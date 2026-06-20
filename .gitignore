@@ -1,0 +1,38 @@
+# Document Intelligence Hub — Ignore Rules
+
+# ─── Credentials & Secrets ───────────────────
+.env
+*.env
+config/config.paperless.yaml
+**/*secret*
+**/*token*
+
+# ─── Database ────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ─── Python ──────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# ─── Logs ────────────────────────────────────
+*.log
+logs/
+
+# ─── IDE ─────────────────────────────────────
+.idea/
+.vscode/
+
+# ─── OS ──────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Node (if using React frontend) ─────────
+node_modules/

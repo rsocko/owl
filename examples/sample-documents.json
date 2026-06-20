@@ -1,0 +1,182 @@
+{
+  "description": "Example document data structures from Paperless-NGX API",
+  "examples": [
+    {
+      "scenario": "Utility Bill",
+      "paperless_document": {
+        "id": 12345,
+        "title": "PowerCo Electric Bill - January 2026",
+        "content": "PowerCo Electric Company\n123 Energy Street\nPower City, PC 12345\n\nAccount Number: 987654321\nStatement Date: January 15, 2026\nDue Date: February 15, 2026\n\nBILLING SUMMARY\nPrevious Balance: $135.20\nPayments Received: -$135.20\nCurrent Charges: $142.35\nAmount Due: $142.35\n\nPLEASE PAY BY: February 15, 2026\n\nPay online at: https://powerco.com/pay\nAccount Number: 987654321\n\nThank you for being a PowerCo customer!",
+        "correspondent": 5,
+        "correspondent_name": "PowerCo Electric",
+        "document_type": 2,
+        "document_type_name": "Bill",
+        "created": "2026-01-16T10:30:00Z",
+        "added": "2026-01-16T10:30:00Z",
+        "archived_file_name": "2026-01-15_powerco_electric_bill.pdf",
+        "tags": [15, 23],
+        "tag_names": ["Inbox", "Utilities"],
+        "notes": []
+      },
+      "extracted_information": {
+        "account_number": "987654321",
+        "statement_date": "2026-01-15",
+        "due_date": "2026-02-15",
+        "previous_balance": "$135.20",
+        "current_charges": "$142.35",
+        "amount_due": "$142.35",
+        "payment_url": "https://powerco.com/pay",
+        "correspondent": "PowerCo Electric"
+      }
+    },
+    {
+      "scenario": "Tax Form",
+      "paperless_document": {
+        "id": 12346,
+        "title": "IRS Form 1099-INT - Investment Bank 2025",
+        "content": "FORM 1099-INT\nInterest Income\nTax Year 2025\n\nPAYER'S Name: Investment Bank Corp\nAddress: 456 Finance Blvd, Money City, MC 67890\n\nRECIPIENT'S Name: John Doe\nAccount Number: XX-XXXX-1234\n\nBox 1 - Interest Income: $482.56\nBox 3 - Interest on U.S. Savings Bonds: $0.00\nBox 8 - Tax-Exempt Interest: $0.00\n\nThis is important tax information and is being furnished to the Internal Revenue Service.\n\nFOR TAX PREPARATION - FILE WITH YOUR 2025 TAX RETURN\nDeadline: April 15, 2026",
+        "correspondent": 12,
+        "correspondent_name": "Investment Bank",
+        "document_type": 7,
+        "document_type_name": "Tax Document",
+        "created": "2026-01-31T09:15:00Z",
+        "added": "2026-02-01T14:20:00Z",
+        "archived_file_name": "2026-01-31_investment_bank_1099int.pdf",
+        "tags": [15, 45],
+        "tag_names": ["Inbox", "Tax-2025"],
+        "notes": []
+      },
+      "extracted_information": {
+        "form_type": "1099-INT",
+        "tax_year": "2025",
+        "payer": "Investment Bank Corp",
+        "account_number": "XX-XXXX-1234",
+        "interest_income": "$482.56",
+        "filing_deadline": "2026-04-15"
+      }
+    },
+    {
+      "scenario": "Medical Bill",
+      "paperless_document": {
+        "id": 12347,
+        "title": "City Hospital - Patient Statement",
+        "content": "CITY HOSPITAL\n789 Health Avenue\nMedical City, MC 34567\n\nPATIENT STATEMENT\n\nPatient: Jane Doe\nAccount Number: MED-789456\nDate of Service: January 5, 2026\nStatement Date: January 20, 2026\n\nService Description: Office Visit - Preventive Care\n\nCharges: $250.00\nInsurance Payment: -$200.00\nPatient Responsibility: $50.00\n\nAMOUNT DUE: $50.00\nDUE DATE: February 20, 2026\n\nPayment Options:\n- Pay online: https://cityhospital.com/billing\n- Mail check to address above\n- Call: 1-800-HOSPITAL\n\nPlease include account number with payment.",
+        "correspondent": 8,
+        "correspondent_name": "City Hospital",
+        "document_type": 2,
+        "document_type_name": "Bill",
+        "created": "2026-01-21T11:00:00Z",
+        "added": "2026-01-21T11:00:00Z",
+        "archived_file_name": "2026-01-20_city_hospital_statement.pdf",
+        "tags": [15, 28],
+        "tag_names": ["Inbox", "Medical"],
+        "notes": []
+      },
+      "extracted_information": {
+        "patient": "Jane Doe",
+        "account_number": "MED-789456",
+        "service_date": "2026-01-05",
+        "statement_date": "2026-01-20",
+        "due_date": "2026-02-20",
+        "total_charges": "$250.00",
+        "insurance_payment": "$200.00",
+        "amount_due": "$50.00",
+        "payment_url": "https://cityhospital.com/billing",
+        "phone": "1-800-HOSPITAL"
+      }
+    },
+    {
+      "scenario": "Insurance Renewal Notice",
+      "paperless_document": {
+        "id": 12348,
+        "title": "Auto Insurance Renewal Notice",
+        "content": "SAFE DRIVE INSURANCE\n321 Coverage Lane\nInsure City, IC 45678\n\nPOLICY RENEWAL NOTICE\n\nPolicyholders: John & Jane Doe\nPolicy Number: AUTO-123456\nCurrent Policy Period: Feb 1, 2026 - Aug 1, 2026\nRenewal Date: August 1, 2026\n\nYour current auto insurance policy will expire on August 1, 2026.\n\nRENEWAL PREMIUM: $892.00 for 6 months\n(Previous period: $845.00)\n\nVehicles Covered:\n- 2023 Honda Accord (Comprehensive + Collision)\n- 2021 Toyota RAV4 (Comprehensive + Collision)\n\nACTION REQUIRED:\nReview your coverage and respond by July 1, 2026\n\nTo renew online: https://safedrive.com/renew\nTo discuss changes: Call 1-800-SAFE-DRV\n\nIf no action is taken, your policy will auto-renew at the new rate.",
+        "correspondent": 18,
+        "correspondent_name": "Safe Drive Insurance",
+        "document_type": 5,
+        "document_type_name": "Notice",
+        "created": "2026-02-01T08:00:00Z",
+        "added": "2026-02-01T08:30:00Z",
+        "archived_file_name": "2026-02-01_safedrive_renewal_notice.pdf",
+        "tags": [15, 32],
+        "tag_names": ["Inbox", "Insurance"],
+        "notes": []
+      },
+      "extracted_information": {
+        "policy_number": "AUTO-123456",
+        "current_expiry": "2026-08-01",
+        "renewal_date": "2026-08-01",
+        "response_deadline": "2026-07-01",
+        "renewal_premium": "$892.00",
+        "previous_premium": "$845.00",
+        "renewal_url": "https://safedrive.com/renew",
+        "phone": "1-800-SAFE-DRV"
+      }
+    },
+    {
+      "scenario": "Credit Card Statement",
+      "paperless_document": {
+        "id": 12349,
+        "title": "MoneyBank Credit Card Statement - January 2026",
+        "content": "MONEYBANK CREDIT CARD\nStatement Period: Dec 16, 2025 - Jan 15, 2026\n\nAccount Number: XXXX-XXXX-XXXX-5678\nStatement Date: January 15, 2026\nPayment Due Date: February 10, 2026\n\nACCOUNT SUMMARY\nPrevious Balance: $1,245.67\nPayments: -$1,245.67\nPurchases: $2,134.89\nCash Advances: $0.00\nFees: $0.00\nInterest Charged: $0.00\n\nNEW BALANCE: $2,134.89\nMINIMUM PAYMENT DUE: $64.00\n\nPAYMENT INFORMATION\nTo avoid interest charges, pay the New Balance by the Payment Due Date.\nMinimum Payment: $64.00\nNew Balance: $2,134.89\n\nPay online: https://moneybank.com/creditcard/pay\nAutomatic Payment: Not enrolled\n\nAnnual Percentage Rate: 18.99% for Purchases\nCredit Limit: $15,000.00\nAvailable Credit: $12,865.11",
+        "correspondent": 22,
+        "correspondent_name": "MoneyBank",
+        "document_type": 4,
+        "document_type_name": "Statement",
+        "created": "2026-01-16T07:00:00Z",
+        "added": "2026-01-16T07:15:00Z",
+        "archived_file_name": "2026-01-15_moneybank_creditcard_statement.pdf",
+        "tags": [15, 19],
+        "tag_names": ["Inbox", "Banking"],
+        "notes": []
+      },
+      "extracted_information": {
+        "account_number": "XXXX-XXXX-XXXX-5678",
+        "statement_period": "2025-12-16 to 2026-01-15",
+        "statement_date": "2026-01-15",
+        "due_date": "2026-02-10",
+        "new_balance": "$2,134.89",
+        "minimum_payment": "$64.00",
+        "payment_url": "https://moneybank.com/creditcard/pay",
+        "credit_limit": "$15,000.00",
+        "available_credit": "$12,865.11"
+      }
+    },
+    {
+      "scenario": "Legal Notice - Collection Warning",
+      "paperless_document": {
+        "id": 12350,
+        "title": "FINAL NOTICE - Account Past Due",
+        "content": "ABC COLLECTIONS AGENCY\n999 Recovery Road\nCollect City, CC 78901\n\nFINAL NOTICE\n\nAccount Number: COLL-456789\nOriginal Creditor: OldDebt Services\nOriginal Amount: $567.89\nCurrent Balance: $567.89 + $45.00 late fees = $612.89\n\nThis is a FINAL NOTICE that your account is seriously past due.\n\nACCOUNT DETAILS:\nDays Past Due: 90 days\nLast Payment: October 15, 2025\n\nURGENT ACTION REQUIRED\nPayment must be received by February 20, 2026 to avoid:\n- Additional late fees\n- Referral to legal department\n- Negative credit reporting\n- Potential legal action\n\nPay immediately at: https://abccollections.com/pay\nAccount Number: COLL-456789\n\nTo discuss payment arrangements, call: 1-888-555-DEBT\n\nThis is an attempt to collect a debt. Any information obtained will be used for that purpose.",
+        "correspondent": 45,
+        "correspondent_name": "ABC Collections",
+        "document_type": 5,
+        "document_type_name": "Notice",
+        "created": "2026-02-05T09:00:00Z",
+        "added": "2026-02-05T09:05:00Z",
+        "archived_file_name": "2026-02-05_abc_collections_final_notice.pdf",
+        "tags": [15, 99],
+        "tag_names": ["Inbox", "Todo"],
+        "notes": []
+      },
+      "extracted_information": {
+        "account_number": "COLL-456789",
+        "original_creditor": "OldDebt Services",
+        "original_amount": "$567.89",
+        "late_fees": "$45.00",
+        "total_due": "$612.89",
+        "days_past_due": 90,
+        "payment_deadline": "2026-02-20",
+        "payment_url": "https://abccollections.com/pay",
+        "phone": "1-888-555-DEBT",
+        "risk_indicators": [
+          "FINAL NOTICE",
+          "seriously past due",
+          "legal action",
+          "negative credit reporting",
+          "90 days past due"
+        ]
+      }
+    }
+  ]
+}

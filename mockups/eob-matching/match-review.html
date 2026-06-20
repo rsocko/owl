@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Medical EOB Matching — Match Review Mockup</title>
+  <style>
+    :root {
+      --bg: #f5f6fa;
+      --card: #ffffff;
+      --border: #e0e3ea;
+      --text: #1a1d2e;
+      --muted: #6b7280;
+      --accent: #3498db;
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    /* ── Header ── */
+    .header { background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
+    .back-link { color: var(--accent); font-weight: 600; font-size: 14px; text-decoration: none; }
+    .header h1 { font-size: 18px; font-weight: 700; flex: 1; }
+    .match-id { font-size: 13px; color: var(--muted); }
+
+    /* ── Page ── */
+    .page { max-width: 960px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+
+    /* ── Section title ── */
+    .section-title { font-size: 15px; font-weight: 700; margin-bottom: 14px; }
+
+    /* ── Confidence card ── */
+    .conf-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+    .conf-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+    .conf-overall { display: flex; align-items: center; gap: 10px; }
+    .conf-pct { font-size: 36px; font-weight: 800; color: var(--success); }
+    .conf-label { font-size: 13px; color: var(--muted); }
+    .conf-badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; background: #d5f5e3; color: #1e8449; }
+    .conf-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .conf-row-label { width: 140px; font-size: 13px; color: var(--muted); flex-shrink: 0; }
+    .conf-bar-bg { flex: 1; height: 8px; background: #f0f0f0; border-radius: 4px; overflow: hidden; }
+    .conf-bar-fill { height: 100%; border-radius: 4px; background: var(--success); }
+    .conf-bar-fill.medium { background: var(--warning); }
+    .conf-pct-label { width: 38px; text-align: right; font-size: 13px; font-weight: 700; }
+
+    /* ── Comparison grid ── */
+    .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .compare-col { padding: 0; }
+    .compare-col-header { background: #f8f9fc; padding: 12px 18px; font-weight: 700; font-size: 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+    .compare-col:first-child { border-right: 1px solid var(--border); }
+    .compare-row { padding: 11px 18px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; }
+    .compare-row:last-child { border-bottom: none; }
+    .field-label { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+    .field-value { font-size: 14px; font-weight: 600; }
+    .match-ok   { color: var(--success); }
+    .match-warn { color: var(--warning); }
+
+    /* ── Amount validation ── */
+    .validation { background: #d5f5e3; border: 1px solid #a9dfbf; border-radius: 8px; padding: 14px 18px; display: flex; align-items: center; gap: 16px; }
+    .validation.fail { background: #fdedec; border-color: #f1948a; }
+    .val-icon { font-size: 20px; }
+    .val-title { font-weight: 700; font-size: 14px; }
+    .val-detail { font-size: 13px; color: var(--muted); margin-top: 2px; }
+    .val-items { display: flex; gap: 24px; font-size: 13px; margin-top: 4px; }
+    .val-items strong { color: var(--text); }
+
+    /* ── Notes ── */
+    .notes-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+    textarea { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: inherit; font-size: 13px; color: var(--text); resize: vertical; min-height: 80px; background: #fcfcfc; }
+    textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+    /* ── Action bar ── */
+    .action-bar { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; display: flex; align-items: center; gap: 12px; }
+    .btn { border: none; border-radius: 7px; padding: 10px 20px; font-size: 14px; cursor: pointer; font-weight: 700; }
+    .btn-confirm { background: var(--success); color: #fff; }
+    .btn-reject  { background: var(--danger);  color: #fff; }
+    .btn-link    { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    .btn:hover   { opacity: .88; }
+    .action-hint { margin-left: auto; font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <a class="back-link" href="dashboard.html">← Back to Dashboard</a>
+  <h1>Review Match</h1>
+  <span class="match-id">Match #42</span>
+</header>
+
+<div class="page">
+
+  <!-- Confidence Breakdown -->
+  <div class="conf-card">
+    <div class="conf-header">
+      <div>
+        <div class="section-title" style="margin-bottom:4px">📊 Match Confidence Breakdown</div>
+        <div style="font-size:13px;color:var(--muted)">EOB: UHC-2024-01 &nbsp;→&nbsp; Bill: INV-001</div>
+      </div>
+      <div class="conf-overall">
+        <div>
+          <div class="conf-pct">82%</div>
+          <div class="conf-label">Overall Match</div>
+        </div>
+        <span class="conf-badge">High Confidence</span>
+      </div>
+    </div>
+
+    <div class="conf-row">
+      <span class="conf-row-label">Date of Service</span>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:95%"></div></div>
+      <span class="conf-pct-label" style="color:var(--success)">95%</span>
+    </div>
+    <div class="conf-row">
+      <span class="conf-row-label">Provider</span>
+      <div class="conf-bar-bg"><div class="conf-bar-fill medium" style="width:80%"></div></div>
+      <span class="conf-pct-label" style="color:var(--warning)">80%</span>
+    </div>
+    <div class="conf-row">
+      <span class="conf-row-label">Patient Name</span>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:100%"></div></div>
+      <span class="conf-pct-label" style="color:var(--success)">100%</span>
+    </div>
+    <div class="conf-row">
+      <span class="conf-row-label">Amount</span>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:100%"></div></div>
+      <span class="conf-pct-label" style="color:var(--success)">100%</span>
+    </div>
+    <div class="conf-row" style="margin-bottom:0">
+      <span class="conf-row-label"><strong>Overall</strong></span>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:82%"></div></div>
+      <span class="conf-pct-label" style="color:var(--success)"><strong>82%</strong></span>
+    </div>
+  </div>
+
+  <!-- Side-by-Side Comparison -->
+  <section>
+    <div class="section-title">📄 Document Comparison</div>
+    <div class="compare-grid">
+
+      <!-- EOB Column -->
+      <div class="compare-col">
+        <div class="compare-col-header">📋 EOB (Explanation of Benefits)</div>
+        <div class="compare-row">
+          <div><div class="field-label">Insurance</div><div class="field-value">UnitedHealthcare</div></div>
+        </div>
+        <div class="compare-row">
+          <div><div class="field-label">Claim #</div><div class="field-value">2024-123456</div></div>
+        </div>
+        <div class="compare-row">
+          <div><div class="field-label">Date of Service</div><div class="field-value match-ok">01/15/2024 ✓</div></div>
+        </div>
+        <div class="compare-row">
+          <div><div class="field-label">Provider</div><div class="field-value match-ok">City Medical Ctr ✓</div></div>
+        </div>
+        <div class="compare-row">
+          <div><div class="field-label">Patient</div><div class="field-value match-ok">John Doe ✓</div></div>
+        </div>
+        <div class="compare-row">
+          <div><div class="field-label">Patient Responsibility</div><div class="field-value match-ok">$36.00 ✓</div></div>
+        </div>
+        <div class="compare-row" style="border-bottom:none">
+          <a href="#" style="color:var(--accent);font-size:13px;font-weight:600">View Full EOB →</a>
+        </div>
+      </div>
+
+      <!-- Bill Column -->
+      <div class="compare-col">
+        <div class="compare-col-header">🧾 Bill / Invoice</div>
+        <div class="compare-row">
+          <div><div class="field-label">Provider</div><div class="field-value">City Medical Center</div></div>
+        </div>
+        <div class="compare-row">
+          <div><div class="field-label">Invoice #</div><div class="field-value">INV-001</div></div>
+        </div>
+        <div class="compare-row">
+          <div><div class="field-label">Date of Service</div><div class="field-value match-ok">01/15/2024 ✓</div></div>
+        </div>
+        <div class="compare-row">
+          <div><div class="field-label">Patient</div><div class="field-value match-ok">John Doe ✓</div></div>
+        </div>
+        <div class="compare-row">
+          <div><div class="field-label">Account / MRN</div><div class="field-value">MRN987654</div></div>
+        </div>
+        <div class="compare-row">
+          <div><div class="field-label">Amount Due</div><div class="field-value match-ok">$36.00 ✓</div></div>
+        </div>
+        <div class="compare-row" style="border-bottom:none">
+          <a href="#" style="color:var(--accent);font-size:13px;font-weight:600">View Full Bill →</a>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Amount Validation -->
+  <div class="validation">
+    <span class="val-icon">✅</span>
+    <div>
+      <div class="val-title">Amount Validation: PASS</div>
+      <div class="val-items">
+        <span>Expected: <strong>$36.00</strong></span>
+        <span>Actual: <strong>$36.00</strong></span>
+        <span>Difference: <strong style="color:var(--success)">$0.00</strong></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notes -->
+  <div class="notes-card">
+    <div class="section-title">💬 Notes <span style="font-size:13px;font-weight:400;color:var(--muted)">(optional)</span></div>
+    <textarea placeholder="Add any notes or context about this match…"></textarea>
+  </div>
+
+  <!-- Action Bar -->
+  <div class="action-bar">
+    <button class="btn btn-confirm">✓ Confirm Match</button>
+    <button class="btn btn-reject">✗ Reject Match</button>
+    <button class="btn btn-link">🔗 Open in Paperless</button>
+    <span class="action-hint">Confirming will link these documents and update payment tracking.</span>
+  </div>
+
+</div>
+</body>
+</html>

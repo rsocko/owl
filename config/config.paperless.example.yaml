@@ -1,0 +1,28 @@
+source:
+  mode: paperless
+  paperless_url: http://paperless:8000
+  api_token_env: PAPERLESS_API_TOKEN
+  verify_ssl: true
+  timeout_seconds: 30
+
+analysis:
+  min_documents_for_pattern: 3
+  monthly_min_days: 25
+  monthly_max_days: 35
+  quarterly_min_days: 80
+  quarterly_max_days: 100
+  annual_min_days: 350
+  annual_max_days: 380
+  allowed_tags:
+    - statement
+    - bill
+    - invoice
+  minimum_title_consistency: 0.5
+  default_grace_period_days: 5
+
+runtime:
+  snapshot_path: ../data/catalog.snapshot.json
+
+server:
+  host: 0.0.0.0
+  port: 8001
