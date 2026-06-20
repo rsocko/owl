@@ -77,11 +77,12 @@ def setup():
 @cli.command()
 def views():
     """List saved views from Paperless-NGX (use their IDs with --saved-view)."""
-    from .paperless_client import PaperlessClient
+    from doc_intelligence_hub.core.paperless import PaperlessClient
+    from .config import settings
     from rich.table import Table
 
     async def _views():
-        client = PaperlessClient()
+        client = PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_token)
         saved_views = await client.list_saved_views()
         if not saved_views:
             console.print("[yellow]No saved views found.[/yellow]")
@@ -106,14 +107,19 @@ def views():
 @cli.command()
 def check():
     """Verify connectivity to Paperless-NGX and Ollama."""
-    from .paperless_client import PaperlessClient
+    from doc_intelligence_hub.core.paperless import PaperlessClient
+    from .config import settings
     from .analyzer import OllamaAnalyzer
 
     async def _check():
         console.print("[bold]Connectivity Check[/bold]\n")
 
-        client = PaperlessClient()
-        ok = await client.health_check()
+        client = PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_token)
+        try:
+            result = await client.health_check()
+            ok = result.get("status") == "ok"
+        except Exception:
+            ok = False
         status = "[green]✓ Connected[/green]" if ok else "[red]✗ Failed[/red]"
         console.print(f"  Paperless-NGX: {status}")
 

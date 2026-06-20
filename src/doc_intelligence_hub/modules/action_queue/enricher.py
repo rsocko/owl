@@ -2,8 +2,12 @@
 
 from typing import Optional
 
-from .paperless_client import PaperlessClient
+from doc_intelligence_hub.core.paperless import PaperlessClient
 from .config import settings
+
+
+def _make_paperless_client() -> PaperlessClient:
+    return PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_token)
 
 # Custom field definitions to auto-create in Paperless
 CUSTOM_FIELD_DEFINITIONS = [
@@ -55,7 +59,7 @@ class PaperlessEnricher:
     """Writes extracted action metadata back to Paperless custom fields."""
 
     def __init__(self):
-        self.client = PaperlessClient()
+        self.client = _make_paperless_client()
         self._field_id_cache: dict[str, int] = {}
 
     async def ensure_custom_fields_exist(self) -> dict[str, int]:
@@ -64,7 +68,7 @@ class PaperlessEnricher:
         Returns:
             Mapping of field name -> field ID
         """
-        existing = await self.client.get_custom_fields()
+        existing = await self.client.list_custom_fields()
         existing_names = {f["name"]: f["id"] for f in existing}
 
         field_map = {}

@@ -12,6 +12,10 @@ config/config.paperless.yaml
 *.sqlite
 *.sqlite3
 
+# ─── Runtime Data ────────────────────────────
+data/*
+!data/.gitkeep
+
 # ─── Python ──────────────────────────────────
 __pycache__/
 *.py[cod]

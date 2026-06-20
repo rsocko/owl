@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     def monitor_tags(self) -> list[str]:
         return [t.strip() for t in self.tags_to_monitor.split(",")]
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()
