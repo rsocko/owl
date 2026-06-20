@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Medical EOB Matching — Dashboard Mockup</title>
+  <style>
+    :root {
+      --bg: #f5f6fa;
+      --card: #ffffff;
+      --border: #e0e3ea;
+      --text: #1a1d2e;
+      --muted: #6b7280;
+      --accent: #3498db;
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+      --neutral: #95a5a6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    /* ── Header ── */
+    .header { background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header h1 { font-size: 18px; font-weight: 700; }
+    .header-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .header-actions { display: flex; gap: 8px; }
+    .btn { border: none; border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer; font-weight: 600; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-ghost   { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-danger  { background: var(--danger);  color: #fff; }
+
+    /* ── Page ── */
+    .page { max-width: 1100px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+
+    /* ── Summary Cards ── */
+    .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+    .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; display: flex; justify-content: space-between; align-items: flex-start; }
+    .stat-card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+    .stat-card .value { font-size: 32px; font-weight: 800; margin: 6px 0; }
+    .stat-card .icon  { font-size: 28px; }
+    .stat-matched  .value { color: var(--success); }
+    .stat-pending  .value { color: var(--warning); }
+    .stat-due      .value { color: var(--accent);  font-size: 24px; }
+    .stat-alerts   .value { color: var(--danger);  }
+
+    /* ── Section ── */
+    .section-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+
+    /* ── Alert Cards ── */
+    .alert-card { background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--warning); border-radius: 8px; padding: 14px 16px; margin-bottom: 10px; }
+    .alert-card.danger { border-left-color: var(--danger); }
+    .alert-header { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+    .alert-body   { font-size: 13px; color: var(--muted); margin: 6px 0; }
+    .alert-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .btn-xs { border: none; border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer; font-weight: 600; }
+    .btn-xs-primary { background: var(--accent);  color: #fff; }
+    .btn-xs-ghost   { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    .btn-xs-success { background: var(--success); color: #fff; }
+
+    /* ── Table ── */
+    .table-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .table-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th { background: #f8f9fc; padding: 10px 14px; text-align: left; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; border-bottom: 1px solid var(--border); }
+    thead th.sort { cursor: pointer; }
+    thead th.sort::after { content: ' ▼'; font-size: 10px; }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; cursor: pointer; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #f0f6ff; }
+    tbody td { padding: 11px 14px; font-size: 13px; }
+
+    /* ── Status Badges ── */
+    .badge { padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 700; }
+    .badge-paid    { background: #d5f5e3; color: #1e8449; }
+    .badge-pending { background: #fef9e7; color: #b7770d; }
+    .badge-review  { background: #fef9e7; color: #b7770d; }
+    .badge-overdue { background: #fdedec; color: #c0392b; }
+
+    /* ── Quick Stats Row ── */
+    .quick-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .qs-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .qs-label { font-size: 13px; color: var(--muted); }
+    .qs-count { font-size: 24px; font-weight: 800; color: var(--accent); }
+    .qs-link  { font-size: 12px; color: var(--accent); text-decoration: none; font-weight: 600; }
+
+    .view-all { font-size: 13px; color: var(--accent); font-weight: 600; cursor: pointer; }
+    .hint { font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <div>
+    <h1>🏥 Medical Bills Dashboard</h1>
+    <div class="header-meta">Last synced: 2 minutes ago</div>
+  </div>
+  <div class="header-actions">
+    <button class="btn btn-ghost">🔄 Sync</button>
+    <button class="btn btn-ghost">⚙️ Settings</button>
+  </div>
+</header>
+
+<div class="page">
+
+  <!-- Summary Cards -->
+  <div class="summary-grid">
+    <div class="stat-card stat-matched">
+      <div>
+        <div class="label">Matched Pairs</div>
+        <div class="value">12</div>
+        <div class="hint">+3 this week</div>
+      </div>
+      <span class="icon">✅</span>
+    </div>
+    <div class="stat-card stat-pending">
+      <div>
+        <div class="label">Pending Bills</div>
+        <div class="value">3</div>
+        <div class="hint">awaiting payment</div>
+      </div>
+      <span class="icon">⏳</span>
+    </div>
+    <div class="stat-card stat-due">
+      <div>
+        <div class="label">Total Due</div>
+        <div class="value">$1,247</div>
+        <div class="hint">across 3 bills</div>
+      </div>
+      <span class="icon">💵</span>
+    </div>
+    <div class="stat-card stat-alerts">
+      <div>
+        <div class="label">Alerts</div>
+        <div class="value">2</div>
+        <div class="hint">need attention</div>
+      </div>
+      <span class="icon">⚠️</span>
+    </div>
+  </div>
+
+  <!-- Alerts -->
+  <section>
+    <div class="section-title">⚠️ Alerts &amp; Action Items</div>
+
+    <div class="alert-card">
+      <div class="alert-header">⚠️ Amount Mismatch: EOB #123 vs Bill #456</div>
+      <div class="alert-body">Expected patient responsibility: <strong>$36.00</strong> &nbsp;·&nbsp; Billed amount: <strong>$42.00</strong> &nbsp;·&nbsp; Difference: <strong style="color:var(--danger)">+$6.00</strong></div>
+      <div class="alert-actions">
+        <button class="btn-xs btn-xs-primary">Review Match →</button>
+        <button class="btn-xs btn-xs-ghost">Dismiss</button>
+      </div>
+    </div>
+
+    <div class="alert-card danger">
+      <div class="alert-header">🔴 Overdue: Invoice INV-001</div>
+      <div class="alert-body">Provider: Dr. Smith &nbsp;·&nbsp; Due: <strong>01/15/2024</strong> (29 days ago) &nbsp;·&nbsp; Amount: <strong>$125.00</strong></div>
+      <div class="alert-actions">
+        <button class="btn-xs btn-xs-success">✓ Mark as Paid</button>
+        <button class="btn-xs btn-xs-ghost">View Details</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Recent Matches Table -->
+  <section>
+    <div class="table-card">
+      <div class="table-header">
+        <div class="section-title" style="margin-bottom:0">📋 Recent Matches <span style="font-size:12px;color:var(--muted);font-weight:400">(Last 30 days)</span></div>
+        <span class="view-all">View All →</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th class="sort">Date</th>
+            <th>EOB</th>
+            <th>Bill</th>
+            <th>Provider</th>
+            <th>Amount</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>02/14</td>
+            <td>UHC-2024-01</td>
+            <td>Bill #789</td>
+            <td>City Medical Ctr</td>
+            <td><strong>$125.00</strong></td>
+            <td><span class="badge badge-paid">✅ Paid</span></td>
+          </tr>
+          <tr>
+            <td>02/13</td>
+            <td>Aetna-456</td>
+            <td>Bill #788</td>
+            <td>Lab Corp</td>
+            <td><strong>$36.00</strong></td>
+            <td><span class="badge badge-pending">⏳ Pending</span></td>
+          </tr>
+          <tr>
+            <td>02/12</td>
+            <td>BCBS-789</td>
+            <td>Bill #787</td>
+            <td>Radiology Group</td>
+            <td><strong>$89.00</strong></td>
+            <td><span class="badge badge-review">⚠️ Review</span></td>
+          </tr>
+          <tr>
+            <td>02/10</td>
+            <td>Kaiser-123</td>
+            <td>Bill #786</td>
+            <td>Kaiser Permanente</td>
+            <td><strong>$45.00</strong></td>
+            <td><span class="badge badge-paid">✅ Paid</span></td>
+          </tr>
+          <tr>
+            <td>02/05</td>
+            <td>UHC-2024-00</td>
+            <td>Bill #785</td>
+            <td>Pharmacy CVS</td>
+            <td><strong>$15.00</strong></td>
+            <td><span class="badge badge-paid">✅ Paid</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="padding:10px 14px;color:var(--muted);font-size:12px;border-top:1px solid var(--border)">Showing 5 of 12 &nbsp;·&nbsp; <a href="match-review.html" style="color:var(--accent);font-weight:600">View all →</a></div>
+    </div>
+  </section>
+
+  <!-- Quick Stats -->
+  <div class="quick-stats">
+    <div class="qs-card">
+      <div>
+        <div class="qs-label">Unmatched EOBs</div>
+        <div class="qs-count">2</div>
+      </div>
+      <a href="#" class="qs-link">View →</a>
+    </div>
+    <div class="qs-card">
+      <div>
+        <div class="qs-label">Unmatched Bills</div>
+        <div class="qs-count">3</div>
+      </div>
+      <a href="#" class="qs-link">View →</a>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

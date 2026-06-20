@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Paperless Action Queue — Dashboard Mockup</title>
+  <style>
+    :root {
+      --bg: #faf9f8;
+      --card: #ffffff;
+      --sidebar: #f3f2f1;
+      --border: #edebe9;
+      --text: #201f1e;
+      --muted: #605e5c;
+      --accent: #0078d4;
+      --success: #107c10;
+      --warning: #ff8c00;
+      --danger: #d83b01;
+      --badge-urgent: #fde7e9;
+      --badge-soon: #fff4ce;
+      --badge-later: #dff6dd;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    /* ── Top Bar ── */
+    .topbar { background: var(--accent); color: #fff; padding: 0 20px; height: 48px; display: flex; align-items: center; justify-content: space-between; }
+    .topbar h1 { font-size: 16px; font-weight: 600; }
+    .topbar .stats { display: flex; gap: 16px; font-size: 13px; }
+    .topbar .stat { background: rgba(255,255,255,.2); padding: 3px 10px; border-radius: 12px; }
+    .topbar .stat.urgent { background: rgba(255,255,255,.35); font-weight: 700; }
+
+    /* ── Filter Bar ── */
+    .filterbar { background: var(--sidebar); border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .filter-pill { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 5px 14px; border-radius: 16px; font-size: 13px; cursor: pointer; }
+    .filter-pill.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .filter-select { border: 1px solid var(--border); background: var(--card); padding: 5px 10px; border-radius: 6px; font-size: 13px; color: var(--text); }
+    .search-input { margin-left: auto; border: 1px solid var(--border); background: var(--card); padding: 5px 12px; border-radius: 6px; font-size: 13px; color: var(--text); width: 200px; }
+
+    /* ── Layout ── */
+    .layout { display: grid; grid-template-columns: 1fr 280px; gap: 0; height: calc(100vh - 96px); overflow: hidden; }
+    .main-col { overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+    .side-col { border-left: 1px solid var(--border); background: var(--card); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+
+    /* ── Section Header ── */
+    .section-label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin-bottom: 8px; }
+    .section-label .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot-urgent { background: var(--danger); }
+    .dot-soon   { background: var(--warning); }
+    .dot-later  { background: var(--success); }
+
+    /* ── Action Card ── */
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; display: flex; gap: 12px; cursor: pointer; transition: box-shadow .15s; }
+    .card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+    .card.selected { border-left: 3px solid var(--accent); background: #f0f6ff; }
+    .card-indicator { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+    .ind-urgent { background: var(--danger); box-shadow: 0 0 0 3px rgba(216,59,1,.2); }
+    .ind-soon   { background: var(--warning); }
+    .ind-later  { background: var(--success); }
+    .card-body { flex: 1; min-width: 0; }
+    .card-title { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card-meta  { color: var(--muted); font-size: 12px; margin-top: 3px; }
+    .card-due   { display: flex; align-items: center; gap: 12px; margin-top: 8px; font-size: 12px; }
+    .due-chip   { background: var(--badge-urgent); color: var(--danger); padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+    .due-chip.soon   { background: var(--badge-soon);  color: var(--warning); }
+    .due-chip.ok     { background: var(--badge-later); color: var(--success); }
+    .amount { font-weight: 700; color: var(--text); }
+    .card-actions { display: flex; gap: 6px; margin-top: 10px; }
+    .btn-sm { border: none; border-radius: 4px; padding: 5px 10px; font-size: 12px; cursor: pointer; font-weight: 600; }
+    .btn-primary  { background: var(--accent);   color: #fff; }
+    .btn-ghost    { background: transparent;      color: var(--accent); border: 1px solid var(--accent); }
+    .btn-danger   { background: transparent;      color: var(--danger); border: 1px solid #f3b7a8; }
+    .card-actions .btn-sm:hover { opacity: .85; }
+
+    /* ── Side Panel ── */
+    .side-section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin-bottom: 8px; }
+    .pdf-preview { background: #f0f0f0; border: 1px solid var(--border); border-radius: 6px; height: 180px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; flex-direction: column; gap: 6px; }
+    .pdf-icon { font-size: 32px; }
+    .detail-row { display: flex; justify-content: space-between; font-size: 13px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-label { color: var(--muted); }
+    .detail-value { font-weight: 600; }
+    .conf-bar { height: 6px; background: var(--border); border-radius: 3px; margin-top: 4px; }
+    .conf-fill { height: 100%; border-radius: 3px; background: var(--success); }
+    .risk-fill  { background: var(--warning); }
+    .edit-btn { width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 13px; cursor: pointer; color: var(--accent); font-weight: 600; margin-top: 8px; }
+  </style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<header class="topbar">
+  <h1>📋 Document Action Queue</h1>
+  <div class="stats">
+    <span class="stat urgent">🔴 3 Urgent</span>
+    <span class="stat">🟠 5 Due Soon</span>
+    <span class="stat">12 Total Pending</span>
+  </div>
+</header>
+
+<!-- Filter Bar -->
+<nav class="filterbar">
+  <span class="filter-pill active">All</span>
+  <span class="filter-pill">Pending</span>
+  <span class="filter-pill">Completed</span>
+  <select class="filter-select"><option>▼ Due Date</option><option>Urgency</option><option>Amount</option></select>
+  <select class="filter-select"><option>All Types</option><option>PAY</option><option>RESPOND</option><option>FILE</option></select>
+  <input class="search-input" placeholder="🔍  Search actions…" />
+</nav>
+
+<!-- Layout -->
+<div class="layout">
+
+  <!-- Main Action List -->
+  <main class="main-col">
+
+    <!-- Urgent -->
+    <section>
+      <div class="section-label"><span class="dot dot-urgent"></span> Urgent — Due Within 3 Days</div>
+
+      <div class="card selected" style="margin-bottom:10px">
+        <span class="card-indicator ind-urgent"></span>
+        <div class="card-body">
+          <div class="card-title">Pay Electric Bill — Account #123456</div>
+          <div class="card-meta">PowerCo Electric &nbsp;·&nbsp; Type: PAY</div>
+          <div class="card-due">
+            <span class="due-chip">Due Feb 16, 2026</span>
+            <span class="amount">$142.35</span>
+            <span style="color:var(--muted);font-size:11px">Confidence: 95%</span>
+          </div>
+          <div class="card-actions">
+            <button class="btn-sm btn-primary">✓ Mark Paid</button>
+            <button class="btn-sm btn-ghost">📄 View Doc</button>
+            <button class="btn-sm btn-ghost">✏️ Edit</button>
+            <button class="btn-sm btn-danger">✕ Dismiss</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <span class="card-indicator ind-urgent"></span>
+        <div class="card-body">
+          <div class="card-title">Respond to IRS Notice CP2000</div>
+          <div class="card-meta">IRS &nbsp;·&nbsp; Type: RESPOND</div>
+          <div class="card-due">
+            <span class="due-chip">Due Feb 17, 2026</span>
+            <span style="color:var(--danger);font-weight:700;font-size:12px">⚠️ URGENT — Tax matter</span>
+          </div>
+          <div class="card-actions">
+            <button class="btn-sm btn-primary">✓ Done</button>
+            <button class="btn-sm btn-ghost">📄 View Doc</button>
+            <button class="btn-sm btn-ghost">✏️ Edit</button>
+            <button class="btn-sm btn-danger">✕ Dismiss</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Due This Week -->
+    <section>
+      <div class="section-label"><span class="dot dot-soon"></span> Due This Week</div>
+
+      <div class="card" style="margin-bottom:10px">
+        <span class="card-indicator ind-soon"></span>
+        <div class="card-body">
+          <div class="card-title">File Insurance Claim — Auto Incident</div>
+          <div class="card-meta">State Farm &nbsp;·&nbsp; Type: FILE</div>
+          <div class="card-due">
+            <span class="due-chip soon">Due Feb 20, 2026</span>
+            <span style="color:var(--muted);font-size:11px">Confidence: 88%</span>
+          </div>
+          <div class="card-actions">
+            <button class="btn-sm btn-primary">✓ Done</button>
+            <button class="btn-sm btn-ghost">📄 View Doc</button>
+            <button class="btn-sm btn-ghost">✏️ Edit</button>
+            <button class="btn-sm btn-danger">✕ Dismiss</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:10px">
+        <span class="card-indicator ind-soon"></span>
+        <div class="card-body">
+          <div class="card-title">Pay Water Bill</div>
+          <div class="card-meta">City Water Authority &nbsp;·&nbsp; Type: PAY</div>
+          <div class="card-due">
+            <span class="due-chip soon">Due Feb 22, 2026</span>
+            <span class="amount">$68.50</span>
+          </div>
+          <div class="card-actions">
+            <button class="btn-sm btn-primary">✓ Mark Paid</button>
+            <button class="btn-sm btn-ghost">📄 View Doc</button>
+            <button class="btn-sm btn-ghost">✏️ Edit</button>
+            <button class="btn-sm btn-danger">✕ Dismiss</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Later -->
+    <section>
+      <div class="section-label"><span class="dot dot-later"></span> Later</div>
+
+      <div class="card" style="margin-bottom:10px">
+        <span class="card-indicator ind-later"></span>
+        <div class="card-body">
+          <div class="card-title">Renew Vehicle Registration</div>
+          <div class="card-meta">DMV &nbsp;·&nbsp; Type: RESPOND</div>
+          <div class="card-due">
+            <span class="due-chip ok">Due Mar 15, 2026</span>
+            <span class="amount">$112.00</span>
+          </div>
+          <div class="card-actions">
+            <button class="btn-sm btn-primary">✓ Done</button>
+            <button class="btn-sm btn-ghost">📄 View Doc</button>
+            <button class="btn-sm btn-ghost">✏️ Edit</button>
+            <button class="btn-sm btn-danger">✕ Dismiss</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Side Panel -->
+  <aside class="side-col">
+    <div>
+      <div class="side-section-title">Document Preview</div>
+      <div class="pdf-preview">
+        <span class="pdf-icon">📄</span>
+        <span>PowerCo Electric</span>
+        <span style="font-size:11px">Jan 2026 Statement</span>
+      </div>
+    </div>
+
+    <div>
+      <div class="side-section-title">Action Details</div>
+      <div class="detail-row"><span class="detail-label">Type</span><span class="detail-value" style="color:var(--accent)">PAY</span></div>
+      <div class="detail-row"><span class="detail-label">Correspondent</span><span class="detail-value">PowerCo Electric</span></div>
+      <div class="detail-row"><span class="detail-label">Due Date</span><span class="detail-value" style="color:var(--danger)">Feb 16, 2026</span></div>
+      <div class="detail-row"><span class="detail-label">Amount</span><span class="detail-value">$142.35</span></div>
+      <div class="detail-row"><span class="detail-label">Status</span><span class="detail-value">Pending</span></div>
+      <div style="margin-top:10px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+          <span class="detail-label">AI Confidence</span><span class="detail-value">95%</span>
+        </div>
+        <div class="conf-bar"><div class="conf-fill" style="width:95%"></div></div>
+      </div>
+      <div style="margin-top:8px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+          <span class="detail-label">Risk Score</span><span class="detail-value" style="color:var(--warning)">25 / 100</span>
+        </div>
+        <div class="conf-bar"><div class="conf-fill risk-fill" style="width:25%"></div></div>
+      </div>
+      <button class="edit-btn">✏️ Edit Details</button>
+    </div>
+  </aside>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,13 @@
+services:
+  statement-tracker:
+    image: service-007.example.invalid/statement-tracker:phase1
+    container_name: statement-tracker
+    restart: unless-stopped
+    command: ["serve", "--config", "/app/config/config.paperless.yaml"]
+    environment:
+      PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
+    ports:
+      - "8001:8001"
+    volumes:
+      - ../config:/app/config:ro
+      - ../data:/app/data

@@ -1,0 +1,101 @@
+[
+  {
+    "id": 1001,
+    "title": "Chase Statement January 2026",
+    "correspondent_id": 42,
+    "correspondent_name": "Chase Visa",
+    "document_type": "statement",
+    "created": "2026-01-03",
+    "added": "2026-01-04T08:00:00Z",
+    "tags": ["statement", "credit-card"],
+    "original_file_name": "chase_statement_2026-01.pdf"
+  },
+  {
+    "id": 1002,
+    "title": "Chase Statement February 2026",
+    "correspondent_id": 42,
+    "correspondent_name": "Chase Visa",
+    "document_type": "statement",
+    "created": "2026-02-03",
+    "added": "2026-02-04T08:00:00Z",
+    "tags": ["statement", "credit-card"],
+    "original_file_name": "chase_statement_2026-02.pdf"
+  },
+  {
+    "id": 1003,
+    "title": "Chase Statement March 2026",
+    "correspondent_id": 42,
+    "correspondent_name": "Chase Visa",
+    "document_type": "statement",
+    "created": "2026-03-03",
+    "added": "2026-03-04T08:00:00Z",
+    "tags": ["statement", "credit-card"],
+    "original_file_name": "chase_statement_2026-03.pdf"
+  },
+  {
+    "id": 1004,
+    "title": "Chase Statement April 2026",
+    "correspondent_id": 42,
+    "correspondent_name": "Chase Visa",
+    "document_type": "statement",
+    "created": "2026-04-03",
+    "added": "2026-04-04T08:00:00Z",
+    "tags": ["statement", "credit-card"],
+    "original_file_name": "chase_statement_2026-04.pdf"
+  },
+  {
+    "id": 2001,
+    "title": "City Utilities Bill January 2026",
+    "correspondent_id": 77,
+    "correspondent_name": "City Utilities",
+    "document_type": "bill",
+    "created": "2026-01-18",
+    "added": "2026-01-18T17:00:00Z",
+    "tags": ["bill", "utility"],
+    "original_file_name": "city_utilities_bill_2026-01.pdf"
+  },
+  {
+    "id": 2002,
+    "title": "City Utilities Bill February 2026",
+    "correspondent_id": 77,
+    "correspondent_name": "City Utilities",
+    "document_type": "bill",
+    "created": "2026-02-18",
+    "added": "2026-02-18T17:00:00Z",
+    "tags": ["bill", "utility"],
+    "original_file_name": "city_utilities_bill_2026-02.pdf"
+  },
+  {
+    "id": 2003,
+    "title": "City Utilities Bill March 2026",
+    "correspondent_id": 77,
+    "correspondent_name": "City Utilities",
+    "document_type": "bill",
+    "created": "2026-03-18",
+    "added": "2026-03-18T17:00:00Z",
+    "tags": ["bill", "utility"],
+    "original_file_name": "city_utilities_bill_2026-03.pdf"
+  },
+  {
+    "id": 3001,
+    "title": "Vacation Plan",
+    "correspondent_id": 88,
+    "correspondent_name": "Personal Notes",
+    "document_type": "note",
+    "created": "2026-03-09",
+    "added": "2026-03-09T07:30:00Z",
+    "tags": ["personal"],
+    "original_file_name": "vacation_plan.pdf"
+  },
+  {
+    "id": 3002,
+    "title": "Grocery Receipt",
+    "correspondent_id": 88,
+    "correspondent_name": "Personal Notes",
+    "document_type": "receipt",
+    "created": "2026-04-09",
+    "added": "2026-04-09T07:30:00Z",
+    "tags": ["receipt"],
+    "original_file_name": "grocery_receipt.pdf"
+  }
+]

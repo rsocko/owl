@@ -1,0 +1,52 @@
+services:
+  # The action queue API / pipeline runner
+  action-queue:
+    build: .
+    container_name: paperless-action-queue
+    environment:
+      - PAPERLESS_URL=${PAPERLESS_URL:-http://paperless:8000}
+      - PAPERLESS_TOKEN=${PAPERLESS_TOKEN}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-phi3:mini}
+      - DATABASE_URL=sqlite:///./data/actions.db
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  # Streamlit dashboard
+  dashboard:
+    build: .
+    container_name: paperless-action-dashboard
+    command: streamlit run dashboard/app.py --server.port=8501 --server.address=0.0.0.0
+    ports:
+      - "8501:8501"
+    environment:
+      - PAPERLESS_URL=${PAPERLESS_URL:-http://paperless:8000}
+      - PAPERLESS_TOKEN=${PAPERLESS_TOKEN}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-phi3:mini}
+      - DATABASE_URL=sqlite:///./data/actions.db
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  # Ollama (if not already running elsewhere)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: paperless-action-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    # Uncomment for GPU support:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: [gpu]
+
+volumes:
+  ollama_data:
