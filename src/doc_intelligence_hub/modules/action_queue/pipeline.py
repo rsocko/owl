@@ -9,18 +9,23 @@ from rich.table import Table
 
 from .config import settings
 from .database import get_session, init_db, Action, ProcessingHistory
-from .paperless_client import PaperlessClient
+from doc_intelligence_hub.core.paperless import PaperlessClient
 from .analyzer import OllamaAnalyzer
 from .enricher import PaperlessEnricher
 
 console = Console()
 
 
+def _make_paperless_client() -> PaperlessClient:
+    """Create a PaperlessClient from action queue settings."""
+    return PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_token)
+
+
 class Pipeline:
     """Orchestrates the document analysis pipeline."""
 
     def __init__(self):
-        self.paperless = PaperlessClient()
+        self.paperless = _make_paperless_client()
         self.analyzer = OllamaAnalyzer()
         self.enricher = PaperlessEnricher()
 
@@ -73,12 +78,12 @@ class Pipeline:
             documents = [doc] if doc else []
         elif saved_view_id:
             console.print(f"[dim]Fetching documents from saved view #{saved_view_id}...[/dim]")
-            documents = await self.paperless.get_documents_by_saved_view(saved_view_id)
+            documents = await self.paperless.list_documents(saved_view=saved_view_id)
         elif any([created_after, created_before, added_after, added_before, correspondent, document_type]):
             # Use flexible query with date/correspondent/type filters
             tags = [tag_override] if tag_override else None
             console.print("[dim]Fetching documents with custom filters...[/dim]")
-            documents = await self.paperless.get_documents_by_query(
+            documents = await self.paperless.list_documents(
                 tags=tags,
                 created_after=created_after,
                 created_before=created_before,
@@ -91,7 +96,7 @@ class Pipeline:
             # Default: use configured tags (Inbox, Todo)
             tags = [tag_override] if tag_override else settings.monitor_tags
             console.print(f"[dim]Fetching documents tagged: {tags}[/dim]")
-            documents = await self.paperless.get_documents_by_tags(tags)
+            documents = await self.paperless.list_documents(tags=tags)
 
         console.print(f"[green]✓[/green] Found {len(documents)} documents")
 

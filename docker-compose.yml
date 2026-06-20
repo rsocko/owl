@@ -1,0 +1,73 @@
+# Document Intelligence Hub — Homelab Deployment
+# Managed via Dockhand on server-mini.socko.us
+#
+# Usage:
+#   docker compose up -d                    # Start all services
+#   docker compose up -d statement-tracker  # Start just statement tracker
+#   docker compose logs -f                  # Follow logs
+#
+# Image is built and pushed via GitHub Actions workflow:
+#   .github/workflows/build-doc-intelligence-image.yml
+
+services:
+  # Statement Tracker — web dashboard + API for detecting missing statements
+  statement-tracker:
+    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    container_name: doc-intelligence-statement-tracker
+    restart: unless-stopped
+    command: ["serve", "--config", "/app/config/config.docker.yaml"]
+    environment:
+      PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
+    ports:
+      - "${STATEMENT_TRACKER_PORT:-8001}:8001"
+    volumes:
+      - ./config:/app/config:ro
+      - hub-data:/app/data
+    networks:
+      - doc-intelligence
+
+  # EOB Matching — scheduled job to classify and match EOBs to bills
+  # Runs on a schedule (via cron on host or Dockhand scheduled task)
+  eob-matching:
+    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    container_name: doc-intelligence-eob-matching
+    restart: "no"
+    entrypoint: ["eob-match"]
+    command: ["run", "--limit", "200", "--verbose"]
+    environment:
+      PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
+      PAPERLESS_TOKEN: ${PAPERLESS_TOKEN}
+    volumes:
+      - hub-data:/app/data
+    networks:
+      - doc-intelligence
+    profiles:
+      - jobs
+
+  # Action Queue — scheduled pipeline for document triage/enrichment
+  action-queue:
+    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    container_name: doc-intelligence-action-queue
+    restart: "no"
+    entrypoint: ["paq"]
+    command: ["run", "--dry-run", "--limit", "20"]
+    environment:
+      PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
+      PAPERLESS_TOKEN: ${PAPERLESS_TOKEN}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-phi3:mini}
+      WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-false}
+    volumes:
+      - hub-data:/app/data
+    networks:
+      - doc-intelligence
+    profiles:
+      - jobs
+
+volumes:
+  hub-data:
+    name: doc-intelligence-data
+
+networks:
+  doc-intelligence:
+    name: doc-intelligence

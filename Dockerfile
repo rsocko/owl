@@ -10,7 +10,14 @@ COPY src ./src
 
 RUN pip install --no-cache-dir .
 
+# Create data directory for runtime artifacts (snapshots, databases)
+RUN mkdir -p /app/data
+
 EXPOSE 8001
 
-ENTRYPOINT ["statement-tracker"]
+# Default: run the statement tracker web server
+# Override with other commands for different modules:
+#   eob-match run --limit 100
+#   paq run --dry-run
+ENTRYPOINT ["doc-hub"]
 CMD ["serve", "--config", "/app/config/config.paperless.yaml"]
