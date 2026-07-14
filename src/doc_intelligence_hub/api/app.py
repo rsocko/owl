@@ -7,14 +7,16 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from doc_intelligence_hub.api.routers import action_queue, eob, statements, system
-from doc_intelligence_hub.modules.statements.api import _STATIC_DIR
+from doc_intelligence_hub.modules.statements.api import _STATIC_DIR as _STATEMENTS_STATIC_DIR
 from doc_intelligence_hub.modules.statements.config import load_config
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_HUB_STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 def _default_statement_tracker_config() -> str:
@@ -117,7 +119,10 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
-        return FileResponse(_STATIC_DIR / "index.html")
+        return FileResponse(_HUB_STATIC_DIR / "index.html")
+
+    # Legacy statement tracker dashboard at /statements/
+    app.mount("/statements", StaticFiles(directory=str(_STATEMENTS_STATIC_DIR), html=True), name="statements-static")
 
     @app.get("/health", tags=["system"])
     async def health(request: Request) -> dict[str, Any]:
