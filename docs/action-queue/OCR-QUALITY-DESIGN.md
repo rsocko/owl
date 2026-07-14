@@ -205,5 +205,5 @@ Paperless API calls and Azure API calls are both rate-limited:
 | [OCR-OLLAMA-INTEGRATION.md](OCR-OLLAMA-INTEGRATION.md) | Prompt templates, Ollama roles, integration patterns |
 | [OCR-N8N-WORKFLOW.md](OCR-N8N-WORKFLOW.md) | n8n workflow specification, node-by-node design |
 | [OCR-BASELINE-INVENTORY.md](OCR-BASELINE-INVENTORY.md) | Phase 0 one-shot inventory script specification |
-| [DESIGN.md](DESIGN.md) | Action Queue Agent overall system design |
+| [DESIGN.md](experiments/personal-automation/mission-control/DESIGN.md) | Action Queue Agent overall system design |
 | [TECHNOLOGY-STACK.md](TECHNOLOGY-STACK.md) | Full technology stack decisions |
