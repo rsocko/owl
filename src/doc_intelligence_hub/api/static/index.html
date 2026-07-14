@@ -262,6 +262,7 @@
 
     <script>
     const API = '';
+    let paperlessBaseUrl = '';  // Resolved from /api/settings on boot
 
     // Navigation
     function showView(id) {
@@ -444,7 +445,7 @@
                         <button class="btn" onclick="reopenAction(${action.id})">↩ Re-open</button>
                     `}
                     <button class="btn" onclick="previewDoc(${action.document_id})">👁 Preview</button>
-                    <a class="btn" href="/api/documents/${action.document_id}/download" target="_blank">📥 PDF</a>
+                    <a class="btn" href="${paperlessBaseUrl}/documents/${action.document_id}/details" target="_blank">📄 Open in Paperless</a>
                 </div>
             </div>
         `;
@@ -534,7 +535,7 @@
                     <div class="panel-header">
                         <span class="panel-title">📄 ${data.title}</span>
                         <div style="display:flex;gap:8px;">
-                            <a class="btn" href="/api/documents/${docId}/download" target="_blank">📥 Download PDF</a>
+                            <a class="btn" href="${paperlessBaseUrl}/documents/${docId}/details" target="_blank">📄 Open in Paperless</a>
                             <button class="btn" onclick="renderQueueTab()">✕ Close</button>
                         </div>
                     </div>
@@ -736,7 +737,15 @@
     }
 
     // Boot
-    loadOverview();
+    async function boot() {
+        try {
+            const res = await fetch(API + '/api/settings');
+            const s = await res.json();
+            paperlessBaseUrl = (s.paperless_url || '').replace(/\/$/, '');
+        } catch(e) {}
+        loadOverview();
+    }
+    boot();
     </script>
 </body>
 </html>
