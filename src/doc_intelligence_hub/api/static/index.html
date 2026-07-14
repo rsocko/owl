@@ -208,6 +208,7 @@
             <div class="btn-group">
                 <button class="btn primary" id="btn-queue-run" onclick="runQueue(false)">▶ Run Pipeline (Dry-Run)</button>
                 <button class="btn" id="btn-queue-check" onclick="checkQueue()">Check Connectivity</button>
+                <label style="font-size:0.78rem;color:var(--text-muted);display:flex;align-items:center;gap:5px;">Limit: <input id="queue-limit" type="number" value="50" min="1" max="500" style="width:60px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:0.78rem;text-align:center;"></label>
                 <span class="btn-hint" id="queue-safety">🔒 Read-only mode</span>
             </div>
             <div class="card-grid" id="queue-cards"><div class="loading"><span class="spinner"></span>Loading...</div></div>
@@ -463,7 +464,7 @@
             const res = await fetch(API + '/api/queue/run', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ limit: 20, dry_run: !live })
+                body: JSON.stringify({ limit: parseInt(document.getElementById('queue-limit').value) || 50, dry_run: !live })
             });
             const data = await res.json();
             queueData.lastRun = data;
