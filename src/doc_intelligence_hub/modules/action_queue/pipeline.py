@@ -70,6 +70,14 @@ class Pipeline:
         """
         console.print("\n[bold blue]═══ Paperless Action Queue Pipeline ═══[/bold blue]\n")
 
+        # Build a correspondent ID→name cache
+        self._correspondent_cache: dict[int, str] = {}
+        try:
+            correspondents = await self.paperless.list_correspondents()
+            self._correspondent_cache = {c["id"]: c["name"] for c in correspondents}
+        except Exception:
+            pass  # Non-fatal — we'll fall back to IDs
+
         # Step 1: Ensure custom fields exist (skip in dry-run or read-only mode)
         if not dry_run and settings.write_to_paperless:
             console.print("[dim]Checking custom fields...[/dim]")
@@ -105,15 +113,38 @@ class Pipeline:
 
         console.print(f"[green]✓[/green] Found {len(documents)} documents")
 
-        if limit:
-            documents = documents[:limit]
-            console.print(f"[dim]  (limited to {limit})[/dim]")
-
         console.print()
 
         if not documents:
             console.print("[yellow]No documents to process.[/yellow]")
             return {"processed": 0, "skipped": 0, "failed": 0}
+
+        # Filter out already-processed documents (unless force re-scan)
+        if not force:
+            init_db()
+            db_check = get_session()
+            try:
+                processed_ids = {
+                    row.document_id
+                    for row in db_check.query(ProcessingHistory.document_id)
+                    .filter(ProcessingHistory.success == 1)
+                    .all()
+                }
+            finally:
+                db_check.close()
+            unprocessed = [d for d in documents if d["id"] not in processed_ids]
+            skipped_count = len(documents) - len(unprocessed)
+            documents = unprocessed
+            console.print(f"[dim]  {skipped_count} already processed, {len(documents)} new[/dim]")
+
+        # Apply limit AFTER filtering (limit means "analyze up to N new docs")
+        if limit and len(documents) > limit:
+            documents = documents[:limit]
+            console.print(f"[dim]  (limited to {limit})[/dim]")
+
+        if not documents:
+            console.print("[yellow]No new documents to process.[/yellow]")
+            return {"processed": 0, "skipped": skipped_count if not force else 0, "failed": 0, "no_action": 0}
 
         # Dry-run: just list what would be processed
         if dry_run:
@@ -143,17 +174,6 @@ class Pipeline:
         for doc in documents:
             doc_id = doc["id"]
             doc_title = doc.get("title", f"Document #{doc_id}")
-
-            # Check processing history (dedup)
-            if not force:
-                existing = (
-                    db.query(ProcessingHistory)
-                    .filter_by(document_id=doc_id)
-                    .first()
-                )
-                if existing and existing.success:
-                    stats["skipped"] += 1
-                    continue
 
             console.print(f"  [dim]Analyzing:[/dim] {doc_title[:60]}...")
 
@@ -287,6 +307,15 @@ class Pipeline:
         """Store or update an action in the internal database."""
         doc_id = document["id"]
 
+        # Resolve correspondent name from cache
+        corr_raw = assessment.get("correspondent") or document.get("correspondent")
+        if isinstance(corr_raw, int):
+            correspondent_name = self._correspondent_cache.get(corr_raw, str(corr_raw))
+        elif corr_raw and str(corr_raw).isdigit():
+            correspondent_name = self._correspondent_cache.get(int(corr_raw), str(corr_raw))
+        else:
+            correspondent_name = str(corr_raw) if corr_raw else None
+
         # For multi-action docs, check by document_id + title to avoid clobbering
         existing = (
             db.query(Action)
@@ -302,6 +331,7 @@ class Pipeline:
             existing.amount = action_data.get("amount")
             existing.urgency = action_data["urgency"]
             existing.confidence = action_data.get("confidence", 0)
+            existing.correspondent = correspondent_name
             existing.extracted_data = assessment.get("extracted_data")
             existing.ai_reasoning = assessment.get("reasoning")
             existing.updated_at = datetime.utcnow()
@@ -317,7 +347,7 @@ class Pipeline:
                 amount=action_data.get("amount"),
                 urgency=action_data["urgency"],
                 confidence=action_data.get("confidence", 0),
-                correspondent=assessment.get("correspondent"),
+                correspondent=correspondent_name,
                 extracted_data=assessment.get("extracted_data"),
                 ai_reasoning=assessment.get("reasoning"),
             )

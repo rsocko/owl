@@ -209,6 +209,7 @@
                 <button class="btn primary" id="btn-queue-run" onclick="runQueue(false)">▶ Run Pipeline (Dry-Run)</button>
                 <button class="btn" id="btn-queue-check" onclick="checkQueue()">Check Connectivity</button>
                 <label style="font-size:0.78rem;color:var(--text-muted);display:flex;align-items:center;gap:5px;">Limit: <input id="queue-limit" type="number" value="50" min="1" max="500" style="width:60px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:0.78rem;text-align:center;"></label>
+                <label style="font-size:0.78rem;color:var(--text-muted);display:flex;align-items:center;gap:5px;cursor:pointer;"><input id="queue-force" type="checkbox" style="margin-right:4px;">Force Re-scan</label>
                 <span class="btn-hint" id="queue-safety">🔒 Read-only mode</span>
             </div>
             <div class="card-grid" id="queue-cards"><div class="loading"><span class="spinner"></span>Loading...</div></div>
@@ -418,6 +419,7 @@
     function renderActionItem(action) {
         const urgencyClass = (action.urgency || 'low').toLowerCase();
         const isActive = action.status === 'pending';
+        const paperlessUrl = document.querySelector('#cfg-ollama-url')?.value ? '' : '';
         return `
             <div class="action-item">
                 <div class="action-item-header">
@@ -431,8 +433,8 @@
                     ${action.due_date ? `<span>📅 Due: ${action.due_date}</span>` : ''}
                     ${action.amount ? `<span>💰 $${action.amount.toFixed(2)}</span>` : ''}
                     ${action.correspondent ? `<span>👤 ${action.correspondent}</span>` : ''}
-                    <span>📄 Doc #${action.document_id}</span>
-                    ${action.confidence ? `<span>🎯 ${action.confidence}% confidence</span>` : ''}
+                    <span>📄 ${action.document_title || 'Doc #' + action.document_id}</span>
+                    ${action.confidence ? `<span>🎯 ${action.confidence}%</span>` : ''}
                 </div>
                 <div class="action-item-actions">
                     ${isActive ? `
@@ -441,7 +443,12 @@
                     ` : `
                         <button class="btn" onclick="reopenAction(${action.id})">↩ Re-open</button>
                     `}
+                    <button class="btn" onclick="previewDoc(${action.document_id})">👁 Preview</button>
+                    <a class="btn" href="/api/documents/${action.document_id}/download" target="_blank">📥 PDF</a>
                 </div>
+            </div>
+        `;
+    }
             </div>
         `;
     }
@@ -464,7 +471,7 @@
             const res = await fetch(API + '/api/queue/run', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ limit: parseInt(document.getElementById('queue-limit').value) || 50, dry_run: !live })
+                body: JSON.stringify({ limit: parseInt(document.getElementById('queue-limit').value) || 50, dry_run: !live, force: document.getElementById('queue-force').checked })
             });
             const data = await res.json();
             queueData.lastRun = data;
@@ -513,6 +520,42 @@
             if (!res.ok) throw new Error(await res.text());
             loadQueue(); // Refresh
         } catch(e) { alert('Error re-opening action: ' + e.message); }
+    }
+
+    async function previewDoc(docId) {
+        // Show a modal-style preview panel
+        const el = document.getElementById('queue-tab-content');
+        el.innerHTML = `<div class="loading"><span class="spinner"></span>Loading document preview...</div>`;
+        try {
+            const res = await fetch(API + `/api/documents/${docId}/preview`);
+            const data = await res.json();
+            el.innerHTML = `
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-title">📄 ${data.title}</span>
+                        <div style="display:flex;gap:8px;">
+                            <a class="btn" href="/api/documents/${docId}/download" target="_blank">📥 Download PDF</a>
+                            <button class="btn" onclick="renderQueueTab()">✕ Close</button>
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;font-size:0.8rem;">
+                            <div><strong>ID:</strong> ${data.id}</div>
+                            <div><strong>Created:</strong> ${data.created ? data.created.substring(0, 10) : '?'}</div>
+                            <div><strong>Added:</strong> ${data.added ? data.added.substring(0, 10) : '?'}</div>
+                            <div><strong>Length:</strong> ${data.content_length.toLocaleString()} chars</div>
+                        </div>
+                        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;max-height:400px;overflow:auto;font-size:0.78rem;line-height:1.6;white-space:pre-wrap;color:var(--text-muted);">${escapeHtml(data.content)}${data.content_length > 3000 ? '\n\n[... truncated ...]' : ''}</div>
+                    </div>
+                </div>
+            `;
+        } catch(e) { el.innerHTML = `<div class="panel"><div class="panel-body">Error loading preview: ${e.message}</div></div>`; }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     // ===== STATEMENTS =====
