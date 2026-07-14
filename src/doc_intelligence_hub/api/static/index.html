@@ -616,24 +616,79 @@
     // ===== SETTINGS =====
     async function loadSettings() {
         try {
-            const res = await fetch(API + '/api/status');
-            const data = await res.json();
+            const [statusRes, settingsRes] = await Promise.all([
+                fetch(API + '/api/status'),
+                fetch(API + '/api/settings')
+            ]);
+            const data = await statusRes.json();
+            const settings = await settingsRes.json();
             const m = data.modules;
             document.getElementById('settings-content').innerHTML = `
                 <div class="panel"><div class="panel-header"><span class="panel-title">Connections</span></div><div class="panel-body">
                     <table><thead><tr><th>Service</th><th>URL</th><th>Status</th></tr></thead><tbody>
                     <tr><td>Paperless-ngx</td><td style="font-family:monospace;font-size:0.78rem">${m.statements?.paperless_url || m.paperless?.base_url || '?'}</td><td><span class="status-dot ${m.paperless?.status || 'err'}"></span>${m.paperless?.status || 'unknown'} (${m.paperless?.documents || 0} docs)</td></tr>
-                    <tr><td>Ollama</td><td style="font-family:monospace;font-size:0.78rem">${m.action_queue?.ollama_url || '?'}</td><td><span class="status-dot ${m.action_queue?.status === 'ok' ? 'ok' : 'err'}"></span>${m.action_queue?.status || 'unknown'}</td></tr>
+                    <tr><td>Ollama</td><td style="font-family:monospace;font-size:0.78rem">${settings.ollama_url || '?'}</td><td><span class="status-dot ${m.action_queue?.status === 'ok' ? 'ok' : 'err'}"></span>${m.action_queue?.status || 'unknown'}</td></tr>
                     </tbody></table>
                 </div></div>
-                <div class="panel"><div class="panel-header"><span class="panel-title">Safety Controls</span></div><div class="panel-body" style="font-size:0.82rem;">
-                    <p style="margin-bottom:10px;"><strong>WRITE_TO_PAPERLESS:</strong> <span style="color:${m.action_queue?.write_to_paperless ? 'var(--success)' : 'var(--danger)'};font-weight:600">${m.action_queue?.write_to_paperless ? 'true' : 'false'}</span></p>
+
+                <div class="panel"><div class="panel-header"><span class="panel-title">Ollama / AI Configuration</span><button class="btn" onclick="testOllama()">Test Connection</button></div><div class="panel-body">
+                    <div style="display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:center;font-size:0.82rem;">
+                        <label for="cfg-ollama-url" style="font-weight:500;">Ollama URL</label>
+                        <input id="cfg-ollama-url" type="text" value="${settings.ollama_url || ''}" placeholder="http://localhost:11434" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:monospace;font-size:0.8rem;width:100%;">
+
+                        <label for="cfg-ollama-model" style="font-weight:500;">Model</label>
+                        <input id="cfg-ollama-model" type="text" value="${settings.ollama_model || ''}" placeholder="phi3:mini" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:monospace;font-size:0.8rem;width:100%;">
+
+                        <label for="cfg-write" style="font-weight:500;">Write Mode</label>
+                        <div>
+                            <label style="cursor:pointer;"><input id="cfg-write" type="checkbox" ${settings.write_to_paperless ? 'checked' : ''} style="margin-right:6px;">Enable writes to Paperless</label>
+                            <span style="color:var(--text-muted);font-size:0.72rem;margin-left:8px;">(tags, custom fields)</span>
+                        </div>
+                    </div>
+                    <div style="margin-top:14px;display:flex;gap:8px;align-items:center;">
+                        <button class="btn primary" onclick="saveSettings()">Save Settings</button>
+                        <span id="settings-save-status" style="font-size:0.75rem;color:var(--text-muted);"></span>
+                    </div>
+                    <p style="margin-top:12px;font-size:0.72rem;color:var(--text-muted);">Settings persist for this server session. Restart the service to reset to env/config defaults.</p>
+                </div></div>
+
+                <div class="panel"><div class="panel-header"><span class="panel-title">System Info</span></div><div class="panel-body" style="font-size:0.82rem;">
                     <p style="margin-bottom:10px;"><strong>Statement Config:</strong> <code style="font-size:0.75rem;color:var(--text-muted)">${m.statements?.config_path || '?'}</code></p>
-                    <p style="margin-bottom:10px;"><strong>Ollama Model:</strong> ${m.action_queue?.ollama_model || 'not configured'}</p>
                     <p><strong>API Docs:</strong> <a href="/docs" style="color:var(--accent)" target="_blank">/docs</a> (OpenAPI / Swagger UI)</p>
                 </div></div>
             `;
         } catch(e) { document.getElementById('settings-content').innerHTML = `<div class="panel"><div class="panel-body">Error: ${e.message}</div></div>`; }
+    }
+
+    async function saveSettings() {
+        const statusEl = document.getElementById('settings-save-status');
+        statusEl.textContent = 'Saving...';
+        try {
+            const res = await fetch(API + '/api/settings', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    ollama_url: document.getElementById('cfg-ollama-url').value,
+                    ollama_model: document.getElementById('cfg-ollama-model').value,
+                    write_to_paperless: document.getElementById('cfg-write').checked,
+                })
+            });
+            const data = await res.json();
+            if (data.status === 'ok') {
+                statusEl.innerHTML = `<span style="color:var(--success)">✓ Saved (${data.changed.join(', ')})</span>`;
+            } else {
+                statusEl.innerHTML = `<span style="color:var(--danger)">Error</span>`;
+            }
+        } catch(e) { statusEl.innerHTML = `<span style="color:var(--danger)">Error: ${e.message}</span>`; }
+    }
+
+    async function testOllama() {
+        try {
+            const res = await fetch(API + '/api/queue/check');
+            const data = await res.json();
+            const msg = `Ollama: ${data.ollama?.status || 'unknown'}\nURL: ${data.ollama?.base_url || '?'}\nModel: ${data.ollama?.model || '?'}`;
+            alert(msg);
+        } catch(e) { alert('Error: ' + e.message); }
     }
 
     // Boot
