@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Request
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
@@ -147,3 +148,42 @@ async def update_settings(request: Request, body: OllamaSettingsUpdate) -> dict[
             "write_to_paperless": hub.write_to_paperless,
         },
     }
+
+
+@router.get("/documents/{document_id}/preview")
+async def document_preview(request: Request, document_id: int) -> dict[str, Any]:
+    """Get document metadata and text content for inline preview."""
+    client = make_paperless_client(request, timeout=15.0)
+    doc = await client.get_document(document_id)
+    content = await client.get_document_content(document_id)
+    return {
+        "id": doc["id"],
+        "title": doc.get("title", ""),
+        "correspondent": doc.get("correspondent"),
+        "tags": doc.get("tags", []),
+        "created": doc.get("created"),
+        "added": doc.get("added"),
+        "content": content[:3000],  # First 3000 chars for preview
+        "content_length": len(content),
+    }
+
+
+@router.get("/documents/{document_id}/download")
+async def document_download(request: Request, document_id: int) -> Response:
+    """Proxy the document PDF/file from Paperless for viewing."""
+    client = make_paperless_client(request, timeout=30.0)
+    import httpx
+    async with httpx.AsyncClient(
+        base_url=client.base_url,
+        headers={"Authorization": f"Token {client.token}"},
+        timeout=30.0,
+    ) as http:
+        resp = await http.get(f"/api/documents/{document_id}/download/")
+        resp.raise_for_status()
+        content_type = resp.headers.get("content-type", "application/pdf")
+        filename = resp.headers.get("content-disposition", f"doc-{document_id}.pdf")
+        return Response(
+            content=resp.content,
+            media_type=content_type,
+            headers={"Content-Disposition": filename},
+        )

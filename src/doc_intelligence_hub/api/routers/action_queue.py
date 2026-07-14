@@ -19,6 +19,7 @@ router = APIRouter(prefix="/api/queue", tags=["action-queue"])
 class QueueRunRequest(BaseModel):
     limit: int | None = Field(default=None, ge=1, le=500)
     dry_run: bool = True
+    force: bool = False
 
 
 class ActionUpdateRequest(BaseModel):
@@ -93,7 +94,7 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
         "read_only": not action_queue_settings.write_to_paperless,
     }
 
-    result = await run_pipeline(limit=body.limit, dry_run=body.dry_run)
+    result = await run_pipeline(limit=body.limit, dry_run=body.dry_run, force=body.force)
     finished_at = datetime.utcnow().isoformat()
     status = {
         "status": "ok",
