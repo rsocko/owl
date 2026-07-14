@@ -338,10 +338,19 @@
 
     async function loadQueue() {
         try {
-            const res = await fetch(API + '/api/queue/status');
-            const data = await res.json();
-            renderQueueCards(data);
-            queueData.lastRun = data.result || null;
+            const [statusRes, actionsRes] = await Promise.all([
+                fetch(API + '/api/queue/status'),
+                fetch(API + '/api/queue/actions?limit=100')
+            ]);
+            const statusData = await statusRes.json();
+            const actionsData = await actionsRes.json();
+            renderQueueCards(statusData);
+            queueData.lastRun = statusData.result || null;
+            // Populate from database
+            const allActions = actionsData.actions || [];
+            queueData.pending = allActions.filter(a => a.status === 'pending');
+            queueData.completed = allActions.filter(a => a.status === 'completed');
+            queueData.dismissed = allActions.filter(a => a.status === 'dismissed');
             renderQueueTab();
         } catch(e) {
             document.getElementById('queue-cards').innerHTML = `<div class="card"><div class="card-desc">Error: ${e.message}</div></div>`;
@@ -396,8 +405,8 @@
             }
             return;
         }
-        // For pending/completed/dismissed — show from last run results or empty
-        const items = queueData.lastRun?.actions?.[currentQueueTab] || [];
+        // Show actions from database
+        const items = queueData[currentQueueTab] || [];
         if (items.length === 0) {
             el.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>No ${currentQueueTab} actions. Run the pipeline to analyze documents.</p></div>`;
             return;
@@ -407,12 +416,14 @@
 
     function renderActionItem(action) {
         const urgencyClass = (action.urgency || 'low').toLowerCase();
+        const isActive = action.status === 'pending';
         return `
             <div class="action-item">
                 <div class="action-item-header">
                     <span class="action-item-type ${action.action_type || 'FILE'}">${action.action_type || '?'}</span>
                     <span class="action-item-title">${action.title || action.document_title || 'Untitled'}</span>
                     <span class="badge ${urgencyClass}">${action.urgency || 'LOW'}</span>
+                    <span class="badge ${action.status}">${action.status}</span>
                 </div>
                 <div class="action-item-body">${action.summary || ''}</div>
                 <div class="action-item-meta">
@@ -423,8 +434,12 @@
                     ${action.confidence ? `<span>🎯 ${action.confidence}% confidence</span>` : ''}
                 </div>
                 <div class="action-item-actions">
-                    <button class="btn" onclick="completeAction(${action.id})">✓ Complete</button>
-                    <button class="btn" onclick="dismissAction(${action.id})">✕ Dismiss</button>
+                    ${isActive ? `
+                        <button class="btn" onclick="completeAction(${action.id})">✓ Complete</button>
+                        <button class="btn" onclick="dismissAction(${action.id})">✕ Dismiss</button>
+                    ` : `
+                        <button class="btn" onclick="reopenAction(${action.id})">↩ Re-open</button>
+                    `}
                 </div>
             </div>
         `;
@@ -462,8 +477,42 @@
         btn.disabled = false; btn.textContent = '▶ Run Pipeline (Dry-Run)';
     }
 
-    function completeAction(id) { alert('Mark action #' + id + ' as completed (not yet wired)'); }
-    function dismissAction(id) { alert('Dismiss action #' + id + ' (not yet wired)'); }
+    async function completeAction(id) {
+        try {
+            const res = await fetch(API + `/api/queue/actions/${id}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ status: 'completed' })
+            });
+            if (!res.ok) throw new Error(await res.text());
+            loadQueue(); // Refresh
+        } catch(e) { alert('Error completing action: ' + e.message); }
+    }
+
+    async function dismissAction(id) {
+        if (!confirm('Dismiss this action? It can be re-opened later.')) return;
+        try {
+            const res = await fetch(API + `/api/queue/actions/${id}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ status: 'dismissed' })
+            });
+            if (!res.ok) throw new Error(await res.text());
+            loadQueue(); // Refresh
+        } catch(e) { alert('Error dismissing action: ' + e.message); }
+    }
+
+    async function reopenAction(id) {
+        try {
+            const res = await fetch(API + `/api/queue/actions/${id}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ status: 'pending' })
+            });
+            if (!res.ok) throw new Error(await res.text());
+            loadQueue(); // Refresh
+        } catch(e) { alert('Error re-opening action: ' + e.message); }
+    }
 
     // ===== STATEMENTS =====
     async function loadStatements() {
