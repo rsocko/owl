@@ -98,7 +98,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
         openapi_tags=[
             {"name": "system", "description": "Service health, connectivity, and shared Paperless metadata."},
             {"name": "statement-tracker", "description": "Statement discovery, recommendations, and provider overrides."},
-            {"name": "eob-matching", "description": "Read-only EOB classification, extraction, and matching workflows."},
+            {"name": "eob-matching", "description": "EOB classification, extraction, matching, and Paperless linking."},
             {"name": "action-queue", "description": "Action Queue connectivity, dry-runs, and pipeline status."},
         ],
     )
@@ -106,7 +106,6 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.state.hub_settings = settings
     app.state.statement_tracker_config = settings.statement_tracker_config
     app.state.statement_tracker_config_loaded = _load_statement_tracker_config(settings.statement_tracker_config)
-    app.state.last_eob_results = None
     app.state.last_queue_status = {"status": "idle", "message": "Action queue has not been run yet."}
 
     _register_exception_handlers(app)

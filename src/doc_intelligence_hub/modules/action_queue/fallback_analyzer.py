@@ -13,27 +13,57 @@ from typing import Optional
 # Keyword patterns for action type detection
 _PAY_KEYWORDS = re.compile(
     r"\b(invoice|bill|statement|payment\s*due|balance\s*due|amount\s*due|"
-    r"pay\s*by|remit|overdue|past\s*due|total\s*due|account\s*balance)\b",
+    r"pay\s*by|remit|overdue|past\s*due|total\s*due|account\s*balance|"
+    r"minimum\s*payment|autopay|payment\s*plan|installment|"
+    r"copay|co[\s-]?pay|deductible|premium\s*due|"
+    r"utility|electric|gas|water|sewer|trash|internet|cable|"
+    r"mortgage|rent|loan\s*payment|tuition|assessment)\b",
     re.IGNORECASE,
 )
 _RESPOND_KEYWORDS = re.compile(
     r"\b(respond|reply|action\s*required|rsvp|confirm|"
-    r"please\s*call|contact\s*us|follow[\s-]?up|signature\s*required)\b",
+    r"please\s*call|contact\s*us|follow[\s-]?up|signature\s*required|"
+    r"verification\s*needed|verify\s*your|update\s*your\s*information|"
+    r"appeal|dispute|grievance|authorization\s*required|"
+    r"jury\s*duty|summons|subpoena|citation)\b",
     re.IGNORECASE,
 )
 _SCHEDULE_KEYWORDS = re.compile(
     r"\b(appointment|renewal|schedule|expires?|expir(ation|ing)|"
-    r"renew\s*by|deadline|due\s*date)\b",
+    r"renew\s*by|deadline|due\s*date|"
+    r"annual\s*review|open\s*enrollment|re[\s-]?enroll|"
+    r"registration|license\s*renewal|inspection\s*due|"
+    r"maintenance|service\s*due|recall|warranty)\b",
     re.IGNORECASE,
 )
 _REVIEW_KEYWORDS = re.compile(
     r"\b(notice|policy|contract|agreement|terms|"
-    r"important\s*information|review|update|change)\b",
+    r"important\s*information|review|update|change|"
+    r"explanation\s*of\s*benefits|eob|claim\s*summary|"
+    r"coverage\s*change|benefit\s*change|rate\s*change|"
+    r"privacy\s*notice|hipaa|disclosure|amendment|"
+    r"tax\s*assessment|property\s*assessment|zoning)\b",
     re.IGNORECASE,
 )
 _FILE_KEYWORDS = re.compile(
     r"\b(receipt|confirmation|summary|record|tax\s*form|"
-    r"w[\-\s]?2|1099|statement\s*of|proof\s*of)\b",
+    r"w[\-\s]?2|1099|w[\-\s]?4|1098|k[\-\s]?1|"
+    r"statement\s*of|proof\s*of|certificate|"
+    r"annual\s*statement|year[\s-]?end|quarterly\s*report|"
+    r"closing\s*disclosure|settlement\s*statement|title\s*report|"
+    r"vaccination|immunization|lab\s*results?|diagnosis|"
+    r"prescription|referral|discharge\s*summary)\b",
+    re.IGNORECASE,
+)
+_SIGN_KEYWORDS = re.compile(
+    r"\b(sign\s*here|signature\s*required|notarize|witness|"
+    r"consent\s*form|authorization\s*form|power\s*of\s*attorney|"
+    r"affidavit|declaration|acknowledgment)\b",
+    re.IGNORECASE,
+)
+_ARCHIVE_KEYWORDS = re.compile(
+    r"\b(for\s*your\s*records|keep\s*for|retain|archive|"
+    r"no\s*action\s*needed|informational\s*only|fyi)\b",
     re.IGNORECASE,
 )
 
@@ -128,6 +158,8 @@ class RuleBasedAnalyzer:
             "SCHEDULE": len(_SCHEDULE_KEYWORDS.findall(text)) * 15,
             "REVIEW": len(_REVIEW_KEYWORDS.findall(text)) * 12,
             "FILE": len(_FILE_KEYWORDS.findall(text)) * 10,
+            "SIGN": len(_SIGN_KEYWORDS.findall(text)) * 18,
+            "ARCHIVE": len(_ARCHIVE_KEYWORDS.findall(text)) * 8,
         }
 
         # Boost from tags
@@ -136,6 +168,15 @@ class RuleBasedAnalyzer:
             scores["PAY"] += 30
         if "inbox" in tag_str or "todo" in tag_str:
             scores["REVIEW"] += 15
+        if "medical" in tag_str or "health" in tag_str or "eob" in tag_str:
+            scores["REVIEW"] += 20
+        if "tax" in tag_str or "financial" in tag_str:
+            scores["FILE"] += 20
+        if "legal" in tag_str or "contract" in tag_str:
+            scores["SIGN"] += 15
+        if "insurance" in tag_str:
+            scores["REVIEW"] += 15
+            scores["PAY"] += 10
 
         # Find best match
         best_type = max(scores, key=scores.get)
