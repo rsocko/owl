@@ -145,14 +145,13 @@ All design docs are comprehensive and implementation-ready:
 
 **Goal:** Get Statement Tracker running live on homelab and validate the shared infrastructure works.
 
-| Task | Issue | Effort |
-|------|-------|--------|
-| Close duplicate issues (#721–#731) | — | 15 min |
-| Deploy Statement Tracker to homelab via Dockhand | #741 | 2h |
-| Validate Paperless connectivity end-to-end | #741 | 2h |
-| Run statement scan against real documents | #741 | 4h |
-| Fix any issues found in live testing | #741 | 4h |
-| Update #741 status to reflect what actually works | — | 30 min |
+| Task                                              | Issue | Effort |
+| ------------------------------------------------- | ----- | ------ |
+| Deploy Statement Tracker to homelab via Dockhand  | #741  | 2h     |
+| Validate Paperless connectivity end-to-end        | #741  | 2h     |
+| Run statement scan against real documents         | #741  | 4h     |
+| Fix any issues found in live testing              | #741  | 4h     |
+| Update #741 status to reflect what actually works | —     | 30 min |
 
 **Exit criteria:** Statement Tracker dashboard shows real data from Paperless at `http://server-mini:8001/statements/`
 
