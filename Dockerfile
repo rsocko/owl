@@ -7,6 +7,7 @@ WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY src ./src
+COPY config/config.docker.yaml ./config/config.docker.yaml
 
 RUN pip install --no-cache-dir .
 
@@ -20,4 +21,4 @@ EXPOSE 8001
 #   eob-match run --limit 100
 #   paq run --dry-run
 ENTRYPOINT ["doc-hub"]
-CMD ["serve", "--config", "/app/config/config.paperless.yaml"]
+CMD ["serve", "--config", "/app/config/config.docker.yaml"]

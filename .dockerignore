@@ -1,7 +1,8 @@
 # Keep Docker build context small and secret-free
 .env
 *.env
-config/
+config/*.env*
+config/config.paperless.yaml
 data/
 docs/
 mockups/
