@@ -1,17 +1,22 @@
 # Document Intelligence Hub — Homelab Deployment
-# Managed via Dockhand on server-mini.socko.us
+# Managed via Dockhand stack pointing to rsocko/ideation repo
+# Compose path: experiments/document-intelligence/docker-compose.yml
 #
 # Usage:
-#   docker compose up -d                    # Start all services
-#   docker compose up -d statement-tracker  # Start just statement tracker
-#   docker compose logs -f                  # Follow logs
+#   docker compose up -d --build             # Build and start all services
+#   docker compose up -d --build statement-tracker  # Build and start just statement tracker
+#   docker compose logs -f                   # Follow logs
 #
-# Image is built and pushed via GitHub Actions workflow:
-#   .github/workflows/build-doc-intelligence-image.yml
+# Build modes:
+#   --build   → builds from local Dockerfile (dev/Dockhand stack)
+#   no --build → pulls pre-built image from GHCR (production)
 
 services:
   # Statement Tracker — web dashboard + API for detecting missing statements
   statement-tracker:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: ghcr.io/rsocko/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
     container_name: doc-intelligence-statement-tracker
     restart: unless-stopped
@@ -19,7 +24,7 @@ services:
     environment:
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
     ports:
-      - "${STATEMENT_TRACKER_PORT:-8001}:8001"
+      - "${STATEMENT_TRACKER_PORT:-8071}:8001"
     volumes:
       - ./config:/app/config:ro
       - hub-data:/app/data
@@ -29,6 +34,9 @@ services:
   # EOB Matching — scheduled job to classify and match EOBs to bills
   # Runs on a schedule (via cron on host or Dockhand scheduled task)
   eob-matching:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: ghcr.io/rsocko/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
     container_name: doc-intelligence-eob-matching
     restart: "no"
@@ -46,6 +54,9 @@ services:
 
   # Action Queue — scheduled pipeline for document triage/enrichment
   action-queue:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: ghcr.io/rsocko/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
     container_name: doc-intelligence-action-queue
     restart: "no"
