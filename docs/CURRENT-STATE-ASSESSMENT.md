@@ -10,6 +10,17 @@ The Document Intelligence Hub is a **well-designed but partially implemented** u
 
 ---
 
+## Related: Mission Control Integration Review
+
+A comprehensive integration design review covering how Document Intelligence connects to [Mission Control](https://github.com/rsocko/mission-control) has been created:
+
+- **PR:** [rsocko/mission-control#708](https://github.com/rsocko/mission-control/pull/708)
+- **File:** `docs/design/proposed/di-integration-review.md`
+
+That review covers UI ownership (MC is the primary user surface; DI is a headless API + optional admin UI), API contract gaps, alert/notification routing, and a phased integration plan. The phased plan below has been updated to align with those decisions.
+
+---
+
 ## GitHub Issues Consolidation
 
 ### Duplicates Found
@@ -213,21 +224,23 @@ All design docs are comprehensive and implementation-ready:
 
 ---
 
-### Phase 4: Unified Hub UI (Priority: MEDIUM)
+### Phase 4: Admin UI & MC Integration Support (Priority: MEDIUM)
 *Estimated: 2–3 weeks*
 
-**Goal:** Single web dashboard showing all modules' data.
+**Goal:** Build a lightweight standalone admin UI for power-user workflows, and expose API endpoints needed by Mission Control's hub page.
+
+> **Note:** The primary user-facing dashboard is now owned by Mission Control (see [integration review](https://github.com/rsocko/mission-control/pull/708)). This phase focuses on DI-specific admin tools and the API surface MC needs.
 
 | Task | Issue | Effort |
 |------|-------|--------|
-| Build SPA shell (sidebar nav, routing) | #742 | 8h |
-| Unified dashboard home (stats from all modules) | #742 | 8h |
-| Integrate Statement Tracker dashboard | #742 | 4h |
-| Build EOB matching UI (from mockups) | #735 | 12h |
-| Build Action Queue UI (from mockup) | #733 | 8h |
-| Cross-module alert feed | #742 | 4h |
+| Build `/api/documents` endpoint (list docs with filters, for MC Documents tab) | #742 | 4h |
+| Build `/api/stats` endpoint (module health, processing counts, for MC Insights tab) | #742 | 4h |
+| Add `previewUrl` field to action queue API responses (Paperless document URL) | #742 | 2h |
+| Build lightweight admin SPA (Paperless connection, scan schedules, scoring weights) | #742 | 8h |
+| OCR quality viewer (admin-only deep tool) | #742 | 8h |
+| Side-by-side match comparison view (EOB debugging) | #735 | 8h |
 
-**Exit criteria:** One URL at `:8001` shows a unified dashboard with live data from all three modules.
+**Exit criteria:** MC can call `/api/documents` and `/api/stats`; admin UI accessible at `:8001/admin` for configuration and debugging.
 
 ---
 
@@ -257,6 +270,7 @@ All design docs are comprehensive and implementation-ready:
 | Settings page (Paperless connection, notification prefs) | #742 | 4h |
 | n8n notification routing (email/push for alerts) | #740 | 4h |
 | Docker image optimization (multi-stage build) | — | 2h |
+| Align notification routing with MC (avoid double-notification via n8n AND MC) | — | 2h |
 | Consolidate extractors into shared `core/extractors/` | — | 8h |
 
 ---
@@ -266,6 +280,7 @@ All design docs are comprehensive and implementation-ready:
 1. **Close 11 duplicate issues** (#721–#731) — reduces noise immediately
 2. **Deploy Statement Tracker to homelab** — proves infrastructure works
 3. **Pick Phase 2 or Phase 3** based on which documents you have more of (EOBs or inbox items)
+4. **Review the MC integration design** ([PR #708](https://github.com/rsocko/mission-control/pull/708)) — aligns DI's UI scope with Mission Control's connector-based integration
 
 ---
 
