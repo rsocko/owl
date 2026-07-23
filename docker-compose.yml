@@ -12,7 +12,7 @@
 services:
   # Statement Tracker — web dashboard + API for detecting missing statements
   statement-tracker:
-    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    image: ghcr.io/rsocko/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
     container_name: doc-intelligence-statement-tracker
     restart: unless-stopped
     command: ["serve", "--config", "/app/config/config.docker.yaml"]
@@ -29,7 +29,7 @@ services:
   # EOB Matching — scheduled job to classify and match EOBs to bills
   # Runs on a schedule (via cron on host or Dockhand scheduled task)
   eob-matching:
-    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    image: ghcr.io/rsocko/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
     container_name: doc-intelligence-eob-matching
     restart: "no"
     entrypoint: ["eob-match"]
@@ -46,7 +46,7 @@ services:
 
   # Action Queue — scheduled pipeline for document triage/enrichment
   action-queue:
-    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    image: ghcr.io/rsocko/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
     container_name: doc-intelligence-action-queue
     restart: "no"
     entrypoint: ["paq"]
