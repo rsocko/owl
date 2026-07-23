@@ -66,13 +66,13 @@ services:
     container_name: doc-intelligence-action-queue
     restart: "no"
     entrypoint: ["paq"]
-    command: ["run", "--dry-run", "--limit", "20"]
+    command: ["run", "--limit", "20"]
     environment:
       PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
       PAPERLESS_TOKEN: ${PAPERLESS_TOKEN}
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-phi3:mini}
-      WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-false}
+      WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-true}
     volumes:
       - hub-data:/app/data
     networks:

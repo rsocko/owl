@@ -1,4 +1,4 @@
-"""Pure-logic EOB ↔ Bill matching helpers."""
+"""Pure-logic EOB ↔ Bill matching helpers with persistence and Paperless enrichment."""
 
 from __future__ import annotations
 
