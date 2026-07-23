@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Intelligence Hub — Dashboard Mockup</title>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --surface-hover: #222633;
+            --border: #2a2e3b;
+            --text: #e4e7ef;
+            --text-muted: #8b92a8;
+            --accent: #4f8ff7;
+            --accent-hover: #6ba0f9;
+            --success: #3dd68c;
+            --warning: #f5a623;
+            --danger: #ef5350;
+            --radius: 10px;
+            --sidebar-width: 240px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            padding: 24px 16px;
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            z-index: 100;
+        }
+
+        .sidebar-logo {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--accent);
+            margin-bottom: 8px;
+            padding: 0 8px;
+        }
+
+        .sidebar-subtitle {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            padding: 0 8px;
+            margin-bottom: 24px;
+        }
+
+        .nav-section {
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            padding: 0 8px;
+            margin: 16px 0 8px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            transition: all 0.15s;
+        }
+
+        .nav-item:hover { background: var(--surface-hover); color: var(--text); }
+        .nav-item.active { background: var(--accent); color: #fff; }
+        .nav-item .icon { font-size: 1.1rem; width: 20px; text-align: center; }
+
+        .nav-item .badge {
+            margin-left: auto;
+            background: var(--danger);
+            color: #fff;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+
+        .sidebar-footer {
+            margin-top: auto;
+            padding: 12px 8px;
+            border-top: 1px solid var(--border);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        .status-dot.ok { background: var(--success); }
+        .status-dot.warn { background: var(--warning); }
+        .status-dot.err { background: var(--danger); }
+
+        /* Main content */
+        .main {
+            margin-left: var(--sidebar-width);
+            flex: 1;
+            padding: 32px;
+            max-width: 1200px;
+        }
+
+        .page-header {
+            margin-bottom: 32px;
+        }
+
+        .page-header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .page-header p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* Status cards grid */
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+
+        .status-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            transition: border-color 0.15s;
+        }
+
+        .status-card:hover { border-color: var(--accent); }
+
+        .status-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .status-card-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .status-card-status {
+            font-size: 0.75rem;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-weight: 500;
+        }
+        .status-card-status.ok { background: rgba(61,214,140,0.15); color: var(--success); }
+        .status-card-status.warn { background: rgba(245,166,35,0.15); color: var(--warning); }
+        .status-card-status.err { background: rgba(239,83,80,0.15); color: var(--danger); }
+
+        .status-card-metric {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .status-card-desc {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        /* Module panels */
+        .module-panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 24px;
+            overflow: hidden;
+        }
+
+        .module-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .module-panel-title {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .module-panel-body {
+            padding: 20px;
+        }
+
+        /* Table */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        .data-table th {
+            text-align: left;
+            padding: 10px 12px;
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .data-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .data-table tr:last-child td { border-bottom: none; }
+        .data-table tr:hover td { background: var(--surface-hover); }
+
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+        .badge.high { background: rgba(239,83,80,0.15); color: var(--danger); }
+        .badge.medium { background: rgba(245,166,35,0.15); color: var(--warning); }
+        .badge.low { background: rgba(61,214,140,0.15); color: var(--success); }
+        .badge.overdue { background: rgba(239,83,80,0.15); color: var(--danger); }
+        .badge.eob { background: rgba(79,143,247,0.15); color: var(--accent); }
+        .badge.bill { background: rgba(245,166,35,0.15); color: var(--warning); }
+
+        /* Buttons */
+        .btn {
+            padding: 8px 16px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn:hover { background: var(--surface-hover); border-color: var(--accent); }
+        .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .btn.primary:hover { background: var(--accent-hover); }
+
+        /* View tabs */
+        .view-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0;
+        }
+
+        .view-tab {
+            padding: 10px 16px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+            transition: all 0.15s;
+        }
+        .view-tab:hover { color: var(--text); }
+        .view-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+        /* Page sections */
+        .view-section { display: none; }
+        .view-section.active { display: block; }
+
+        /* Progress bar */
+        .progress-bar {
+            height: 4px;
+            background: var(--border);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: width 0.3s;
+        }
+
+        /* Match visualization */
+        .match-pair {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 12px;
+            background: var(--bg);
+            border-radius: var(--radius);
+            margin-bottom: 8px;
+        }
+
+        .match-doc {
+            flex: 1;
+            padding: 8px 12px;
+            background: var(--surface);
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            font-size: 0.8rem;
+        }
+
+        .match-arrow {
+            color: var(--accent);
+            font-size: 1.2rem;
+        }
+
+        .match-score {
+            text-align: center;
+            min-width: 60px;
+        }
+
+        .match-score-value {
+            font-size: 1.4rem;
+            font-weight: 700;
+        }
+
+        .match-score-label {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        /* Annotation */
+        .mockup-note {
+            background: rgba(79,143,247,0.08);
+            border: 1px dashed var(--accent);
+            border-radius: var(--radius);
+            padding: 12px 16px;
+            font-size: 0.8rem;
+            color: var(--accent);
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar Navigation -->
+    <nav class="sidebar">
+        <div class="sidebar-logo">Doc Intelligence</div>
+        <div class="sidebar-subtitle">Hub v0.1.0</div>
+
+        <div class="nav-section">Overview</div>
+        <div class="nav-item active" onclick="showView('overview')">
+            <span class="icon">📊</span> Dashboard
+        </div>
+
+        <div class="nav-section">Modules</div>
+        <div class="nav-item" onclick="showView('statements')">
+            <span class="icon">📋</span> Statements
+            <span class="badge">4</span>
+        </div>
+        <div class="nav-item" onclick="showView('eob')">
+            <span class="icon">🏥</span> EOB Matching
+        </div>
+        <div class="nav-item" onclick="showView('queue')">
+            <span class="icon">⚡</span> Action Queue
+        </div>
+
+        <div class="nav-section">System</div>
+        <div class="nav-item" onclick="showView('settings')">
+            <span class="icon">⚙️</span> Settings
+        </div>
+
+        <div class="sidebar-footer">
+            <span class="status-dot ok"></span> Paperless connected<br>
+            <span style="margin-left: 14px; display:inline-block; margin-top: 4px;">8,520 documents</span>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main">
+
+        <!-- ============ OVERVIEW VIEW ============ -->
+        <div class="view-section active" id="view-overview">
+            <div class="page-header">
+                <h1>Dashboard</h1>
+                <p>Document Intelligence Hub — system overview and alerts</p>
+            </div>
+
+            <div class="mockup-note">
+                📐 MOCKUP — This is a proposed dashboard layout. Click sidebar items to see module detail views.
+            </div>
+
+            <!-- Status Cards -->
+            <div class="status-grid">
+                <div class="status-card">
+                    <div class="status-card-header">
+                        <span class="status-card-title">Paperless-ngx</span>
+                        <span class="status-card-status ok">Connected</span>
+                    </div>
+                    <div class="status-card-metric">8,520</div>
+                    <div class="status-card-desc">Total documents • 25 correspondents • 30 tags</div>
+                </div>
+
+                <div class="status-card">
+                    <div class="status-card-header">
+                        <span class="status-card-title">Statements</span>
+                        <span class="status-card-status warn">4 Overdue</span>
+                    </div>
+                    <div class="status-card-metric">26</div>
+                    <div class="status-card-desc">Tracked providers • last scan 2 hrs ago</div>
+                </div>
+
+                <div class="status-card">
+                    <div class="status-card-header">
+                        <span class="status-card-title">EOB Matching</span>
+                        <span class="status-card-status ok">Ready</span>
+                    </div>
+                    <div class="status-card-metric">7 / 12</div>
+                    <div class="status-card-desc">EOBs / Bills classified in last run</div>
+                </div>
+
+                <div class="status-card">
+                    <div class="status-card-header">
+                        <span class="status-card-title">Action Queue</span>
+                        <span class="status-card-status warn">Ollama offline</span>
+                    </div>
+                    <div class="status-card-metric">Idle</div>
+                    <div class="status-card-desc">Dry-run mode • needs Ollama for enrichment</div>
+                </div>
+            </div>
+
+            <!-- Alerts Panel -->
+            <div class="module-panel">
+                <div class="module-panel-header">
+                    <span class="module-panel-title">⚠️ Action Required</span>
+                    <button class="btn">Dismiss All</button>
+                </div>
+                <div class="module-panel-body">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Module</th>
+                                <th>Alert</th>
+                                <th>Priority</th>
+                                <th>Since</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span class="badge overdue">Statements</span></td>
+                                <td>Water Sewer Bill Natick — 163 days overdue</td>
+                                <td><span class="badge high">HIGH</span></td>
+                                <td>Jan 8, 2026</td>
+                            </tr>
+                            <tr>
+                                <td><span class="badge overdue">Statements</span></td>
+                                <td>Centerville Electric Bill — 32 days overdue</td>
+                                <td><span class="badge high">HIGH</span></td>
+                                <td>May 19, 2026</td>
+                            </tr>
+                            <tr>
+                                <td><span class="badge overdue">Statements</span></td>
+                                <td>Water Bill Weaver — 19 days overdue</td>
+                                <td><span class="badge high">HIGH</span></td>
+                                <td>Jun 1, 2026</td>
+                            </tr>
+                            <tr>
+                                <td><span class="badge overdue">Statements</span></td>
+                                <td>USB Credit Card Statement — 1 day late</td>
+                                <td><span class="badge medium">MED</span></td>
+                                <td>Jun 19, 2026</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Recent Activity -->
+            <div class="module-panel">
+                <div class="module-panel-header">
+                    <span class="module-panel-title">📊 Recent Activity</span>
+                </div>
+                <div class="module-panel-body">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Module</th>
+                                <th>Action</th>
+                                <th>Result</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style="color:var(--text-muted)">5:00 PM</td>
+                                <td>Statements</td>
+                                <td>Discovery scan</td>
+                                <td><span class="badge low">26 providers</span></td>
+                            </tr>
+                            <tr>
+                                <td style="color:var(--text-muted)">4:45 PM</td>
+                                <td>EOB Matching</td>
+                                <td>Classification (50 docs)</td>
+                                <td><span class="badge low">7 EOBs, 12 Bills</span></td>
+                            </tr>
+                            <tr>
+                                <td style="color:var(--text-muted)">4:40 PM</td>
+                                <td>Action Queue</td>
+                                <td>Dry-run (5 docs)</td>
+                                <td><span class="badge low">Complete</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ STATEMENTS VIEW ============ -->
+        <div class="view-section" id="view-statements">
+            <div class="page-header">
+                <h1>Statement Tracker</h1>
+                <p>Detect recurring statements and identify missing documents</p>
+            </div>
+
+            <div class="view-tabs">
+                <div class="view-tab active">Providers</div>
+                <div class="view-tab">Missing / Overdue</div>
+                <div class="view-tab">Timeline</div>
+                <div class="view-tab">Settings</div>
+            </div>
+
+            <div style="display:flex; gap:12px; margin-bottom: 20px;">
+                <button class="btn primary">Run Discovery</button>
+                <button class="btn">Check Missing (as of today)</button>
+            </div>
+
+            <div class="module-panel">
+                <div class="module-panel-header">
+                    <span class="module-panel-title">Detected Providers (26)</span>
+                </div>
+                <div class="module-panel-body">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Provider</th>
+                                <th>Frequency</th>
+                                <th>Documents</th>
+                                <th>Consistency</th>
+                                <th>Last Received</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>Bank of America</strong><br><span style="color:var(--text-muted);font-size:0.75rem">Checking Account Statement</span></td>
+                                <td>Monthly</td>
+                                <td>63</td>
+                                <td>
+                                    <div class="progress-bar" style="width:80px"><div class="progress-bar-fill" style="width:100%"></div></div>
+                                </td>
+                                <td>Jun 15, 2026</td>
+                                <td><span class="badge low">On track</span></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Credit Card Statement</strong><br><span style="color:var(--text-muted);font-size:0.75rem">Monthly statement</span></td>
+                                <td>Monthly</td>
+                                <td>28</td>
+                                <td>
+                                    <div class="progress-bar" style="width:80px"><div class="progress-bar-fill" style="width:100%"></div></div>
+                                </td>
+                                <td>Jun 12, 2026</td>
+                                <td><span class="badge low">On track</span></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Gas Statement Natick</strong><br><span style="color:var(--text-muted);font-size:0.75rem">Utility bill</span></td>
+                                <td>Monthly</td>
+                                <td>13</td>
+                                <td>
+                                    <div class="progress-bar" style="width:80px"><div class="progress-bar-fill" style="width:85%"></div></div>
+                                </td>
+                                <td>Jun 3, 2026</td>
+                                <td><span class="badge low">On track</span></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Water Bill Weaver</strong><br><span style="color:var(--text-muted);font-size:0.75rem">Quarterly utility</span></td>
+                                <td>Quarterly</td>
+                                <td>4</td>
+                                <td>
+                                    <div class="progress-bar" style="width:80px"><div class="progress-bar-fill" style="width:70%"></div></div>
+                                </td>
+                                <td>Mar 2, 2026</td>
+                                <td><span class="badge overdue">19d overdue</span></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Centerville Electric</strong><br><span style="color:var(--text-muted);font-size:0.75rem">Electric bill</span></td>
+                                <td>Quarterly</td>
+                                <td>3</td>
+                                <td>
+                                    <div class="progress-bar" style="width:80px"><div class="progress-bar-fill" style="width:60%"></div></div>
+                                </td>
+                                <td>Feb 17, 2026</td>
+                                <td><span class="badge overdue">32d overdue</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ EOB VIEW ============ -->
+        <div class="view-section" id="view-eob">
+            <div class="page-header">
+                <h1>EOB Matching</h1>
+                <p>Classify medical documents and match Explanations of Benefits to bills</p>
+            </div>
+
+            <div class="view-tabs">
+                <div class="view-tab active">Pipeline</div>
+                <div class="view-tab">Classified Documents</div>
+                <div class="view-tab">Matches</div>
+                <div class="view-tab">Unmatched</div>
+            </div>
+
+            <div style="display:flex; gap:12px; margin-bottom: 20px;">
+                <button class="btn primary">Run Pipeline</button>
+                <button class="btn">Classify Only</button>
+                <span style="color:var(--text-muted); font-size:0.8rem; align-self:center; margin-left:8px;">
+                    🔒 Read-only mode — no writes to Paperless
+                </span>
+            </div>
+
+            <!-- Classification Summary -->
+            <div class="status-grid">
+                <div class="status-card">
+                    <div class="status-card-header">
+                        <span class="status-card-title">EOBs Found</span>
+                        <span class="status-card-status eob" style="background:rgba(79,143,247,0.15);color:var(--accent)">Medical</span>
+                    </div>
+                    <div class="status-card-metric">7</div>
+                    <div class="status-card-desc">Insurance explanations of benefits</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-card-header">
+                        <span class="status-card-title">Bills Found</span>
+                        <span class="status-card-status warn">Medical</span>
+                    </div>
+                    <div class="status-card-metric">12</div>
+                    <div class="status-card-desc">Medical bills and invoices</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-card-header">
+                        <span class="status-card-title">Matches</span>
+                        <span class="status-card-status ok">Paired</span>
+                    </div>
+                    <div class="status-card-metric">3</div>
+                    <div class="status-card-desc">EOB ↔ Bill pairs identified</div>
+                </div>
+            </div>
+
+            <!-- Match Results -->
+            <div class="module-panel">
+                <div class="module-panel-header">
+                    <span class="module-panel-title">Matched Pairs</span>
+                </div>
+                <div class="module-panel-body">
+                    <div class="match-pair">
+                        <div class="match-doc">
+                            <span class="badge eob">EOB</span>
+                            <div style="margin-top:6px"><strong>UHC EOB — Quinn Sockalosky</strong></div>
+                            <div style="color:var(--text-muted);font-size:0.75rem">Date of Service: 04/15/2026 • Patient Resp: $125.00</div>
+                        </div>
+                        <div class="match-score">
+                            <div class="match-score-value" style="color:var(--success)">92</div>
+                            <div class="match-score-label">Score</div>
+                        </div>
+                        <div class="match-doc">
+                            <span class="badge bill">BILL</span>
+                            <div style="margin-top:6px"><strong>Paige Melsheid, MD — Invoice</strong></div>
+                            <div style="color:var(--text-muted);font-size:0.75rem">Balance: $125.00 • Patient: Quinn T Sockalosky</div>
+                        </div>
+                    </div>
+
+                    <div class="match-pair">
+                        <div class="match-doc">
+                            <span class="badge eob">EOB</span>
+                            <div style="margin-top:6px"><strong>Aetna EOB — Tracy Sockalosky</strong></div>
+                            <div style="color:var(--text-muted);font-size:0.75rem">Date of Service: 03/22/2026 • Patient Resp: $45.00</div>
+                        </div>
+                        <div class="match-score">
+                            <div class="match-score-value" style="color:var(--success)">87</div>
+                            <div class="match-score-label">Score</div>
+                        </div>
+                        <div class="match-doc">
+                            <span class="badge bill">BILL</span>
+                            <div style="color:var(--text-muted);font-size:0.75rem">Physical Therapy — Balance: $45.00</div>
+                            <div style="margin-top:6px"><strong>Jerg Physical Therapy</strong></div>
+                        </div>
+                    </div>
+
+                    <div class="match-pair">
+                        <div class="match-doc">
+                            <span class="badge eob">EOB</span>
+                            <div style="margin-top:6px"><strong>UHC EOB — Laney MRI</strong></div>
+                            <div style="color:var(--text-muted);font-size:0.75rem">Date of Service: 02/10/2026 • Patient Resp: $870.37</div>
+                        </div>
+                        <div class="match-score">
+                            <div class="match-score-value" style="color:var(--warning)">74</div>
+                            <div class="match-score-label">Score</div>
+                        </div>
+                        <div class="match-doc">
+                            <span class="badge bill">BILL</span>
+                            <div style="margin-top:6px"><strong>Medical Imaging — Statement</strong></div>
+                            <div style="color:var(--text-muted);font-size:0.75rem">Balance: $870.37 • Account ending 4821</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ ACTION QUEUE VIEW ============ -->
+        <div class="view-section" id="view-queue">
+            <div class="page-header">
+                <h1>Action Queue</h1>
+                <p>AI-powered document triage and enrichment pipeline</p>
+            </div>
+
+            <div class="view-tabs">
+                <div class="view-tab active">Queue</div>
+                <div class="view-tab">Processed</div>
+                <div class="view-tab">Rules</div>
+                <div class="view-tab">Settings</div>
+            </div>
+
+            <div style="display:flex; gap:12px; margin-bottom: 20px;">
+                <button class="btn primary">Run Pipeline (Dry-Run)</button>
+                <button class="btn">Check Connectivity</button>
+                <span style="color:var(--text-muted); font-size:0.8rem; align-self:center; margin-left:8px;">
+                    🔒 WRITE_TO_PAPERLESS=false
+                </span>
+            </div>
+
+            <div class="status-grid">
+                <div class="status-card">
+                    <div class="status-card-header">
+                        <span class="status-card-title">Inbox</span>
+                        <span class="status-card-status warn">Pending</span>
+                    </div>
+                    <div class="status-card-metric">23</div>
+                    <div class="status-card-desc">Documents awaiting triage</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-card-header">
+                        <span class="status-card-title">Ollama</span>
+                        <span class="status-card-status err">Offline</span>
+                    </div>
+                    <div class="status-card-metric">—</div>
+                    <div class="status-card-desc">phi3:mini not available</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-card-header">
+                        <span class="status-card-title">Processed Today</span>
+                        <span class="status-card-status ok">OK</span>
+                    </div>
+                    <div class="status-card-metric">5</div>
+                    <div class="status-card-desc">Documents enriched this session</div>
+                </div>
+            </div>
+
+            <div class="module-panel">
+                <div class="module-panel-header">
+                    <span class="module-panel-title">Pending Documents</span>
+                </div>
+                <div class="module-panel-body">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Title</th>
+                                <th>Tags</th>
+                                <th>Added</th>
+                                <th>Suggested Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>9632</td>
+                                <td>To Our Crockett Doodle Forever Homes</td>
+                                <td>Inbox, Todo</td>
+                                <td>Jun 20</td>
+                                <td><span style="color:var(--text-muted)">Awaiting AI analysis</span></td>
+                            </tr>
+                            <tr>
+                                <td>9615</td>
+                                <td>Spay Neuter Contract - Callie</td>
+                                <td>Inbox</td>
+                                <td>Jun 20</td>
+                                <td><span style="color:var(--text-muted)">Awaiting AI analysis</span></td>
+                            </tr>
+                            <tr>
+                                <td>9612</td>
+                                <td>E-Collar Technologies, Inc.</td>
+                                <td>Inbox</td>
+                                <td>Jun 20</td>
+                                <td><span style="color:var(--text-muted)">Awaiting AI analysis</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ SETTINGS VIEW ============ -->
+        <div class="view-section" id="view-settings">
+            <div class="page-header">
+                <h1>Settings</h1>
+                <p>Service configuration and connectivity</p>
+            </div>
+
+            <div class="module-panel">
+                <div class="module-panel-header">
+                    <span class="module-panel-title">Connections</span>
+                </div>
+                <div class="module-panel-body">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Service</th>
+                                <th>URL</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Paperless-ngx</td>
+                                <td style="font-family:monospace;font-size:0.8rem">http://service-006.example.invalid</td>
+                                <td><span class="status-dot ok"></span>Connected (8,520 docs)</td>
+                            </tr>
+                            <tr>
+                                <td>Ollama</td>
+                                <td style="font-family:monospace;font-size:0.8rem">http://localhost:11434</td>
+                                <td><span class="status-dot err"></span>Offline</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="module-panel">
+                <div class="module-panel-header">
+                    <span class="module-panel-title">Safety Controls</span>
+                </div>
+                <div class="module-panel-body" style="font-size:0.85rem;">
+                    <p style="margin-bottom:12px;"><strong>WRITE_TO_PAPERLESS:</strong> <span style="color:var(--danger);font-weight:600">false</span> — All operations are read-only</p>
+                    <p style="margin-bottom:12px;"><strong>Statement Tracker Config:</strong> <span style="font-family:monospace;font-size:0.8rem">config/config.docker.yaml</span></p>
+                    <p><strong>API Documentation:</strong> <a href="/docs" style="color:var(--accent)">/docs</a> (OpenAPI / Swagger UI)</p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        function showView(viewId) {
+            // Hide all views
+            document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+            // Show selected
+            document.getElementById('view-' + viewId).classList.add('active');
+            // Update nav
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            event.currentTarget.classList.add('active');
+        }
+    </script>
+</body>
+</html>
