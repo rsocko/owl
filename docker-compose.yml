@@ -26,7 +26,6 @@ services:
     ports:
       - "${STATEMENT_TRACKER_PORT:-8071}:8001"
     volumes:
-      - ./config:/app/config:ro
       - hub-data:/app/data
     networks:
       - doc-intelligence
