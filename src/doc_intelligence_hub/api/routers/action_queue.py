@@ -19,6 +19,12 @@ router = APIRouter(prefix="/api/queue", tags=["action-queue"])
 class QueueRunRequest(BaseModel):
     limit: int | None = Field(default=None, ge=1, le=500)
     dry_run: bool = True
+    force: bool = False
+
+
+class ActionUpdateRequest(BaseModel):
+    status: str = Field(..., pattern=r"^(completed|dismissed|pending)$")
+    dry_run: bool = True
 
 
 def _sync_action_queue_settings(request: Request) -> None:
@@ -88,7 +94,7 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
         "read_only": not action_queue_settings.write_to_paperless,
     }
 
-    result = await run_pipeline(limit=body.limit, dry_run=body.dry_run)
+    result = await run_pipeline(limit=body.limit, dry_run=body.dry_run, force=body.force)
     finished_at = datetime.utcnow().isoformat()
     status = {
         "status": "ok",
@@ -113,3 +119,76 @@ async def queue_status(request: Request) -> dict[str, Any]:
         "read_only": not action_queue_settings.write_to_paperless,
         "database": _database_counts(),
     }
+
+
+@router.get("/actions")
+async def list_actions(
+    request: Request,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """List action items from the database with optional status filter."""
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        query = db.query(Action).order_by(Action.created_at.desc())
+        if status:
+            query = query.filter_by(status=status)
+        total = query.count()
+        actions = query.offset(offset).limit(limit).all()
+        return {
+            "actions": [
+                {
+                    "id": a.id,
+                    "document_id": a.document_id,
+                    "document_title": a.document_title,
+                    "action_type": a.action_type,
+                    "title": a.title,
+                    "summary": a.summary,
+                    "due_date": a.due_date.isoformat() if a.due_date else None,
+                    "amount": a.amount,
+                    "urgency": a.urgency,
+                    "confidence": a.confidence,
+                    "status": a.status,
+                    "correspondent": a.correspondent,
+                    "ai_reasoning": a.ai_reasoning,
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                    "completed_at": a.completed_at.isoformat() if a.completed_at else None,
+                }
+                for a in actions
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    finally:
+        db.close()
+
+
+@router.patch("/actions/{action_id}")
+async def update_action(request: Request, action_id: int, body: ActionUpdateRequest) -> dict[str, Any]:
+    """Update an action's status (complete, dismiss, or re-open)."""
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        action = db.query(Action).filter_by(id=action_id).first()
+        if not action:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        action.status = body.status
+        if body.status == "completed":
+            action.completed_at = datetime.utcnow()
+        elif body.status == "pending":
+            action.completed_at = None
+        db.commit()
+        return {
+            "id": action.id,
+            "status": action.status,
+            "document_title": action.document_title,
+            "updated": True,
+        }
+    finally:
+        db.close()

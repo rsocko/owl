@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Intelligence Hub</title>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --surface-hover: #222633;
+            --border: #2a2e3b;
+            --text: #e4e7ef;
+            --text-muted: #8b92a8;
+            --accent: #4f8ff7;
+            --accent-hover: #6ba0f9;
+            --success: #3dd68c;
+            --warning: #f5a623;
+            --danger: #ef5350;
+            --radius: 10px;
+            --sidebar-width: 220px;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            padding: 20px 12px;
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            top: 0; left: 0; bottom: 0;
+            z-index: 100;
+        }
+        .sidebar-logo { font-size: 1rem; font-weight: 700; color: var(--accent); padding: 0 8px; margin-bottom: 4px; }
+        .sidebar-subtitle { font-size: 0.7rem; color: var(--text-muted); padding: 0 8px; margin-bottom: 20px; }
+        .nav-section { font-size: 0.6rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); padding: 0 8px; margin: 14px 0 6px; }
+        .nav-item {
+            display: flex; align-items: center; gap: 8px;
+            padding: 9px 10px; border-radius: 8px; cursor: pointer;
+            font-size: 0.82rem; color: var(--text-muted); transition: all 0.15s;
+        }
+        .nav-item:hover { background: var(--surface-hover); color: var(--text); }
+        .nav-item.active { background: var(--accent); color: #fff; }
+        .nav-item .icon { font-size: 1rem; width: 18px; text-align: center; }
+        .nav-badge { margin-left: auto; background: var(--danger); color: #fff; font-size: 0.65rem; padding: 1px 5px; border-radius: 8px; font-weight: 600; }
+        .sidebar-footer { margin-top: auto; padding: 10px 8px; border-top: 1px solid var(--border); font-size: 0.7rem; color: var(--text-muted); }
+        .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
+        .status-dot.ok { background: var(--success); }
+        .status-dot.warn { background: var(--warning); }
+        .status-dot.err { background: var(--danger); }
+
+        /* Main */
+        .main { margin-left: var(--sidebar-width); flex: 1; padding: 28px 32px; }
+        .page-header { margin-bottom: 24px; }
+        .page-header h1 { font-size: 1.4rem; font-weight: 600; margin-bottom: 2px; }
+        .page-header p { color: var(--text-muted); font-size: 0.85rem; }
+
+        /* Cards */
+        .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-bottom: 24px; }
+        .card {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 16px; transition: border-color 0.15s;
+        }
+        .card:hover { border-color: var(--accent); }
+        .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+        .card-title { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+        .card-status { font-size: 0.68rem; padding: 2px 7px; border-radius: 10px; font-weight: 500; }
+        .card-status.ok { background: rgba(61,214,140,0.15); color: var(--success); }
+        .card-status.warn { background: rgba(245,166,35,0.15); color: var(--warning); }
+        .card-status.err { background: rgba(239,83,80,0.15); color: var(--danger); }
+        .card-metric { font-size: 1.8rem; font-weight: 700; margin-bottom: 2px; }
+        .card-desc { font-size: 0.75rem; color: var(--text-muted); }
+
+        /* Panel */
+        .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 20px; overflow: hidden; }
+        .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+        .panel-title { font-size: 0.95rem; font-weight: 600; }
+        .panel-body { padding: 16px 18px; }
+
+        /* Table */
+        table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        th { text-align: left; padding: 8px 10px; color: var(--text-muted); font-weight: 500; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--border); }
+        td { padding: 9px 10px; border-bottom: 1px solid var(--border); }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: var(--surface-hover); }
+
+        /* Badges */
+        .badge { display: inline-block; padding: 2px 7px; border-radius: 8px; font-size: 0.65rem; font-weight: 600; }
+        .badge.critical { background: rgba(239,83,80,0.2); color: var(--danger); }
+        .badge.high { background: rgba(239,83,80,0.15); color: var(--danger); }
+        .badge.medium { background: rgba(245,166,35,0.15); color: var(--warning); }
+        .badge.low { background: rgba(61,214,140,0.15); color: var(--success); }
+        .badge.pending { background: rgba(79,143,247,0.15); color: var(--accent); }
+        .badge.completed { background: rgba(61,214,140,0.15); color: var(--success); }
+        .badge.dismissed { background: rgba(139,146,168,0.15); color: var(--text-muted); }
+
+        /* Buttons */
+        .btn { padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 0.78rem; cursor: pointer; transition: all 0.15s; }
+        .btn:hover { background: var(--surface-hover); border-color: var(--accent); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .btn.primary:hover { background: var(--accent-hover); }
+        .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+        .btn-group { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; align-items: center; }
+        .btn-hint { font-size: 0.75rem; color: var(--text-muted); }
+
+        /* Views */
+        .view { display: none; }
+        .view.active { display: block; }
+
+        /* Action items */
+        .action-item {
+            background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+            padding: 14px 16px; margin-bottom: 10px; transition: border-color 0.15s;
+        }
+        .action-item:hover { border-color: var(--accent); }
+        .action-item-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+        .action-item-type { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 6px; border-radius: 4px; }
+        .action-item-type.PAY { background: rgba(239,83,80,0.15); color: var(--danger); }
+        .action-item-type.RESPOND { background: rgba(245,166,35,0.15); color: var(--warning); }
+        .action-item-type.FILE { background: rgba(79,143,247,0.15); color: var(--accent); }
+        .action-item-type.REVIEW { background: rgba(61,214,140,0.15); color: var(--success); }
+        .action-item-title { font-weight: 600; font-size: 0.9rem; flex: 1; }
+        .action-item-body { display: flex; gap: 20px; font-size: 0.8rem; color: var(--text-muted); }
+        .action-item-meta { display: flex; gap: 16px; margin-top: 8px; font-size: 0.75rem; color: var(--text-muted); }
+        .action-item-actions { display: flex; gap: 6px; margin-top: 10px; }
+
+        /* Loading */
+        .loading { text-align: center; padding: 40px; color: var(--text-muted); }
+        .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Empty state */
+        .empty-state { text-align: center; padding: 40px; color: var(--text-muted); }
+        .empty-state .icon { font-size: 2.5rem; margin-bottom: 10px; }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 2px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+        .tab { padding: 8px 14px; font-size: 0.82rem; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all 0.15s; }
+        .tab:hover { color: var(--text); }
+        .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    </style>
+</head>
+<body>
+    <nav class="sidebar">
+        <div class="sidebar-logo">Doc Intelligence</div>
+        <div class="sidebar-subtitle">Hub v0.1.0</div>
+
+        <div class="nav-section">Overview</div>
+        <div class="nav-item active" onclick="showView('overview')">
+            <span class="icon">📊</span> Dashboard
+        </div>
+
+        <div class="nav-section">Modules</div>
+        <div class="nav-item" onclick="showView('queue')">
+            <span class="icon">⚡</span> Action Queue
+            <span class="nav-badge" id="nav-queue-badge" style="display:none">0</span>
+        </div>
+        <div class="nav-item" onclick="showView('statements')">
+            <span class="icon">📋</span> Statements
+            <span class="nav-badge" id="nav-stmt-badge" style="display:none">0</span>
+        </div>
+        <div class="nav-item" onclick="showView('eob')">
+            <span class="icon">🏥</span> EOB Matching
+        </div>
+
+        <div class="nav-section">System</div>
+        <div class="nav-item" onclick="showView('settings')">
+            <span class="icon">⚙️</span> Settings
+        </div>
+
+        <div class="sidebar-footer" id="sidebar-footer">
+            <span class="status-dot ok"></span> Loading...
+        </div>
+    </nav>
+
+    <div class="main">
+        <!-- OVERVIEW -->
+        <div class="view active" id="view-overview">
+            <div class="page-header">
+                <h1>Dashboard</h1>
+                <p>System overview and alerts</p>
+            </div>
+            <div class="card-grid" id="overview-cards"><div class="loading"><span class="spinner"></span>Loading status...</div></div>
+            <div class="panel">
+                <div class="panel-header"><span class="panel-title">⚠️ Alerts & Actions</span><button class="btn" onclick="loadOverview()">Refresh</button></div>
+                <div class="panel-body" id="overview-alerts"><div class="loading"><span class="spinner"></span>Loading...</div></div>
+            </div>
+        </div>
+
+        <!-- ACTION QUEUE -->
+        <div class="view" id="view-queue">
+            <div class="page-header">
+                <h1>Action Queue</h1>
+                <p>AI-powered document triage — review, pay, respond, file</p>
+            </div>
+            <div class="btn-group">
+                <button class="btn primary" id="btn-queue-run" onclick="runQueue(false)">▶ Run Pipeline (Dry-Run)</button>
+                <button class="btn" id="btn-queue-check" onclick="checkQueue()">Check Connectivity</button>
+                <label style="font-size:0.78rem;color:var(--text-muted);display:flex;align-items:center;gap:5px;">Limit: <input id="queue-limit" type="number" value="50" min="1" max="500" style="width:60px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:0.78rem;text-align:center;"></label>
+                <label style="font-size:0.78rem;color:var(--text-muted);display:flex;align-items:center;gap:5px;cursor:pointer;"><input id="queue-force" type="checkbox" style="margin-right:4px;">Force Re-scan</label>
+                <span class="btn-hint" id="queue-safety">🔒 Read-only mode</span>
+            </div>
+            <div class="card-grid" id="queue-cards"><div class="loading"><span class="spinner"></span>Loading...</div></div>
+            <div class="tabs">
+                <div class="tab active" onclick="showQueueTab('pending')">Pending</div>
+                <div class="tab" onclick="showQueueTab('completed')">Completed</div>
+                <div class="tab" onclick="showQueueTab('dismissed')">Dismissed</div>
+                <div class="tab" onclick="showQueueTab('run-log')">Last Run</div>
+            </div>
+            <div id="queue-tab-content"><div class="loading"><span class="spinner"></span>Loading actions...</div></div>
+        </div>
+
+        <!-- STATEMENTS -->
+        <div class="view" id="view-statements">
+            <div class="page-header">
+                <h1>Statement Tracker</h1>
+                <p>Detect recurring statements and identify missing documents</p>
+            </div>
+            <div class="btn-group">
+                <button class="btn primary" onclick="runDiscovery()">Run Discovery</button>
+                <button class="btn" onclick="runRecommendations()">Check Missing</button>
+            </div>
+            <div id="statements-content"><div class="loading"><span class="spinner"></span>Loading...</div></div>
+        </div>
+
+        <!-- EOB MATCHING -->
+        <div class="view" id="view-eob">
+            <div class="page-header">
+                <h1>EOB Matching</h1>
+                <p>Classify medical documents and match EOBs to bills</p>
+            </div>
+            <div class="btn-group">
+                <button class="btn primary" onclick="runEobPipeline()">Run Pipeline</button>
+                <button class="btn" onclick="classifyOnly()">Classify Only</button>
+                <span class="btn-hint">🔒 Read-only — no writes to Paperless</span>
+            </div>
+            <div class="card-grid" id="eob-cards"></div>
+            <div id="eob-content"><div class="empty-state"><div class="icon">🏥</div><p>Run the pipeline to classify and match documents.</p></div></div>
+        </div>
+
+        <!-- SETTINGS -->
+        <div class="view" id="view-settings">
+            <div class="page-header">
+                <h1>Settings</h1>
+                <p>Service configuration and connectivity</p>
+            </div>
+            <div id="settings-content"><div class="loading"><span class="spinner"></span>Loading...</div></div>
+        </div>
+    </div>
+
+    <script>
+    const API = '';
+    let paperlessBaseUrl = '';  // Resolved from /api/settings on boot
+
+    // Navigation
+    function showView(id) {
+        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+        document.getElementById('view-' + id).classList.add('active');
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        event.currentTarget.classList.add('active');
+        if (id === 'queue') loadQueue();
+        if (id === 'statements') loadStatements();
+        if (id === 'settings') loadSettings();
+    }
+
+    // ===== OVERVIEW =====
+    async function loadOverview() {
+        try {
+            const res = await fetch(API + '/api/status');
+            const data = await res.json();
+            renderOverviewCards(data);
+            renderOverviewAlerts(data);
+            updateSidebar(data);
+        } catch(e) {
+            document.getElementById('overview-cards').innerHTML = `<div class="card"><div class="card-desc">Error: ${e.message}</div></div>`;
+        }
+    }
+
+    function renderOverviewCards(data) {
+        const m = data.modules;
+        const pDocs = m.paperless?.documents || 0;
+        const pStatus = m.paperless?.status || 'error';
+        const qStatus = m.action_queue?.status || 'error';
+        const sStatus = m.statements?.status || 'error';
+        const eStatus = m.eob_matching?.status || 'ok';
+
+        document.getElementById('overview-cards').innerHTML = `
+            <div class="card">
+                <div class="card-header"><span class="card-title">Paperless-ngx</span><span class="card-status ${pStatus}">${pStatus}</span></div>
+                <div class="card-metric">${pDocs.toLocaleString()}</div>
+                <div class="card-desc">${m.paperless?.correspondents || 0} correspondents • ${m.paperless?.tags || 0} tags</div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="card-title">Action Queue</span><span class="card-status ${qStatus}">${qStatus}</span></div>
+                <div class="card-metric">${m.action_queue?.last_run?.status === 'ok' ? '✓' : 'Idle'}</div>
+                <div class="card-desc">Ollama: ${m.action_queue?.ollama_model || 'n/a'} • Write: ${m.action_queue?.write_to_paperless ? 'ON' : 'OFF'}</div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="card-title">Statements</span><span class="card-status ${sStatus}">${sStatus}</span></div>
+                <div class="card-metric">—</div>
+                <div class="card-desc">Source: ${m.statements?.source_mode || 'unknown'}</div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="card-title">EOB Matching</span><span class="card-status ${eStatus}">${eStatus}</span></div>
+                <div class="card-metric">${m.eob_matching?.last_run_available ? 'Results' : 'Ready'}</div>
+                <div class="card-desc">Read-only classification & matching</div>
+            </div>
+        `;
+    }
+
+    function renderOverviewAlerts(data) {
+        const el = document.getElementById('overview-alerts');
+        el.innerHTML = `<p style="color:var(--text-muted); font-size:0.82rem;">Run Statement Tracker or Action Queue to see alerts here.</p>`;
+    }
+
+    function updateSidebar(data) {
+        const m = data.modules;
+        const pStatus = m.paperless?.status || 'error';
+        const pDocs = m.paperless?.documents || 0;
+        document.getElementById('sidebar-footer').innerHTML = `
+            <span class="status-dot ${pStatus}"></span> Paperless ${pStatus}<br>
+            <span style="margin-left:12px;display:inline-block;margin-top:3px;">${pDocs.toLocaleString()} documents</span>
+        `;
+    }
+
+    // ===== ACTION QUEUE =====
+    let queueData = { pending: [], completed: [], dismissed: [], lastRun: null };
+    let currentQueueTab = 'pending';
+
+    async function loadQueue() {
+        try {
+            const [statusRes, actionsRes] = await Promise.all([
+                fetch(API + '/api/queue/status'),
+                fetch(API + '/api/queue/actions?limit=100')
+            ]);
+            const statusData = await statusRes.json();
+            const actionsData = await actionsRes.json();
+            renderQueueCards(statusData);
+            queueData.lastRun = statusData.result || null;
+            // Populate from database
+            const allActions = actionsData.actions || [];
+            queueData.pending = allActions.filter(a => a.status === 'pending');
+            queueData.completed = allActions.filter(a => a.status === 'completed');
+            queueData.dismissed = allActions.filter(a => a.status === 'dismissed');
+            renderQueueTab();
+        } catch(e) {
+            document.getElementById('queue-cards').innerHTML = `<div class="card"><div class="card-desc">Error: ${e.message}</div></div>`;
+        }
+    }
+
+    function renderQueueCards(data) {
+        const db = data.database || {};
+        document.getElementById('queue-cards').innerHTML = `
+            <div class="card">
+                <div class="card-header"><span class="card-title">Pending Actions</span><span class="card-status ${db.pending > 0 ? 'warn' : 'ok'}">${db.pending || 0}</span></div>
+                <div class="card-metric">${db.pending || 0}</div>
+                <div class="card-desc">Awaiting review or completion</div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="card-title">Completed</span><span class="card-status ok">done</span></div>
+                <div class="card-metric">${db.completed || 0}</div>
+                <div class="card-desc">Actions resolved</div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="card-title">Pipeline Status</span><span class="card-status ${data.status === 'ok' ? 'ok' : data.status === 'running' ? 'warn' : 'ok'}">${data.status}</span></div>
+                <div class="card-metric">${data.status === 'running' ? '⏳' : data.status === 'ok' ? '✓' : '—'}</div>
+                <div class="card-desc">${data.dry_run !== undefined ? (data.dry_run ? 'Dry-run' : 'Live') : 'Not run yet'} • ${data.read_only ? 'Read-only' : 'Write enabled'}</div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="card-title">Total Processed</span><span class="card-status ok">all time</span></div>
+                <div class="card-metric">${db.total || 0}</div>
+                <div class="card-desc">${db.dismissed || 0} dismissed</div>
+            </div>
+        `;
+        // Update badge
+        const badge = document.getElementById('nav-queue-badge');
+        if (db.pending > 0) { badge.textContent = db.pending; badge.style.display = ''; }
+        else { badge.style.display = 'none'; }
+    }
+
+    function showQueueTab(tab) {
+        currentQueueTab = tab;
+        document.querySelectorAll('#view-queue .tab').forEach(t => t.classList.remove('active'));
+        event.currentTarget.classList.add('active');
+        renderQueueTab();
+    }
+
+    function renderQueueTab() {
+        const el = document.getElementById('queue-tab-content');
+        if (currentQueueTab === 'run-log') {
+            if (!queueData.lastRun) {
+                el.innerHTML = `<div class="empty-state"><div class="icon">⚡</div><p>No pipeline run yet. Click "Run Pipeline" above.</p></div>`;
+            } else {
+                const r = queueData.lastRun;
+                el.innerHTML = `<div class="panel"><div class="panel-body"><pre style="font-size:0.78rem;color:var(--text-muted);white-space:pre-wrap;max-height:400px;overflow:auto;">${JSON.stringify(r, null, 2)}</pre></div></div>`;
+            }
+            return;
+        }
+        // Show actions from database
+        const items = queueData[currentQueueTab] || [];
+        if (items.length === 0) {
+            el.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>No ${currentQueueTab} actions. Run the pipeline to analyze documents.</p></div>`;
+            return;
+        }
+        el.innerHTML = items.map(a => renderActionItem(a)).join('');
+    }
+
+    function renderActionItem(action) {
+        const urgencyClass = (action.urgency || 'low').toLowerCase();
+        const isActive = action.status === 'pending';
+        const paperlessUrl = document.querySelector('#cfg-ollama-url')?.value ? '' : '';
+        return `
+            <div class="action-item">
+                <div class="action-item-header">
+                    <span class="action-item-type ${action.action_type || 'FILE'}">${action.action_type || '?'}</span>
+                    <span class="action-item-title">${action.title || action.document_title || 'Untitled'}</span>
+                    <span class="badge ${urgencyClass}">${action.urgency || 'LOW'}</span>
+                    <span class="badge ${action.status}">${action.status}</span>
+                </div>
+                <div class="action-item-body">${action.summary || ''}</div>
+                <div class="action-item-meta">
+                    ${action.due_date ? `<span>📅 Due: ${action.due_date}</span>` : ''}
+                    ${action.amount ? `<span>💰 $${action.amount.toFixed(2)}</span>` : ''}
+                    ${action.correspondent ? `<span>👤 ${action.correspondent}</span>` : ''}
+                    <span>📄 ${action.document_title || 'Doc #' + action.document_id}</span>
+                    ${action.confidence ? `<span>🎯 ${action.confidence}%</span>` : ''}
+                </div>
+                <div class="action-item-actions">
+                    ${isActive ? `
+                        <button class="btn" onclick="completeAction(${action.id})">✓ Complete</button>
+                        <button class="btn" onclick="dismissAction(${action.id})">✕ Dismiss</button>
+                    ` : `
+                        <button class="btn" onclick="reopenAction(${action.id})">↩ Re-open</button>
+                    `}
+                    <button class="btn" onclick="previewDoc(${action.document_id})">👁 Preview</button>
+                    <a class="btn" href="${paperlessBaseUrl}/documents/${action.document_id}/details" target="_blank">📄 Open in Paperless</a>
+                </div>
+            </div>
+        `;
+    }
+
+    async function checkQueue() {
+        const btn = document.getElementById('btn-queue-check');
+        btn.disabled = true; btn.textContent = 'Checking...';
+        try {
+            const res = await fetch(API + '/api/queue/check');
+            const data = await res.json();
+            alert(`Paperless: ${data.paperless?.status || 'unknown'}\nOllama: ${data.ollama?.status || 'unknown'} (${data.ollama?.model || 'n/a'})\nRead-only: ${data.read_only}`);
+        } catch(e) { alert('Error: ' + e.message); }
+        btn.disabled = false; btn.textContent = 'Check Connectivity';
+    }
+
+    async function runQueue(live = false) {
+        const btn = document.getElementById('btn-queue-run');
+        btn.disabled = true; btn.textContent = '⏳ Running...';
+        try {
+            const res = await fetch(API + '/api/queue/run', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ limit: parseInt(document.getElementById('queue-limit').value) || 50, dry_run: !live, force: document.getElementById('queue-force').checked })
+            });
+            const data = await res.json();
+            queueData.lastRun = data;
+            renderQueueCards(data);
+            // Switch to run-log tab
+            currentQueueTab = 'run-log';
+            document.querySelectorAll('#view-queue .tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('#view-queue .tab')[3].classList.add('active');
+            renderQueueTab();
+        } catch(e) { alert('Pipeline error: ' + e.message); }
+        btn.disabled = false; btn.textContent = '▶ Run Pipeline (Dry-Run)';
+    }
+
+    async function completeAction(id) {
+        try {
+            const res = await fetch(API + `/api/queue/actions/${id}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ status: 'completed' })
+            });
+            if (!res.ok) throw new Error(await res.text());
+            loadQueue(); // Refresh
+        } catch(e) { alert('Error completing action: ' + e.message); }
+    }
+
+    async function dismissAction(id) {
+        if (!confirm('Dismiss this action? It can be re-opened later.')) return;
+        try {
+            const res = await fetch(API + `/api/queue/actions/${id}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ status: 'dismissed' })
+            });
+            if (!res.ok) throw new Error(await res.text());
+            loadQueue(); // Refresh
+        } catch(e) { alert('Error dismissing action: ' + e.message); }
+    }
+
+    async function reopenAction(id) {
+        try {
+            const res = await fetch(API + `/api/queue/actions/${id}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ status: 'pending' })
+            });
+            if (!res.ok) throw new Error(await res.text());
+            loadQueue(); // Refresh
+        } catch(e) { alert('Error re-opening action: ' + e.message); }
+    }
+
+    async function previewDoc(docId) {
+        // Show a modal-style preview panel
+        const el = document.getElementById('queue-tab-content');
+        el.innerHTML = `<div class="loading"><span class="spinner"></span>Loading document preview...</div>`;
+        try {
+            const res = await fetch(API + `/api/documents/${docId}/preview`);
+            const data = await res.json();
+            el.innerHTML = `
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-title">📄 ${data.title}</span>
+                        <div style="display:flex;gap:8px;">
+                            <a class="btn" href="${paperlessBaseUrl}/documents/${docId}/details" target="_blank">📄 Open in Paperless</a>
+                            <button class="btn" onclick="renderQueueTab()">✕ Close</button>
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;font-size:0.8rem;">
+                            <div><strong>ID:</strong> ${data.id}</div>
+                            <div><strong>Created:</strong> ${data.created ? data.created.substring(0, 10) : '?'}</div>
+                            <div><strong>Added:</strong> ${data.added ? data.added.substring(0, 10) : '?'}</div>
+                            <div><strong>Length:</strong> ${data.content_length.toLocaleString()} chars</div>
+                        </div>
+                        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;max-height:400px;overflow:auto;font-size:0.78rem;line-height:1.6;white-space:pre-wrap;color:var(--text-muted);">${escapeHtml(data.content)}${data.content_length > 3000 ? '\n\n[... truncated ...]' : ''}</div>
+                    </div>
+                </div>
+            `;
+        } catch(e) { el.innerHTML = `<div class="panel"><div class="panel-body">Error loading preview: ${e.message}</div></div>`; }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ===== STATEMENTS =====
+    async function loadStatements() {
+        document.getElementById('statements-content').innerHTML = `<div class="loading"><span class="spinner"></span>Loading statement tracker...</div>`;
+        // Redirect to the legacy statement tracker UI which is feature-rich
+        document.getElementById('statements-content').innerHTML = `
+            <div class="panel"><div class="panel-body">
+                <p style="margin-bottom:12px;">The Statement Tracker has a dedicated dashboard with SSE streaming, provider management, and document previews.</p>
+                <a href="/statements/" class="btn primary" target="_blank">Open Statement Tracker Dashboard →</a>
+            </div></div>
+        `;
+    }
+
+    async function runDiscovery() {
+        document.getElementById('statements-content').innerHTML = `<div class="loading"><span class="spinner"></span>Running discovery (scanning all documents)...</div>`;
+        try {
+            const res = await fetch(API + '/api/statements/discovery/run', { method: 'POST' });
+            const data = await res.json();
+            const providers = data.providers || [];
+            document.getElementById('statements-content').innerHTML = `
+                <div class="panel"><div class="panel-header"><span class="panel-title">Discovered Providers (${providers.length})</span></div><div class="panel-body">
+                    <table><thead><tr><th>Provider</th><th>Frequency</th><th>Documents</th><th>Consistency</th></tr></thead><tbody>
+                    ${providers.slice(0, 20).map(p => `<tr><td><strong>${p.provider_name}</strong><br><span style="color:var(--text-muted);font-size:0.72rem">${p.normalized_title}</span></td><td>${p.pattern?.frequency || '?'}</td><td>${p.document_count}</td><td>${(p.title_consistency * 100).toFixed(0)}%</td></tr>`).join('')}
+                    </tbody></table>
+                </div></div>
+            `;
+        } catch(e) { document.getElementById('statements-content').innerHTML = `<div class="panel"><div class="panel-body">Error: ${e.message}</div></div>`; }
+    }
+
+    async function runRecommendations() {
+        document.getElementById('statements-content').innerHTML = `<div class="loading"><span class="spinner"></span>Checking for missing statements...</div>`;
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const res = await fetch(API + '/api/statements/recommendations/run?as_of=' + today, { method: 'POST' });
+            const data = await res.json();
+            const recs = data.recommendations || [];
+            document.getElementById('statements-content').innerHTML = `
+                <div class="panel"><div class="panel-header"><span class="panel-title">Missing / Overdue (${recs.length})</span></div><div class="panel-body">
+                    ${recs.length === 0 ? '<p style="color:var(--text-muted)">All statements are up to date! 🎉</p>' : `
+                    <table><thead><tr><th>Provider</th><th>Expected</th><th>Days Late</th><th>Status</th></tr></thead><tbody>
+                    ${recs.map(r => `<tr><td><strong>${r.provider_name}</strong></td><td>${r.expected_date}</td><td>${r.days_late}d</td><td><span class="badge ${r.days_late > 30 ? 'critical' : r.days_late > 7 ? 'high' : 'medium'}">${r.status}</span></td></tr>`).join('')}
+                    </tbody></table>`}
+                </div></div>
+            `;
+            // Update badge
+            if (recs.length > 0) {
+                const badge = document.getElementById('nav-stmt-badge');
+                badge.textContent = recs.length; badge.style.display = '';
+            }
+        } catch(e) { document.getElementById('statements-content').innerHTML = `<div class="panel"><div class="panel-body">Error: ${e.message}</div></div>`; }
+    }
+
+    // ===== EOB =====
+    async function runEobPipeline() {
+        document.getElementById('eob-content').innerHTML = `<div class="loading"><span class="spinner"></span>Running EOB pipeline (classify → extract → match)...</div>`;
+        try {
+            const res = await fetch(API + '/api/eob/run', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ limit: 50, verbose: true })
+            });
+            const data = await res.json();
+            renderEobResults(data);
+        } catch(e) { document.getElementById('eob-content').innerHTML = `<div class="panel"><div class="panel-body">Error: ${e.message}</div></div>`; }
+    }
+
+    async function classifyOnly() {
+        document.getElementById('eob-content').innerHTML = `<div class="loading"><span class="spinner"></span>Classifying documents...</div>`;
+        try {
+            const res = await fetch(API + '/api/eob/classify', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ limit: 30 })
+            });
+            const data = await res.json();
+            document.getElementById('eob-content').innerHTML = `
+                <div class="panel"><div class="panel-header"><span class="panel-title">Classification Results (${data.documents_scanned} docs)</span></div><div class="panel-body">
+                    <table><thead><tr><th>Doc ID</th><th>Title</th><th>Type</th><th>Score</th></tr></thead><tbody>
+                    ${data.results.map(r => `<tr><td>${r.document_id}</td><td>${(r.title||'').substring(0,45)}</td><td><span class="badge ${r.classification.type === 'EOB' ? 'pending' : r.classification.type === 'BILL' ? 'medium' : 'dismissed'}">${r.classification.type}</span></td><td>${r.classification.confidence_score}</td></tr>`).join('')}
+                    </tbody></table>
+                </div></div>
+            `;
+        } catch(e) { document.getElementById('eob-content').innerHTML = `<div class="panel"><div class="panel-body">Error: ${e.message}</div></div>`; }
+    }
+
+    function renderEobResults(data) {
+        const s = data.summary || {};
+        document.getElementById('eob-cards').innerHTML = `
+            <div class="card"><div class="card-header"><span class="card-title">EOBs</span><span class="card-status ok">found</span></div><div class="card-metric">${s.EOB || 0}</div><div class="card-desc">Explanations of Benefits</div></div>
+            <div class="card"><div class="card-header"><span class="card-title">Bills</span><span class="card-status warn">found</span></div><div class="card-metric">${s.BILL || 0}</div><div class="card-desc">Medical bills & invoices</div></div>
+            <div class="card"><div class="card-header"><span class="card-title">Matches</span><span class="card-status ${s.matches > 0 ? 'ok' : 'warn'}">paired</span></div><div class="card-metric">${s.matches || 0}</div><div class="card-desc">${s.unmatched_eobs || 0} unmatched EOBs</div></div>
+        `;
+        const matches = data.matches || [];
+        if (matches.length > 0) {
+            document.getElementById('eob-content').innerHTML = `<div class="panel"><div class="panel-header"><span class="panel-title">Matched Pairs</span></div><div class="panel-body">${matches.map(m => `<div class="action-item"><div class="action-item-header"><span class="badge pending">EOB #${m.eob_id}</span> ↔ <span class="badge medium">Bill #${m.bill_id}</span><span class="badge ${m.confidence === 'HIGH' ? 'low' : m.confidence === 'MEDIUM' ? 'medium' : 'high'}">${m.score.toFixed(0)}% ${m.confidence}</span></div></div>`).join('')}</div></div>`;
+        } else {
+            document.getElementById('eob-content').innerHTML = `<div class="panel"><div class="panel-body"><p style="color:var(--text-muted)">No matches found. Scanned ${data.documents_scanned} documents. The extractor may need tuning for your document formats.</p></div></div>`;
+        }
+    }
+
+    // ===== SETTINGS =====
+    async function loadSettings() {
+        try {
+            const [statusRes, settingsRes] = await Promise.all([
+                fetch(API + '/api/status'),
+                fetch(API + '/api/settings')
+            ]);
+            const data = await statusRes.json();
+            const settings = await settingsRes.json();
+            const m = data.modules;
+            document.getElementById('settings-content').innerHTML = `
+                <div class="panel"><div class="panel-header"><span class="panel-title">Connections</span></div><div class="panel-body">
+                    <table><thead><tr><th>Service</th><th>URL</th><th>Status</th></tr></thead><tbody>
+                    <tr><td>Paperless-ngx</td><td style="font-family:monospace;font-size:0.78rem">${m.statements?.paperless_url || m.paperless?.base_url || '?'}</td><td><span class="status-dot ${m.paperless?.status || 'err'}"></span>${m.paperless?.status || 'unknown'} (${m.paperless?.documents || 0} docs)</td></tr>
+                    <tr><td>Ollama</td><td style="font-family:monospace;font-size:0.78rem">${settings.ollama_url || '?'}</td><td><span class="status-dot ${m.action_queue?.status === 'ok' ? 'ok' : 'err'}"></span>${m.action_queue?.status || 'unknown'}</td></tr>
+                    </tbody></table>
+                </div></div>
+
+                <div class="panel"><div class="panel-header"><span class="panel-title">Ollama / AI Configuration</span><button class="btn" onclick="testOllama()">Test Connection</button></div><div class="panel-body">
+                    <div style="display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:center;font-size:0.82rem;">
+                        <label for="cfg-ollama-url" style="font-weight:500;">Ollama URL</label>
+                        <input id="cfg-ollama-url" type="text" value="${settings.ollama_url || ''}" placeholder="http://localhost:11434" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:monospace;font-size:0.8rem;width:100%;">
+
+                        <label for="cfg-ollama-model" style="font-weight:500;">Model</label>
+                        <input id="cfg-ollama-model" type="text" value="${settings.ollama_model || ''}" placeholder="phi3:mini" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:monospace;font-size:0.8rem;width:100%;">
+
+                        <label for="cfg-write" style="font-weight:500;">Write Mode</label>
+                        <div>
+                            <label style="cursor:pointer;"><input id="cfg-write" type="checkbox" ${settings.write_to_paperless ? 'checked' : ''} style="margin-right:6px;">Enable writes to Paperless</label>
+                            <span style="color:var(--text-muted);font-size:0.72rem;margin-left:8px;">(tags, custom fields)</span>
+                        </div>
+                    </div>
+                    <div style="margin-top:14px;display:flex;gap:8px;align-items:center;">
+                        <button class="btn primary" onclick="saveSettings()">Save Settings</button>
+                        <span id="settings-save-status" style="font-size:0.75rem;color:var(--text-muted);"></span>
+                    </div>
+                    <p style="margin-top:12px;font-size:0.72rem;color:var(--text-muted);">Settings persist for this server session. Restart the service to reset to env/config defaults.</p>
+                </div></div>
+
+                <div class="panel"><div class="panel-header"><span class="panel-title">System Info</span></div><div class="panel-body" style="font-size:0.82rem;">
+                    <p style="margin-bottom:10px;"><strong>Statement Config:</strong> <code style="font-size:0.75rem;color:var(--text-muted)">${m.statements?.config_path || '?'}</code></p>
+                    <p><strong>API Docs:</strong> <a href="/docs" style="color:var(--accent)" target="_blank">/docs</a> (OpenAPI / Swagger UI)</p>
+                </div></div>
+            `;
+        } catch(e) { document.getElementById('settings-content').innerHTML = `<div class="panel"><div class="panel-body">Error: ${e.message}</div></div>`; }
+    }
+
+    async function saveSettings() {
+        const statusEl = document.getElementById('settings-save-status');
+        statusEl.textContent = 'Saving...';
+        try {
+            const res = await fetch(API + '/api/settings', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    ollama_url: document.getElementById('cfg-ollama-url').value,
+                    ollama_model: document.getElementById('cfg-ollama-model').value,
+                    write_to_paperless: document.getElementById('cfg-write').checked,
+                })
+            });
+            const data = await res.json();
+            if (data.status === 'ok') {
+                statusEl.innerHTML = `<span style="color:var(--success)">✓ Saved (${data.changed.join(', ')})</span>`;
+            } else {
+                statusEl.innerHTML = `<span style="color:var(--danger)">Error</span>`;
+            }
+        } catch(e) { statusEl.innerHTML = `<span style="color:var(--danger)">Error: ${e.message}</span>`; }
+    }
+
+    async function testOllama() {
+        try {
+            const res = await fetch(API + '/api/queue/check');
+            const data = await res.json();
+            const msg = `Ollama: ${data.ollama?.status || 'unknown'}\nURL: ${data.ollama?.base_url || '?'}\nModel: ${data.ollama?.model || '?'}`;
+            alert(msg);
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    // Boot
+    async function boot() {
+        try {
+            const res = await fetch(API + '/api/settings');
+            const s = await res.json();
+            paperlessBaseUrl = (s.paperless_url || '').replace(/\/$/, '');
+        } catch(e) {}
+        loadOverview();
+    }
+    boot();
+    </script>
+</body>
+</html>

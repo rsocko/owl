@@ -1,6 +1,7 @@
 """Main processing pipeline — orchestrates fetch → analyze → store → enrich."""
 
 import asyncio
+import io
 from datetime import datetime, date
 from typing import Optional
 
@@ -11,9 +12,11 @@ from .config import settings
 from .database import get_session, init_db, Action, ProcessingHistory
 from doc_intelligence_hub.core.paperless import PaperlessClient
 from .analyzer import OllamaAnalyzer
+from .fallback_analyzer import RuleBasedAnalyzer
 from .enricher import PaperlessEnricher
 
-console = Console()
+# Use a file-based console to avoid Windows encoding issues when running under uvicorn
+console = Console(file=io.StringIO(), force_terminal=False, highlight=False)
 
 
 def _make_paperless_client() -> PaperlessClient:
@@ -27,7 +30,9 @@ class Pipeline:
     def __init__(self):
         self.paperless = _make_paperless_client()
         self.analyzer = OllamaAnalyzer()
+        self.fallback_analyzer = RuleBasedAnalyzer()
         self.enricher = PaperlessEnricher()
+        self._ollama_available: Optional[bool] = None
 
     async def run(
         self,
@@ -65,8 +70,16 @@ class Pipeline:
         """
         console.print("\n[bold blue]═══ Paperless Action Queue Pipeline ═══[/bold blue]\n")
 
-        # Step 1: Ensure custom fields exist (skip in dry-run)
-        if not dry_run:
+        # Build a correspondent ID→name cache
+        self._correspondent_cache: dict[int, str] = {}
+        try:
+            correspondents = await self.paperless.list_correspondents()
+            self._correspondent_cache = {c["id"]: c["name"] for c in correspondents}
+        except Exception:
+            pass  # Non-fatal — we'll fall back to IDs
+
+        # Step 1: Ensure custom fields exist (skip in dry-run or read-only mode)
+        if not dry_run and settings.write_to_paperless:
             console.print("[dim]Checking custom fields...[/dim]")
             await self.enricher.ensure_custom_fields_exist()
             console.print("[green]✓[/green] Custom fields ready\n")
@@ -100,15 +113,38 @@ class Pipeline:
 
         console.print(f"[green]✓[/green] Found {len(documents)} documents")
 
-        if limit:
-            documents = documents[:limit]
-            console.print(f"[dim]  (limited to {limit})[/dim]")
-
         console.print()
 
         if not documents:
             console.print("[yellow]No documents to process.[/yellow]")
             return {"processed": 0, "skipped": 0, "failed": 0}
+
+        # Filter out already-processed documents (unless force re-scan)
+        if not force:
+            init_db()
+            db_check = get_session()
+            try:
+                processed_ids = {
+                    row.document_id
+                    for row in db_check.query(ProcessingHistory.document_id)
+                    .filter(ProcessingHistory.success == 1)
+                    .all()
+                }
+            finally:
+                db_check.close()
+            unprocessed = [d for d in documents if d["id"] not in processed_ids]
+            skipped_count = len(documents) - len(unprocessed)
+            documents = unprocessed
+            console.print(f"[dim]  {skipped_count} already processed, {len(documents)} new[/dim]")
+
+        # Apply limit AFTER filtering (limit means "analyze up to N new docs")
+        if limit and len(documents) > limit:
+            documents = documents[:limit]
+            console.print(f"[dim]  (limited to {limit})[/dim]")
+
+        if not documents:
+            console.print("[yellow]No new documents to process.[/yellow]")
+            return {"processed": 0, "skipped": skipped_count if not force else 0, "failed": 0, "no_action": 0}
 
         # Dry-run: just list what would be processed
         if dry_run:
@@ -139,17 +175,6 @@ class Pipeline:
             doc_id = doc["id"]
             doc_title = doc.get("title", f"Document #{doc_id}")
 
-            # Check processing history (dedup)
-            if not force:
-                existing = (
-                    db.query(ProcessingHistory)
-                    .filter_by(document_id=doc_id)
-                    .first()
-                )
-                if existing and existing.success:
-                    stats["skipped"] += 1
-                    continue
-
             console.print(f"  [dim]Analyzing:[/dim] {doc_title[:60]}...")
 
             # Fetch full content if not already present
@@ -170,8 +195,20 @@ class Pipeline:
                 stats["no_action"] += 1
                 continue
 
-            # Analyze with Ollama
-            extraction = await self.analyzer.analyze_document(doc)
+            # Analyze with Ollama (or fallback to rules if unavailable)
+            if self._ollama_available is None:
+                self._ollama_available = await self.analyzer.health_check()
+                if not self._ollama_available:
+                    console.print("[yellow]⚠ Ollama unavailable — using rule-based fallback[/yellow]\n")
+
+            extraction = None
+            if self._ollama_available:
+                extraction = await self.analyzer.analyze_document(doc)
+                if not extraction:
+                    # Ollama returned nothing — try fallback for this doc
+                    extraction = self.fallback_analyzer.analyze_document(doc)
+            else:
+                extraction = self.fallback_analyzer.analyze_document(doc)
 
             if not extraction:
                 console.print(f"  [red]✗[/red] Analysis failed for document {doc_id}")
@@ -230,22 +267,22 @@ class Pipeline:
                 )
                 stored_actions.append(action)
 
-            # Enrich Paperless with PRIMARY action's data
+            # Enrich Paperless with PRIMARY action's data (only if writes enabled)
             primary_action = actions[primary_idx] if primary_idx < len(actions) else actions[0]
-            enrichment_data = {**primary_action, **assessment}
-            try:
-                await self.enricher.enrich_document(doc_id, enrichment_data, action_count=len(actions))
-                # Track what we wrote so bidirectional sync knows our last state
-                for a in stored_actions:
-                    a.last_synced_status = "pending"
-                action_summary = f"{primary_action['action_type']} — {primary_action['title'][:50]}"
-                if len(actions) > 1:
-                    action_summary += f" (+{len(actions)-1} more)"
-                console.print(
-                    f"  [green]✓[/green] {action_summary} (confidence: {overall_confidence}%)"
-                )
-            except Exception as e:
-                console.print(f"  [yellow]⚠[/yellow] Stored but enrichment failed: {e}")
+            if settings.write_to_paperless:
+                enrichment_data = {**primary_action, **assessment}
+                try:
+                    await self.enricher.enrich_document(doc_id, enrichment_data, action_count=len(actions))
+                    # Track what we wrote so bidirectional sync knows our last state
+                    for a in stored_actions:
+                        a.last_synced_status = "pending"
+                except Exception as e:
+                    console.print(f"  [yellow]⚠[/yellow] Stored but enrichment failed: {e}")
+
+            action_summary = f"{primary_action['action_type']} — {primary_action['title'][:50]}"
+            if len(actions) > 1:
+                action_summary += f" (+{len(actions)-1} more)"
+            console.print(f"  [green]✓[/green] {action_summary} (confidence: {overall_confidence}%)")
 
             self._record_history(
                 db, doc_id, success=True, disposition="action_created",
@@ -270,6 +307,15 @@ class Pipeline:
         """Store or update an action in the internal database."""
         doc_id = document["id"]
 
+        # Resolve correspondent name from cache
+        corr_raw = assessment.get("correspondent") or document.get("correspondent")
+        if isinstance(corr_raw, int):
+            correspondent_name = self._correspondent_cache.get(corr_raw, str(corr_raw))
+        elif corr_raw and str(corr_raw).isdigit():
+            correspondent_name = self._correspondent_cache.get(int(corr_raw), str(corr_raw))
+        else:
+            correspondent_name = str(corr_raw) if corr_raw else None
+
         # For multi-action docs, check by document_id + title to avoid clobbering
         existing = (
             db.query(Action)
@@ -285,6 +331,7 @@ class Pipeline:
             existing.amount = action_data.get("amount")
             existing.urgency = action_data["urgency"]
             existing.confidence = action_data.get("confidence", 0)
+            existing.correspondent = correspondent_name
             existing.extracted_data = assessment.get("extracted_data")
             existing.ai_reasoning = assessment.get("reasoning")
             existing.updated_at = datetime.utcnow()
@@ -300,7 +347,7 @@ class Pipeline:
                 amount=action_data.get("amount"),
                 urgency=action_data["urgency"],
                 confidence=action_data.get("confidence", 0),
-                correspondent=assessment.get("correspondent"),
+                correspondent=correspondent_name,
                 extracted_data=assessment.get("extracted_data"),
                 ai_reasoning=assessment.get("reasoning"),
             )
