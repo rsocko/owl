@@ -214,7 +214,7 @@ All design docs are comprehensive and implementation-ready:
 |------|-------|--------|
 | Build `/api/documents` endpoint (list docs with filters, for MC Documents tab) | #742 | 4h |
 | Build `/api/stats` endpoint (module health, processing counts, for MC Insights tab) | #742 | 4h |
-| Add `previewUrl` field to action queue API responses (Paperless document URL) | #742 | 2h |
+| ~~Add `previewUrl` field to action queue API responses (Paperless document URL)~~ | ~~#761~~ | ~~2h~~ ✅ |
 | Build lightweight admin SPA (Paperless connection, scan schedules, scoring weights) | #742 | 8h |
 | OCR quality viewer (admin-only deep tool) | #742 | 8h |
 | Side-by-side match comparison view (EOB debugging) | #735 | 8h |

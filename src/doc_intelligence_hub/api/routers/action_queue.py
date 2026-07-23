@@ -45,6 +45,36 @@ def _sync_action_queue_settings(request: Request) -> None:
     action_queue_settings.ollama_model = hub_settings.ollama_model
 
 
+def _build_preview_url(document_id: int | None) -> str | None:
+    """Build a Paperless document preview URL, or None if unavailable."""
+    paperless_base = action_queue_settings.paperless_url.rstrip("/")
+    if not paperless_base or not document_id:
+        return None
+    return f"{paperless_base}/documents/{document_id}/details"
+
+
+def _serialize_action(a: Action) -> dict[str, Any]:
+    """Serialize an Action row to a JSON-safe dict with preview_url."""
+    return {
+        "id": a.id,
+        "document_id": a.document_id,
+        "document_title": a.document_title,
+        "action_type": a.action_type,
+        "title": a.title,
+        "summary": a.summary,
+        "due_date": a.due_date.isoformat() if a.due_date else None,
+        "amount": a.amount,
+        "urgency": a.urgency,
+        "confidence": a.confidence,
+        "status": a.status,
+        "correspondent": a.correspondent,
+        "ai_reasoning": a.ai_reasoning,
+        "preview_url": _build_preview_url(a.document_id),
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+        "completed_at": a.completed_at.isoformat() if a.completed_at else None,
+    }
+
+
 def _database_counts() -> dict[str, int]:
     init_db()
     db = get_session()
@@ -139,30 +169,8 @@ async def list_actions(
         total = query.count()
         actions = query.offset(offset).limit(limit).all()
 
-        paperless_base = action_queue_settings.paperless_url.rstrip("/")
-
         return {
-            "actions": [
-                {
-                    "id": a.id,
-                    "document_id": a.document_id,
-                    "document_title": a.document_title,
-                    "action_type": a.action_type,
-                    "title": a.title,
-                    "summary": a.summary,
-                    "due_date": a.due_date.isoformat() if a.due_date else None,
-                    "amount": a.amount,
-                    "urgency": a.urgency,
-                    "confidence": a.confidence,
-                    "status": a.status,
-                    "correspondent": a.correspondent,
-                    "ai_reasoning": a.ai_reasoning,
-                    "preview_url": f"{paperless_base}/documents/{a.document_id}/details",
-                    "created_at": a.created_at.isoformat() if a.created_at else None,
-                    "completed_at": a.completed_at.isoformat() if a.completed_at else None,
-                }
-                for a in actions
-            ],
+            "actions": [_serialize_action(a) for a in actions],
             "total": total,
             "limit": limit,
             "offset": offset,
@@ -188,11 +196,6 @@ async def update_action(request: Request, action_id: int, body: ActionUpdateRequ
         elif body.status == "pending":
             action.completed_at = None
         db.commit()
-        return {
-            "id": action.id,
-            "status": action.status,
-            "document_title": action.document_title,
-            "updated": True,
-        }
+        return _serialize_action(action)
     finally:
         db.close()
