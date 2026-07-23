@@ -12,26 +12,6 @@ The Document Intelligence Hub is a **well-designed but partially implemented** u
 
 ## GitHub Issues Consolidation
 
-### Duplicates Found
-
-Issues were created twice (likely two batch runs). The following pairs are exact duplicates:
-
-| Keep | Close (Duplicate) | Title |
-|------|-------------------|-------|
-| #742 | #731 | Hub - Unified Dashboard |
-| #741 | #730 | Statement Tracking - Phase 1 |
-| #740 | #729 | OCR - n8n Workflow Orchestration |
-| #739 | #728 | OCR - Remediation Engine |
-| #738 | #727 | OCR - Ollama Validation Integration |
-| #737 | #726 | OCR - Quality Scoring Service |
-| #736 | #725 | OCR - Baseline Inventory Script |
-| #735 | #724 | EOB Matching - UI Dashboard |
-| #734 | #723 | EOB Matching - Core Implementation |
-| #733 | #722 | Action Queue - UI Dashboard |
-| #732 | #721 | Action Queue - Core Pipeline |
-
-**Recommendation:** Close #721–#731 as duplicates of #732–#742.
-
 ### Canonical Issue Map (after dedup)
 
 | # | Title | Status Label | Category |
