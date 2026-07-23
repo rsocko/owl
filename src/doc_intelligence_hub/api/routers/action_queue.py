@@ -138,6 +138,9 @@ async def list_actions(
             query = query.filter_by(status=status)
         total = query.count()
         actions = query.offset(offset).limit(limit).all()
+
+        paperless_base = action_queue_settings.paperless_url.rstrip("/")
+
         return {
             "actions": [
                 {
@@ -154,6 +157,7 @@ async def list_actions(
                     "status": a.status,
                     "correspondent": a.correspondent,
                     "ai_reasoning": a.ai_reasoning,
+                    "preview_url": f"{paperless_base}/documents/{a.document_id}/details",
                     "created_at": a.created_at.isoformat() if a.created_at else None,
                     "completed_at": a.completed_at.isoformat() if a.completed_at else None,
                 }
