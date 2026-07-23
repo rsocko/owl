@@ -1,0 +1,27 @@
+# Keep Docker build context small and secret-free
+.env
+*.env
+config/
+data/
+docs/
+mockups/
+examples/
+tests/
+dashboard/
+.git/
+.gitignore
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+.DS_Store
+Thumbs.db
+_category_.json
+docker-compose.yml
