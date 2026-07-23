@@ -9,7 +9,7 @@
 #
 # Build modes:
 #   --build   → builds from local Dockerfile (dev/Dockhand stack)
-#   no --build → pulls pre-built image from GHCR (production)
+#   no --build → pulls pre-built image from service-007.example.invalid (production)
 
 services:
   # Statement Tracker — web dashboard + API for detecting missing statements
@@ -17,7 +17,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/rsocko/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
     container_name: doc-intelligence-statement-tracker
     restart: unless-stopped
     command: ["serve", "--config", "/app/config/config.docker.yaml"]
@@ -36,7 +36,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/rsocko/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
     container_name: doc-intelligence-eob-matching
     restart: "no"
     entrypoint: ["eob-match"]
@@ -56,7 +56,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/rsocko/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
     container_name: doc-intelligence-action-queue
     restart: "no"
     entrypoint: ["paq"]
