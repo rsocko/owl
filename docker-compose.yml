@@ -23,6 +23,12 @@ services:
     command: ["serve", "--config", "/app/config/config.docker.yaml"]
     environment:
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     ports:
       - "${STATEMENT_TRACKER_PORT:-8071}:8001"
     volumes:
