@@ -1,6 +1,6 @@
 services:
   statement-tracker:
-    image: service-007.example.invalid/statement-tracker:phase1
+    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
     container_name: statement-tracker
     restart: unless-stopped
     command: ["serve", "--config", "/app/config/config.paperless.yaml"]
