@@ -304,7 +304,14 @@ class Pipeline:
         return stats
 
     def _store_action(self, db, document: dict, action_data: dict, assessment: dict, is_primary: bool = True) -> Action:
-        """Store or update an action in the internal database."""
+        """Store or update an action in the internal database.
+
+        Deduplication strategy:
+        1. Exact match on document_id + title → update in place
+        2. Match on document_id + action_type (pending only) → update existing
+           (handles LLM producing slightly different titles on re-runs)
+        3. No match → create new
+        """
         doc_id = document["id"]
 
         # Resolve correspondent name from cache
@@ -316,12 +323,20 @@ class Pipeline:
         else:
             correspondent_name = str(corr_raw) if corr_raw else None
 
-        # For multi-action docs, check by document_id + title to avoid clobbering
+        # Strategy 1: exact match on document_id + title
         existing = (
             db.query(Action)
             .filter_by(document_id=doc_id, title=action_data["title"])
             .first()
         )
+
+        # Strategy 2: match on document_id + action_type for pending actions
+        if not existing:
+            existing = (
+                db.query(Action)
+                .filter_by(document_id=doc_id, action_type=action_data["action_type"], status="pending")
+                .first()
+            )
 
         if existing:
             existing.action_type = action_data["action_type"]
