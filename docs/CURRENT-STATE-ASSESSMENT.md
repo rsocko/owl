@@ -39,7 +39,7 @@ That review covers UI ownership (MC is the primary user surface; DI is a headles
 | **#739** | OCR - Remediation Engine (Tesseract + Azure DI) | idea | OCR |
 | **#740** | OCR - n8n Workflow Orchestration | idea | OCR |
 | **#741** | Statement Tracking - Phase 1 | in-progress | Module |
-| **#742** | Hub - Unified Dashboard | idea | UI |
+| **#742** | ~~Hub - Unified Dashboard~~ | closed (not planned) | ~~UI~~ |
 
 ---
 
@@ -203,23 +203,25 @@ All design docs are comprehensive and implementation-ready:
 
 ---
 
-### Phase 4: Admin UI & MC Integration Support (Priority: MEDIUM)
+### Phase 4: Admin UI & MC Integration Support (Priority: MEDIUM) ✅ COMPLETE
 *Estimated: 2–3 weeks*
 
 **Goal:** Build a lightweight standalone admin UI for power-user workflows, and expose API endpoints needed by Mission Control's hub page.
 
-> **Note:** The primary user-facing dashboard is now owned by Mission Control (see [integration review](https://github.com/rsocko/mission-control/pull/708)). This phase focuses on DI-specific admin tools and the API surface MC needs.
+> **Note:** The primary user-facing dashboard is now owned by Mission Control (see [integration review](https://github.com/rsocko/mission-control/pull/708)). DI is a headless API + admin UI only.
 
-| Task | Issue | Effort |
-|------|-------|--------|
-| Build `/api/documents` endpoint (list docs with filters, for MC Documents tab) | #742 | 4h |
-| Build `/api/stats` endpoint (module health, processing counts, for MC Insights tab) | #742 | 4h |
-| ~~Add `previewUrl` field to action queue API responses (Paperless document URL)~~ | ~~#761~~ | ~~2h~~ ✅ |
-| Build lightweight admin SPA (Paperless connection, scan schedules, scoring weights) | #742 | 8h |
-| OCR quality viewer (admin-only deep tool) | #742 | 8h |
-| Side-by-side match comparison view (EOB debugging) | #735 | 8h |
+> **Decision (2026-07-23):** `/api/documents` endpoint permanently removed from scope. Users browse documents in Paperless-ngx directly; MC links out via `metadata.previewUrl`. #742 closed as not planned.
 
-**Exit criteria:** MC can call `/api/documents` and `/api/stats`; admin UI accessible at `:8001/admin` for configuration and debugging.
+| Task | Issue | Effort | Status |
+|------|-------|--------|--------|
+| ~~Build `/api/documents` endpoint (list docs with filters, for MC Documents tab)~~ | ~~#742~~ | ~~4h~~ | ❌ Not planned — Paperless is the document browser |
+| Build `/api/stats` endpoint (module health, processing counts, for MC Insights tab) | #767 | 4h | ✅ Done |
+| ~~Add `previewUrl` field to action queue API responses (Paperless document URL)~~ | ~~#761~~ | ~~2h~~ | ✅ Done |
+| Build lightweight admin SPA (Paperless connection, scan schedules, scoring weights) | #764 | 8h | ✅ Done |
+| OCR quality viewer (admin-only deep tool) | — | 8h | Deferred to Phase 5 (OCR) |
+| Side-by-side match comparison view (EOB debugging) | #735 | 8h | Deferred to Phase 6 |
+
+**Exit criteria:** ✅ MC can call `/api/stats`; admin UI accessible at `:8001/admin` for configuration and debugging.
 
 ---
 
@@ -246,7 +248,7 @@ All design docs are comprehensive and implementation-ready:
 
 | Task | Issue | Effort |
 |------|-------|--------|
-| Settings page (Paperless connection, notification prefs) | #742 | 4h |
+| Settings page (Paperless connection, notification prefs) | — | 4h |
 | n8n notification routing (email/push for alerts) | #740 | 4h |
 | Docker image optimization (multi-stage build) | — | 2h |
 | Align notification routing with MC (avoid double-notification via n8n AND MC) | — | 2h |
