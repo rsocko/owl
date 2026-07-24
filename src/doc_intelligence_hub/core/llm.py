@@ -172,6 +172,63 @@ def _parse_json_response(text: str) -> dict | None:
         return None
 
 
+async def validate_model_availability() -> dict[str, Any]:
+    """Check if the configured model is available via the LLM gateway.
+
+    Queries the gateway's /models endpoint and verifies the configured model
+    is listed. This catches misconfigurations (e.g., requesting phi3:mini when
+    Bifrost has no key/route for it) at startup rather than at first LLM call.
+
+    Returns:
+        Dict with 'available' bool, configured model, available models list,
+        and a human-readable message if the model is missing.
+    """
+    import httpx
+
+    settings = get_llm_settings()
+    # Strip /chat/completions or trailing path to get the base for /models
+    models_url = settings.base_url.rstrip("/")
+    if models_url.endswith("/v1"):
+        models_url = models_url  # already at /v1 level
+    elif models_url.endswith("/openai/v1"):
+        models_url = models_url  # already at /openai/v1 level
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            resp = await http.get(
+                f"{models_url}/models",
+                headers={"Authorization": f"Bearer {settings.api_key}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        # OpenAI-compatible /models response has {"data": [{"id": "model-name"}, ...]}
+        available_models = [m.get("id", "") for m in data.get("data", [])]
+        model_found = settings.model in available_models
+
+        result: dict[str, Any] = {
+            "available": model_found,
+            "configured_model": settings.model,
+            "available_models": available_models,
+            "base_url": settings.base_url,
+        }
+        if not model_found:
+            result["message"] = (
+                f"Model '{settings.model}' is not listed by the LLM gateway at "
+                f"{settings.base_url}. Available models: {available_models}. "
+                f"Check Bifrost routing rules or change LLM_MODEL to a supported model."
+            )
+        return result
+
+    except Exception as e:
+        return {
+            "available": None,
+            "configured_model": settings.model,
+            "base_url": settings.base_url,
+            "message": f"Could not query gateway models endpoint: {e}",
+        }
+
+
 async def health_check() -> dict[str, Any]:
     """Check if the LLM gateway is reachable and responsive."""
     client = get_llm_client()
@@ -205,4 +262,5 @@ __all__ = [
     "get_llm_settings",
     "health_check",
     "reset_llm_client",
+    "validate_model_availability",
 ]

@@ -7,7 +7,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
-from doc_intelligence_hub.core.llm import get_llm_settings, health_check as llm_health_check
+from doc_intelligence_hub.core.llm import get_llm_settings, health_check as llm_health_check, validate_model_availability
 
 router = APIRouter(prefix="/api", tags=["system"])
 
@@ -51,13 +51,26 @@ async def _statement_status(request: Request) -> dict[str, Any]:
 async def _queue_status(request: Request) -> dict[str, Any]:
     llm_settings = get_llm_settings()
     health = await llm_health_check()
-    return {
+
+    # Include model validation result if available from startup check
+    model_validation = getattr(request.app.state, "llm_model_validation", None)
+
+    result = {
         "status": "ok" if health.get("status") == "ok" else "degraded",
         "llm_base_url": llm_settings.base_url,
         "llm_model": llm_settings.model,
         "last_run": request.app.state.last_queue_status,
         "write_to_paperless": request.app.state.hub_settings.write_to_paperless,
     }
+
+    if model_validation and model_validation.get("available") is False:
+        result["status"] = "error"
+        result["model_available"] = False
+        result["model_warning"] = model_validation.get("message")
+    elif model_validation:
+        result["model_available"] = model_validation.get("available")
+
+    return result
 
 
 def _eob_status(request: Request) -> dict[str, Any]:
@@ -185,6 +198,17 @@ async def test_llm_connection(body: LLMTestRequest) -> dict[str, Any]:
             "model": model,
             "message": str(e),
         }
+
+
+@router.get("/llm/models")
+async def list_available_models() -> dict[str, Any]:
+    """Check which models the LLM gateway reports as available.
+
+    Queries Bifrost/Ollama's /models endpoint and indicates whether the
+    currently configured model is in the list. Use this to detect
+    misconfiguration before the first LLM call fails.
+    """
+    return await validate_model_availability()
 
 
 @router.get("/documents/{document_id}/preview")

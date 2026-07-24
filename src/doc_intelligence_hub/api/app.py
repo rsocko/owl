@@ -13,6 +13,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from doc_intelligence_hub.api.routers import action_queue, admin, eob, mc_connector, statements, stats, system
+from doc_intelligence_hub.core.llm import get_llm_settings, validate_model_availability
 from doc_intelligence_hub.modules.statements.api import _STATIC_DIR as _STATEMENTS_STATIC_DIR
 from doc_intelligence_hub.modules.statements.config import load_config
 
@@ -164,6 +165,36 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
                 "action_queue": "loaded",
             },
         }
+
+    @app.on_event("startup")
+    async def _validate_llm_on_startup() -> None:
+        """Validate LLM model availability at startup and log warnings."""
+        import logging
+
+        logger = logging.getLogger("doc_intelligence_hub.startup")
+        llm_settings = get_llm_settings()
+        logger.info(
+            "LLM config: model=%s base_url=%s",
+            llm_settings.model,
+            llm_settings.base_url,
+        )
+
+        result = await validate_model_availability()
+        app.state.llm_model_validation = result
+
+        if result.get("available") is False:
+            logger.warning(
+                "⚠️  LLM MODEL NOT AVAILABLE: %s — %s",
+                llm_settings.model,
+                result.get("message", "Model not found in gateway"),
+            )
+        elif result.get("available") is None:
+            logger.warning(
+                "⚠️  Could not verify model availability: %s",
+                result.get("message", "Gateway unreachable"),
+            )
+        else:
+            logger.info("✓ LLM model '%s' confirmed available via gateway.", llm_settings.model)
 
     return app
 
