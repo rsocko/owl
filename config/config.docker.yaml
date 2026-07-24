@@ -1,6 +1,6 @@
 source:
   mode: paperless
-  paperless_url: http://service-006.example.invalid
+  paperless_url: https://service-006.example.invalid
   api_token_env: PAPERLESS_API_TOKEN
   verify_ssl: false
   timeout_seconds: 60
