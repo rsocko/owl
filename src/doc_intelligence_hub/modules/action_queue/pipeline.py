@@ -21,7 +21,7 @@ console = Console(file=io.StringIO(), force_terminal=False, highlight=False)
 
 def _make_paperless_client() -> PaperlessClient:
     """Create a PaperlessClient from action queue settings."""
-    return PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_token)
+    return PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_api_token)
 
 
 class Pipeline:

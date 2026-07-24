@@ -47,7 +47,7 @@ def cli(ctx, db_url):
 
 @cli.command()
 @click.option("--paperless-url", envvar="PAPERLESS_URL", required=True, help="Paperless-ngx URL")
-@click.option("--paperless-token", envvar="PAPERLESS_TOKEN", required=True, help="Paperless API token")
+@click.option("--paperless-token", envvar="PAPERLESS_API_TOKEN", required=True, help="Paperless API token")
 @click.option("--tag", multiple=True, help="Filter by tag name (can specify multiple)")
 @click.option("--correspondent", type=str, default=None, help="Filter by correspondent name")
 @click.option("--limit", type=int, default=50, help="Max documents to process")
@@ -83,7 +83,7 @@ def run(ctx, paperless_url, paperless_token, tag, correspondent, limit, output, 
 
 @cli.command()
 @click.option("--paperless-url", envvar="PAPERLESS_URL", required=True)
-@click.option("--paperless-token", envvar="PAPERLESS_TOKEN", required=True)
+@click.option("--paperless-token", envvar="PAPERLESS_API_TOKEN", required=True)
 @click.option("--tag", multiple=True, help="Filter by tag name")
 @click.option("--limit", type=int, default=20, help="Max documents to scan")
 def classify(paperless_url, paperless_token, tag, limit):
@@ -105,7 +105,7 @@ def classify(paperless_url, paperless_token, tag, limit):
 
 @cli.command()
 @click.option("--paperless-url", envvar="PAPERLESS_URL", required=True)
-@click.option("--paperless-token", envvar="PAPERLESS_TOKEN", required=True)
+@click.option("--paperless-token", envvar="PAPERLESS_API_TOKEN", required=True)
 def check(paperless_url, paperless_token):
     """Verify connectivity to Paperless-ngx."""
     asyncio.run(_check_connection(paperless_url, paperless_token))
@@ -113,7 +113,7 @@ def check(paperless_url, paperless_token):
 
 @cli.command()
 @click.option("--paperless-url", envvar="PAPERLESS_URL", required=True)
-@click.option("--paperless-token", envvar="PAPERLESS_TOKEN", required=True)
+@click.option("--paperless-token", envvar="PAPERLESS_API_TOKEN", required=True)
 def setup(paperless_url, paperless_token):
     """Create EOB matching custom fields in Paperless.
 

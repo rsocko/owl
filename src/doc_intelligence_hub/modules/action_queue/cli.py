@@ -82,7 +82,7 @@ def views():
     from rich.table import Table
 
     async def _views():
-        client = PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_token)
+        client = PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_api_token)
         saved_views = await client.list_saved_views()
         if not saved_views:
             console.print("[yellow]No saved views found.[/yellow]")
@@ -114,7 +114,7 @@ def check():
     async def _check():
         console.print("[bold]Connectivity Check[/bold]\n")
 
-        client = PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_token)
+        client = PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_api_token)
         try:
             result = await client.health_check()
             ok = result.get("status") == "ok"

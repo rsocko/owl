@@ -38,7 +38,7 @@ def _sync_action_queue_settings(request: Request) -> None:
 
     token = hub_settings.resolved_paperless_token or (resolve_api_token(statement_config) if statement_config else None)
     if token:
-        action_queue_settings.paperless_token = token
+        action_queue_settings.paperless_api_token = token
 
     action_queue_settings.write_to_paperless = hub_settings.write_to_paperless
     action_queue_settings.ollama_url = hub_settings.ollama_url
