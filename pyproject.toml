@@ -46,7 +46,10 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"doc_intelligence_hub" = ["modules/statements/static/**"]
+"doc_intelligence_hub" = [
+  "modules/statements/static/**",
+  "api/static/**",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
