@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from doc_intelligence_hub.api.routers import action_queue, eob, statements, system
+from doc_intelligence_hub.api.routers import action_queue, eob, statements, stats, system
 from doc_intelligence_hub.modules.statements.api import _STATIC_DIR as _STATEMENTS_STATIC_DIR
 from doc_intelligence_hub.modules.statements.config import load_config
 
@@ -100,6 +100,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
             {"name": "statement-tracker", "description": "Statement discovery, recommendations, and provider overrides."},
             {"name": "eob-matching", "description": "EOB classification, extraction, matching, and Paperless linking."},
             {"name": "action-queue", "description": "Action Queue connectivity, dry-runs, and pipeline status."},
+            {"name": "stats", "description": "Aggregate statistics across all DI modules for MC integration."},
         ],
     )
 
@@ -107,6 +108,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.state.statement_tracker_config = settings.statement_tracker_config
     app.state.statement_tracker_config_loaded = _load_statement_tracker_config(settings.statement_tracker_config)
     app.state.last_queue_status = {"status": "idle", "message": "Action queue has not been run yet."}
+    app.state.last_eob_results = None
 
     _register_exception_handlers(app)
 
@@ -115,6 +117,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(statements.router, prefix="/api", include_in_schema=False)
     app.include_router(eob.router)
     app.include_router(action_queue.router)
+    app.include_router(stats.router)
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
