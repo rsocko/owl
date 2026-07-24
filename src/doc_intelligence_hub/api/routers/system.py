@@ -14,7 +14,13 @@ router = APIRouter(prefix="/api", tags=["system"])
 
 class LLMSettingsUpdate(BaseModel):
     llm_model: str | None = None
+    llm_base_url: str | None = None
     write_to_paperless: bool | None = None
+
+
+class LLMTestRequest(BaseModel):
+    base_url: str
+    model: str | None = None
 
 
 async def _paperless_status(request: Request) -> dict[str, Any]:
@@ -129,6 +135,9 @@ async def update_settings(request: Request, body: LLMSettingsUpdate) -> dict[str
     if body.llm_model is not None:
         hub.llm_model = body.llm_model
         changed.append("llm_model")
+    if body.llm_base_url is not None:
+        hub.llm_base_url = body.llm_base_url
+        changed.append("llm_base_url")
     if body.write_to_paperless is not None:
         hub.write_to_paperless = body.write_to_paperless
         changed.append("write_to_paperless")
@@ -137,11 +146,45 @@ async def update_settings(request: Request, body: LLMSettingsUpdate) -> dict[str
         "status": "ok",
         "changed": changed,
         "settings": {
-            "llm_base_url": llm.base_url,
+            "llm_base_url": hub.llm_base_url or llm.base_url,
             "llm_model": hub.llm_model or llm.model,
             "write_to_paperless": hub.write_to_paperless,
         },
     }
+
+
+@router.post("/llm/test")
+async def test_llm_connection(body: LLMTestRequest) -> dict[str, Any]:
+    """Test LLM connectivity using the provided URL (not the server-side default).
+
+    This is used by the settings UI 'Test Connection' button so users can verify
+    their entered Bifrost/Ollama URL before saving.
+    """
+    from openai import AsyncOpenAI
+
+    base_url = body.base_url.strip().rstrip("/")
+    model = body.model or get_llm_settings().model
+
+    client = AsyncOpenAI(base_url=base_url, api_key="bifrost", timeout=15.0)
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=5,
+        )
+        return {
+            "status": "ok",
+            "base_url": base_url,
+            "model": model,
+            "response": response.choices[0].message.content,
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "base_url": base_url,
+            "model": model,
+            "message": str(e),
+        }
 
 
 @router.get("/documents/{document_id}/preview")

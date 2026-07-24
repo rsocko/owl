@@ -726,9 +726,16 @@
 
     async function testOllama() {
         try {
-            const res = await fetch(API + '/api/queue/check');
+            const url = document.getElementById('cfg-ollama-url').value;
+            const model = document.getElementById('cfg-ollama-model').value;
+            if (!url) { alert('Please enter an Ollama/Bifrost URL first.'); return; }
+            const res = await fetch(API + '/api/llm/test', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ base_url: url, model: model || undefined })
+            });
             const data = await res.json();
-            const msg = `Ollama: ${data.ollama?.status || 'unknown'}\nURL: ${data.ollama?.base_url || '?'}\nModel: ${data.ollama?.model || '?'}`;
+            const msg = `LLM: ${data.status}\nURL: ${data.base_url || '?'}\nModel: ${data.model || '?'}${data.message ? '\nError: ' + data.message : ''}`;
             alert(msg);
         } catch(e) { alert('Error: ' + e.message); }
     }
