@@ -41,7 +41,7 @@ class HubSettings(BaseSettings):
     write_to_paperless: bool = False
     # LLM settings (used by admin UI status display; actual LLM config lives in LLM_* env vars)
     llm_base_url: str = "https://service-001.example.invalid/openai/v1"
-    llm_model: str = "phi3:mini"
+    llm_model: str = "gpt-4o-mini"
     # Legacy Ollama settings — kept for backwards compat with existing .env files
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "phi3:mini"

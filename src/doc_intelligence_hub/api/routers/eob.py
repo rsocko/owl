@@ -571,6 +571,12 @@ class BenchmarkRequest(BaseModel):
     limit: int = Field(default=5, ge=1, le=50, description="Number of documents to test per model")
     tags: list[str] | None = Field(default=None, description="Paperless tag filter")
     document_type: str | None = Field(default=None, description="Paperless document type filter")
+    created_after: str | None = Field(
+        default=None, description="Only docs created on/after this date (YYYY-MM-DD)"
+    )
+    created_before: str | None = Field(
+        default=None, description="Only docs created on/before this date (YYYY-MM-DD)"
+    )
     bifrost_url: str = Field(
         default="https://service-001.example.invalid/openai/v1",
         description="Bifrost gateway URL override",
@@ -616,6 +622,8 @@ async def run_model_benchmark(request: Request, body: BenchmarkRequest) -> dict[
         limit=body.limit,
         tags=body.tags,
         document_type=body.document_type,
+        created_after=body.created_after,
+        created_before=body.created_before,
     )
 
     if not documents:

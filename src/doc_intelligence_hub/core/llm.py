@@ -6,7 +6,7 @@ Bifrost, which handles model routing, failover, and provider abstraction.
 Environment variables:
     LLM_BASE_URL: Bifrost gateway URL (default: https://service-001.example.invalid/openai/v1)
     LLM_API_KEY: API key for Bifrost (default: "bifrost" — local gateway)
-    LLM_MODEL: Default model to use (default: phi3:mini — routed through Bifrost to Ollama)
+    LLM_MODEL: Default model to use (default: gpt-4o-mini — routed through Bifrost to Azure)
     LLM_TIMEOUT: Request timeout in seconds (default: 120)
 """
 
@@ -25,7 +25,7 @@ class LLMSettings(BaseSettings):
 
     base_url: str = "https://service-001.example.invalid/openai/v1"
     api_key: str = "bifrost"
-    model: str = "phi3:mini"
+    model: str = "gpt-4o-mini"
     timeout: float = 120.0
     temperature: float = 0.1
 
