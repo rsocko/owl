@@ -134,7 +134,7 @@ class PaperlessClient:
                 if type_id:
                     params["document_type__id"] = type_id
 
-            return await self._paginate(client, "/api/documents/", params, on_progress=on_progress)
+            return await self._paginate(client, "/api/documents/", params, limit=page_size, on_progress=on_progress)
 
     async def list_documents_by_tag_ids(self, tag_ids: list[int], *, page_size: int = 100) -> list[dict]:
         """Fetch documents matching any of the given tag IDs (union, deduplicated)."""
@@ -316,13 +316,18 @@ class PaperlessClient:
         endpoint: str,
         params: dict,
         *,
+        limit: Optional[int] = None,
         on_progress: Optional[ProgressCallback] = None,
     ) -> list[dict]:
-        """Paginate through all results for an endpoint."""
+        """Paginate through results for an endpoint, stopping early if limit is reached."""
         results: list[dict] = []
         page = 1
         params = {**params}
         params.setdefault("page_size", 100)
+
+        # If a limit is specified and smaller than page_size, reduce page_size to avoid over-fetching
+        if limit is not None and limit < params["page_size"]:
+            params["page_size"] = limit
 
         resp = await client.get(endpoint, params={**params, "page": page})
         resp.raise_for_status()
@@ -333,6 +338,10 @@ class PaperlessClient:
         if on_progress:
             await on_progress("fetching", "Fetching documents...", len(results), total)
 
+        # Stop early if we've gathered enough results
+        if limit is not None and len(results) >= limit:
+            return results[:limit]
+
         while data.get("next"):
             page += 1
             resp = await client.get(endpoint, params={**params, "page": page})
@@ -340,7 +349,10 @@ class PaperlessClient:
             data = resp.json()
             results.extend(data.get("results", []))
             if on_progress:
-                await on_progress("fetching", "Fetching documents...", len(results), total)
+                await on_progress("fetching", "Fetching documents...", min(len(results), total), total)
+            # Stop early if we've gathered enough results
+            if limit is not None and len(results) >= limit:
+                return results[:limit]
 
         return results
 
