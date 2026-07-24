@@ -81,10 +81,16 @@ async def fetch_eob_documents(
     limit: int = 5,
     tags: list[str] | None = None,
     document_type: str | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch EOB documents from Paperless for benchmarking.
 
     Returns list of dicts with 'id' and 'content' keys.
+
+    Args:
+        created_after: Only include docs created on or after this date (YYYY-MM-DD).
+        created_before: Only include docs created on or before this date (YYYY-MM-DD).
     """
     client = PaperlessClient(
         base_url=paperless_url,
@@ -98,6 +104,8 @@ async def fetch_eob_documents(
     documents = await client.list_documents(
         tags=tags,
         document_type=document_type,
+        created_after=created_after,
+        created_before=created_before,
         page_size=min(limit, 100),
     )
     documents = documents[:limit]

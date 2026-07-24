@@ -198,12 +198,14 @@ def purge_stale(ctx, dry_run):
 @click.option("--paperless-token", envvar="PAPERLESS_API_TOKEN", required=True, help="Paperless API token")
 @click.option("--tag", multiple=True, help="Filter by tag name")
 @click.option("--document-type", type=str, default=None, help="Filter by Paperless document type")
+@click.option("--created-after", type=str, default=None, help="Only docs created on/after this date (YYYY-MM-DD)")
+@click.option("--created-before", type=str, default=None, help="Only docs created on/before this date (YYYY-MM-DD)")
 @click.option("--limit", type=int, default=5, help="Number of documents to test per model")
 @click.option("--output", type=click.Path(), default=None, help="Save results to JSON file")
 @click.option("--bifrost-url", envvar="LLM_BASE_URL",
               default="https://service-001.example.invalid/openai/v1",
               help="Bifrost gateway URL")
-def benchmark(models, paperless_url, paperless_token, tag, document_type, limit, output, bifrost_url):
+def benchmark(models, paperless_url, paperless_token, tag, document_type, created_after, created_before, limit, output, bifrost_url):
     """Benchmark LLM models on EOB extraction for speed and accuracy.
 
     Fetches real EOB documents from Paperless and runs each model against them,
@@ -220,6 +222,8 @@ def benchmark(models, paperless_url, paperless_token, tag, document_type, limit,
         paperless_token=paperless_token,
         tags=list(tag) if tag else None,
         document_type=document_type,
+        created_after=created_after,
+        created_before=created_before,
         limit=limit,
         output_path=output,
         bifrost_url=bifrost_url,
@@ -644,6 +648,8 @@ async def _run_benchmark(
     paperless_token: str,
     tags: list[str] | None,
     document_type: str | None,
+    created_after: str | None,
+    created_before: str | None,
     limit: int,
     output_path: str | None,
     bifrost_url: str,
@@ -680,6 +686,8 @@ async def _run_benchmark(
             limit=limit,
             tags=tags,
             document_type=document_type,
+            created_after=created_after,
+            created_before=created_before,
         )
     except Exception as e:
         console.print(f"[red]✗ Failed to fetch documents:[/red] {e}")
