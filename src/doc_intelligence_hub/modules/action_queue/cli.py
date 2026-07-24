@@ -11,7 +11,8 @@ console = Console()
 @click.group()
 def cli():
     """Paperless Action Queue — Extract actions from your documents."""
-    pass
+    from doc_intelligence_hub.core.logging_config import configure_logging
+    configure_logging()
 
 
 @cli.command()

@@ -2,8 +2,10 @@
 
 import asyncio
 import io
+import logging
+import time
 from datetime import datetime, date
-from typing import Optional
+from typing import Any, Optional
 
 from rich.console import Console
 from rich.table import Table
@@ -15,8 +17,41 @@ from .analyzer import OllamaAnalyzer
 from .fallback_analyzer import RuleBasedAnalyzer
 from .enricher import PaperlessEnricher
 
+logger = logging.getLogger(__name__)
+
 # Use a file-based console to avoid Windows encoding issues when running under uvicorn
 console = Console(file=io.StringIO(), force_terminal=False, highlight=False)
+
+
+# ---------------------------------------------------------------------------
+# Progress tracking — read by the /api/queue/status endpoint while a run is
+# in flight. Since the pipeline runs on the same asyncio event loop as the
+# API server, other coroutines (like a concurrent status request) can read
+# this module-level state at any `await` point during the run.
+# ---------------------------------------------------------------------------
+_progress: dict[str, Any] = {"current_step": "idle", "progress": None, "current_document": None}
+_progress_start: Optional[float] = None
+
+
+def get_pipeline_progress() -> dict[str, Any]:
+    """Return a snapshot of the current/last pipeline run's progress."""
+    snapshot = dict(_progress)
+    if _progress_start is not None and snapshot.get("current_step") not in (None, "idle"):
+        snapshot["elapsed_seconds"] = round(time.monotonic() - _progress_start, 1)
+    else:
+        snapshot["elapsed_seconds"] = None
+    return snapshot
+
+
+def _reset_progress() -> None:
+    global _progress_start
+    _progress.clear()
+    _progress.update({"current_step": "starting", "progress": None, "current_document": None})
+    _progress_start = time.monotonic()
+
+
+def _set_progress(**kwargs: Any) -> None:
+    _progress.update(kwargs)
 
 
 def _make_paperless_client() -> PaperlessClient:
@@ -71,6 +106,14 @@ class Pipeline:
         """
         console.print("\n[bold blue]═══ Paperless Action Queue Pipeline ═══[/bold blue]\n")
 
+        run_start = time.monotonic()
+        _reset_progress()
+        _set_progress(current_step="fetching_documents")
+        logger.info(
+            "Pipeline run starting: limit=%s dry_run=%s force=%s read_only=%s document_id=%s",
+            limit, dry_run, force, not settings.write_to_paperless, document_id,
+        )
+
         # Build a correspondent ID→name cache
         self._correspondent_cache: dict[int, str] = {}
         try:
@@ -86,11 +129,13 @@ class Pipeline:
             try:
                 await self.enricher.ensure_custom_fields_exist()
                 console.print("[green]✓[/green] Custom fields ready\n")
+                logger.info("Custom fields verified/created in Paperless")
             except Exception as e:
                 console.print(
                     f"[yellow]⚠[/yellow] Custom fields check failed: {e}\n"
                     "[yellow]  Pipeline will continue — actions stored locally but not written to Paperless[/yellow]\n"
                 )
+                logger.warning("Custom fields check failed: %s — writes to Paperless disabled for this run", e)
                 self._enrichment_available = False
 
         # Step 2: Fetch documents based on provided filters
@@ -121,14 +166,17 @@ class Pipeline:
             documents = await self.paperless.list_documents(tags=tags)
 
         console.print(f"[green]✓[/green] Found {len(documents)} documents")
+        logger.info("Document fetch: found %d documents matching filters", len(documents))
 
         console.print()
 
         if not documents:
             console.print("[yellow]No documents to process.[/yellow]")
+            _set_progress(current_step="complete", progress="0/0 documents processed")
             return {"processed": 0, "skipped": 0, "failed": 0}
 
         # Filter out already-processed documents (unless force re-scan)
+        skipped_count = 0
         if not force:
             init_db()
             db_check = get_session()
@@ -145,14 +193,20 @@ class Pipeline:
             skipped_count = len(documents) - len(unprocessed)
             documents = unprocessed
             console.print(f"[dim]  {skipped_count} already processed, {len(documents)} new[/dim]")
+            logger.info(
+                "Document filter: %d already processed (skipped), %d new to analyze",
+                skipped_count, len(documents),
+            )
 
         # Apply limit AFTER filtering (limit means "analyze up to N new docs")
         if limit and len(documents) > limit:
             documents = documents[:limit]
             console.print(f"[dim]  (limited to {limit})[/dim]")
+            logger.info("Document limit applied: analyzing %d of the new documents", limit)
 
         if not documents:
             console.print("[yellow]No new documents to process.[/yellow]")
+            _set_progress(current_step="complete", progress="0/0 documents processed")
             return {"processed": 0, "skipped": skipped_count if not force else 0, "failed": 0, "no_action": 0}
 
         # Dry-run: just list what would be processed
@@ -173,134 +227,202 @@ class Pipeline:
                 )
             console.print(table)
             console.print(f"\n[dim]{len(documents)} documents would be processed.[/dim]")
+            logger.info("Dry run: %d documents would be processed (no analysis performed)", len(documents))
+            _set_progress(current_step="complete", progress=f"0/{len(documents)} documents processed (dry run)")
             return {"processed": 0, "skipped": 0, "failed": 0, "would_process": len(documents)}
 
         # Step 3: Process each document
         init_db()
         db = get_session()
-        stats = {"processed": 0, "skipped": 0, "failed": 0, "no_action": 0}
+        stats: dict[str, Any] = {"processed": 0, "skipped": 0, "failed": 0, "no_action": 0, "errors": [], "timed_out": False}
+        max_duration = settings.pipeline_max_duration_seconds
+        total_docs = len(documents)
 
-        for doc in documents:
+        _set_progress(current_step="analyzing", progress=f"0/{total_docs} documents processed")
+        logger.info("Beginning analysis of %d documents (pipeline timeout=%.0fs)", total_docs, max_duration)
+
+        for index, doc in enumerate(documents):
             doc_id = doc["id"]
             doc_title = doc.get("title", f"Document #{doc_id}")
+            doc_title_short = doc_title[:50]
 
-            console.print(f"  [dim]Analyzing:[/dim] {doc_title[:60]}...")
+            # Overall pipeline timeout — stop processing remaining documents.
+            elapsed = time.monotonic() - run_start
+            if elapsed > max_duration:
+                remaining = total_docs - index
+                logger.warning(
+                    "Pipeline max duration exceeded (%.0fs > %.0fs limit) — stopping with %d/%d "
+                    "documents processed, %d document(s) skipped due to timeout",
+                    elapsed, max_duration, index, total_docs, remaining,
+                )
+                stats["timed_out"] = True
+                stats["skipped"] += remaining
+                break
 
-            # Fetch full content if not already present
-            if "content" not in doc or not doc["content"]:
-                doc["content"] = await self.paperless.get_document_content(doc_id)
+            _set_progress(
+                current_step="analyzing",
+                progress=f"{index}/{total_docs} documents processed",
+                current_document=doc_title_short,
+            )
 
-            # Compute basic text quality metrics
-            content = doc.get("content", "")
-            text_metrics = self._compute_text_quality(content)
+            try:
+                console.print(f"  [dim]Analyzing:[/dim] {doc_title[:60]}...")
+                logger.info("Processing document: doc_id=%s title=%r (%d/%d)", doc_id, doc_title_short, index + 1, total_docs)
 
-            # Check if content is too short/empty to analyze
-            if text_metrics["content_length"] < 20:
-                console.print(f"  [yellow]⚠[/yellow] No/minimal text content — marking unreadable")
+                # Fetch full content if not already present
+                if "content" not in doc or not doc["content"]:
+                    doc["content"] = await self.paperless.get_document_content(doc_id)
+
+                # Compute basic text quality metrics
+                content = doc.get("content", "")
+                text_metrics = self._compute_text_quality(content)
+
+                # Check if content is too short/empty to analyze
+                if text_metrics["content_length"] < 20:
+                    console.print(f"  [yellow]⚠[/yellow] No/minimal text content — marking unreadable")
+                    logger.info("doc_id=%s: minimal/no text content — marking unreadable", doc_id)
+                    self._record_history(
+                        db, doc_id, success=True, disposition="unreadable",
+                        text_metrics=text_metrics,
+                    )
+                    stats["no_action"] += 1
+                    continue
+
+                # Analyze with Ollama (or fallback to rules if unavailable)
+                if self._ollama_available is None:
+                    self._ollama_available = await self.analyzer.health_check()
+                    if not self._ollama_available:
+                        console.print("[yellow]⚠ Ollama unavailable — using rule-based fallback[/yellow]\n")
+                        logger.warning("LLM gateway unavailable — using rule-based fallback for all documents")
+
+                extraction = None
+                if self._ollama_available:
+                    logger.info("doc_id=%s: entering LLM analysis step (model=%s)", doc_id, self.analyzer.model)
+                    extraction = await self.analyzer.analyze_document(doc)
+                    if not extraction:
+                        # Ollama returned nothing — try fallback for this doc
+                        logger.warning("doc_id=%s: LLM analysis failed — falling back to rule-based analyzer", doc_id)
+                        extraction = self.fallback_analyzer.analyze_document(doc)
+                else:
+                    extraction = self.fallback_analyzer.analyze_document(doc)
+
+                if not extraction:
+                    console.print(f"  [red]✗[/red] Analysis failed for document {doc_id}")
+                    logger.error("doc_id=%s: analysis failed (LLM and fallback both returned no result)", doc_id)
+                    self._record_history(
+                        db, doc_id, success=False, error="Ollama returned no result",
+                        disposition="low_confidence", text_metrics=text_metrics,
+                    )
+                    stats["failed"] += 1
+                    stats["errors"].append({
+                        "document_id": doc_id, "title": doc_title_short,
+                        "error": "Analysis failed — LLM and fallback both returned no result",
+                    })
+                    continue
+
+                assessment = extraction.get("document_assessment", {})
+                actions = extraction.get("actions", [])
+                overall_confidence = assessment.get("overall_confidence", 0)
+                text_quality = assessment.get("text_quality", "fair")
+
+                # Handle unreadable text
+                if text_quality == "unreadable":
+                    console.print(f"  [yellow]⚠[/yellow] Text quality: unreadable")
+                    logger.info("doc_id=%s: text quality unreadable", doc_id)
+                    self._record_history(
+                        db, doc_id, success=True, disposition="unreadable",
+                        text_metrics=text_metrics,
+                    )
+                    stats["no_action"] += 1
+                    continue
+
+                # Handle "no action needed" documents
+                if not assessment.get("requires_action", True) or not actions:
+                    console.print(f"  [dim]  ○ No action needed[/dim] (confidence: {overall_confidence}%)")
+                    logger.info("doc_id=%s: no action needed (confidence=%s%%)", doc_id, overall_confidence)
+                    self._record_history(
+                        db, doc_id, success=True, disposition="no_action_needed",
+                        text_metrics=text_metrics,
+                    )
+                    stats["no_action"] += 1
+                    continue
+
+                # Check confidence threshold
+                if overall_confidence < settings.confidence_threshold:
+                    console.print(
+                        f"  [yellow]⚠[/yellow] Low confidence ({overall_confidence}%) — recording but not enriching"
+                    )
+                    logger.info(
+                        "doc_id=%s: confidence %s%% below threshold %s%% — recording but not enriching",
+                        doc_id, overall_confidence, settings.confidence_threshold,
+                    )
+                    self._record_history(
+                        db, doc_id, success=True, disposition="low_confidence",
+                        error=f"Below threshold: {overall_confidence}%",
+                        text_metrics=text_metrics,
+                    )
+                    stats["no_action"] += 1
+                    continue
+
+                # Store ALL actions in internal DB
+                primary_idx = assessment.get("primary_action_index", 0)
+                stored_actions = []
+                for i, action_data in enumerate(actions):
+                    action = self._store_action(
+                        db, doc, action_data, assessment,
+                        is_primary=(i == primary_idx),
+                    )
+                    stored_actions.append(action)
+
+                # Enrich Paperless with PRIMARY action's data (only if writes enabled and available)
+                primary_action = actions[primary_idx] if primary_idx < len(actions) else actions[0]
+                if settings.write_to_paperless and self._enrichment_available:
+                    enrichment_data = {**primary_action, **assessment}
+                    logger.info(
+                        "doc_id=%s: enriching Paperless — action_type=%s urgency=%s fields=%s",
+                        doc_id, primary_action.get("action_type"), primary_action.get("urgency"),
+                        list(enrichment_data.keys()),
+                    )
+                    try:
+                        await self.enricher.enrich_document(doc_id, enrichment_data, action_count=len(actions))
+                        logger.info("doc_id=%s: enrichment succeeded", doc_id)
+                        # Track what we wrote so bidirectional sync knows our last state
+                        for a in stored_actions:
+                            a.last_synced_status = "pending"
+                    except Exception as e:
+                        console.print(f"  [yellow]⚠[/yellow] Stored but enrichment failed: {e}")
+                        logger.warning("doc_id=%s: stored locally but enrichment to Paperless failed: %s", doc_id, e)
+
+                action_summary = f"{primary_action['action_type']} — {primary_action['title'][:50]}"
+                if len(actions) > 1:
+                    action_summary += f" (+{len(actions)-1} more)"
+                console.print(f"  [green]✓[/green] {action_summary} (confidence: {overall_confidence}%)")
+                logger.info("doc_id=%s: processed successfully — %s", doc_id, action_summary)
+
                 self._record_history(
-                    db, doc_id, success=True, disposition="unreadable",
+                    db, doc_id, success=True, disposition="action_created",
                     text_metrics=text_metrics,
                 )
-                stats["no_action"] += 1
-                continue
+                stats["processed"] += 1
 
-            # Analyze with Ollama (or fallback to rules if unavailable)
-            if self._ollama_available is None:
-                self._ollama_available = await self.analyzer.health_check()
-                if not self._ollama_available:
-                    console.print("[yellow]⚠ Ollama unavailable — using rule-based fallback[/yellow]\n")
-
-            extraction = None
-            if self._ollama_available:
-                extraction = await self.analyzer.analyze_document(doc)
-                if not extraction:
-                    # Ollama returned nothing — try fallback for this doc
-                    extraction = self.fallback_analyzer.analyze_document(doc)
-            else:
-                extraction = self.fallback_analyzer.analyze_document(doc)
-
-            if not extraction:
-                console.print(f"  [red]✗[/red] Analysis failed for document {doc_id}")
-                self._record_history(
-                    db, doc_id, success=False, error="Ollama returned no result",
-                    disposition="low_confidence", text_metrics=text_metrics,
+            except Exception as e:
+                # Isolate per-document failures so one bad document can't kill the whole run.
+                console.print(f"  [red]✗[/red] Unexpected error processing document {doc_id}: {e}")
+                logger.error(
+                    "doc_id=%s title=%r: unexpected error during processing — continuing to next document",
+                    doc_id, doc_title_short, exc_info=True,
                 )
                 stats["failed"] += 1
+                stats["errors"].append({
+                    "document_id": doc_id, "title": doc_title_short, "error": str(e),
+                })
                 continue
-
-            assessment = extraction.get("document_assessment", {})
-            actions = extraction.get("actions", [])
-            overall_confidence = assessment.get("overall_confidence", 0)
-            text_quality = assessment.get("text_quality", "fair")
-
-            # Handle unreadable text
-            if text_quality == "unreadable":
-                console.print(f"  [yellow]⚠[/yellow] Text quality: unreadable")
-                self._record_history(
-                    db, doc_id, success=True, disposition="unreadable",
-                    text_metrics=text_metrics,
-                )
-                stats["no_action"] += 1
-                continue
-
-            # Handle "no action needed" documents
-            if not assessment.get("requires_action", True) or not actions:
-                console.print(f"  [dim]  ○ No action needed[/dim] (confidence: {overall_confidence}%)")
-                self._record_history(
-                    db, doc_id, success=True, disposition="no_action_needed",
-                    text_metrics=text_metrics,
-                )
-                stats["no_action"] += 1
-                continue
-
-            # Check confidence threshold
-            if overall_confidence < settings.confidence_threshold:
-                console.print(
-                    f"  [yellow]⚠[/yellow] Low confidence ({overall_confidence}%) — recording but not enriching"
-                )
-                self._record_history(
-                    db, doc_id, success=True, disposition="low_confidence",
-                    error=f"Below threshold: {overall_confidence}%",
-                    text_metrics=text_metrics,
-                )
-                stats["no_action"] += 1
-                continue
-
-            # Store ALL actions in internal DB
-            primary_idx = assessment.get("primary_action_index", 0)
-            stored_actions = []
-            for i, action_data in enumerate(actions):
-                action = self._store_action(
-                    db, doc, action_data, assessment,
-                    is_primary=(i == primary_idx),
-                )
-                stored_actions.append(action)
-
-            # Enrich Paperless with PRIMARY action's data (only if writes enabled and available)
-            primary_action = actions[primary_idx] if primary_idx < len(actions) else actions[0]
-            if settings.write_to_paperless and self._enrichment_available:
-                enrichment_data = {**primary_action, **assessment}
-                try:
-                    await self.enricher.enrich_document(doc_id, enrichment_data, action_count=len(actions))
-                    # Track what we wrote so bidirectional sync knows our last state
-                    for a in stored_actions:
-                        a.last_synced_status = "pending"
-                except Exception as e:
-                    console.print(f"  [yellow]⚠[/yellow] Stored but enrichment failed: {e}")
-
-            action_summary = f"{primary_action['action_type']} — {primary_action['title'][:50]}"
-            if len(actions) > 1:
-                action_summary += f" (+{len(actions)-1} more)"
-            console.print(f"  [green]✓[/green] {action_summary} (confidence: {overall_confidence}%)")
-
-            self._record_history(
-                db, doc_id, success=True, disposition="action_created",
-                text_metrics=text_metrics,
-            )
-            stats["processed"] += 1
 
         db.commit()
         db.close()
+
+        total_duration = time.monotonic() - run_start
+        _set_progress(current_step="complete", progress=f"{stats['processed']}/{total_docs} documents processed", current_document=None)
 
         # Summary
         console.print(f"\n[bold green]Done![/bold green]")
@@ -310,6 +432,12 @@ class Pipeline:
             f"Skipped: {stats['skipped']} | "
             f"Failed: {stats['failed']}"
         )
+        logger.info(
+            "Pipeline run complete: processed=%d no_action=%d skipped=%d failed=%d timed_out=%s duration=%.2fs",
+            stats["processed"], stats["no_action"], stats["skipped"], stats["failed"],
+            stats["timed_out"], total_duration,
+        )
+        stats["duration_seconds"] = round(total_duration, 2)
         return stats
 
     def _store_action(self, db, document: dict, action_data: dict, assessment: dict, is_primary: bool = True) -> Action:

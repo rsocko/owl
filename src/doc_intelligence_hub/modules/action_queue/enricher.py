@@ -1,9 +1,12 @@
 """Paperless custom field enricher — writes action metadata back to documents."""
 
+import logging
 from typing import Optional
 
 from doc_intelligence_hub.core.paperless import PaperlessClient
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _make_paperless_client() -> PaperlessClient:
@@ -93,6 +96,7 @@ class PaperlessEnricher:
                 created = await self.client.create_custom_field(field_def)
                 field_map[name] = created["id"]
                 print(f"  Created custom field: {name} (id={created['id']})")
+                logger.info("Created Paperless custom field: %s (id=%s)", name, created["id"])
                 # Cache select option IDs for newly created fields
                 if field_def.get("data_type") == "select":
                     self._cache_select_options(name, created)
@@ -203,6 +207,10 @@ class PaperlessEnricher:
         })
 
         if custom_fields:
+            logger.info(
+                "Writing %d custom field(s) to Paperless document_id=%s: %s",
+                len(custom_fields), document_id, [f["field"] for f in custom_fields],
+            )
             await self.client.update_custom_fields(document_id, custom_fields)
 
     async def sync_status(self, document_id: int, status: str) -> None:
