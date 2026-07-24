@@ -78,6 +78,36 @@ class PaperlessClient:
             "tags_access": str(tag_data.get("access", "ok")),
         }
 
+    async def check_custom_fields(self) -> dict[str, Any]:
+        """Check custom fields endpoint health — useful for diagnosing 500 errors."""
+        async with self._make_client() as client:
+            resp = await client.get("/api/custom_fields/")
+            if resp.status_code == 500:
+                # Try to get error details from response body
+                try:
+                    body = resp.text
+                except Exception:
+                    body = "(could not read response body)"
+                return {
+                    "status": "error",
+                    "http_status": 500,
+                    "detail": body[:500],
+                    "fix_hint": (
+                        "Paperless custom_fields endpoint returns 500. "
+                        "Check Paperless logs: docker logs paperless-ngx --tail 50. "
+                        "Common cause: corrupt select field options in DB. "
+                        "Fix: delete broken custom fields via Django shell or Paperless admin UI."
+                    ),
+                }
+            resp.raise_for_status()
+            data = resp.json()
+            results = data.get("results", data) if isinstance(data, dict) else data
+            return {
+                "status": "ok",
+                "count": len(results),
+                "fields": [{"id": f.get("id"), "name": f.get("name"), "data_type": f.get("data_type")} for f in results],
+            }
+
     # ------------------------------------------------------------------
     # Documents — read
     # ------------------------------------------------------------------
@@ -240,6 +270,17 @@ class PaperlessClient:
         """List all defined custom field definitions."""
         async with self._make_client() as client:
             resp = await client.get("/api/custom_fields/")
+            if resp.status_code == 500:
+                # Paperless may have internal issues with custom_fields endpoint;
+                # try paginated format as fallback
+                resp2 = await client.get("/api/custom_fields/?page=1&page_size=100")
+                if resp2.status_code == 500:
+                    raise RuntimeError(
+                        f"Paperless /api/custom_fields/ returns 500. "
+                        f"This is likely a Paperless-side issue (DB migration or corrupt field). "
+                        f"Check Paperless container logs: docker logs paperless-ngx"
+                    )
+                resp = resp2
             resp.raise_for_status()
             data = resp.json()
             if isinstance(data, dict) and "results" in data:

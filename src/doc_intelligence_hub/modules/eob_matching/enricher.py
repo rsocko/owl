@@ -13,18 +13,20 @@ CUSTOM_FIELD_DEFINITIONS = [
         "name": "EOB Match Status",
         "data_type": "select",
         "extra_data": {
-            "select_options": ["matched", "unmatched", "review_needed"],
+            "select_options": [
+                {"label": "matched"}, {"label": "unmatched"}, {"label": "review_needed"},
+            ],
         },
     },
     {
         "name": "EOB Match Score",
-        "data_type": "float",
+        "data_type": "decimal",
     },
     {
         "name": "EOB Match Confidence",
         "data_type": "select",
         "extra_data": {
-            "select_options": ["HIGH", "MEDIUM", "LOW"],
+            "select_options": [{"label": "HIGH"}, {"label": "MEDIUM"}, {"label": "LOW"}],
         },
     },
     {
@@ -35,12 +37,12 @@ CUSTOM_FIELD_DEFINITIONS = [
         "name": "EOB Document Type",
         "data_type": "select",
         "extra_data": {
-            "select_options": ["EOB", "BILL"],
+            "select_options": [{"label": "EOB"}, {"label": "BILL"}],
         },
     },
     {
         "name": "EOB Patient Responsibility",
-        "data_type": "float",
+        "data_type": "decimal",
     },
     {
         "name": "EOB Analyzed",
@@ -55,23 +57,48 @@ class EOBEnricher:
     def __init__(self, client: PaperlessClient):
         self.client = client
         self._field_id_cache: dict[str, int] = {}
+        self._select_option_cache: dict[str, dict[str, int]] = {}
 
     async def ensure_custom_fields_exist(self) -> dict[str, int]:
         """Create custom fields in Paperless if they don't exist."""
         existing = await self.client.list_custom_fields()
-        existing_names = {f["name"]: f["id"] for f in existing}
+        existing_by_name = {f["name"]: f for f in existing}
 
         field_map = {}
         for field_def in CUSTOM_FIELD_DEFINITIONS:
             name = field_def["name"]
-            if name in existing_names:
-                field_map[name] = existing_names[name]
+            if name in existing_by_name:
+                field_map[name] = existing_by_name[name]["id"]
+                if field_def.get("data_type") == "select":
+                    self._cache_select_options(name, existing_by_name[name])
             else:
                 created = await self.client.create_custom_field(field_def)
                 field_map[name] = created["id"]
+                if field_def.get("data_type") == "select":
+                    self._cache_select_options(name, created)
 
         self._field_id_cache = field_map
         return field_map
+
+    def _cache_select_options(self, field_name: str, field_data: dict) -> None:
+        """Build label -> option_id mapping for a select field."""
+        extra_data = field_data.get("extra_data", {})
+        options = extra_data.get("select_options", [])
+        option_map = {}
+        for opt in options:
+            if isinstance(opt, dict):
+                label = opt.get("label", "")
+                opt_id = opt.get("id")
+                if label and opt_id is not None:
+                    option_map[label] = opt_id
+        self._select_option_cache[field_name] = option_map
+
+    def _resolve_select_value(self, field_name: str, label: str) -> int | str:
+        """Resolve a select option label to its ID. Falls back to label if not cached."""
+        option_map = self._select_option_cache.get(field_name, {})
+        if label in option_map:
+            return option_map[label]
+        return label
 
     async def get_field_ids(self) -> dict[str, int]:
         if not self._field_id_cache:
@@ -94,11 +121,11 @@ class EOBEnricher:
 
         # Tag the EOB document
         eob_fields = [
-            {"field": field_ids["EOB Match Status"], "value": "matched"},
+            {"field": field_ids["EOB Match Status"], "value": self._resolve_select_value("EOB Match Status", "matched")},
             {"field": field_ids["EOB Match Score"], "value": round(score, 1)},
-            {"field": field_ids["EOB Match Confidence"], "value": confidence},
+            {"field": field_ids["EOB Match Confidence"], "value": self._resolve_select_value("EOB Match Confidence", confidence)},
             {"field": field_ids["EOB Matched Document"], "value": bill_document_id},
-            {"field": field_ids["EOB Document Type"], "value": "EOB"},
+            {"field": field_ids["EOB Document Type"], "value": self._resolve_select_value("EOB Document Type", "EOB")},
             {"field": field_ids["EOB Analyzed"], "value": today},
         ]
         if patient_responsibility is not None:
@@ -109,11 +136,11 @@ class EOBEnricher:
 
         # Tag the Bill document
         bill_fields = [
-            {"field": field_ids["EOB Match Status"], "value": "matched"},
+            {"field": field_ids["EOB Match Status"], "value": self._resolve_select_value("EOB Match Status", "matched")},
             {"field": field_ids["EOB Match Score"], "value": round(score, 1)},
-            {"field": field_ids["EOB Match Confidence"], "value": confidence},
+            {"field": field_ids["EOB Match Confidence"], "value": self._resolve_select_value("EOB Match Confidence", confidence)},
             {"field": field_ids["EOB Matched Document"], "value": eob_document_id},
-            {"field": field_ids["EOB Document Type"], "value": "BILL"},
+            {"field": field_ids["EOB Document Type"], "value": self._resolve_select_value("EOB Document Type", "BILL")},
             {"field": field_ids["EOB Analyzed"], "value": today},
         ]
         await self.client.update_custom_fields(bill_document_id, bill_fields)
@@ -124,7 +151,7 @@ class EOBEnricher:
 
         field_ids = await self.get_field_ids()
         await self.client.update_custom_fields(document_id, [
-            {"field": field_ids["EOB Match Status"], "value": "unmatched"},
-            {"field": field_ids["EOB Document Type"], "value": doc_type},
+            {"field": field_ids["EOB Match Status"], "value": self._resolve_select_value("EOB Match Status", "unmatched")},
+            {"field": field_ids["EOB Document Type"], "value": self._resolve_select_value("EOB Document Type", doc_type)},
             {"field": field_ids["EOB Analyzed"], "value": date.today().isoformat()},
         ])

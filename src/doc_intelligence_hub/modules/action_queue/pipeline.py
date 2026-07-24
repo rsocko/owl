@@ -33,6 +33,7 @@ class Pipeline:
         self.fallback_analyzer = RuleBasedAnalyzer()
         self.enricher = PaperlessEnricher()
         self._ollama_available: Optional[bool] = None
+        self._enrichment_available: bool = True
 
     async def run(
         self,
@@ -79,10 +80,18 @@ class Pipeline:
             pass  # Non-fatal — we'll fall back to IDs
 
         # Step 1: Ensure custom fields exist (skip in dry-run or read-only mode)
+        self._enrichment_available = True
         if not dry_run and settings.write_to_paperless:
             console.print("[dim]Checking custom fields...[/dim]")
-            await self.enricher.ensure_custom_fields_exist()
-            console.print("[green]✓[/green] Custom fields ready\n")
+            try:
+                await self.enricher.ensure_custom_fields_exist()
+                console.print("[green]✓[/green] Custom fields ready\n")
+            except Exception as e:
+                console.print(
+                    f"[yellow]⚠[/yellow] Custom fields check failed: {e}\n"
+                    "[yellow]  Pipeline will continue — actions stored locally but not written to Paperless[/yellow]\n"
+                )
+                self._enrichment_available = False
 
         # Step 2: Fetch documents based on provided filters
         if document_id:
@@ -267,9 +276,9 @@ class Pipeline:
                 )
                 stored_actions.append(action)
 
-            # Enrich Paperless with PRIMARY action's data (only if writes enabled)
+            # Enrich Paperless with PRIMARY action's data (only if writes enabled and available)
             primary_action = actions[primary_idx] if primary_idx < len(actions) else actions[0]
-            if settings.write_to_paperless:
+            if settings.write_to_paperless and self._enrichment_available:
                 enrichment_data = {**primary_action, **assessment}
                 try:
                     await self.enricher.enrich_document(doc_id, enrichment_data, action_count=len(actions))

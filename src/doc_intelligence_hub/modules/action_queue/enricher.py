@@ -15,7 +15,11 @@ CUSTOM_FIELD_DEFINITIONS = [
         "name": "Action Type",
         "data_type": "select",
         "extra_data": {
-            "select_options": ["PAY", "RESPOND", "FILE", "REVIEW", "SHARE", "SCHEDULE", "SIGN", "ARCHIVE"]
+            "select_options": [
+                {"label": "PAY"}, {"label": "RESPOND"}, {"label": "FILE"},
+                {"label": "REVIEW"}, {"label": "SHARE"}, {"label": "SCHEDULE"},
+                {"label": "SIGN"}, {"label": "ARCHIVE"},
+            ]
         },
     },
     {
@@ -24,20 +28,25 @@ CUSTOM_FIELD_DEFINITIONS = [
     },
     {
         "name": "Action Amount",
-        "data_type": "float",
+        "data_type": "decimal",
     },
     {
         "name": "Action Urgency",
         "data_type": "select",
         "extra_data": {
-            "select_options": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+            "select_options": [
+                {"label": "CRITICAL"}, {"label": "HIGH"},
+                {"label": "MEDIUM"}, {"label": "LOW"},
+            ]
         },
     },
     {
         "name": "Action Status",
         "data_type": "select",
         "extra_data": {
-            "select_options": ["pending", "completed", "dismissed"]
+            "select_options": [
+                {"label": "pending"}, {"label": "completed"}, {"label": "dismissed"},
+            ]
         },
     },
     {
@@ -61,6 +70,7 @@ class PaperlessEnricher:
     def __init__(self):
         self.client = _make_paperless_client()
         self._field_id_cache: dict[str, int] = {}
+        self._select_option_cache: dict[str, dict[str, int]] = {}
 
     async def ensure_custom_fields_exist(self) -> dict[str, int]:
         """Create custom fields in Paperless if they don't exist.
@@ -69,20 +79,47 @@ class PaperlessEnricher:
             Mapping of field name -> field ID
         """
         existing = await self.client.list_custom_fields()
-        existing_names = {f["name"]: f["id"] for f in existing}
+        existing_by_name = {f["name"]: f for f in existing}
 
         field_map = {}
         for field_def in CUSTOM_FIELD_DEFINITIONS:
             name = field_def["name"]
-            if name in existing_names:
-                field_map[name] = existing_names[name]
+            if name in existing_by_name:
+                field_map[name] = existing_by_name[name]["id"]
+                # Cache select option IDs for existing fields
+                if field_def.get("data_type") == "select":
+                    self._cache_select_options(name, existing_by_name[name])
             else:
                 created = await self.client.create_custom_field(field_def)
                 field_map[name] = created["id"]
                 print(f"  Created custom field: {name} (id={created['id']})")
+                # Cache select option IDs for newly created fields
+                if field_def.get("data_type") == "select":
+                    self._cache_select_options(name, created)
 
         self._field_id_cache = field_map
         return field_map
+
+    def _cache_select_options(self, field_name: str, field_data: dict) -> None:
+        """Build label -> option_id mapping for a select field."""
+        extra_data = field_data.get("extra_data", {})
+        options = extra_data.get("select_options", [])
+        option_map = {}
+        for opt in options:
+            if isinstance(opt, dict):
+                label = opt.get("label", "")
+                opt_id = opt.get("id")
+                if label and opt_id is not None:
+                    option_map[label] = opt_id
+        self._select_option_cache[field_name] = option_map
+
+    def _resolve_select_value(self, field_name: str, label: str) -> int | str:
+        """Resolve a select option label to its ID. Falls back to label if not cached."""
+        option_map = self._select_option_cache.get(field_name, {})
+        if label in option_map:
+            return option_map[label]
+        # Fallback: return label directly (works on some Paperless versions)
+        return label
 
     async def get_field_ids(self) -> dict[str, int]:
         """Get cached field IDs, populating cache if needed."""
@@ -109,11 +146,11 @@ class PaperlessEnricher:
 
         custom_fields = []
 
-        # Action Type
+        # Action Type (select)
         if extraction.get("action_type"):
             custom_fields.append({
                 "field": field_ids["Action Type"],
-                "value": extraction["action_type"],
+                "value": self._resolve_select_value("Action Type", extraction["action_type"]),
             })
 
         # Due Date
@@ -130,17 +167,17 @@ class PaperlessEnricher:
                 "value": extraction["amount"],
             })
 
-        # Urgency
+        # Urgency (select)
         if extraction.get("urgency"):
             custom_fields.append({
                 "field": field_ids["Action Urgency"],
-                "value": extraction["urgency"],
+                "value": self._resolve_select_value("Action Urgency", extraction["urgency"]),
             })
 
-        # Status (always starts as pending)
+        # Status (select — always starts as pending)
         custom_fields.append({
             "field": field_ids["Action Status"],
-            "value": "pending",
+            "value": self._resolve_select_value("Action Status", "pending"),
         })
 
         # Summary (include action count hint if multiple)
@@ -178,13 +215,14 @@ class PaperlessEnricher:
 
         field_ids = await self.get_field_ids()
         await self.client.update_custom_fields(document_id, [
-            {"field": field_ids["Action Status"], "value": status}
+            {"field": field_ids["Action Status"], "value": self._resolve_select_value("Action Status", status)}
         ])
 
     async def read_paperless_status(self, document_id: int) -> str | None:
         """Read the current Action Status value from Paperless.
 
         Used for bidirectional sync — detect if user changed the field in Paperless.
+        Returns the label string (e.g., "pending", "completed", "dismissed").
         """
         field_ids = await self.get_field_ids()
         status_field_id = field_ids.get("Action Status")
@@ -195,5 +233,11 @@ class PaperlessEnricher:
         custom_fields = doc.get("custom_fields", [])
         for field in custom_fields:
             if field.get("field") == status_field_id:
-                return field.get("value")
+                value = field.get("value")
+                # Reverse-map option ID back to label
+                option_map = self._select_option_cache.get("Action Status", {})
+                id_to_label = {v: k for k, v in option_map.items()}
+                if isinstance(value, int) and value in id_to_label:
+                    return id_to_label[value]
+                return value  # Already a string or unknown
         return None

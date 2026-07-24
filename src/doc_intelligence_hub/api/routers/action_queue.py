@@ -112,6 +112,14 @@ async def queue_check(request: Request) -> dict[str, Any]:
     }
 
 
+@router.get("/check/custom-fields")
+async def queue_check_custom_fields(request: Request) -> dict[str, Any]:
+    """Diagnostic: test Paperless custom_fields endpoint directly."""
+    _sync_action_queue_settings(request)
+    client = make_paperless_client(request, timeout=15.0)
+    return await client.check_custom_fields()
+
+
 @router.post("/run")
 async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
     _sync_action_queue_settings(request)
