@@ -570,6 +570,7 @@ class BenchmarkRequest(BaseModel):
     )
     limit: int = Field(default=5, ge=1, le=50, description="Number of documents to test per model")
     tags: list[str] | None = Field(default=None, description="Paperless tag filter")
+    document_type: str | None = Field(default=None, description="Paperless document type filter")
     bifrost_url: str = Field(
         default="https://service-001.example.invalid/openai/v1",
         description="Bifrost gateway URL override",
@@ -614,6 +615,7 @@ async def run_model_benchmark(request: Request, body: BenchmarkRequest) -> dict[
         paperless_token=paperless_token,
         limit=body.limit,
         tags=body.tags,
+        document_type=body.document_type,
     )
 
     if not documents:

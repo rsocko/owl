@@ -80,20 +80,26 @@ async def fetch_eob_documents(
     *,
     limit: int = 5,
     tags: list[str] | None = None,
+    document_type: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch EOB documents from Paperless for benchmarking.
 
     Returns list of dicts with 'id' and 'content' keys.
     """
-    if tags is None:
-        tags = ["medical"]
-
     client = PaperlessClient(
         base_url=paperless_url,
         token=paperless_token,
     )
 
-    documents = await client.list_documents(tags=tags, page_size=min(limit, 100))
+    # Default to the EOB document type if no filters specified
+    if tags is None and document_type is None:
+        document_type = "EOB - Explanation of Benefits"
+
+    documents = await client.list_documents(
+        tags=tags,
+        document_type=document_type,
+        page_size=min(limit, 100),
+    )
     documents = documents[:limit]
 
     results = []
