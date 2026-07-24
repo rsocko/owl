@@ -131,6 +131,66 @@ def init_db(ctx):
     console.print("[green]✓[/green] Database initialized")
 
 
+@cli.command("purge-stale")
+@click.option("--dry-run", is_flag=True, help="Show stale records without deleting them")
+@click.pass_context
+def purge_stale(ctx, dry_run):
+    """Purge stale EOB records with garbage extracted data.
+
+    Identifies records where the provider_name field contains document
+    boilerplate text (e.g. "The summary below is intended to help you
+    understand") that was incorrectly extracted before validation was added.
+
+    Criteria for stale records:
+    - provider_name contains >8 words
+    - provider_name matches known boilerplate phrases
+    - all amount fields are 0/null with suspiciously long provider name
+
+    Examples:\b
+        eob-match purge-stale --dry-run
+        eob-match purge-stale
+    """
+    from doc_intelligence_hub.modules.eob_matching.database import get_session as get_db_session
+    from doc_intelligence_hub.modules.eob_matching.purge import find_stale_eobs, purge_stale_eobs
+
+    _init_database(ctx.obj.get("db_url"))
+    db = get_db_session()
+
+    try:
+        if dry_run:
+            stale = find_stale_eobs(db)
+            if not stale:
+                console.print("[green]✓[/green] No stale EOB records found.")
+                return
+
+            console.print(f"[yellow]Found {len(stale)} stale EOB records:[/yellow]\n")
+            table = Table(title="Stale EOB Records")
+            table.add_column("ID", style="dim")
+            table.add_column("Doc ID")
+            table.add_column("Provider Name")
+            table.add_column("Amounts")
+            for r in stale:
+                amounts = f"B:{r.total_billed or 0} A:{r.total_allowed or 0} P:{r.total_plan_pays or 0} R:{r.total_patient_responsibility or 0}"
+                provider_display = (r.provider_name or "")[:60]
+                if len(r.provider_name or "") > 60:
+                    provider_display += "..."
+                table.add_row(str(r.id), str(r.document_id), provider_display, amounts)
+            console.print(table)
+            console.print("\n[dim]Run without --dry-run to delete these records.[/dim]")
+        else:
+            result = purge_stale_eobs(db)
+            if result.purged_count == 0:
+                console.print("[green]✓[/green] No stale EOB records found.")
+            else:
+                console.print(
+                    f"[green]✓[/green] Purged {result.purged_count} stale EOB records "
+                    f"and {result.orphaned_matches_removed} orphaned match records."
+                )
+                console.print(f"  Document IDs: {result.document_ids}")
+    finally:
+        db.close()
+
+
 @cli.command()
 @click.option("--last", type=int, default=10, help="Number of recent runs to show")
 @click.pass_context
