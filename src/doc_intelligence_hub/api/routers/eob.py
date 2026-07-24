@@ -21,6 +21,7 @@ from doc_intelligence_hub.modules.eob_matching.database import (
 )
 from doc_intelligence_hub.modules.eob_matching.enricher import EOBEnricher
 from doc_intelligence_hub.modules.eob_matching.extractor import extract_bill, extract_eob
+from doc_intelligence_hub.modules.eob_matching.llm_extractor import extract_bill_llm, extract_eob_llm
 from doc_intelligence_hub.modules.eob_matching.matcher import match_documents
 from doc_intelligence_hub.modules.eob_matching.models import DocumentType
 
@@ -224,7 +225,7 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
             }
 
             if classification.type == DocumentType.EOB:
-                extracted = extract_eob(content, document_id=str(document["id"]))
+                extracted = await extract_eob_llm(content, document_id=str(document["id"]))
                 extracted_eobs.append(extracted)
                 if body.verbose:
                     item["extracted"] = extracted.model_dump(mode="json")
@@ -251,7 +252,7 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
                 ))
 
             elif classification.type == DocumentType.BILL:
-                extracted = extract_bill(content, document_id=str(document["id"]))
+                extracted = await extract_bill_llm(content, document_id=str(document["id"]))
                 extracted_bills.append(extracted)
                 if body.verbose:
                     item["extracted"] = extracted.model_dump(mode="json")

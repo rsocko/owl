@@ -193,12 +193,12 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Ollama URL</label>
-                        <input type="url" id="ollama-url" placeholder="http://localhost:11434">
+                        <label>LLM Gateway (Bifrost)</label>
+                        <input type="url" id="llm-base-url" placeholder="http://bifrost:8080/openai/v1" disabled>
                     </div>
                     <div class="form-group">
-                        <label>Ollama Model</label>
-                        <input type="text" id="ollama-model" placeholder="phi3:mini">
+                        <label>LLM Model</label>
+                        <input type="text" id="llm-model" placeholder="phi3:mini">
                     </div>
                 </div>
                 <div class="form-group">
@@ -399,8 +399,8 @@
     async function loadConnectionPage() {
         try {
             const [settings, status] = await Promise.all([apiGet('/settings'), apiGet('/status')]);
-            document.getElementById('ollama-url').value = settings.ollama_url || '';
-            document.getElementById('ollama-model').value = settings.ollama_model || '';
+            document.getElementById('llm-base-url').value = settings.llm_base_url || settings.ollama_url || '';
+            document.getElementById('llm-model').value = settings.llm_model || settings.ollama_model || '';
             document.getElementById('paperless-url').value = settings.paperless_url || '';
             document.getElementById('write-to-paperless').checked = settings.write_to_paperless;
 
@@ -430,8 +430,7 @@
     async function saveConnectionSettings() {
         try {
             await apiPut('/settings', {
-                ollama_url: document.getElementById('ollama-url').value || undefined,
-                ollama_model: document.getElementById('ollama-model').value || undefined,
+                llm_model: document.getElementById('llm-model').value || undefined,
                 write_to_paperless: document.getElementById('write-to-paperless').checked,
             });
             showToast('Settings saved');
