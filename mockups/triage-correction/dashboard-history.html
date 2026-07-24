@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Intelligence — Correction History &amp; Dashboard</title>
+  <style>
+    :root {
+      --bg: #f5f6fa;
+      --card: #ffffff;
+      --border: #e0e3ea;
+      --text: #1a1d2e;
+      --muted: #6b7280;
+      --accent: #3498db;
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+      --purple: #8b5cf6;
+      --orange: #f97316;
+      --teal: #14b8a6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    .topnav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: 48px; gap: 24px; }
+    .topnav-brand { font-weight: 800; font-size: 15px; color: var(--accent); }
+    .topnav-links { display: flex; gap: 4px; }
+    .topnav-link { padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--muted); text-decoration: none; }
+    .topnav-link.active { color: var(--accent); background: #eef6ff; }
+    .topnav-link .badge { position: relative; top: -6px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; }
+
+    .page { max-width: 1100px; margin: 0 auto; padding: 20px 24px; }
+
+    /* ── View switcher ── */
+    .view-tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 2px solid var(--border); }
+    .view-tab { padding: 10px 18px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; border: none; background: none; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+    .view-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .btn { border: none; border-radius: 7px; padding: 8px 14px; font-size: 12px; cursor: pointer; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+
+    /* ════════════════════════════════════════════════════ */
+    /* ── DASHBOARD ── */
+    /* ════════════════════════════════════════════════════ */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+    .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    .stat-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .stat-card-title { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+    .stat-card-icon { font-size: 18px; }
+    .stat-value { font-size: 28px; font-weight: 800; }
+    .stat-change { font-size: 11px; margin-top: 4px; }
+    .stat-change.up { color: var(--success); }
+    .stat-change.down { color: var(--danger); }
+    .stat-change.neutral { color: var(--muted); }
+
+    .mc-float-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; font-size: 9px; font-weight: 700; background: #fde8e8; color: var(--danger); margin-top: 6px; }
+
+    /* ── Activity feed ── */
+    .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .dash-section { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    .dash-section-title { font-size: 13px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+    .dash-section-title .mc-badge { font-size: 9px; padding: 2px 6px; border-radius: 4px; background: #fde8e8; color: var(--danger); font-weight: 700; }
+
+    .activity-item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .activity-item:last-child { border-bottom: none; }
+    .activity-icon { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
+    .activity-icon.match { background: #d1fae5; }
+    .activity-icon.reject { background: #fde8e8; }
+    .activity-icon.merge { background: #ede9fe; }
+    .activity-icon.meta { background: #dbeafe; }
+    .activity-icon.orphan { background: #fef3c7; }
+    .activity-text { flex: 1; font-size: 12px; line-height: 1.4; }
+    .activity-text strong { font-weight: 700; }
+    .activity-time { font-size: 10px; color: var(--muted); flex-shrink: 0; }
+
+    /* ── Pending queue breakdown ── */
+    .queue-breakdown { }
+    .qb-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .qb-row:last-child { border-bottom: none; }
+    .qb-type { font-size: 12px; font-weight: 600; flex: 1; }
+    .qb-bar-bg { width: 120px; height: 8px; background: #f0f0f0; border-radius: 4px; overflow: hidden; }
+    .qb-bar { height: 100%; border-radius: 4px; }
+    .qb-count { font-size: 12px; font-weight: 700; width: 30px; text-align: right; }
+
+    /* ── Match rate chart (simple bar) ── */
+    .match-chart { }
+    .mc-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .mc-label { font-size: 11px; width: 50px; color: var(--muted); }
+    .mc-bar-bg { flex: 1; height: 16px; background: #f0f0f0; border-radius: 4px; overflow: hidden; position: relative; }
+    .mc-bar { height: 100%; border-radius: 4px; display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; font-size: 9px; font-weight: 700; color: #fff; }
+
+    /* ════════════════════════════════════════════════════ */
+    /* ── CORRECTION HISTORY ── */
+    /* ════════════════════════════════════════════════════ */
+    .history-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .history-filters { display: flex; gap: 6px; }
+    .filter-chip { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; border: 1px solid var(--border); background: var(--card); cursor: pointer; color: var(--muted); }
+    .filter-chip.active { border-color: var(--accent); background: #eef6ff; color: var(--accent); }
+
+    .history-list { display: flex; flex-direction: column; gap: 8px; }
+    .history-entry { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+    .he-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .he-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
+    .he-icon.match { background: #d1fae5; }
+    .he-icon.reject { background: #fde8e8; }
+    .he-icon.merge { background: #ede9fe; }
+    .he-icon.meta { background: #dbeafe; }
+    .he-icon.orphan { background: #fef3c7; }
+    .he-icon.split { background: #fce7f3; }
+    .he-title { font-size: 13px; font-weight: 700; flex: 1; }
+    .he-time { font-size: 10px; color: var(--muted); }
+    .he-body { margin-left: 42px; }
+    .he-detail { font-size: 12px; color: var(--muted); margin-bottom: 6px; line-height: 1.5; }
+
+    /* Before/after diff */
+    .he-diff { background: #f8f9fc; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 11px; font-family: 'Cascadia Code', monospace; }
+    .he-diff-row { display: flex; gap: 8px; padding: 2px 0; }
+    .he-diff-label { width: 70px; font-weight: 600; color: var(--muted); flex-shrink: 0; }
+    .he-diff-old { color: var(--danger); text-decoration: line-through; }
+    .he-diff-new { color: var(--success); font-weight: 600; }
+    .he-diff-arrow { color: var(--muted); }
+
+    /* Paperless sync indicator */
+    .he-sync { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 10px; }
+    .he-sync-badge { padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+    .he-sync-badge.synced { background: #d1fae5; color: #065f46; }
+    .he-sync-badge.pending { background: #fef3c7; color: #92400e; }
+    .he-sync-badge.audit { background: #dbeafe; color: #1e40af; }
+
+    /* Undo button */
+    .he-actions { margin-top: 6px; display: flex; gap: 6px; }
+    .he-undo { font-size: 10px; color: var(--accent); cursor: pointer; font-weight: 600; border: none; background: none; text-decoration: underline; }
+
+    /* Integration note */
+    .integration-note { background: #eef6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-size: 12px; color: #1e40af; line-height: 1.5; }
+  </style>
+</head>
+<body>
+
+<nav class="topnav">
+  <span class="topnav-brand">📄 DI Admin</span>
+  <div class="topnav-links">
+    <a href="#" class="topnav-link active">Dashboard</a>
+    <a href="#" class="topnav-link">Triage <span class="badge">14</span></a>
+    <a href="#" class="topnav-link">Insights</a>
+    <a href="#" class="topnav-link">Rules</a>
+    <a href="#" class="topnav-link">History</a>
+    <a href="#" class="topnav-link">Config</a>
+  </div>
+</nav>
+
+<div class="page">
+
+  <!-- View toggle between Dashboard and History -->
+  <div class="view-tabs">
+    <button class="view-tab active" onclick="showView('dashboard')">📊 Dashboard</button>
+    <button class="view-tab" onclick="showView('history')">📜 Correction History</button>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- DASHBOARD VIEW                                       -->
+  <!-- ════════════════════════════════════════════════════ -->
+  <div id="view-dashboard">
+
+    <!-- Stats row -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-card-header">
+          <span class="stat-card-title">Pending Triage</span>
+          <span class="stat-card-icon">📥</span>
+        </div>
+        <div class="stat-value">14</div>
+        <div class="stat-change down">↑ 3 from last week</div>
+        <div class="mc-float-badge">🚨 4 escalated to MC</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-header">
+          <span class="stat-card-title">Match Rate</span>
+          <span class="stat-card-icon">🎯</span>
+        </div>
+        <div class="stat-value" style="color:var(--success);">92%</div>
+        <div class="stat-change up">↑ 3% from last month</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-header">
+          <span class="stat-card-title">Triaged This Month</span>
+          <span class="stat-card-icon">✅</span>
+        </div>
+        <div class="stat-value">47</div>
+        <div class="stat-change neutral">Avg 2.1 min per item</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-header">
+          <span class="stat-card-title">Extraction Accuracy</span>
+          <span class="stat-card-icon">🧠</span>
+        </div>
+        <div class="stat-value" style="color:var(--accent);">87%</div>
+        <div class="stat-change up">↑ 5% (corrections improving model)</div>
+      </div>
+    </div>
+
+    <div class="dashboard-grid">
+
+      <!-- Left: Queue breakdown + match chart -->
+      <div>
+        <!-- Pending queue breakdown -->
+        <div class="dash-section" style="margin-bottom:16px;">
+          <div class="dash-section-title">
+            📥 Pending Queue Breakdown
+            <span class="mc-badge">4 in MC</span>
+          </div>
+          <div class="queue-breakdown">
+            <div class="qb-row">
+              <span class="qb-type">📋 EOB Matches</span>
+              <div class="qb-bar-bg"><div class="qb-bar" style="width:36%;background:var(--accent);"></div></div>
+              <span class="qb-count">5</span>
+            </div>
+            <div class="qb-row">
+              <span class="qb-type">👻 Orphans</span>
+              <div class="qb-bar-bg"><div class="qb-bar" style="width:22%;background:var(--warning);"></div></div>
+              <span class="qb-count">3</span>
+            </div>
+            <div class="qb-row">
+              <span class="qb-type">📋 Duplicates</span>
+              <div class="qb-bar-bg"><div class="qb-bar" style="width:22%;background:var(--purple);"></div></div>
+              <span class="qb-count">3</span>
+            </div>
+            <div class="qb-row">
+              <span class="qb-type">✏️ Metadata Issues</span>
+              <div class="qb-bar-bg"><div class="qb-bar" style="width:14%;background:var(--teal);"></div></div>
+              <span class="qb-count">2</span>
+            </div>
+            <div class="qb-row">
+              <span class="qb-type">📂 Grouping Issues</span>
+              <div class="qb-bar-bg"><div class="qb-bar" style="width:7%;background:var(--orange);"></div></div>
+              <span class="qb-count">1</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Match rate by month -->
+        <div class="dash-section">
+          <div class="dash-section-title">🎯 Auto-Match Rate (6 months)</div>
+          <div class="match-chart">
+            <div class="mc-row"><span class="mc-label">Feb</span><div class="mc-bar-bg"><div class="mc-bar" style="width:78%;background:var(--warning);">78%</div></div></div>
+            <div class="mc-row"><span class="mc-label">Mar</span><div class="mc-bar-bg"><div class="mc-bar" style="width:82%;background:var(--warning);">82%</div></div></div>
+            <div class="mc-row"><span class="mc-label">Apr</span><div class="mc-bar-bg"><div class="mc-bar" style="width:85%;background:var(--accent);">85%</div></div></div>
+            <div class="mc-row"><span class="mc-label">May</span><div class="mc-bar-bg"><div class="mc-bar" style="width:88%;background:var(--accent);">88%</div></div></div>
+            <div class="mc-row"><span class="mc-label">Jun</span><div class="mc-bar-bg"><div class="mc-bar" style="width:89%;background:var(--accent);">89%</div></div></div>
+            <div class="mc-row"><span class="mc-label">Jul</span><div class="mc-bar-bg"><div class="mc-bar" style="width:92%;background:var(--success);">92%</div></div></div>
+          </div>
+          <div style="font-size:10px;color:var(--muted);margin-top:6px;">📈 Match rate improves as correction data trains the extraction model</div>
+        </div>
+      </div>
+
+      <!-- Right: Recent activity -->
+      <div>
+        <div class="dash-section">
+          <div class="dash-section-title">🕐 Recent Activity</div>
+          <div>
+            <div class="activity-item">
+              <div class="activity-icon match">✅</div>
+              <div class="activity-text"><strong>Confirmed</strong> EOB match: Aetna ↔ Lab Corp blood work ($48.00)</div>
+              <span class="activity-time">2h ago</span>
+            </div>
+            <div class="activity-item">
+              <div class="activity-icon merge">🔗</div>
+              <div class="activity-text"><strong>Merged</strong> duplicate: City Medical Jan bill (mail + portal copies)</div>
+              <span class="activity-time">2h ago</span>
+            </div>
+            <div class="activity-item">
+              <div class="activity-icon meta">✏️</div>
+              <div class="activity-text"><strong>Corrected</strong> provider name on BCBS EOB: "Ci+y Medica1" → "City Medical Center"</div>
+              <span class="activity-time">3h ago</span>
+            </div>
+            <div class="activity-item">
+              <div class="activity-icon reject">❌</div>
+              <div class="activity-text"><strong>Rejected</strong> match: UHC EOB ≠ Dr. Smith bill (wrong patient)</div>
+              <span class="activity-time">3h ago</span>
+            </div>
+            <div class="activity-item">
+              <div class="activity-icon orphan">⏸</div>
+              <div class="activity-text"><strong>Deferred</strong> orphan bill: Radiology Associates X-Ray (waiting for EOB)</div>
+              <span class="activity-time">yesterday</span>
+            </div>
+            <div class="activity-item">
+              <div class="activity-icon match">✅</div>
+              <div class="activity-text"><strong>Auto-confirmed</strong> 12 EOB matches (bulk ≥90% confidence)</div>
+              <span class="activity-time">yesterday</span>
+            </div>
+            <div class="activity-item">
+              <div class="activity-icon meta">✏️</div>
+              <div class="activity-text"><strong>Added</strong> missing patient name to 3 documents (batch correction)</div>
+              <span class="activity-time">2 days ago</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Notifications/scheduling summary -->
+        <div class="dash-section" style="margin-top:16px;">
+          <div class="dash-section-title">🔔 Notifications & Schedule</div>
+          <div style="font-size:12px;line-height:1.8;">
+            <div>📧 <strong>Weekly digest:</strong> Sundays 9 AM — triage summary + pending items</div>
+            <div>🚨 <strong>MC alerts:</strong> Real-time for escalated items (orphans >60d, spend spikes >50%)</div>
+            <div>📊 <strong>Analysis runs:</strong> Daily 2 AM (basic rules), Weekly Sun 3 AM (LLM rules)</div>
+            <div>🔄 <strong>Next scheduled run:</strong> Tonight 2:00 AM — 4 basic rules, 1 n8n workflow</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- CORRECTION HISTORY VIEW                              -->
+  <!-- ════════════════════════════════════════════════════ -->
+  <div id="view-history" style="display:none;">
+
+    <div class="integration-note">
+      <strong>📋 Dual History Sources:</strong> Corrections are tracked in both the DI <code>correction_events</code> table (with training context) and the <strong>Paperless audit log</strong> (django-auditlog, on by default since v2.7). When DI writes back to Paperless via <code>PATCH /api/documents/{'{id}'}/</code>, the audit log auto-records the change with before/after values under the DI service account. The "🔗 Synced to Paperless" badges below indicate successful writeback.
+    </div>
+
+    <div class="history-header">
+      <div style="font-size:16px;font-weight:700;">Correction History</div>
+      <div class="history-filters">
+        <span class="filter-chip active">All</span>
+        <span class="filter-chip">Match changes</span>
+        <span class="filter-chip">Metadata fixes</span>
+        <span class="filter-chip">Merges</span>
+        <span class="filter-chip">Orphan resolutions</span>
+        <span class="filter-chip">Series changes</span>
+      </div>
+    </div>
+
+    <div class="history-list">
+
+      <!-- Match confirmed -->
+      <div class="history-entry">
+        <div class="he-header">
+          <div class="he-icon match">✅</div>
+          <div class="he-title">Confirmed EOB ↔ Bill Match</div>
+          <div class="he-time">Today, 2:15 PM</div>
+        </div>
+        <div class="he-body">
+          <div class="he-detail">
+            Confirmed auto-match between <strong>Aetna EOB #1456</strong> (Claim 2024-3847) and <strong>Lab Corp Bill #1502</strong> ($48.00). Match confidence was 87%.
+          </div>
+          <div class="he-sync">
+            <span class="he-sync-badge synced">✅ Synced to Paperless</span>
+            <span style="color:var(--muted);">Tag "eob-matched:1456" added to #1502</span>
+          </div>
+          <div class="he-sync">
+            <span class="he-sync-badge audit">📋 Audit logged</span>
+            <span style="color:var(--muted);">Paperless audit log entry for #1502 by user "di-service"</span>
+          </div>
+          <div class="he-actions">
+            <button class="he-undo">↩ Undo (unlink match)</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Duplicate merge -->
+      <div class="history-entry">
+        <div class="he-header">
+          <div class="he-icon merge">🔗</div>
+          <div class="he-title">Merged Duplicate Documents</div>
+          <div class="he-time">Today, 2:10 PM</div>
+        </div>
+        <div class="he-body">
+          <div class="he-detail">
+            Merged <strong>City Medical Jan bill</strong>: kept <strong>#1302</strong> (mail scan, 98% OCR) as primary, archived <strong>#1318</strong> (portal download, 91% OCR). Similarity: 96%.
+          </div>
+          <div class="he-diff">
+            <div class="he-diff-row">
+              <span class="he-diff-label">#1318 tags:</span>
+              <span class="he-diff-old">medical, bill</span>
+              <span class="he-diff-arrow">→</span>
+              <span class="he-diff-new">medical, bill, duplicate-of:1302</span>
+            </div>
+            <div class="he-diff-row">
+              <span class="he-diff-label">#1302 links:</span>
+              <span class="he-diff-old">(none)</span>
+              <span class="he-diff-arrow">→</span>
+              <span class="he-diff-new">has-duplicate:1318</span>
+            </div>
+          </div>
+          <div class="he-sync">
+            <span class="he-sync-badge synced">✅ Synced to Paperless</span>
+            <span style="color:var(--muted);">Tags updated on both #1302 and #1318</span>
+          </div>
+          <div class="he-actions">
+            <button class="he-undo">↩ Undo (unmerge)</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Metadata correction with diff -->
+      <div class="history-entry">
+        <div class="he-header">
+          <div class="he-icon meta">✏️</div>
+          <div class="he-title">Corrected Metadata — BCBS EOB #1489</div>
+          <div class="he-time">Today, 1:45 PM</div>
+        </div>
+        <div class="he-body">
+          <div class="he-detail">
+            Corrected 2 fields with low extraction confidence. Changes written back to Paperless custom fields.
+          </div>
+          <div class="he-diff">
+            <div class="he-diff-row">
+              <span class="he-diff-label">provider:</span>
+              <span class="he-diff-old">"Ci+y Medica1 Cen+er" (42%)</span>
+              <span class="he-diff-arrow">→</span>
+              <span class="he-diff-new">"City Medical Center" (user corrected)</span>
+            </div>
+            <div class="he-diff-row">
+              <span class="he-diff-label">patient:</span>
+              <span class="he-diff-old">(missing)</span>
+              <span class="he-diff-arrow">→</span>
+              <span class="he-diff-new">"John Doe" (user added)</span>
+            </div>
+          </div>
+          <div class="he-sync">
+            <span class="he-sync-badge synced">✅ Synced to Paperless</span>
+            <span style="color:var(--muted);">Custom fields di_provider_name, di_patient_name updated on #1489</span>
+          </div>
+          <div class="he-sync">
+            <span class="he-sync-badge audit">📋 Audit logged</span>
+            <span style="color:var(--muted);">Paperless History tab shows before/after for both fields</span>
+          </div>
+          <div class="he-sync" style="margin-top:4px;">
+            <span style="font-size:10px;color:var(--purple);font-weight:600;">🧠 Training data saved</span>
+            <span style="font-size:10px;color:var(--muted);">2 extraction_corrections rows for future model improvement</span>
+          </div>
+          <div class="he-actions">
+            <button class="he-undo">↩ Undo (revert to original values)</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Match rejected -->
+      <div class="history-entry">
+        <div class="he-header">
+          <div class="he-icon reject">❌</div>
+          <div class="he-title">Rejected EOB ↔ Bill Match</div>
+          <div class="he-time">Today, 1:30 PM</div>
+        </div>
+        <div class="he-body">
+          <div class="he-detail">
+            Rejected auto-match between <strong>UHC EOB #1472</strong> and <strong>Dr. Smith Bill #1490</strong>. Reason: wrong patient — EOB is for John Doe but bill is for Jane Doe.
+          </div>
+          <div class="he-diff">
+            <div class="he-diff-row">
+              <span class="he-diff-label">match status:</span>
+              <span class="he-diff-old">unreviewed (74% confidence)</span>
+              <span class="he-diff-arrow">→</span>
+              <span class="he-diff-new">rejected</span>
+            </div>
+            <div class="he-diff-row">
+              <span class="he-diff-label">reason:</span>
+              <span class="he-diff-new">Wrong patient (John ≠ Jane)</span>
+            </div>
+          </div>
+          <div class="he-sync" style="margin-top:4px;">
+            <span style="font-size:10px;color:var(--purple);font-weight:600;">🧠 Negative training example</span>
+            <span style="font-size:10px;color:var(--muted);">Same provider + different patient = no match</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Orphan resolved -->
+      <div class="history-entry">
+        <div class="he-header">
+          <div class="he-icon orphan">⏸</div>
+          <div class="he-title">Deferred Orphan Bill</div>
+          <div class="he-time">Yesterday, 4:20 PM</div>
+        </div>
+        <div class="he-body">
+          <div class="he-detail">
+            Marked <strong>Radiology Associates X-Ray #1510</strong> as "Waiting for EOB" — snoozed 30 days. Will re-flag on Aug 23, 2024 if still unmatched.
+          </div>
+        </div>
+      </div>
+
+      <!-- Bulk auto-confirm -->
+      <div class="history-entry">
+        <div class="he-header">
+          <div class="he-icon match">✅</div>
+          <div class="he-title">Bulk Auto-Confirm (12 matches)</div>
+          <div class="he-time">Yesterday, 10:00 AM</div>
+        </div>
+        <div class="he-body">
+          <div class="he-detail">
+            Auto-confirmed <strong>12 EOB ↔ Bill matches</strong> with confidence ≥ 90%. All matches had exact provider + date + patient + amount match.
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px;">
+            Documents: #1401↔#1415, #1403↔#1420, #1408↔#1422, #1410↔#1425, #1412↔#1428, #1414↔#1430, #1416↔#1432, #1418↔#1435, #1420↔#1438, #1422↔#1440, #1424↔#1442, #1426↔#1445
+          </div>
+          <div class="he-sync">
+            <span class="he-sync-badge synced">✅ 24 Paperless docs updated</span>
+          </div>
+          <div class="he-actions">
+            <button class="he-undo">↩ Undo all (unconfirm 12 matches)</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Series split -->
+      <div class="history-entry">
+        <div class="he-header">
+          <div class="he-icon split">✂️</div>
+          <div class="he-title">Split Statement Series</div>
+          <div class="he-time">3 days ago</div>
+        </div>
+        <div class="he-body">
+          <div class="he-detail">
+            Split <strong>"Lab Corp Statements"</strong> into two series: kept original for account LC-889012, created <strong>"Lab Corp — Account LC-776543"</strong> for the other account.
+          </div>
+          <div class="he-diff">
+            <div class="he-diff-row">
+              <span class="he-diff-label">original:</span>
+              <span class="he-diff-old">Lab Corp Statements (8 docs)</span>
+              <span class="he-diff-arrow">→</span>
+              <span class="he-diff-new">Lab Corp Statements (5 docs)</span>
+            </div>
+            <div class="he-diff-row">
+              <span class="he-diff-label">new series:</span>
+              <span class="he-diff-new">Lab Corp — Account LC-776543 (3 docs)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+function showView(view) {
+  document.getElementById('view-dashboard').style.display = view === 'dashboard' ? '' : 'none';
+  document.getElementById('view-history').style.display = view === 'history' ? '' : 'none';
+  document.querySelectorAll('.view-tab').forEach(function(t) { t.classList.remove('active'); });
+  event.target.classList.add('active');
+}
+</script>
+
+</body>
+</html>

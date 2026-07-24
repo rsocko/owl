@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Intelligence — Insights Tab</title>
+  <style>
+    :root {
+      --bg: #f5f6fa;
+      --card: #ffffff;
+      --border: #e0e3ea;
+      --text: #1a1d2e;
+      --muted: #6b7280;
+      --accent: #3498db;
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+      --purple: #8b5cf6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    /* ── Top nav ── */
+    .topnav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: 48px; gap: 24px; }
+    .topnav-brand { font-weight: 800; font-size: 15px; color: var(--accent); }
+    .topnav-links { display: flex; gap: 4px; }
+    .topnav-link { padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--muted); text-decoration: none; position: relative; }
+    .topnav-link.active { color: var(--accent); background: #eef6ff; }
+    .topnav-link .badge { position: absolute; top: 1px; right: 1px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; }
+    .topnav-link .badge-info { position: absolute; top: 1px; right: 1px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; }
+
+    /* ── Page ── */
+    .page { max-width: 960px; margin: 0 auto; padding: 24px; }
+
+    /* ── Filters ── */
+    .filters { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .filter-tabs { display: flex; gap: 3px; }
+    .filter-tab { padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; background: transparent; color: var(--muted); }
+    .filter-tab.active { background: var(--accent); color: #fff; }
+    .filter-select { padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 12px; background: var(--card); color: var(--text); }
+    .filter-sep { width: 1px; height: 20px; background: var(--border); }
+    .filter-search { padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 12px; flex: 1; min-width: 140px; }
+    .filter-search:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+    /* ── Insight cards ── */
+    .insight-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 16px; transition: box-shadow 0.15s; }
+    .insight-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.05); }
+    .insight-card.new { border-left: 3px solid var(--accent); }
+    .insight-header { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px; }
+    .insight-icon { font-size: 20px; flex-shrink: 0; margin-top: 2px; }
+    .insight-title-area { flex: 1; }
+    .insight-title { font-size: 15px; font-weight: 700; }
+    .insight-subtitle { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .insight-badge { padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 700; flex-shrink: 0; }
+    .insight-badge.new { background: #dbeafe; color: #1e40af; }
+    .insight-badge.viewed { background: #f3f4f6; color: var(--muted); }
+    .insight-badge.warning { background: #fef3c7; color: #92400e; }
+
+    /* ── Metrics row ── */
+    .metrics-row { display: flex; gap: 24px; margin-bottom: 16px; }
+    .metric { }
+    .metric-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 2px; }
+    .metric-value { font-size: 20px; font-weight: 800; }
+    .metric-value.up { color: var(--danger); }
+    .metric-value.down { color: var(--success); }
+    .metric-value.neutral { color: var(--text); }
+    .metric-change { font-size: 12px; font-weight: 700; }
+    .metric-change.up { color: var(--danger); }
+    .metric-change.down { color: var(--success); }
+
+    /* ── Mini chart ── */
+    .chart-container { background: #f8f9fc; border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+    .chart-bars { display: flex; align-items: flex-end; gap: 4px; height: 80px; }
+    .chart-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .chart-bar { width: 100%; border-radius: 3px 3px 0 0; min-height: 4px; transition: height 0.3s; }
+    .chart-bar.normal { background: var(--accent); opacity: 0.5; }
+    .chart-bar.current { background: var(--accent); }
+    .chart-bar.high { background: var(--warning); }
+    .chart-bar.spike { background: var(--danger); }
+    .chart-label { font-size: 9px; color: var(--muted); }
+    .chart-avg-line { position: relative; margin-top: -44px; margin-bottom: 44px; height: 0; border-top: 1px dashed var(--muted); opacity: 0.4; }
+    .chart-avg-label { position: absolute; right: 0; top: -10px; font-size: 9px; color: var(--muted); background: #f8f9fc; padding: 0 4px; }
+
+    /* ── Highlights ── */
+    .highlights { margin-bottom: 14px; }
+    .highlight-title { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 8px; }
+    .highlight-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 12px; }
+    .highlight-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .highlight-dot.up { background: var(--danger); }
+    .highlight-dot.down { background: var(--success); }
+    .highlight-dot.new { background: var(--warning); }
+    .highlight-dot.neutral { background: var(--muted); }
+    .highlight-text { flex: 1; color: var(--text); }
+    .highlight-value { font-weight: 700; font-size: 11px; }
+
+    /* ── Card actions ── */
+    .insight-actions { display: flex; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .insight-btn { padding: 6px 12px; border-radius: 6px; font-size: 11px; font-weight: 600; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; }
+    .insight-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .insight-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .insight-btn.primary:hover { opacity: 0.85; }
+
+    /* ── Trend line (simplified) ── */
+    .trend-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .trend-spark { display: flex; align-items: flex-end; gap: 2px; height: 24px; }
+    .trend-spark-bar { width: 6px; border-radius: 2px 2px 0 0; background: var(--accent); opacity: 0.5; }
+    .trend-spark-bar.current { opacity: 1; }
+    .trend-spark-bar.high { background: var(--warning); opacity: 1; }
+    .trend-info { font-size: 12px; color: var(--muted); }
+
+    /* ── Compliance card ── */
+    .compliance-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .compliance-row:last-child { border-bottom: none; }
+    .compliance-icon { font-size: 16px; }
+    .compliance-text { flex: 1; font-size: 12px; }
+    .compliance-detail { font-size: 11px; color: var(--muted); }
+
+    /* ── Section divider ── */
+    .section-divider { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; padding: 8px 0; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+
+    /* ── MoM comparison table ── */
+    .mom-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 14px; }
+    .mom-table th { text-align: left; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    .mom-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    .mom-table tr:last-child td { border-bottom: none; }
+    .mom-table .amount { font-weight: 600; text-align: right; font-family: 'SF Mono', 'Roboto Mono', monospace; }
+    .mom-table .change { text-align: right; font-weight: 600; font-size: 11px; }
+    .mom-table .change.up { color: var(--danger); }
+    .mom-table .change.down { color: var(--success); }
+    .mom-table .change.flat { color: var(--muted); }
+    .mom-table .row-highlight { background: #fef3c7; }
+  </style>
+</head>
+<body>
+
+<nav class="topnav">
+  <span class="topnav-brand">📄 DI Admin</span>
+  <div class="topnav-links">
+    <a href="#" class="topnav-link">Triage <span class="badge">5</span></a>
+    <a href="#" class="topnav-link active">Insights <span class="badge-info">8</span></a>
+    <a href="#" class="topnav-link">Rules</a>
+    <a href="#" class="topnav-link">Config</a>
+    <a href="#" class="topnav-link">Scanning</a>
+  </div>
+</nav>
+
+<div class="page">
+
+  <!-- Filters -->
+  <div class="filters">
+    <div class="filter-tabs">
+      <button class="filter-tab active">All (8)</button>
+      <button class="filter-tab">Spend (4)</button>
+      <button class="filter-tab">Trends (2)</button>
+      <button class="filter-tab">Compliance (2)</button>
+    </div>
+    <div class="filter-sep"></div>
+    <select class="filter-select">
+      <option>All Series</option>
+      <option>Chase Sapphire</option>
+      <option>Chase Freedom</option>
+      <option>Comcast</option>
+      <option>AT&T Wireless</option>
+    </select>
+    <select class="filter-select">
+      <option>Last 3 months</option>
+      <option>Last 6 months</option>
+      <option>Last 12 months</option>
+      <option>All time</option>
+    </select>
+    <input type="text" class="filter-search" placeholder="🔍 Search insights..." />
+  </div>
+
+  <!-- New insights -->
+  <div class="section-divider">New (3)</div>
+
+  <!-- Card 1: Monthly spend comparison with chart -->
+  <div class="insight-card new">
+    <div class="insight-header">
+      <span class="insight-icon">📊</span>
+      <div class="insight-title-area">
+        <div class="insight-title">Chase Sapphire — June 2024 Spend Summary</div>
+        <div class="insight-subtitle">Rule: Monthly Spend vs Average · Generated Jul 18, 2024</div>
+      </div>
+      <span class="insight-badge warning">▲ +40%</span>
+    </div>
+
+    <div class="metrics-row">
+      <div class="metric">
+        <div class="metric-label">June Total</div>
+        <div class="metric-value up">$2,847</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">3-mo Average</div>
+        <div class="metric-value neutral">$2,034</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">vs Average</div>
+        <div class="metric-change up">▲ +$813 (+40%)</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">vs May</div>
+        <div class="metric-change up">▲ +$422 (+17%)</div>
+      </div>
+    </div>
+
+    <!-- Bar chart -->
+    <div class="chart-container">
+      <div class="chart-bars">
+        <div class="chart-bar-wrap">
+          <div class="chart-bar normal" style="height: 48%"></div>
+          <span class="chart-label">Jan</span>
+        </div>
+        <div class="chart-bar-wrap">
+          <div class="chart-bar normal" style="height: 55%"></div>
+          <span class="chart-label">Feb</span>
+        </div>
+        <div class="chart-bar-wrap">
+          <div class="chart-bar normal" style="height: 62%"></div>
+          <span class="chart-label">Mar</span>
+        </div>
+        <div class="chart-bar-wrap">
+          <div class="chart-bar normal" style="height: 50%"></div>
+          <span class="chart-label">Apr</span>
+        </div>
+        <div class="chart-bar-wrap">
+          <div class="chart-bar current" style="height: 58%"></div>
+          <span class="chart-label">May</span>
+        </div>
+        <div class="chart-bar-wrap">
+          <div class="chart-bar spike" style="height: 88%"></div>
+          <span class="chart-label">Jun</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Month-over-month table -->
+    <table class="mom-table">
+      <thead>
+        <tr><th>Category</th><th class="amount">May</th><th class="amount">June</th><th class="change">Change</th></tr>
+      </thead>
+      <tbody>
+        <tr class="row-highlight">
+          <td>🍽 Dining</td>
+          <td class="amount">$285</td>
+          <td class="amount">$625</td>
+          <td class="change up">+$340</td>
+        </tr>
+        <tr class="row-highlight">
+          <td>✈️ Travel</td>
+          <td class="amount">$0</td>
+          <td class="amount">$589</td>
+          <td class="change up">+$589 (new)</td>
+        </tr>
+        <tr>
+          <td>🛒 Groceries</td>
+          <td class="amount">$380</td>
+          <td class="amount">$334</td>
+          <td class="change down">-$46</td>
+        </tr>
+        <tr>
+          <td>⛽ Gas</td>
+          <td class="amount">$142</td>
+          <td class="amount">$155</td>
+          <td class="change flat">+$13</td>
+        </tr>
+        <tr>
+          <td>📦 Shopping</td>
+          <td class="amount">$418</td>
+          <td class="amount">$389</td>
+          <td class="change down">-$29</td>
+        </tr>
+        <tr>
+          <td style="color: var(--muted);">Other (6 categories)</td>
+          <td class="amount" style="color: var(--muted);">$1,200</td>
+          <td class="amount" style="color: var(--muted);">$755</td>
+          <td class="change flat">-$445</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="insight-actions">
+      <button class="insight-btn primary">View Statement →</button>
+      <button class="insight-btn">Acknowledge</button>
+      <button class="insight-btn">Archive</button>
+      <button class="insight-btn" style="margin-left: auto;">⚙️ Adjust Rule</button>
+    </div>
+  </div>
+
+  <!-- Card 2: Bill trend -->
+  <div class="insight-card new">
+    <div class="insight-header">
+      <span class="insight-icon">📈</span>
+      <div class="insight-title-area">
+        <div class="insight-title">AT&T Wireless — Bill Trend (6 months)</div>
+        <div class="insight-subtitle">Rule: Balance Trend · Generated Jul 15, 2024</div>
+      </div>
+      <span class="insight-badge new">New</span>
+    </div>
+
+    <div class="metrics-row">
+      <div class="metric">
+        <div class="metric-label">Current</div>
+        <div class="metric-value neutral">$89.42</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">6mo Ago</div>
+        <div class="metric-value neutral">$79.99</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Change</div>
+        <div class="metric-change up">▲ +12% (+$9.43)</div>
+      </div>
+    </div>
+
+    <div class="trend-row">
+      <div class="trend-spark">
+        <div class="trend-spark-bar" style="height: 14px;"></div>
+        <div class="trend-spark-bar" style="height: 14px;"></div>
+        <div class="trend-spark-bar" style="height: 16px;"></div>
+        <div class="trend-spark-bar high" style="height: 18px;"></div>
+        <div class="trend-spark-bar" style="height: 18px;"></div>
+        <div class="trend-spark-bar current" style="height: 19px;"></div>
+      </div>
+      <div class="trend-info">
+        Steady increase since Jan. Base rate increased $5/mo in March (plan change). Remaining $4.43 from overage/fees.
+      </div>
+    </div>
+
+    <div class="insight-actions">
+      <button class="insight-btn">View Statements →</button>
+      <button class="insight-btn">Acknowledge</button>
+    </div>
+  </div>
+
+  <!-- Card 3: New category detected -->
+  <div class="insight-card new">
+    <div class="insight-header">
+      <span class="insight-icon">🆕</span>
+      <div class="insight-title-area">
+        <div class="insight-title">Chase Freedom — New Category: "Pet Services"</div>
+        <div class="insight-subtitle">Rule: New Charge Category · Generated Jul 16, 2024</div>
+      </div>
+      <span class="insight-badge new">New</span>
+    </div>
+
+    <div class="highlights">
+      <div class="highlight-item">
+        <span class="highlight-dot new"></span>
+        <span class="highlight-text">First-time charge category on this account</span>
+      </div>
+      <div class="highlight-item">
+        <span class="highlight-dot neutral"></span>
+        <span class="highlight-text">PetSmart — $67.42 on Jul 10</span>
+      </div>
+      <div class="highlight-item">
+        <span class="highlight-dot neutral"></span>
+        <span class="highlight-text">Rover.com — $45.00 on Jul 12</span>
+      </div>
+    </div>
+
+    <div class="insight-actions">
+      <button class="insight-btn">View Statement →</button>
+      <button class="insight-btn">Acknowledge</button>
+    </div>
+  </div>
+
+  <!-- Viewed insights -->
+  <div class="section-divider">Viewed (3)</div>
+
+  <!-- Card 4: Compliance check -->
+  <div class="insight-card">
+    <div class="insight-header">
+      <span class="insight-icon">✅</span>
+      <div class="insight-title-area">
+        <div class="insight-title">June Statements — All Received</div>
+        <div class="insight-subtitle">Rule: Statement Arrival Confirmation · Generated Jul 1, 2024</div>
+      </div>
+      <span class="insight-badge viewed">Viewed</span>
+    </div>
+
+    <div class="compliance-row">
+      <span class="compliance-icon">✅</span>
+      <span class="compliance-text">Chase Sapphire</span>
+      <span class="compliance-detail">Received Jun 18 (expected Jun 17–19)</span>
+    </div>
+    <div class="compliance-row">
+      <span class="compliance-icon">✅</span>
+      <span class="compliance-text">Chase Freedom</span>
+      <span class="compliance-detail">Received Jun 16 (expected Jun 15–17)</span>
+    </div>
+    <div class="compliance-row">
+      <span class="compliance-icon">✅</span>
+      <span class="compliance-text">Comcast</span>
+      <span class="compliance-detail">Received Jun 15 (expected Jun 14–16)</span>
+    </div>
+    <div class="compliance-row">
+      <span class="compliance-icon">✅</span>
+      <span class="compliance-text">AT&T Wireless</span>
+      <span class="compliance-detail">Received Jun 20 (expected Jun 19–21)</span>
+    </div>
+
+    <div class="insight-actions">
+      <button class="insight-btn">Archive</button>
+    </div>
+  </div>
+
+  <!-- Card 5: Comcast steady -->
+  <div class="insight-card">
+    <div class="insight-header">
+      <span class="insight-icon">📊</span>
+      <div class="insight-title-area">
+        <div class="insight-title">Comcast — June Bill: No Change</div>
+        <div class="insight-subtitle">Rule: Monthly Spend vs Average · Generated Jun 16, 2024</div>
+      </div>
+      <span class="insight-badge viewed">Viewed</span>
+    </div>
+
+    <div class="metrics-row">
+      <div class="metric">
+        <div class="metric-label">June</div>
+        <div class="metric-value neutral">$129.99</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">May</div>
+        <div class="metric-value neutral">$129.99</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Change</div>
+        <div class="metric-change" style="color: var(--muted);">— $0.00 (0%)</div>
+      </div>
+    </div>
+
+    <div class="insight-actions">
+      <button class="insight-btn">Archive</button>
+    </div>
+  </div>
+
+  <!-- Card 6: Spend overview -->
+  <div class="insight-card">
+    <div class="insight-header">
+      <span class="insight-icon">💳</span>
+      <div class="insight-title-area">
+        <div class="insight-title">Chase Freedom — May 2024 Spend Summary</div>
+        <div class="insight-subtitle">Rule: Monthly Spend vs Average · Generated Jun 17, 2024</div>
+      </div>
+      <span class="insight-badge viewed">Viewed</span>
+    </div>
+
+    <div class="metrics-row">
+      <div class="metric">
+        <div class="metric-label">May Total</div>
+        <div class="metric-value neutral">$1,124</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">3-mo Average</div>
+        <div class="metric-value neutral">$1,089</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">vs Average</div>
+        <div class="metric-change" style="color: var(--muted);">▲ +3%</div>
+      </div>
+    </div>
+
+    <div class="insight-actions">
+      <button class="insight-btn">View Details →</button>
+      <button class="insight-btn">Archive</button>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

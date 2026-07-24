@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Intelligence — EOB Match Review Detail</title>
+  <style>
+    :root {
+      --bg: #f5f6fa;
+      --card: #ffffff;
+      --border: #e0e3ea;
+      --text: #1a1d2e;
+      --muted: #6b7280;
+      --accent: #3498db;
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    /* ── Header ── */
+    .header { background: var(--card); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+    .back-link { color: var(--accent); font-weight: 600; font-size: 13px; text-decoration: none; display: flex; align-items: center; gap: 4px; }
+    .header-title { font-size: 17px; font-weight: 700; flex: 1; }
+    .header-meta { font-size: 12px; color: var(--muted); }
+
+    /* ── Page ── */
+    .page { max-width: 1100px; margin: 0 auto; padding: 24px; }
+
+    /* ── Action bar (sticky) ── */
+    .action-bar { position: sticky; top: 0; z-index: 10; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    .action-bar .label { font-size: 13px; font-weight: 600; color: var(--muted); margin-right: 8px; }
+    .btn { border: none; border-radius: 7px; padding: 9px 18px; font-size: 13px; cursor: pointer; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; transition: opacity 0.15s; }
+    .btn:hover { opacity: 0.85; }
+    .btn-confirm { background: var(--success); color: #fff; }
+    .btn-reject { background: var(--danger); color: #fff; }
+    .btn-skip { background: #f0f0f0; color: var(--muted); }
+    .btn-relink { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    .btn-paperless { background: transparent; color: var(--muted); border: 1px solid var(--border); margin-left: auto; }
+    .kbd { display: inline-block; padding: 1px 5px; border-radius: 3px; background: rgba(0,0,0,0.06); font-size: 10px; font-weight: 600; font-family: monospace; }
+
+    /* ── Section ── */
+    .section { margin-bottom: 20px; }
+    .section-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+
+    /* ── Reason banner ── */
+    .reason-banner { background: #fef3c7; border: 1px solid #fde68a; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; font-size: 13px; line-height: 1.5; }
+    .reason-banner strong { color: #92400e; }
+
+    /* ── Confidence ── */
+    .conf-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+    .conf-top { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+    .conf-pct { font-size: 42px; font-weight: 800; line-height: 1; }
+    .conf-pct.high { color: var(--success); }
+    .conf-pct.medium { color: var(--warning); }
+    .conf-pct.low { color: var(--danger); }
+    .conf-meta { flex: 1; }
+    .conf-meta-title { font-size: 14px; font-weight: 700; }
+    .conf-meta-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .conf-badge { padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+    .conf-badge.review { background: #fef3c7; color: #92400e; }
+    .conf-badge.good { background: #d1fae5; color: #065f46; }
+    .conf-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px; }
+    .conf-row { display: flex; align-items: center; gap: 8px; }
+    .conf-row-label { width: 100px; font-size: 12px; color: var(--muted); flex-shrink: 0; }
+    .conf-bar-bg { flex: 1; height: 8px; background: #f0f0f0; border-radius: 4px; overflow: hidden; }
+    .conf-bar-fill { height: 100%; border-radius: 4px; }
+    .conf-bar-fill.high { background: var(--success); }
+    .conf-bar-fill.medium { background: var(--warning); }
+    .conf-bar-fill.low { background: var(--danger); }
+    .conf-pct-val { width: 34px; text-align: right; font-size: 12px; font-weight: 700; }
+
+    /* ── Comparison grid ── */
+    .compare-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .compare-grid { display: grid; grid-template-columns: 1fr 1fr; }
+    .compare-col:first-child { border-right: 1px solid var(--border); }
+    .compare-col-header { background: #f8f9fc; padding: 12px 16px; font-weight: 700; font-size: 13px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+    .compare-row { padding: 10px 16px; border-bottom: 1px solid var(--border); }
+    .compare-row:last-child { border-bottom: none; }
+    .compare-row.mismatch { background: #fef2f2; }
+    .field-label { font-size: 11px; color: var(--muted); margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.3px; }
+    .field-value { font-size: 13px; font-weight: 600; }
+    .match-ok { color: var(--success); }
+    .match-warn { color: var(--danger); }
+
+    /* ── Document preview ── */
+    .preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .preview-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .preview-header { padding: 10px 14px; background: #f8f9fc; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+    .preview-body { height: 200px; background: #fafbfc; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; }
+    .preview-placeholder { text-align: center; }
+    .preview-placeholder .icon { font-size: 32px; margin-bottom: 8px; display: block; }
+
+    /* ── History ── */
+    .history-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    .history-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .history-item:last-child { border-bottom: none; }
+    .history-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); margin-top: 5px; flex-shrink: 0; }
+    .history-dot.reject { background: var(--danger); }
+    .history-dot.auto { background: var(--accent); }
+    .history-text { font-size: 12px; color: var(--muted); }
+    .history-text strong { color: var(--text); }
+    .history-time { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    /* ── Notes ── */
+    .notes-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    textarea { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: inherit; font-size: 13px; resize: vertical; min-height: 70px; background: #fcfcfc; }
+    textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+    /* ── Amount validation ── */
+    .amount-card { border-radius: 8px; padding: 14px 18px; display: flex; align-items: center; gap: 14px; }
+    .amount-card.fail { background: #fef2f2; border: 1px solid #fecaca; }
+    .amount-card.pass { background: #d1fae5; border: 1px solid #a7f3d0; }
+    .amount-icon { font-size: 22px; }
+    .amount-info { flex: 1; }
+    .amount-title { font-weight: 700; font-size: 13px; }
+    .amount-detail { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .amount-values { display: flex; gap: 20px; font-size: 12px; margin-top: 4px; }
+    .amount-values strong { color: var(--text); }
+  </style>
+</head>
+<body>
+
+<header class="header">
+  <a href="#" class="back-link">← Back to Queue</a>
+  <h1 class="header-title">Match Review: UHC EOB #2024-0847 ↔ City Medical Bill</h1>
+  <span class="header-meta">Triage Item #TQ-0042 · Flagged 3 days ago</span>
+</header>
+
+<div class="page">
+
+  <!-- Sticky action bar -->
+  <div class="action-bar">
+    <span class="label">Actions:</span>
+    <button class="btn btn-confirm">✓ Confirm Match <span class="kbd">Y</span></button>
+    <button class="btn btn-reject">✗ Reject <span class="kbd">N</span></button>
+    <button class="btn btn-relink">🔗 Re-link to Different <span class="kbd">R</span></button>
+    <button class="btn btn-skip">Skip <span class="kbd">S</span></button>
+    <button class="btn btn-paperless">📄 View in Paperless</button>
+  </div>
+
+  <!-- Reason banner -->
+  <div class="reason-banner">
+    <strong>⚠️ Why this was flagged:</strong> The EOB shows patient responsibility of <strong>$36.00</strong> but the bill charges <strong>$42.00</strong> — a $6.00 difference. This could indicate: (1) an additional lab draw fee not covered by the EOB, (2) a billing error, or (3) a wrong match. The provider names also differ slightly ("City Medical Center" vs "City Med Ctr").
+  </div>
+
+  <!-- Confidence breakdown -->
+  <div class="section">
+    <div class="section-title">📊 Match Confidence Breakdown</div>
+    <div class="conf-card">
+      <div class="conf-top">
+        <span class="conf-pct medium">72%</span>
+        <div class="conf-meta">
+          <div class="conf-meta-title">Weighted 5-Factor Score</div>
+          <div class="conf-meta-sub">Threshold for auto-confirm: 85% · Review threshold: 75%</div>
+        </div>
+        <span class="conf-badge review">Needs Review</span>
+      </div>
+      <div class="conf-rows">
+        <div class="conf-row">
+          <span class="conf-row-label">Date (30%)</span>
+          <div class="conf-bar-bg"><div class="conf-bar-fill high" style="width:95%"></div></div>
+          <span class="conf-pct-val">95%</span>
+        </div>
+        <div class="conf-row">
+          <span class="conf-row-label">Provider (25%)</span>
+          <div class="conf-bar-bg"><div class="conf-bar-fill medium" style="width:80%"></div></div>
+          <span class="conf-pct-val">80%</span>
+        </div>
+        <div class="conf-row">
+          <span class="conf-row-label">Patient (20%)</span>
+          <div class="conf-bar-bg"><div class="conf-bar-fill high" style="width:100%"></div></div>
+          <span class="conf-pct-val">100%</span>
+        </div>
+        <div class="conf-row">
+          <span class="conf-row-label">Amount (15%)</span>
+          <div class="conf-bar-bg"><div class="conf-bar-fill low" style="width:35%"></div></div>
+          <span class="conf-pct-val">35%</span>
+        </div>
+        <div class="conf-row">
+          <span class="conf-row-label">Procedures (10%)</span>
+          <div class="conf-bar-bg"><div class="conf-bar-fill medium" style="width:70%"></div></div>
+          <span class="conf-pct-val">70%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Amount validation -->
+  <div class="section">
+    <div class="amount-card fail">
+      <span class="amount-icon">⚠️</span>
+      <div class="amount-info">
+        <div class="amount-title">Amount Validation: MISMATCH</div>
+        <div class="amount-detail">Patient responsibility on EOB does not match bill amount due.</div>
+        <div class="amount-values">
+          <span>EOB Patient Resp: <strong>$36.00</strong></span>
+          <span>Bill Amount Due: <strong>$42.00</strong></span>
+          <span>Difference: <strong style="color: var(--danger);">+$6.00</strong></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Side-by-side comparison -->
+  <div class="section">
+    <div class="section-title">📄 Document Comparison</div>
+    <div class="compare-card">
+      <div class="compare-grid">
+        <div class="compare-col">
+          <div class="compare-col-header">📋 EOB — UnitedHealthcare</div>
+          <div class="compare-row">
+            <div class="field-label">Claim Number</div>
+            <div class="field-value">2024-0847-5391</div>
+          </div>
+          <div class="compare-row">
+            <div class="field-label">Date of Service</div>
+            <div class="field-value">01/15/2024 <span class="match-ok">✅</span></div>
+          </div>
+          <div class="compare-row">
+            <div class="field-label">Provider</div>
+            <div class="field-value">City Medical Center <span class="match-ok">✅</span></div>
+          </div>
+          <div class="compare-row">
+            <div class="field-label">Patient</div>
+            <div class="field-value">John Doe <span class="match-ok">✅</span></div>
+          </div>
+          <div class="compare-row mismatch">
+            <div class="field-label">Patient Responsibility</div>
+            <div class="field-value match-warn">$36.00 ⚠️</div>
+          </div>
+          <div class="compare-row">
+            <div class="field-label">Services</div>
+            <div class="field-value">99213 — Office Visit, Est. Patient</div>
+          </div>
+          <div class="compare-row">
+            <div class="field-label">Plan Paid</div>
+            <div class="field-value">$144.00</div>
+          </div>
+        </div>
+        <div class="compare-col">
+          <div class="compare-col-header">💰 Bill — City Med Ctr</div>
+          <div class="compare-row">
+            <div class="field-label">Invoice Number</div>
+            <div class="field-value">INV-20240115-042</div>
+          </div>
+          <div class="compare-row">
+            <div class="field-label">Date of Service</div>
+            <div class="field-value">01/15/2024 <span class="match-ok">✅</span></div>
+          </div>
+          <div class="compare-row">
+            <div class="field-label">Provider</div>
+            <div class="field-value">City Med Ctr <span class="match-ok">✅</span></div>
+          </div>
+          <div class="compare-row">
+            <div class="field-label">Patient</div>
+            <div class="field-value">Doe, John <span class="match-ok">✅</span></div>
+          </div>
+          <div class="compare-row mismatch">
+            <div class="field-label">Amount Due</div>
+            <div class="field-value match-warn">$42.00 ⚠️</div>
+          </div>
+          <div class="compare-row">
+            <div class="field-label">Services</div>
+            <div class="field-value">Office Visit + Lab Draw Fee</div>
+          </div>
+          <div class="compare-row">
+            <div class="field-label">Due Date</div>
+            <div class="field-value">02/15/2024</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Document previews -->
+  <div class="section">
+    <div class="section-title">🔍 Document Previews</div>
+    <div class="preview-grid">
+      <div class="preview-card">
+        <div class="preview-header">
+          <span>EOB — Paperless #1247</span>
+          <a href="#" style="color: var(--accent); font-size: 11px;">Open full →</a>
+        </div>
+        <div class="preview-body">
+          <div class="preview-placeholder">
+            <span class="icon">📄</span>
+            UHC_EOB_2024-0847.pdf<br/>
+            <span style="font-size: 11px; color: #aaa;">Page 1 of 2 · Scanned 01/20/2024</span>
+          </div>
+        </div>
+      </div>
+      <div class="preview-card">
+        <div class="preview-header">
+          <span>Bill — Paperless #1302</span>
+          <a href="#" style="color: var(--accent); font-size: 11px;">Open full →</a>
+        </div>
+        <div class="preview-body">
+          <div class="preview-placeholder">
+            <span class="icon">📄</span>
+            CityMedCtr_Invoice_Jan2024.pdf<br/>
+            <span style="font-size: 11px; color: #aaa;">Page 1 of 1 · Scanned 01/22/2024</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Match history -->
+  <div class="section">
+    <div class="section-title">🕐 Match History</div>
+    <div class="history-card">
+      <div class="history-item">
+        <div class="history-dot auto"></div>
+        <div>
+          <div class="history-text"><strong>Auto-matched</strong> by EOB Matching Engine (scan #47)</div>
+          <div class="history-time">Jan 20, 2024 at 10:45 AM · Score: 72%</div>
+        </div>
+      </div>
+      <div class="history-item">
+        <div class="history-dot"></div>
+        <div>
+          <div class="history-text"><strong>Flagged for review</strong> — Amount mismatch detected</div>
+          <div class="history-time">Jan 20, 2024 at 10:45 AM · Auto-flag rule: amount_diff > $5</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notes -->
+  <div class="section">
+    <div class="section-title">💬 Notes (optional)</div>
+    <div class="notes-card">
+      <textarea placeholder="Add context about this match decision... (e.g., 'Bill includes $6 lab draw fee not on EOB — confirmed correct match')"></textarea>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
