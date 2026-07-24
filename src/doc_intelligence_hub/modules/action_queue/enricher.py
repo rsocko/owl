@@ -7,7 +7,7 @@ from .config import settings
 
 
 def _make_paperless_client() -> PaperlessClient:
-    return PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_token)
+    return PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_api_token)
 
 # Custom field definitions to auto-create in Paperless
 CUSTOM_FIELD_DEFINITIONS = [

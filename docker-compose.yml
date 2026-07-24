@@ -55,7 +55,7 @@ services:
     command: ["run", "--limit", "200", "--verbose"]
     environment:
       PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
-      PAPERLESS_TOKEN: ${PAPERLESS_TOKEN}
+      PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
       WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-false}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://service-001.example.invalid/openai/v1}
       LLM_API_KEY: ${LLM_API_KEY:-bifrost}
@@ -79,7 +79,7 @@ services:
     command: ["run", "--limit", "20"]
     environment:
       PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
-      PAPERLESS_TOKEN: ${PAPERLESS_TOKEN}
+      PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://service-001.example.invalid/openai/v1}
       LLM_API_KEY: ${LLM_API_KEY:-bifrost}
       LLM_MODEL: ${LLM_MODEL:-phi3:mini}

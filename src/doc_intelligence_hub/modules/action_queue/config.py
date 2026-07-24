@@ -7,7 +7,7 @@ from pydantic import Field
 class Settings(BaseSettings):
     # Paperless-NGX
     paperless_url: str = Field(default="http://paperless:8000")
-    paperless_token: str = Field(default="")
+    paperless_api_token: str = Field(default="")
 
     # LLM (optional override — defaults come from core.llm LLM_* env vars)
     llm_model: str = Field(default="")  # Empty = use default from LLM_MODEL

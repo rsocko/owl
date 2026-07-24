@@ -10,7 +10,7 @@ def _get_client() -> PaperlessClient:
     """Create a PaperlessClient from action queue settings."""
     return PaperlessClient(
         base_url=settings.paperless_url,
-        token=settings.paperless_token,
+        token=settings.paperless_api_token,
     )
 
 

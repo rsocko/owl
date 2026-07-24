@@ -53,7 +53,7 @@ class HubSettings(BaseSettings):
 
     @property
     def resolved_paperless_token(self) -> str | None:
-        return self.paperless_token or self.paperless_api_token
+        return self.paperless_api_token or self.paperless_token
 
 
 def _load_statement_tracker_config(path: str) -> Any | None:
