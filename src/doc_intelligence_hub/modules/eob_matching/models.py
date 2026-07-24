@@ -47,6 +47,7 @@ class ExtractedEOB(BaseModel):
     total_plan_pays: float | None = None
     total_patient_responsibility: float | None = None
     document_id: str
+    extraction_confidence: float = 0.0
 
 
 class ExtractedBill(BaseModel):
@@ -60,6 +61,7 @@ class ExtractedBill(BaseModel):
     balance_due: float | None = None
     payment_status: str | None = None
     document_id: str
+    extraction_confidence: float = 0.0
 
 
 class MatchBreakdown(BaseModel):

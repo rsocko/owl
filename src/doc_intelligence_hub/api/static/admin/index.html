@@ -440,9 +440,19 @@
 
     async function testConnection() {
         try {
-            const result = await apiGet('/paperless/health');
-            if (result.status === 'ok') showToast('Connection OK!');
-            else showToast('Connection issue: ' + (result.message || 'unknown'), 'error');
+            // Test Paperless
+            const paperlessResult = await apiGet('/paperless/health');
+            let msg = 'Paperless: ' + (paperlessResult.status === 'ok' ? '✓ Connected' : '✗ ' + (paperlessResult.message || 'unknown'));
+
+            // Also test LLM using the displayed URL
+            const llmUrl = document.getElementById('llm-base-url').value;
+            if (llmUrl) {
+                const llmResult = await apiPost('/llm/test', { base_url: llmUrl, model: document.getElementById('llm-model').value || undefined });
+                msg += '\nLLM: ' + (llmResult.status === 'ok' ? '✓ Connected' : '✗ ' + (llmResult.message || 'unknown'));
+            }
+
+            if (paperlessResult.status === 'ok') showToast(msg);
+            else showToast(msg, 'error');
         } catch (e) { showToast('Test failed: ' + e.message, 'error'); }
     }
 
