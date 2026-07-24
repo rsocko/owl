@@ -47,8 +47,14 @@ async def mc_list_actions(
                 "id": str(a.id),
                 "document_id": a.document_id,
                 "document_title": a.document_title or "",
-                "action_type": a.action_type or "review",
-                "urgency": a.urgency or "medium",
+                "title": a.title or "",
+                # Contract (INTEGRATION-API-CONTRACT.md) requires lowercase enum values —
+                # the DB stores these uppercase (PAY, CRITICAL, ...) for internal use, so
+                # normalize here. Mismatched casing silently breaks MC's isTaskAction() filter.
+                "action_type": (a.action_type or "review").lower(),
+                "category": (a.action_type or "review").lower(),
+                "urgency": (a.urgency or "medium").lower(),
+                "confidence": a.confidence,
                 "due_date": a.due_date.isoformat() if a.due_date else None,
                 "amount": a.amount,
                 "correspondent": a.correspondent,

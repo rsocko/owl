@@ -28,7 +28,7 @@ services:
       # LLM via Bifrost gateway
       LLM_BASE_URL: ${LLM_BASE_URL:-https://service-001.example.invalid/openai/v1}
       LLM_API_KEY: ${LLM_API_KEY:-bifrost}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_MODEL: ${LLM_MODEL:-azure/gpt-4o-mini}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 30s
@@ -59,7 +59,7 @@ services:
       WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-false}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://service-001.example.invalid/openai/v1}
       LLM_API_KEY: ${LLM_API_KEY:-bifrost}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_MODEL: ${LLM_MODEL:-azure/gpt-4o-mini}
     volumes:
       - hub-data:/app/data
     networks:
@@ -82,7 +82,7 @@ services:
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://service-001.example.invalid/openai/v1}
       LLM_API_KEY: ${LLM_API_KEY:-bifrost}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_MODEL: ${LLM_MODEL:-azure/gpt-4o-mini}
       WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-true}
     volumes:
       - hub-data:/app/data
