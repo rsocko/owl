@@ -6,12 +6,13 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from doc_intelligence_hub.api.routers import action_queue, admin, eob, statements, stats, system
+from doc_intelligence_hub.api.routers import action_queue, admin, eob, mc_connector, statements, stats, system
 from doc_intelligence_hub.modules.statements.api import _STATIC_DIR as _STATEMENTS_STATIC_DIR
 from doc_intelligence_hub.modules.statements.config import load_config
 
@@ -39,6 +40,7 @@ class HubSettings(BaseSettings):
     write_to_paperless: bool = False
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "phi3:mini"
+    cors_origins: str = "*"
     host: str = "0.0.0.0"
     port: int = 8001
 
@@ -114,6 +116,16 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.state.eob_weights = None
     app.state.admin_schedules = None
 
+    # CORS — allow Mission Control (and other local services) to reach the API
+    origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     _register_exception_handlers(app)
 
     app.include_router(system.router)
@@ -123,6 +135,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(action_queue.router)
     app.include_router(admin.router)
     app.include_router(stats.router)
+    app.include_router(mc_connector.router)
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:

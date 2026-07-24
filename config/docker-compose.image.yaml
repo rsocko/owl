@@ -1,11 +1,12 @@
 services:
-  statement-tracker:
+  hub:
     image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
-    container_name: statement-tracker
+    container_name: doc-intelligence-hub
     restart: unless-stopped
-    command: ["serve", "--config", "/app/config/config.paperless.yaml"]
     environment:
+      PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
+      STATEMENT_TRACKER_CONFIG: /app/config/config.paperless.yaml
     ports:
       - "8001:8001"
     volumes:
