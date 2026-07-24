@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Intelligence — Triage Queue (Unified)</title>
+  <style>
+    :root {
+      --bg: #f5f6fa;
+      --card: #ffffff;
+      --border: #e0e3ea;
+      --text: #1a1d2e;
+      --muted: #6b7280;
+      --accent: #3498db;
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+      --purple: #8b5cf6;
+      --pink: #ec4899;
+      --selected-bg: #eef6ff;
+      --selected-border: #3498db;
+      --queue-width: 360px;
+      --queue-collapsed: 52px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    /* ── Top nav ── */
+    .topnav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: 48px; gap: 24px; }
+    .topnav-brand { font-weight: 800; font-size: 15px; color: var(--accent); }
+    .topnav-links { display: flex; gap: 4px; }
+    .topnav-link { padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--muted); text-decoration: none; position: relative; }
+    .topnav-link.active { color: var(--accent); background: #eef6ff; }
+    .topnav-link .badge { position: absolute; top: 1px; right: 1px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; }
+
+    /* ── Page layout ── */
+    .page { display: flex; height: calc(100vh - 48px); }
+
+    /* ── Queue panel (left) — collapsible ── */
+    .queue-panel {
+      width: var(--queue-width);
+      min-width: var(--queue-width);
+      border-right: 1px solid var(--border);
+      background: var(--card);
+      display: flex;
+      flex-direction: column;
+      transition: width 0.25s ease, min-width 0.25s ease;
+      overflow: hidden;
+    }
+    .queue-panel.collapsed {
+      width: var(--queue-collapsed);
+      min-width: var(--queue-collapsed);
+    }
+    .queue-panel.collapsed .queue-header-content,
+    .queue-panel.collapsed .queue-list { display: none; }
+    .queue-panel.collapsed .queue-collapsed-strip { display: flex; }
+
+    .queue-header { padding: 12px 14px 10px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 8px; }
+    .queue-collapse-btn { width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border); background: transparent; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--muted); }
+    .queue-collapse-btn:hover { background: #f0f0f0; }
+    .queue-header-content { flex: 1; min-width: 0; }
+    .queue-title { font-size: 15px; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; }
+    .queue-stats { font-size: 12px; color: var(--muted); font-weight: 400; }
+    .queue-tabs { display: flex; gap: 3px; flex-wrap: wrap; }
+    .queue-tab { padding: 5px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; color: var(--muted); cursor: pointer; border: none; background: transparent; white-space: nowrap; }
+    .queue-tab.active { background: var(--accent); color: #fff; }
+    .queue-list { flex: 1; overflow-y: auto; }
+
+    /* Collapsed strip */
+    .queue-collapsed-strip { display: none; flex-direction: column; align-items: center; padding-top: 12px; gap: 8px; }
+    .queue-collapsed-strip .collapse-count { writing-mode: vertical-rl; font-size: 11px; font-weight: 700; color: var(--muted); }
+
+    /* ── Queue item ── */
+    .queue-item { padding: 12px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; }
+    .queue-item:hover { background: #fafbfc; }
+    .queue-item.selected { background: var(--selected-bg); border-left: 3px solid var(--selected-border); padding-left: 11px; }
+    .qi-top { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+    .qi-check { width: 16px; height: 16px; border-radius: 3px; border: 2px solid var(--border); cursor: pointer; flex-shrink: 0; }
+    .qi-check.checked { background: var(--accent); border-color: var(--accent); }
+    .qi-type { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
+    .qi-type.eob { background: #fde8e8; color: var(--danger); }
+    .qi-type.grouping { background: #ede9fe; color: var(--purple); }
+    .qi-type.orphan { background: #fef3c7; color: #92400e; }
+    .qi-confidence { margin-left: auto; font-size: 11px; font-weight: 700; }
+    .qi-confidence.low { color: var(--danger); }
+    .qi-confidence.medium { color: var(--warning); }
+    .qi-confidence.high { color: var(--success); }
+    .qi-title { font-size: 12px; font-weight: 600; margin-bottom: 3px; line-height: 1.3; }
+    .qi-reason { font-size: 11px; color: var(--muted); line-height: 1.3; }
+    .qi-meta { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 10px; color: var(--muted); }
+    .qi-priority.high { color: var(--danger); font-weight: 600; }
+
+    /* ── Bulk action bar ── */
+    .bulk-bar { padding: 8px 14px; background: #eef6ff; border-bottom: 1px solid #bfdbfe; display: flex; align-items: center; gap: 8px; font-size: 12px; }
+    .bulk-bar .count { font-weight: 700; color: var(--accent); }
+    .bulk-btn { padding: 4px 10px; border-radius: 5px; border: 1px solid var(--border); background: var(--card); font-size: 11px; font-weight: 600; cursor: pointer; }
+    .bulk-btn.confirm { border-color: var(--success); color: var(--success); }
+    .bulk-btn.reject { border-color: var(--danger); color: var(--danger); }
+    .bulk-auto { margin-left: auto; padding: 4px 10px; border-radius: 5px; border: 1px dashed var(--success); background: #f0fdf4; font-size: 11px; font-weight: 600; cursor: pointer; color: #166534; }
+
+    /* ── Detail panel (right) ── */
+    .detail-panel { flex: 1; overflow-y: auto; padding: 20px 24px; background: var(--bg); }
+
+    /* ── Detail header ── */
+    .detail-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .detail-title { font-size: 17px; font-weight: 700; }
+    .detail-actions { display: flex; gap: 6px; }
+    .btn { border: none; border-radius: 7px; padding: 8px 14px; font-size: 12px; cursor: pointer; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; transition: opacity 0.15s; }
+    .btn:hover { opacity: 0.85; }
+    .btn-confirm { background: var(--success); color: #fff; }
+    .btn-reject { background: var(--danger); color: #fff; }
+    .btn-skip { background: #f0f0f0; color: var(--muted); }
+    .btn-relink { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    .btn-paperless { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .kbd { display: inline-block; padding: 1px 4px; border-radius: 3px; background: rgba(0,0,0,0.06); font-size: 10px; font-weight: 600; font-family: monospace; }
+
+    /* ── Reason banner ── */
+    .reason-banner { background: #fef3c7; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 12px; line-height: 1.5; }
+    .reason-banner strong { color: #92400e; }
+
+    /* ── Section ── */
+    .section { margin-bottom: 16px; }
+    .section-title { font-size: 13px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+
+    /* ── Confidence ── */
+    .conf-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    .conf-top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+    .conf-pct { font-size: 36px; font-weight: 800; line-height: 1; }
+    .conf-pct.high { color: var(--success); }
+    .conf-pct.medium { color: var(--warning); }
+    .conf-pct.low { color: var(--danger); }
+    .conf-meta { flex: 1; }
+    .conf-meta-title { font-size: 13px; font-weight: 700; }
+    .conf-meta-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .conf-badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+    .conf-badge.review { background: #fef3c7; color: #92400e; }
+    .conf-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; }
+    .conf-row { display: flex; align-items: center; gap: 8px; }
+    .conf-row-label { width: 100px; font-size: 11px; color: var(--muted); flex-shrink: 0; }
+    .conf-bar-bg { flex: 1; height: 7px; background: #f0f0f0; border-radius: 4px; overflow: hidden; }
+    .conf-bar-fill { height: 100%; border-radius: 4px; }
+    .conf-bar-fill.high { background: var(--success); }
+    .conf-bar-fill.medium { background: var(--warning); }
+    .conf-bar-fill.low { background: var(--danger); }
+    .conf-pct-val { width: 32px; text-align: right; font-size: 11px; font-weight: 700; }
+
+    /* ── Amount validation ── */
+    .amount-card { border-radius: 8px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; }
+    .amount-card.fail { background: #fef2f2; border: 1px solid #fecaca; }
+    .amount-icon { font-size: 18px; }
+    .amount-info { flex: 1; }
+    .amount-title { font-weight: 700; font-size: 12px; }
+    .amount-detail { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .amount-values { display: flex; gap: 16px; font-size: 11px; margin-top: 3px; }
+
+    /* ── Comparison ── */
+    .compare-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .compare-grid { display: grid; grid-template-columns: 1fr 1fr; }
+    .compare-col:first-child { border-right: 1px solid var(--border); }
+    .compare-col-header { background: #f8f9fc; padding: 10px 14px; font-weight: 700; font-size: 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+    .compare-row { padding: 8px 14px; border-bottom: 1px solid var(--border); }
+    .compare-row:last-child { border-bottom: none; }
+    .compare-row.mismatch { background: #fef2f2; }
+    .field-label { font-size: 10px; color: var(--muted); margin-bottom: 1px; text-transform: uppercase; letter-spacing: 0.3px; }
+    .field-value { font-size: 12px; font-weight: 600; }
+    .match-ok { color: var(--success); }
+    .match-warn { color: var(--danger); }
+
+    /* ── Document previews ── */
+    .preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .preview-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .preview-header { padding: 8px 12px; background: #f8f9fc; border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+    .preview-body { height: 140px; background: #fafbfc; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 11px; }
+    .preview-placeholder { text-align: center; }
+    .preview-placeholder .icon { font-size: 28px; margin-bottom: 6px; display: block; }
+
+    /* ── Alternatives ── */
+    .alt-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    .alt-title { font-size: 12px; font-weight: 700; margin-bottom: 10px; color: var(--muted); }
+    .alt-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; margin-bottom: 6px; cursor: pointer; transition: border-color 0.15s; }
+    .alt-item:hover { border-color: var(--accent); background: #fafcff; }
+    .alt-item:last-child { margin-bottom: 0; }
+    .alt-score { font-size: 11px; font-weight: 700; color: var(--warning); min-width: 32px; }
+    .alt-info { flex: 1; }
+    .alt-info-title { font-size: 12px; font-weight: 600; }
+    .alt-info-meta { font-size: 10px; color: var(--muted); }
+    .alt-action { font-size: 11px; color: var(--accent); font-weight: 600; }
+
+    /* ── History ── */
+    .history-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    .history-item { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .history-item:last-child { border-bottom: none; }
+    .history-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); margin-top: 5px; flex-shrink: 0; }
+    .history-dot.auto { background: var(--accent); }
+    .history-text { font-size: 11px; color: var(--muted); }
+    .history-text strong { color: var(--text); }
+    .history-time { font-size: 10px; color: var(--muted); margin-top: 1px; }
+
+    /* ── Notes ── */
+    .notes-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    textarea { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-family: inherit; font-size: 12px; resize: vertical; min-height: 60px; background: #fcfcfc; }
+    textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+    /* ── Keyboard hint ── */
+    .keyboard-hint { position: fixed; bottom: 12px; right: 12px; background: var(--card); border: 1px solid var(--border); border-radius: 7px; padding: 8px 12px; font-size: 10px; color: var(--muted); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .keyboard-hint kbd { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; font-family: monospace; font-weight: 600; margin: 0 1px; }
+  </style>
+
+  <script>
+    function toggleQueue() {
+      const panel = document.querySelector('.queue-panel');
+      const btn = document.getElementById('collapseBtn');
+      panel.classList.toggle('collapsed');
+      btn.textContent = panel.classList.contains('collapsed') ? '▶' : '◀';
+    }
+  </script>
+</head>
+<body>
+
+<!-- Top navigation -->
+<nav class="topnav">
+  <span class="topnav-brand">📄 DI Admin</span>
+  <div class="topnav-links">
+    <a href="#" class="topnav-link active">Triage <span class="badge">12</span></a>
+    <a href="#" class="topnav-link">Config</a>
+    <a href="#" class="topnav-link">Scanning</a>
+  </div>
+</nav>
+
+<div class="page">
+  <!-- Queue panel (collapsible) -->
+  <div class="queue-panel">
+    <div class="queue-header">
+      <button class="queue-collapse-btn" id="collapseBtn" onclick="toggleQueue()" title="Toggle queue panel (F)">◀</button>
+      <div class="queue-header-content">
+        <div class="queue-title">
+          Triage Queue
+          <span class="queue-stats">12 pending</span>
+        </div>
+        <div class="queue-tabs">
+          <button class="queue-tab active">All <span class="count">(12)</span></button>
+          <button class="queue-tab">EOB <span class="count">(7)</span></button>
+          <button class="queue-tab">Groups <span class="count">(4)</span></button>
+          <button class="queue-tab">Orphans <span class="count">(1)</span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bulk action bar -->
+    <div class="bulk-bar">
+      <span class="count">3 selected</span>
+      <button class="bulk-btn confirm">✓ Confirm</button>
+      <button class="bulk-btn reject">✗ Reject</button>
+      <button class="bulk-btn">Defer</button>
+      <button class="bulk-auto">⚡ Auto-confirm ≥90%</button>
+    </div>
+
+    <!-- Collapsed strip -->
+    <div class="queue-collapsed-strip">
+      <button class="queue-collapse-btn" onclick="toggleQueue()" title="Expand queue">▶</button>
+      <span class="collapse-count">12 items</span>
+    </div>
+
+    <div class="queue-list">
+      <div class="queue-item selected">
+        <div class="qi-top">
+          <div class="qi-check"></div>
+          <span class="qi-type eob">EOB Match</span>
+          <span class="qi-confidence medium">72%</span>
+        </div>
+        <div class="qi-title">UHC EOB #2024-0847 ↔ City Medical Bill</div>
+        <div class="qi-reason">Amount mismatch: EOB $36.00 vs bill $42.00</div>
+        <div class="qi-meta">
+          <span class="qi-priority high">● High</span>
+          <span>3d ago</span>
+        </div>
+      </div>
+
+      <div class="queue-item">
+        <div class="qi-top">
+          <div class="qi-check"></div>
+          <span class="qi-type grouping">Grouping</span>
+        </div>
+        <div class="qi-title">Chase — 2 accounts in same series</div>
+        <div class="qi-reason">Account ending 4321 AND 8876 detected</div>
+        <div class="qi-meta">
+          <span class="qi-priority high">● High</span>
+          <span>1d ago</span>
+        </div>
+      </div>
+
+      <div class="queue-item">
+        <div class="qi-top">
+          <div class="qi-check checked"></div>
+          <span class="qi-type eob">EOB Match</span>
+          <span class="qi-confidence low">65%</span>
+        </div>
+        <div class="qi-title">Aetna EOB #456 ↔ Radiology Assoc</div>
+        <div class="qi-reason">Multiple candidates: 65%, 62%, 58%</div>
+        <div class="qi-meta"><span>5d ago</span></div>
+      </div>
+
+      <div class="queue-item">
+        <div class="qi-top">
+          <div class="qi-check"></div>
+          <span class="qi-type grouping">Grouping</span>
+        </div>
+        <div class="qi-title">Capital One — CC vs savings?</div>
+        <div class="qi-reason">New doc doesn't match existing series</div>
+        <div class="qi-meta"><span>2d ago</span></div>
+      </div>
+
+      <div class="queue-item">
+        <div class="qi-top">
+          <div class="qi-check checked"></div>
+          <span class="qi-type eob">EOB Match</span>
+          <span class="qi-confidence medium">78%</span>
+        </div>
+        <div class="qi-title">BCBS EOB → Dr. Martinez visit</div>
+        <div class="qi-reason">Provider: "Martinez MD" vs "R Martinez DO"</div>
+        <div class="qi-meta"><span>6d ago</span></div>
+      </div>
+
+      <div class="queue-item">
+        <div class="qi-top">
+          <div class="qi-check"></div>
+          <span class="qi-type grouping">Grouping</span>
+        </div>
+        <div class="qi-title">Comcast — irregular 47-day gap</div>
+        <div class="qi-reason">Expected ~30d, got 47d gap</div>
+        <div class="qi-meta"><span>4d ago</span></div>
+      </div>
+
+      <div class="queue-item">
+        <div class="qi-top">
+          <div class="qi-check"></div>
+          <span class="qi-type orphan">Orphan</span>
+        </div>
+        <div class="qi-title">Lab Corp Invoice — no EOB</div>
+        <div class="qi-reason">45 days old, no matching EOB found</div>
+        <div class="qi-meta"><span>7d ago</span></div>
+      </div>
+
+      <div class="queue-item">
+        <div class="qi-top">
+          <div class="qi-check checked"></div>
+          <span class="qi-type eob">EOB Match</span>
+          <span class="qi-confidence high">91%</span>
+        </div>
+        <div class="qi-title">UHC EOB → Pharmacy RX refill</div>
+        <div class="qi-reason">First match for this provider</div>
+        <div class="qi-meta"><span>1d ago</span></div>
+      </div>
+
+      <div class="queue-item">
+        <div class="qi-top">
+          <div class="qi-check"></div>
+          <span class="qi-type grouping">Grouping</span>
+        </div>
+        <div class="qi-title">AT&T — title variation split</div>
+        <div class="qi-reason">"Wireless Bill" vs "Mobility Statement"</div>
+        <div class="qi-meta"><span>3d ago</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail panel (right) — scrollable, contains everything -->
+  <div class="detail-panel">
+    <!-- Header + actions (sticky would be nice in real impl) -->
+    <div class="detail-header">
+      <div class="detail-title">EOB Match Review</div>
+      <div class="detail-actions">
+        <button class="btn btn-confirm">✓ Confirm <span class="kbd">Y</span></button>
+        <button class="btn btn-reject">✗ Reject <span class="kbd">N</span></button>
+        <button class="btn btn-relink">🔗 Re-link <span class="kbd">R</span></button>
+        <button class="btn btn-skip">Skip <span class="kbd">S</span></button>
+        <button class="btn btn-paperless">📄 Paperless</button>
+      </div>
+    </div>
+
+    <!-- Reason -->
+    <div class="reason-banner">
+      <strong>⚠️ Flagged:</strong> Amount mismatch — EOB patient responsibility <strong>$36.00</strong> vs bill amount <strong>$42.00</strong> (+$6.00). Could be additional lab draw fee. Provider name also differs slightly.
+    </div>
+
+    <!-- Confidence breakdown -->
+    <div class="section">
+      <div class="conf-card">
+        <div class="conf-top">
+          <span class="conf-pct medium">72%</span>
+          <div class="conf-meta">
+            <div class="conf-meta-title">Weighted 5-Factor Score</div>
+            <div class="conf-meta-sub">Auto-confirm ≥ 85% · Review ≥ 75%</div>
+          </div>
+          <span class="conf-badge review" style="margin-left:auto;">Needs Review</span>
+        </div>
+        <div class="conf-rows">
+          <div class="conf-row">
+            <span class="conf-row-label">Date (30%)</span>
+            <div class="conf-bar-bg"><div class="conf-bar-fill high" style="width:95%"></div></div>
+            <span class="conf-pct-val">95%</span>
+          </div>
+          <div class="conf-row">
+            <span class="conf-row-label">Provider (25%)</span>
+            <div class="conf-bar-bg"><div class="conf-bar-fill medium" style="width:80%"></div></div>
+            <span class="conf-pct-val">80%</span>
+          </div>
+          <div class="conf-row">
+            <span class="conf-row-label">Patient (20%)</span>
+            <div class="conf-bar-bg"><div class="conf-bar-fill high" style="width:100%"></div></div>
+            <span class="conf-pct-val">100%</span>
+          </div>
+          <div class="conf-row">
+            <span class="conf-row-label">Amount (15%)</span>
+            <div class="conf-bar-bg"><div class="conf-bar-fill low" style="width:35%"></div></div>
+            <span class="conf-pct-val">35%</span>
+          </div>
+          <div class="conf-row">
+            <span class="conf-row-label">Procedures (10%)</span>
+            <div class="conf-bar-bg"><div class="conf-bar-fill medium" style="width:70%"></div></div>
+            <span class="conf-pct-val">70%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Amount validation -->
+    <div class="section">
+      <div class="amount-card fail">
+        <span class="amount-icon">⚠️</span>
+        <div class="amount-info">
+          <div class="amount-title">Amount Validation: MISMATCH</div>
+          <div class="amount-values">
+            <span>EOB: <strong>$36.00</strong></span>
+            <span>Bill: <strong>$42.00</strong></span>
+            <span>Diff: <strong style="color:var(--danger);">+$6.00</strong></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Side-by-side comparison -->
+    <div class="section">
+      <div class="section-title">📄 Document Comparison</div>
+      <div class="compare-card">
+        <div class="compare-grid">
+          <div class="compare-col">
+            <div class="compare-col-header">📋 EOB — UnitedHealthcare</div>
+            <div class="compare-row">
+              <div class="field-label">Claim Number</div>
+              <div class="field-value">2024-0847-5391</div>
+            </div>
+            <div class="compare-row">
+              <div class="field-label">Date of Service</div>
+              <div class="field-value">01/15/2024 <span class="match-ok">✅</span></div>
+            </div>
+            <div class="compare-row">
+              <div class="field-label">Provider</div>
+              <div class="field-value">City Medical Center <span class="match-ok">✅</span></div>
+            </div>
+            <div class="compare-row">
+              <div class="field-label">Patient</div>
+              <div class="field-value">John Doe <span class="match-ok">✅</span></div>
+            </div>
+            <div class="compare-row mismatch">
+              <div class="field-label">Patient Responsibility</div>
+              <div class="field-value match-warn">$36.00 ⚠️</div>
+            </div>
+            <div class="compare-row">
+              <div class="field-label">Procedure</div>
+              <div class="field-value">99213 — Office Visit</div>
+            </div>
+            <div class="compare-row">
+              <div class="field-label">Paperless Doc</div>
+              <div class="field-value"><a href="#" style="color:var(--accent);font-size:12px;">#1247 — View →</a></div>
+            </div>
+          </div>
+          <div class="compare-col">
+            <div class="compare-col-header">💰 Bill — City Med Ctr</div>
+            <div class="compare-row">
+              <div class="field-label">Invoice Number</div>
+              <div class="field-value">INV-20240115-042</div>
+            </div>
+            <div class="compare-row">
+              <div class="field-label">Date of Service</div>
+              <div class="field-value">01/15/2024 <span class="match-ok">✅</span></div>
+            </div>
+            <div class="compare-row">
+              <div class="field-label">Provider</div>
+              <div class="field-value">City Med Ctr <span class="match-ok">✅</span></div>
+            </div>
+            <div class="compare-row">
+              <div class="field-label">Patient</div>
+              <div class="field-value">Doe, John <span class="match-ok">✅</span></div>
+            </div>
+            <div class="compare-row mismatch">
+              <div class="field-label">Amount Due</div>
+              <div class="field-value match-warn">$42.00 ⚠️</div>
+            </div>
+            <div class="compare-row">
+              <div class="field-label">Description</div>
+              <div class="field-value">Office Visit + Lab Draw</div>
+            </div>
+            <div class="compare-row">
+              <div class="field-label">Paperless Doc</div>
+              <div class="field-value"><a href="#" style="color:var(--accent);font-size:12px;">#1302 — View →</a></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Document previews -->
+    <div class="section">
+      <div class="section-title">🔍 Document Previews</div>
+      <div class="preview-grid">
+        <div class="preview-card">
+          <div class="preview-header">
+            <span>EOB — Paperless #1247</span>
+            <a href="#" style="color:var(--accent);font-size:10px;">Open full →</a>
+          </div>
+          <div class="preview-body">
+            <div class="preview-placeholder">
+              <span class="icon">📄</span>
+              UHC_EOB_2024-0847.pdf<br/>
+              <span style="font-size:10px;color:#aaa;">Page 1 of 2 · Scanned 01/20/2024</span>
+            </div>
+          </div>
+        </div>
+        <div class="preview-card">
+          <div class="preview-header">
+            <span>Bill — Paperless #1302</span>
+            <a href="#" style="color:var(--accent);font-size:10px;">Open full →</a>
+          </div>
+          <div class="preview-body">
+            <div class="preview-placeholder">
+              <span class="icon">📄</span>
+              CityMedCtr_Invoice_Jan2024.pdf<br/>
+              <span style="font-size:10px;color:#aaa;">Page 1 of 1 · Scanned 01/22/2024</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Alternative candidates -->
+    <div class="section">
+      <div class="section-title">📊 Alternative Candidates</div>
+      <div class="alt-card">
+        <div class="alt-title">If rejecting, link to one of these instead:</div>
+        <div class="alt-item">
+          <span class="alt-score">58%</span>
+          <div class="alt-info">
+            <div class="alt-info-title">City Medical Ctr — Bill #INV-20240122-018</div>
+            <div class="alt-info-meta">01/22/2024 · $36.00 · Lab Work Only</div>
+          </div>
+          <span class="alt-action">Select →</span>
+        </div>
+        <div class="alt-item">
+          <span class="alt-score">45%</span>
+          <div class="alt-info">
+            <div class="alt-info-title">City Medical Ctr — Bill #INV-20240115-043</div>
+            <div class="alt-info-meta">01/15/2024 · $89.00 · Radiology</div>
+          </div>
+          <span class="alt-action">Select →</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Match history -->
+    <div class="section">
+      <div class="section-title">🕐 Match History</div>
+      <div class="history-card">
+        <div class="history-item">
+          <div class="history-dot auto"></div>
+          <div>
+            <div class="history-text"><strong>Auto-matched</strong> by EOB Matching Engine (scan #47)</div>
+            <div class="history-time">Jan 20, 2024 · Score: 72%</div>
+          </div>
+        </div>
+        <div class="history-item">
+          <div class="history-dot"></div>
+          <div>
+            <div class="history-text"><strong>Flagged for review</strong> — amount_diff > $5</div>
+            <div class="history-time">Jan 20, 2024 · Auto-flag rule</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notes -->
+    <div class="section">
+      <div class="section-title">💬 Notes</div>
+      <div class="notes-card">
+        <textarea placeholder="Add context... (e.g., 'Bill includes $6 lab fee not on EOB — correct match')"></textarea>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Keyboard shortcuts -->
+<div class="keyboard-hint">
+  <kbd>Y</kbd> Confirm · <kbd>N</kbd> Reject · <kbd>R</kbd> Re-link · <kbd>S</kbd> Skip · <kbd>↑↓</kbd> Nav · <kbd>F</kbd> Focus · <kbd>?</kbd> Help
+</div>
+
+</body>
+</html>

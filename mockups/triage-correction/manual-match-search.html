@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Intelligence — Manual Match Search</title>
+  <style>
+    :root {
+      --bg: #f5f6fa;
+      --card: #ffffff;
+      --border: #e0e3ea;
+      --text: #1a1d2e;
+      --muted: #6b7280;
+      --accent: #3498db;
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+      --purple: #8b5cf6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    .topnav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: 48px; gap: 24px; }
+    .topnav-brand { font-weight: 800; font-size: 15px; color: var(--accent); }
+
+    /* ── Modal overlay ── */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .modal { background: var(--card); border-radius: 14px; width: 880px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+    .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .modal-title { font-size: 16px; font-weight: 700; }
+    .modal-close { width: 28px; height: 28px; border-radius: 6px; border: none; background: #f0f0f0; cursor: pointer; font-size: 14px; font-weight: 700; }
+    .modal-body { flex: 1; overflow-y: auto; padding: 0; display: flex; }
+    .modal-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+
+    /* ── Split: context left, search right ── */
+    .match-context { width: 280px; min-width: 280px; border-right: 1px solid var(--border); padding: 16px; background: #f8f9fc; overflow-y: auto; }
+    .match-search { flex: 1; padding: 16px; overflow-y: auto; }
+
+    .ctx-label { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 4px; }
+    .ctx-value { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+    .ctx-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-bottom: 12px; }
+    .ctx-badge.eob { background: #dbeafe; color: #1e40af; }
+    .ctx-badge.bill { background: #fef3c7; color: #92400e; }
+    .ctx-doc-preview { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 9px; color: #555; line-height: 1.5; margin-top: 8px; }
+    .ctx-doc-preview .logo { font-size: 11px; font-weight: 800; color: #1a4d8f; margin-bottom: 4px; }
+
+    /* ── Search bar ── */
+    .search-bar { display: flex; gap: 8px; margin-bottom: 12px; }
+    .search-input { flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+    .search-input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    .btn { border: none; border-radius: 7px; padding: 8px 14px; font-size: 12px; cursor: pointer; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+
+    /* ── Filters ── */
+    .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .filter-chip { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; border: 1px solid var(--border); background: var(--card); cursor: pointer; color: var(--muted); }
+    .filter-chip.active { border-color: var(--accent); background: #eef6ff; color: var(--accent); }
+
+    /* ── Smart suggestions ── */
+    .smart-suggest { background: #eef6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 12px; }
+    .smart-suggest strong { color: #1e40af; }
+
+    /* ── Results ── */
+    .results-header { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 8px; }
+    .result-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 8px; cursor: pointer; transition: all 0.15s; }
+    .result-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(52,152,219,0.1); }
+    .result-card.selected { border-color: var(--accent); background: #eef6ff; box-shadow: 0 0 0 2px rgba(52,152,219,0.2); }
+    .result-card.best-match { border-color: var(--success); }
+    .rc-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .rc-title { font-size: 13px; font-weight: 700; flex: 1; }
+    .rc-score { padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+    .rc-score.high { background: #d1fae5; color: #065f46; }
+    .rc-score.medium { background: #fef3c7; color: #92400e; }
+    .rc-score.low { background: #fde8e8; color: var(--danger); }
+    .rc-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
+    .rc-field { font-size: 11px; }
+    .rc-field-label { color: var(--muted); font-size: 9px; text-transform: uppercase; }
+    .rc-field-value { font-weight: 600; }
+    .rc-field-match { color: var(--success); font-weight: 600; }
+    .rc-field-miss { color: var(--warning); }
+    .rc-footer { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 10px; color: var(--muted); padding-top: 6px; border-top: 1px solid var(--border); }
+    .rc-preview-toggle { font-size: 10px; color: var(--accent); cursor: pointer; font-weight: 600; margin-left: auto; border: none; background: none; }
+    .rc-doc-preview { background: #e8e8e8; border: 1px solid var(--border); border-radius: 6px; margin-top: 8px; display: none; overflow: hidden; }
+    .rc-doc-preview.open { display: block; }
+    .rc-preview-toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: #f0f0f0; border-bottom: 1px solid var(--border); font-size: 10px; color: var(--muted); }
+    .rc-preview-toolbar .preview-filename { font-weight: 600; color: var(--text); flex: 1; }
+    .rc-preview-toolbar .preview-action { padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 10px; font-weight: 600; color: var(--muted); }
+    .rc-preview-toolbar .preview-action:hover { border-color: var(--accent); color: var(--accent); }
+    .rc-preview-page { background: #fff; width: 88%; margin: 12px auto; box-shadow: 0 2px 8px rgba(0,0,0,0.12); border-radius: 2px; padding: 18px 16px; font-size: 9px; color: #444; line-height: 1.6; }
+    .rc-preview-footer { padding: 5px 10px; background: #f0f0f0; border-top: 1px solid var(--border); font-size: 9px; color: var(--muted); display: flex; justify-content: space-between; }
+
+    /* ── Fullscreen overlay ── */
+    .fullscreen-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; display: flex; align-items: center; justify-content: center; }
+    .fullscreen-viewer { background: #e8e8e8; border-radius: 10px; width: 700px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.4); }
+    .fullscreen-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: #333; color: #fff; font-size: 12px; }
+    .fullscreen-toolbar .fs-title { flex: 1; font-weight: 600; }
+    .fullscreen-toolbar .fs-btn { padding: 4px 10px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.3); background: transparent; color: #fff; cursor: pointer; font-size: 11px; font-weight: 600; }
+    .fullscreen-toolbar .fs-btn:hover { background: rgba(255,255,255,0.15); }
+    .fullscreen-body { flex: 1; overflow-y: auto; padding: 20px; display: flex; justify-content: center; }
+    .fullscreen-page { background: #fff; width: 100%; max-width: 600px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); padding: 32px 28px; font-size: 11px; color: #333; line-height: 1.7; }
+
+    /* ── Phase banner ── */
+    .phase-banner { padding: 8px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 11px; display: flex; align-items: center; gap: 8px; }
+    .phase-banner.mvp { background: #d1fae5; border: 1px solid #a7f3d0; }
+    .phase-banner.advanced { background: #ede9fe; border: 1px solid #ddd6fe; }
+    .phase-badge { font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: 700; }
+    .phase-badge.mvp { background: #065f46; color: #fff; }
+    .phase-badge.adv { background: var(--purple); color: #fff; }
+
+    /* ── Tabs ── */
+    .search-tabs { display: flex; gap: 3px; margin-bottom: 12px; }
+    .search-tab { padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; background: transparent; color: var(--muted); }
+    .search-tab.active { background: var(--accent); color: #fff; }
+  </style>
+</head>
+<body>
+
+<nav class="topnav">
+  <span class="topnav-brand">📄 DI Admin</span>
+  <span style="font-size:13px;color:var(--muted);">Triage → Manual Match Search</span>
+</nav>
+
+<!-- ═══ MODAL: Manual Match Search ═══ -->
+<div class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">🔍 Find Matching Bill — Aetna EOB (Claim #2024-3847)</div>
+      <button class="modal-close">✕</button>
+    </div>
+
+    <div class="modal-body">
+
+      <!-- LEFT: Source document context -->
+      <div class="match-context">
+        <span class="ctx-badge eob">📋 Source: EOB</span>
+        <div class="ctx-label">Insurance</div>
+        <div class="ctx-value">Aetna PPO</div>
+        <div class="ctx-label">Provider</div>
+        <div class="ctx-value">Lab Corp</div>
+        <div class="ctx-label">Date of Service</div>
+        <div class="ctx-value">06/10/2024</div>
+        <div class="ctx-label">Patient</div>
+        <div class="ctx-value">John Doe</div>
+        <div class="ctx-label">Patient Responsibility</div>
+        <div class="ctx-value" style="color:var(--danger);">$48.00</div>
+        <div class="ctx-label">Claim #</div>
+        <div class="ctx-value">2024-3847</div>
+
+        <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
+          <div class="ctx-label">Document Preview</div>
+          <div class="ctx-doc-preview">
+            <div class="logo">Aetna</div>
+            <strong>EXPLANATION OF BENEFITS</strong><br/>
+            Member: John Doe<br/>
+            Claim: 2024-3847<br/>
+            Provider: Lab Corp<br/>
+            Service: 06/10/2024<br/>
+            You Owe: <strong style="color:#c0392b;">$48.00</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Search & results -->
+      <div class="match-search">
+
+        <!-- Phase indicator -->
+        <div class="phase-banner mvp">
+          <span class="phase-badge mvp">MVP</span>
+          <span>Smart search with auto-populated filters from source document</span>
+        </div>
+
+        <!-- Search bar -->
+        <div class="search-bar">
+          <input type="text" class="search-input" placeholder="Search Paperless documents..." value="Lab Corp" />
+          <button class="btn btn-primary">🔍 Search</button>
+        </div>
+
+        <!-- Auto-filters from source -->
+        <div class="filters">
+          <span class="filter-chip active">📋 Bills only</span>
+          <span class="filter-chip active">🏥 Lab Corp</span>
+          <span class="filter-chip active">📅 ±30 days of Jun 10</span>
+          <span class="filter-chip">👤 John Doe</span>
+          <span class="filter-chip">💰 ~$48</span>
+          <span class="filter-chip">📎 Unmatched only</span>
+        </div>
+
+        <!-- Smart suggestion -->
+        <div class="smart-suggest">
+          <strong>🧠 Smart Match:</strong> Found <strong>3 bills</strong> from Lab Corp within 30 days of service date. Best match scores <strong>87%</strong> on amount + date + provider.
+        </div>
+
+        <!-- Results -->
+        <div class="results-header">3 potential matches found</div>
+
+        <!-- Best match -->
+        <div class="result-card best-match selected" onclick="selectResult(this)">
+          <div class="rc-top">
+            <span style="font-size:12px;">📄</span>
+            <span class="rc-title">Lab Corp — Blood Work Invoice</span>
+            <span class="rc-score high">87% match</span>
+          </div>
+          <div class="rc-fields">
+            <div class="rc-field">
+              <div class="rc-field-label">Provider</div>
+              <div class="rc-field-value rc-field-match">✅ Lab Corp</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Amount</div>
+              <div class="rc-field-value rc-field-match">✅ $48.00</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Date</div>
+              <div class="rc-field-value rc-field-match">✅ 06/10/2024</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Patient</div>
+              <div class="rc-field-value rc-field-match">✅ John Doe</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Paperless #</div>
+              <div class="rc-field-value">#1502</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Status</div>
+              <div class="rc-field-value" style="color:var(--warning);">Unmatched</div>
+            </div>
+          </div>
+          <div class="rc-footer">
+            <span>Added Jun 25, 2024</span>
+            <span>Tags: medical, bill, lab</span>
+            <button class="rc-preview-toggle" onclick="event.stopPropagation();toggleResultPreview(this)">▶ Preview doc</button>
+          </div>
+          <div class="rc-doc-preview">
+            <div class="rc-preview-toolbar">
+              <span class="preview-filename">📄 LabCorp_BloodWork_Jun2024.pdf</span>
+              <button class="preview-action" onclick="event.stopPropagation();openFullscreen('fs-labcorp-blood')">⛶ Expand</button>
+              <button class="preview-action">🔗 Open in Paperless</button>
+            </div>
+            <div class="rc-preview-page">
+              <div style="font-size:12px;font-weight:800;color:#1a4d8f;margin-bottom:4px;">Laboratory Corporation of America</div>
+              <div style="font-size:8px;color:#888;margin-bottom:10px;">PATIENT STATEMENT</div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+                <div><strong>Patient:</strong> John Doe<br/><strong>Account:</strong> LC-889012<br/><strong>Date of Service:</strong> 06/10/2024</div>
+                <div style="text-align:right;"><strong>Statement Date:</strong> 06/22/2024<br/><strong>Due Date:</strong> 07/22/2024</div>
+              </div>
+              <table style="width:100%;border-collapse:collapse;font-size:8px;margin:6px 0;">
+                <tr style="background:#f0f4f8;"><th style="text-align:left;padding:3px 6px;border:1px solid #ddd;">Description</th><th style="padding:3px 6px;border:1px solid #ddd;">Code</th><th style="padding:3px 6px;border:1px solid #ddd;">Amount</th></tr>
+                <tr><td style="padding:3px 6px;border:1px solid #ddd;">Comprehensive Metabolic Panel</td><td style="padding:3px 6px;border:1px solid #ddd;text-align:center;">80053</td><td style="padding:3px 6px;border:1px solid #ddd;text-align:right;">$28.00</td></tr>
+                <tr><td style="padding:3px 6px;border:1px solid #ddd;">Complete Blood Count (CBC)</td><td style="padding:3px 6px;border:1px solid #ddd;text-align:center;">85025</td><td style="padding:3px 6px;border:1px solid #ddd;text-align:right;">$20.00</td></tr>
+                <tr style="font-weight:700;"><td style="padding:3px 6px;border:1px solid #ddd;" colspan="2">TOTAL AMOUNT DUE</td><td style="padding:3px 6px;border:1px solid #ddd;text-align:right;color:#c0392b;">$48.00</td></tr>
+              </table>
+              <div style="font-size:7px;color:#888;margin-top:8px;border-top:1px solid #ddd;padding-top:4px;">Please remit payment within 30 days. Questions? Call 800-555-0199.</div>
+            </div>
+            <div class="rc-preview-footer">
+              <span>Page 1 of 1 · Added Jun 25, 2024</span>
+              <span>PDF · 245 KB</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Partial match -->
+        <div class="result-card" onclick="selectResult(this)">
+          <div class="rc-top">
+            <span style="font-size:12px;">📄</span>
+            <span class="rc-title">Lab Corp — Urinalysis Bill</span>
+            <span class="rc-score medium">52% match</span>
+          </div>
+          <div class="rc-fields">
+            <div class="rc-field">
+              <div class="rc-field-label">Provider</div>
+              <div class="rc-field-value rc-field-match">✅ Lab Corp</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Amount</div>
+              <div class="rc-field-value rc-field-miss">⚠ $22.00</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Date</div>
+              <div class="rc-field-value rc-field-match">✅ 06/10/2024</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Patient</div>
+              <div class="rc-field-value rc-field-match">✅ John Doe</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Paperless #</div>
+              <div class="rc-field-value">#1498</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Status</div>
+              <div class="rc-field-value" style="color:var(--warning);">Unmatched</div>
+            </div>
+          </div>
+          <div class="rc-footer">
+            <span>Added Jun 23, 2024</span>
+            <span>Tags: medical, bill, lab</span>
+            <button class="rc-preview-toggle" onclick="event.stopPropagation();toggleResultPreview(this)">▶ Preview doc</button>
+          </div>
+          <div class="rc-doc-preview">
+            <div class="rc-preview-toolbar">
+              <span class="preview-filename">📄 LabCorp_Urinalysis_Jun2024.pdf</span>
+              <button class="preview-action" onclick="event.stopPropagation();">⛶ Expand</button>
+              <button class="preview-action">🔗 Open in Paperless</button>
+            </div>
+            <div class="rc-preview-page">
+              <div style="font-size:12px;font-weight:800;color:#1a4d8f;margin-bottom:4px;">Laboratory Corporation of America</div>
+              <div style="font-size:8px;color:#888;margin-bottom:8px;">PATIENT STATEMENT</div>
+              <div><strong>Patient:</strong> John Doe &nbsp;|&nbsp; <strong>DOS:</strong> 06/10/2024 &nbsp;|&nbsp; <strong>Account:</strong> LC-889012</div>
+              <div style="margin-top:6px;"><strong>Description:</strong> Urinalysis</div>
+              <div style="margin-top:4px;font-weight:700;">Amount Due: $22.00</div>
+            </div>
+            <div class="rc-preview-footer">
+              <span>Page 1 of 1 · Added Jun 23, 2024</span>
+              <span>PDF · 198 KB</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Low match -->
+        <div class="result-card" onclick="selectResult(this)">
+          <div class="rc-top">
+            <span style="font-size:12px;">📄</span>
+            <span class="rc-title">Lab Corp — May 2024 Statement</span>
+            <span class="rc-score low">28% match</span>
+          </div>
+          <div class="rc-fields">
+            <div class="rc-field">
+              <div class="rc-field-label">Provider</div>
+              <div class="rc-field-value rc-field-match">✅ Lab Corp</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Amount</div>
+              <div class="rc-field-value rc-field-miss">⚠ $125.00</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Date</div>
+              <div class="rc-field-value rc-field-miss">⚠ 05/15/2024</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Patient</div>
+              <div class="rc-field-value rc-field-match">✅ John Doe</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Paperless #</div>
+              <div class="rc-field-value">#1445</div>
+            </div>
+            <div class="rc-field">
+              <div class="rc-field-label">Status</div>
+              <div class="rc-field-value" style="color:var(--success);">Already matched</div>
+            </div>
+          </div>
+          <div class="rc-footer">
+            <span>Added May 20, 2024</span>
+            <span>⚠ Already linked to EOB #1440</span>
+            <button class="rc-preview-toggle" onclick="event.stopPropagation();toggleResultPreview(this)">▶ Preview doc</button>
+          </div>
+          <div class="rc-doc-preview">
+            <div class="rc-preview-toolbar">
+              <span class="preview-filename">📄 LabCorp_Statement_May2024.pdf</span>
+              <button class="preview-action" onclick="event.stopPropagation();">⛶ Expand</button>
+              <button class="preview-action">🔗 Open in Paperless</button>
+            </div>
+            <div class="rc-preview-page">
+              <div style="font-size:12px;font-weight:800;color:#1a4d8f;margin-bottom:4px;">Laboratory Corporation of America</div>
+              <div style="font-size:8px;color:#888;margin-bottom:8px;">MONTHLY STATEMENT</div>
+              <div>Multiple services — May 2024</div>
+              <div style="margin-top:4px;font-weight:700;">Total Due: $125.00</div>
+              <div style="margin-top:4px;font-size:8px;color:var(--warning);">⚠ Already linked to EOB #1440</div>
+            </div>
+            <div class="rc-preview-footer">
+              <span>Page 1 of 2 · Added May 20, 2024</span>
+              <span>PDF · 312 KB</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Advanced features section -->
+        <div style="margin-top:16px;">
+          <div class="phase-banner advanced">
+            <span class="phase-badge adv">Advanced</span>
+            <span>Future enhancements for complex matching scenarios</span>
+          </div>
+          <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:11px;color:var(--muted);line-height:1.6;">
+            <strong style="color:var(--text);">Planned for Advanced Build:</strong>
+            <ul style="margin-left:14px;margin-top:4px;">
+              <li><strong>🧠 LLM-assisted matching:</strong> "Analyze these 2 documents and tell me if they're related" — uses document content, not just fields</li>
+              <li><strong>📊 Multi-EOB to one bill:</strong> Handle cases where a single bill covers multiple services, each with its own EOB</li>
+              <li><strong>🔗 Cross-provider matching:</strong> Match lab bills to referring physician EOBs (bundled services)</li>
+              <li><strong>📥 External search:</strong> Search Monarch Money transactions for payment confirmation</li>
+              <li><strong>⏰ Auto-retry:</strong> Schedule re-match attempts for orphaned documents weekly</li>
+            </ul>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <div class="modal-footer">
+      <div style="font-size:11px;color:var(--muted);">
+        Selected: <strong style="color:var(--text);">Lab Corp — Blood Work Invoice (#1502)</strong> · 87% match
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-outline">Cancel</button>
+        <button class="btn btn-success">✅ Confirm Match</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══ FULLSCREEN DOCUMENT VIEWER ═══ -->
+<div class="fullscreen-overlay" id="fs-overlay" style="display:none;" onclick="closeFullscreen(event)">
+  <div class="fullscreen-viewer" onclick="event.stopPropagation();">
+    <div class="fullscreen-toolbar">
+      <span class="fs-title" id="fs-title">📄 LabCorp_BloodWork_Jun2024.pdf</span>
+      <button class="fs-btn">◀</button>
+      <span style="font-size:11px;">Page 1 of 1</span>
+      <button class="fs-btn">▶</button>
+      <button class="fs-btn">🔍 Zoom</button>
+      <button class="fs-btn">🔗 Open in Paperless</button>
+      <button class="fs-btn" onclick="closeFullscreen(event)">✕ Close</button>
+    </div>
+    <div class="fullscreen-body">
+      <div class="fullscreen-page" id="fs-page">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+          <div>
+            <div style="font-size:18px;font-weight:800;color:#1a4d8f;">Laboratory Corporation of America</div>
+            <div style="font-size:10px;color:#888;margin-top:2px;">358 S Main St · Burlington, NC 27215 · 800-555-0199</div>
+          </div>
+          <div style="text-align:right;font-size:11px;">
+            <strong>PATIENT STATEMENT</strong><br/>
+            <span style="color:#888;">Statement Date: 06/22/2024</span>
+          </div>
+        </div>
+
+        <div style="background:#f0f4f8;border:1px solid #ddd;border-radius:4px;padding:10px 14px;margin-bottom:14px;display:flex;justify-content:space-between;">
+          <div>
+            <strong>Patient:</strong> John Doe<br/>
+            <strong>Account #:</strong> LC-889012<br/>
+            <strong>DOB:</strong> ••/••/1985
+          </div>
+          <div style="text-align:right;">
+            <strong>Date of Service:</strong> 06/10/2024<br/>
+            <strong>Ordering Physician:</strong> Dr. Sarah Chen<br/>
+            <strong>Due Date:</strong> 07/22/2024
+          </div>
+        </div>
+
+        <table style="width:100%;border-collapse:collapse;margin:10px 0;">
+          <tr style="background:#f0f4f8;">
+            <th style="text-align:left;padding:6px 10px;border:1px solid #ddd;font-size:10px;">Description</th>
+            <th style="padding:6px 10px;border:1px solid #ddd;font-size:10px;">CPT Code</th>
+            <th style="padding:6px 10px;border:1px solid #ddd;font-size:10px;text-align:right;">Charged</th>
+            <th style="padding:6px 10px;border:1px solid #ddd;font-size:10px;text-align:right;">Insurance Paid</th>
+            <th style="padding:6px 10px;border:1px solid #ddd;font-size:10px;text-align:right;">You Owe</th>
+          </tr>
+          <tr>
+            <td style="padding:6px 10px;border:1px solid #ddd;">Comprehensive Metabolic Panel</td>
+            <td style="padding:6px 10px;border:1px solid #ddd;text-align:center;">80053</td>
+            <td style="padding:6px 10px;border:1px solid #ddd;text-align:right;">$120.00</td>
+            <td style="padding:6px 10px;border:1px solid #ddd;text-align:right;">$92.00</td>
+            <td style="padding:6px 10px;border:1px solid #ddd;text-align:right;">$28.00</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 10px;border:1px solid #ddd;">Complete Blood Count (CBC)</td>
+            <td style="padding:6px 10px;border:1px solid #ddd;text-align:center;">85025</td>
+            <td style="padding:6px 10px;border:1px solid #ddd;text-align:right;">$60.00</td>
+            <td style="padding:6px 10px;border:1px solid #ddd;text-align:right;">$40.00</td>
+            <td style="padding:6px 10px;border:1px solid #ddd;text-align:right;">$20.00</td>
+          </tr>
+          <tr style="font-weight:700;background:#fff8f0;">
+            <td style="padding:6px 10px;border:1px solid #ddd;" colspan="4">TOTAL AMOUNT DUE</td>
+            <td style="padding:6px 10px;border:1px solid #ddd;text-align:right;color:#c0392b;font-size:13px;">$48.00</td>
+          </tr>
+        </table>
+
+        <div style="margin-top:16px;font-size:10px;color:#666;border-top:1px solid #ddd;padding-top:10px;">
+          <strong>Insurance:</strong> Aetna PPO (Plan ID: W123456789)<br/>
+          Please remit payment within 30 days of statement date.<br/>
+          Pay online at <span style="color:#1a4d8f;">labcorp.com/pay</span> or mail check to address above.<br/><br/>
+          <span style="font-size:9px;color:#999;">If you have questions about your bill, please call Patient Billing at 800-555-0199, Mon-Fri 8AM-6PM ET.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function selectResult(card) {
+  document.querySelectorAll('.result-card').forEach(function(c) { c.classList.remove('selected'); });
+  card.classList.add('selected');
+}
+
+function toggleResultPreview(btn) {
+  var preview = btn.closest('.result-card').querySelector('.rc-doc-preview');
+  if (preview.classList.contains('open')) {
+    preview.classList.remove('open');
+    btn.textContent = '▶ Preview doc';
+  } else {
+    preview.classList.add('open');
+    btn.textContent = '▼ Hide preview';
+  }
+}
+
+function openFullscreen(id) {
+  document.getElementById('fs-overlay').style.display = 'flex';
+}
+
+function closeFullscreen(e) {
+  document.getElementById('fs-overlay').style.display = 'none';
+}
+</script>
+
+</body>
+</html>

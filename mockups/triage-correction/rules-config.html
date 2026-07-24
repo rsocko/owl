@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Intelligence — Rules Configuration</title>
+  <style>
+    :root {
+      --bg: #f5f6fa;
+      --card: #ffffff;
+      --border: #e0e3ea;
+      --text: #1a1d2e;
+      --muted: #6b7280;
+      --accent: #3498db;
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+      --purple: #8b5cf6;
+      --orange: #f97316;
+      --teal: #14b8a6;
+      --n8n: #ff6d5a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    /* ── Top nav ── */
+    .topnav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: 48px; gap: 24px; }
+    .topnav-brand { font-weight: 800; font-size: 15px; color: var(--accent); }
+    .topnav-links { display: flex; gap: 4px; }
+    .topnav-link { padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--muted); text-decoration: none; }
+    .topnav-link.active { color: var(--accent); background: #eef6ff; }
+    .topnav-link .badge { position: relative; top: -6px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; }
+
+    /* ── Page ── */
+    .page { max-width: 1100px; margin: 0 auto; padding: 20px 24px; }
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .page-title { font-size: 20px; font-weight: 800; }
+    .page-subtitle { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+    /* ── Buttons ── */
+    .btn { border: none; border-radius: 7px; padding: 8px 14px; font-size: 12px; cursor: pointer; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; transition: opacity 0.15s; }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+    .btn-purple { background: var(--purple); color: #fff; }
+    .btn-n8n { background: var(--n8n); color: #fff; }
+
+    /* ── Rule type tabs ── */
+    .rule-tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 2px solid var(--border); padding-bottom: 0; }
+    .rule-tab { padding: 10px 18px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; border: none; background: none; border-bottom: 2px solid transparent; margin-bottom: -2px; display: flex; align-items: center; gap: 6px; }
+    .rule-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .rule-tab .tab-count { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: #f0f0f0; color: var(--muted); font-weight: 700; }
+    .rule-tab.active .tab-count { background: #eef6ff; color: var(--accent); }
+    .rule-tab .tab-icon { font-size: 15px; }
+
+    /* ── Rule engine explanation ── */
+    .engine-banner { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+    .engine-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    .engine-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .engine-card-icon { font-size: 20px; }
+    .engine-card-title { font-size: 13px; font-weight: 700; }
+    .engine-card-badge { font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: 700; }
+    .engine-card-badge.basic { background: #dbeafe; color: #1e40af; }
+    .engine-card-badge.llm { background: #ede9fe; color: var(--purple); }
+    .engine-card-badge.n8n { background: #ffece8; color: #c0392b; }
+    .engine-card-desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
+    .engine-card-examples { margin-top: 8px; font-size: 10px; }
+    .engine-card-examples li { color: var(--muted); margin-bottom: 2px; }
+
+    /* ── Rules list ── */
+    .rules-list { display: flex; flex-direction: column; gap: 10px; }
+    .rule-row { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; display: flex; align-items: center; gap: 14px; transition: border-color 0.15s; cursor: pointer; }
+    .rule-row:hover { border-color: var(--accent); }
+    .rule-row.disabled { opacity: 0.5; }
+    .rule-toggle { position: relative; width: 36px; height: 20px; border-radius: 10px; background: #e0e3ea; cursor: pointer; flex-shrink: 0; transition: background 0.2s; }
+    .rule-toggle.on { background: var(--success); }
+    .rule-toggle .toggle-dot { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+    .rule-toggle.on .toggle-dot { left: 18px; }
+    .rule-type-badge { font-size: 9px; padding: 2px 8px; border-radius: 4px; font-weight: 700; flex-shrink: 0; white-space: nowrap; }
+    .rule-type-badge.basic { background: #dbeafe; color: #1e40af; }
+    .rule-type-badge.llm { background: #ede9fe; color: var(--purple); }
+    .rule-type-badge.n8n { background: #ffece8; color: #c0392b; }
+    .rule-info { flex: 1; min-width: 0; }
+    .rule-name { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+    .rule-desc { font-size: 11px; color: var(--muted); }
+    .rule-meta { display: flex; gap: 12px; flex-shrink: 0; align-items: center; }
+    .rule-meta-item { font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 3px; }
+    .rule-route { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+    .rule-route.triage { background: #fef3c7; color: #92400e; }
+    .rule-route.mc { background: #fde8e8; color: var(--danger); }
+    .rule-route.insight { background: #d1fae5; color: #065f46; }
+
+    /* ── Rule detail / editor ── */
+    .rule-editor { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-top: 16px; display: none; }
+    .rule-editor.open { display: block; }
+    .editor-section { margin-bottom: 16px; }
+    .editor-section:last-child { margin-bottom: 0; }
+    .editor-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 6px; }
+    .editor-input { width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: inherit; }
+    .editor-input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    textarea.editor-input { min-height: 80px; resize: vertical; }
+    .editor-select { padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: inherit; background: var(--card); }
+    .editor-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .editor-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+    /* ── Threshold builder ── */
+    .threshold-builder { background: #f8f9fc; border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+    .threshold-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+    .threshold-row:last-child { margin-bottom: 0; }
+    .threshold-field { padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; background: var(--card); }
+    .threshold-op { padding: 4px 8px; border-radius: 4px; background: #eef6ff; color: var(--accent); font-weight: 600; font-size: 11px; }
+    .threshold-add { font-size: 11px; color: var(--accent); cursor: pointer; font-weight: 600; border: none; background: none; margin-top: 4px; }
+
+    /* ── LLM prompt editor ── */
+    .llm-prompt-area { background: #1e1e2e; border-radius: 8px; padding: 14px; color: #e0e0e0; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 12px; line-height: 1.6; min-height: 120px; position: relative; }
+    .llm-prompt-area .prompt-var { color: #f39c12; font-weight: 600; }
+    .llm-prompt-area .prompt-comment { color: #6b7280; font-style: italic; }
+    .llm-model-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+    .llm-model-badge { padding: 4px 10px; border-radius: 6px; background: #ede9fe; color: var(--purple); font-size: 11px; font-weight: 600; }
+    .llm-cost-est { font-size: 10px; color: var(--muted); }
+
+    /* ── n8n integration ── */
+    .n8n-config { background: #fff8f6; border: 1px solid #ffcfc6; border-radius: 8px; padding: 14px; }
+    .n8n-url-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .n8n-url-input { flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; font-family: monospace; }
+    .n8n-status { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+    .n8n-status-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .n8n-status-dot.connected { background: var(--success); }
+    .n8n-status-dot.error { background: var(--danger); }
+    .n8n-flow-preview { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-top: 8px; }
+    .n8n-node { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; margin-right: 4px; }
+    .n8n-node.trigger { background: #ffece8; color: #c0392b; }
+    .n8n-node.process { background: #eef6ff; color: #1e40af; }
+    .n8n-node.llm { background: #ede9fe; color: var(--purple); }
+    .n8n-node.output { background: #d1fae5; color: #065f46; }
+    .n8n-arrow { color: var(--muted); font-size: 12px; margin: 0 2px; }
+
+    /* ── Routing config ── */
+    .route-config { display: flex; gap: 8px; flex-wrap: wrap; }
+    .route-option { padding: 8px 14px; border: 2px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.15s; }
+    .route-option:hover { border-color: var(--accent); }
+    .route-option.selected { border-color: var(--accent); background: #eef6ff; }
+    .route-option .route-label { display: block; margin-bottom: 2px; }
+    .route-option .route-desc { font-size: 10px; color: var(--muted); font-weight: 400; }
+
+    /* ── Escalation ── */
+    .escalation-row { display: flex; align-items: center; gap: 8px; background: #fef3c7; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; font-size: 12px; }
+    .escalation-row .esc-label { font-weight: 600; }
+  </style>
+</head>
+<body>
+
+<nav class="topnav">
+  <span class="topnav-brand">📄 DI Admin</span>
+  <div class="topnav-links">
+    <a href="#" class="topnav-link">Triage <span class="badge">14</span></a>
+    <a href="#" class="topnav-link">Insights</a>
+    <a href="#" class="topnav-link active">Rules</a>
+    <a href="#" class="topnav-link">Config</a>
+  </div>
+</nav>
+
+<div class="page">
+
+  <div class="page-header">
+    <div>
+      <div class="page-title">Analysis Rules</div>
+      <div class="page-subtitle">Configure rules that detect issues, generate insights, and route items to triage or Mission Control</div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-outline">📥 Import YAML</button>
+      <button class="btn btn-primary" onclick="toggleEditor()">+ New Rule</button>
+    </div>
+  </div>
+
+  <!-- ═══ Engine type cards ═══ -->
+  <div class="engine-banner">
+    <div class="engine-card">
+      <div class="engine-card-header">
+        <span class="engine-card-icon">⚙️</span>
+        <span class="engine-card-title">Basic Rules</span>
+        <span class="engine-card-badge basic">Built-in</span>
+      </div>
+      <div class="engine-card-desc">Threshold-based rules using extracted metadata. Fast, free, deterministic. Best for known patterns.</div>
+      <ul class="engine-card-examples">
+        <li>• Orphan after N days</li>
+        <li>• Duplicate similarity ≥ threshold</li>
+        <li>• Spend change ≥ X%</li>
+      </ul>
+    </div>
+    <div class="engine-card">
+      <div class="engine-card-header">
+        <span class="engine-card-icon">🧠</span>
+        <span class="engine-card-title">LLM Rules</span>
+        <span class="engine-card-badge llm">AI-Powered</span>
+      </div>
+      <div class="engine-card-desc">Use an LLM to analyze documents, detect anomalies, or classify content. Best for fuzzy/contextual rules.</div>
+      <ul class="engine-card-examples">
+        <li>• "Does this bill look inflated?"</li>
+        <li>• "Summarize coverage changes"</li>
+        <li>• "Classify unknown doc type"</li>
+      </ul>
+    </div>
+    <div class="engine-card">
+      <div class="engine-card-header">
+        <span class="engine-card-icon">🔗</span>
+        <span class="engine-card-title">n8n Workflow Rules</span>
+        <span class="engine-card-badge n8n">External</span>
+      </div>
+      <div class="engine-card-desc">Trigger an n8n workflow for complex multi-step analysis, external API calls, or custom integrations.</div>
+      <ul class="engine-card-examples">
+        <li>• Cross-reference with Monarch</li>
+        <li>• Call provider price-check API</li>
+        <li>• Multi-doc summary pipeline</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ═══ Tab filters ═══ -->
+  <div class="rule-tabs">
+    <button class="rule-tab active" onclick="filterRules('all',this)">
+      <span class="tab-icon">📋</span> All Rules <span class="tab-count">8</span>
+    </button>
+    <button class="rule-tab" onclick="filterRules('basic',this)">
+      <span class="tab-icon">⚙️</span> Basic <span class="tab-count">4</span>
+    </button>
+    <button class="rule-tab" onclick="filterRules('llm',this)">
+      <span class="tab-icon">🧠</span> LLM <span class="tab-count">2</span>
+    </button>
+    <button class="rule-tab" onclick="filterRules('n8n',this)">
+      <span class="tab-icon">🔗</span> n8n <span class="tab-count">2</span>
+    </button>
+  </div>
+
+  <!-- ═══ Rules list ═══ -->
+  <div class="rules-list" id="rules-list">
+
+    <!-- BASIC RULES -->
+    <div class="rule-row" data-type="basic" onclick="selectRule(this)">
+      <div class="rule-toggle on" onclick="event.stopPropagation();toggleRule(this)"><div class="toggle-dot"></div></div>
+      <span class="rule-type-badge basic">⚙️ Basic</span>
+      <div class="rule-info">
+        <div class="rule-name">Orphan Detection</div>
+        <div class="rule-desc">Flag EOBs with no matching bill after 30 days, escalate at 60 days</div>
+      </div>
+      <div class="rule-meta">
+        <span class="rule-meta-item">🔄 Daily</span>
+        <span class="rule-meta-item">📊 3 hits this month</span>
+        <span class="rule-route triage">→ Triage</span>
+        <span class="rule-route mc">→ MC (60d)</span>
+      </div>
+    </div>
+
+    <div class="rule-row" data-type="basic" onclick="selectRule(this)">
+      <div class="rule-toggle on" onclick="event.stopPropagation();toggleRule(this)"><div class="toggle-dot"></div></div>
+      <span class="rule-type-badge basic">⚙️ Basic</span>
+      <div class="rule-info">
+        <div class="rule-name">Duplicate Detection</div>
+        <div class="rule-desc">Flag documents with ≥85% similarity score as potential duplicates</div>
+      </div>
+      <div class="rule-meta">
+        <span class="rule-meta-item">🔄 On ingest</span>
+        <span class="rule-meta-item">📊 5 hits this month</span>
+        <span class="rule-route triage">→ Triage</span>
+      </div>
+    </div>
+
+    <div class="rule-row" data-type="basic" onclick="selectRule(this)">
+      <div class="rule-toggle on" onclick="event.stopPropagation();toggleRule(this)"><div class="toggle-dot"></div></div>
+      <span class="rule-type-badge basic">⚙️ Basic</span>
+      <div class="rule-info">
+        <div class="rule-name">Monthly Spend Spike</div>
+        <div class="rule-desc">Alert when any account's monthly spend increases by ≥30% over 3-month average</div>
+      </div>
+      <div class="rule-meta">
+        <span class="rule-meta-item">🔄 Monthly</span>
+        <span class="rule-meta-item">📊 1 hit this month</span>
+        <span class="rule-route insight">→ Insight</span>
+        <span class="rule-route mc">→ MC (≥50%)</span>
+      </div>
+    </div>
+
+    <div class="rule-row" data-type="basic" onclick="selectRule(this)">
+      <div class="rule-toggle on" onclick="event.stopPropagation();toggleRule(this)"><div class="toggle-dot"></div></div>
+      <span class="rule-type-badge basic">⚙️ Basic</span>
+      <div class="rule-info">
+        <div class="rule-name">Low Extraction Confidence</div>
+        <div class="rule-desc">Flag documents where any critical field has extraction confidence &lt; 60%</div>
+      </div>
+      <div class="rule-meta">
+        <span class="rule-meta-item">🔄 On ingest</span>
+        <span class="rule-meta-item">📊 2 hits this month</span>
+        <span class="rule-route triage">→ Triage</span>
+      </div>
+    </div>
+
+    <!-- LLM RULES -->
+    <div class="rule-row" data-type="llm" onclick="selectRule(this)">
+      <div class="rule-toggle on" onclick="event.stopPropagation();toggleRule(this)"><div class="toggle-dot"></div></div>
+      <span class="rule-type-badge llm">🧠 LLM</span>
+      <div class="rule-info">
+        <div class="rule-name">Bill Reasonableness Check</div>
+        <div class="rule-desc">Use LLM to analyze if billed amount seems reasonable for the procedure and region</div>
+      </div>
+      <div class="rule-meta">
+        <span class="rule-meta-item">🔄 On ingest</span>
+        <span class="rule-meta-item">💰 ~$0.02/doc</span>
+        <span class="rule-meta-item">📊 1 hit this month</span>
+        <span class="rule-route insight">→ Insight</span>
+        <span class="rule-route mc">→ MC (flagged)</span>
+      </div>
+    </div>
+
+    <div class="rule-row" data-type="llm" onclick="selectRule(this)">
+      <div class="rule-toggle on" onclick="event.stopPropagation();toggleRule(this)"><div class="toggle-dot"></div></div>
+      <span class="rule-type-badge llm">🧠 LLM</span>
+      <div class="rule-info">
+        <div class="rule-name">Coverage Change Detection</div>
+        <div class="rule-desc">Analyze EOBs to detect changes in coverage terms, deductible resets, or plan modifications</div>
+      </div>
+      <div class="rule-meta">
+        <span class="rule-meta-item">🔄 Weekly</span>
+        <span class="rule-meta-item">💰 ~$0.05/run</span>
+        <span class="rule-meta-item">📊 0 hits</span>
+        <span class="rule-route insight">→ Insight</span>
+      </div>
+    </div>
+
+    <!-- N8N RULES -->
+    <div class="rule-row" data-type="n8n" onclick="selectRule(this)">
+      <div class="rule-toggle on" onclick="event.stopPropagation();toggleRule(this)"><div class="toggle-dot"></div></div>
+      <span class="rule-type-badge n8n">🔗 n8n</span>
+      <div class="rule-info">
+        <div class="rule-name">Monarch Cross-Reference</div>
+        <div class="rule-desc">Check if medical bills appear in Monarch Money transactions. Flag unpaid bills.</div>
+      </div>
+      <div class="rule-meta">
+        <span class="rule-meta-item">🔄 Weekly</span>
+        <span class="rule-meta-item">📊 2 hits this month</span>
+        <span class="rule-route triage">→ Triage</span>
+        <span class="rule-route mc">→ MC (unpaid)</span>
+      </div>
+    </div>
+
+    <div class="rule-row disabled" data-type="n8n" onclick="selectRule(this)">
+      <div class="rule-toggle" onclick="event.stopPropagation();toggleRule(this)"><div class="toggle-dot"></div></div>
+      <span class="rule-type-badge n8n">🔗 n8n</span>
+      <div class="rule-info">
+        <div class="rule-name">Provider Price Comparison</div>
+        <div class="rule-desc">Cross-check billed amounts against fair-price databases (Healthcare Bluebook API)</div>
+      </div>
+      <div class="rule-meta">
+        <span class="rule-meta-item" style="color:var(--danger);">⚠ Workflow offline</span>
+        <span class="rule-route insight">→ Insight</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ Rule editor (expanded when creating/editing) ═══ -->
+  <div class="rule-editor" id="rule-editor">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div style="font-size:16px;font-weight:700;">✏️ Edit Rule: Bill Reasonableness Check</div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-outline" onclick="toggleEditor()">Cancel</button>
+        <button class="btn btn-success">💾 Save Rule</button>
+      </div>
+    </div>
+
+    <div class="editor-row" style="margin-bottom:16px;">
+      <div class="editor-section">
+        <div class="editor-label">Rule Name</div>
+        <input type="text" class="editor-input" value="Bill Reasonableness Check" />
+      </div>
+      <div class="editor-section">
+        <div class="editor-label">Rule Type</div>
+        <select class="editor-select editor-input" onchange="switchEditorType(this.value)">
+          <option value="basic">⚙️ Basic — Threshold / Field comparison</option>
+          <option value="llm" selected>🧠 LLM — AI-powered analysis</option>
+          <option value="n8n">🔗 n8n — External workflow</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="editor-section">
+      <div class="editor-label">Description</div>
+      <input type="text" class="editor-input" value="Use LLM to analyze if billed amount seems reasonable for the procedure and region" />
+    </div>
+
+    <!-- ── Basic: Threshold config (hidden when LLM selected) ── -->
+    <div class="editor-section" id="editor-basic" style="display:none;">
+      <div class="editor-label">Conditions</div>
+      <div class="threshold-builder">
+        <div class="threshold-row">
+          <span style="font-weight:600;">IF</span>
+          <select class="threshold-field">
+            <option>spend_change_pct</option>
+            <option>days_since_service</option>
+            <option>similarity_score</option>
+            <option>extraction_confidence</option>
+            <option>patient_responsibility</option>
+          </select>
+          <select class="threshold-field" style="width:50px;">
+            <option>≥</option><option>≤</option><option>=</option><option>≠</option><option>&gt;</option><option>&lt;</option>
+          </select>
+          <input type="text" class="threshold-field" value="30" style="width:60px;" />
+          <select class="threshold-field" style="width:60px;">
+            <option>%</option><option>days</option><option>$</option><option>count</option>
+          </select>
+        </div>
+        <div class="threshold-row">
+          <span style="font-weight:600;color:var(--accent);">AND</span>
+          <select class="threshold-field">
+            <option>document_type</option>
+            <option>correspondent</option>
+            <option>tag</option>
+          </select>
+          <select class="threshold-field" style="width:50px;">
+            <option>=</option><option>≠</option><option>contains</option>
+          </select>
+          <input type="text" class="threshold-field" value="bill" style="width:100px;" />
+          <button style="color:var(--danger);border:none;background:none;cursor:pointer;font-weight:700;">✕</button>
+        </div>
+        <button class="threshold-add">+ Add condition</button>
+      </div>
+    </div>
+
+    <!-- ── LLM: Prompt config ── -->
+    <div class="editor-section" id="editor-llm">
+      <div class="editor-label">LLM Prompt Template</div>
+      <div class="llm-prompt-area" contenteditable="true">
+        <span class="prompt-comment">// Analyze the medical bill for reasonableness</span><br/>
+        You are a medical billing analyst. Given the following document data:<br/><br/>
+        Provider: <span class="prompt-var">{{provider_name}}</span><br/>
+        Procedure: <span class="prompt-var">{{description}}</span><br/>
+        Billed amount: <span class="prompt-var">{{billed_amount}}</span><br/>
+        Region: <span class="prompt-var">{{region}}</span><br/><br/>
+        Analyze whether this charge is reasonable. Consider:<br/>
+        1. Is the amount within typical range for this procedure?<br/>
+        2. Are there any red flags (balance billing, surprise charges)?<br/>
+        3. Should the patient negotiate or appeal?<br/><br/>
+        Respond with JSON: { "reasonable": bool, "confidence": 0-1, "explanation": "...", "action": "none|review|appeal" }
+      </div>
+      <div class="llm-model-row">
+        <span style="font-size:11px;font-weight:600;">Model:</span>
+        <select class="editor-select" style="padding:4px 8px;font-size:11px;">
+          <option>gpt-4o-mini (fastest, cheapest)</option>
+          <option>gpt-4o (balanced)</option>
+          <option selected>claude-3.5-sonnet (best reasoning)</option>
+          <option>llama-3 local (free, private)</option>
+        </select>
+        <span class="llm-model-badge">~$0.02/doc</span>
+        <span class="llm-cost-est">Est. $0.40/month at current volume</span>
+      </div>
+      <div style="margin-top:8px;">
+        <div class="editor-label">Available Variables</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;font-size:10px;">
+          <span style="padding:2px 6px;background:#ede9fe;color:var(--purple);border-radius:3px;font-family:monospace;">{{provider_name}}</span>
+          <span style="padding:2px 6px;background:#ede9fe;color:var(--purple);border-radius:3px;font-family:monospace;">{{patient_name}}</span>
+          <span style="padding:2px 6px;background:#ede9fe;color:var(--purple);border-radius:3px;font-family:monospace;">{{billed_amount}}</span>
+          <span style="padding:2px 6px;background:#ede9fe;color:var(--purple);border-radius:3px;font-family:monospace;">{{allowed_amount}}</span>
+          <span style="padding:2px 6px;background:#ede9fe;color:var(--purple);border-radius:3px;font-family:monospace;">{{description}}</span>
+          <span style="padding:2px 6px;background:#ede9fe;color:var(--purple);border-radius:3px;font-family:monospace;">{{date_of_service}}</span>
+          <span style="padding:2px 6px;background:#ede9fe;color:var(--purple);border-radius:3px;font-family:monospace;">{{document_text}}</span>
+          <span style="padding:2px 6px;background:#ede9fe;color:var(--purple);border-radius:3px;font-family:monospace;">{{region}}</span>
+          <span style="padding:2px 6px;background:#ede9fe;color:var(--purple);border-radius:3px;font-family:monospace;">{{insurance_plan}}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── n8n: Workflow config (hidden when LLM selected) ── -->
+    <div class="editor-section" id="editor-n8n" style="display:none;">
+      <div class="editor-label">n8n Workflow Configuration</div>
+      <div class="n8n-config">
+        <div class="n8n-url-row">
+          <span style="font-size:11px;font-weight:600;">Webhook URL:</span>
+          <input type="text" class="n8n-url-input" value="https://n8n.local/webhook/di-monarch-xref" />
+          <button class="btn btn-outline" style="padding:6px 10px;font-size:11px;">🔍 Test</button>
+        </div>
+        <div class="n8n-status">
+          <span class="n8n-status-dot connected"></span>
+          <span style="color:var(--success);font-weight:600;">Connected</span>
+          <span style="color:var(--muted);">— Last triggered 2 days ago (took 3.2s)</span>
+        </div>
+        <div class="n8n-flow-preview">
+          <div style="font-size:10px;font-weight:600;color:var(--muted);margin-bottom:6px;">WORKFLOW PREVIEW:</div>
+          <span class="n8n-node trigger">🔴 Webhook</span>
+          <span class="n8n-arrow">→</span>
+          <span class="n8n-node process">📄 Parse DI Data</span>
+          <span class="n8n-arrow">→</span>
+          <span class="n8n-node process">💰 Query Monarch</span>
+          <span class="n8n-arrow">→</span>
+          <span class="n8n-node llm">🧠 Match Analysis</span>
+          <span class="n8n-arrow">→</span>
+          <span class="n8n-node output">✅ Return Result</span>
+        </div>
+        <div style="margin-top:8px;font-size:10px;color:var(--muted);">
+          💡 The n8n workflow receives document data via webhook and returns a JSON result. DI routes the result based on your routing config below.
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Scheduling ── -->
+    <div class="editor-row" style="margin-top:16px;">
+      <div class="editor-section">
+        <div class="editor-label">Schedule</div>
+        <select class="editor-select editor-input">
+          <option>On document ingest (real-time)</option>
+          <option>Hourly</option>
+          <option selected>Daily (2:00 AM)</option>
+          <option>Weekly (Sunday 2:00 AM)</option>
+          <option>Monthly (1st, 2:00 AM)</option>
+          <option>Manual only</option>
+        </select>
+      </div>
+      <div class="editor-section">
+        <div class="editor-label">Applies To</div>
+        <select class="editor-select editor-input">
+          <option>All documents</option>
+          <option>Bills only</option>
+          <option>EOBs only</option>
+          <option>Statements only</option>
+          <option selected>Bills + EOBs</option>
+          <option>Custom filter...</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- ── Routing ── -->
+    <div class="editor-section">
+      <div class="editor-label">Default Routing</div>
+      <div class="route-config">
+        <div class="route-option selected">
+          <span class="route-label">📊 Insight Only</span>
+          <span class="route-desc">Show in DI Insights tab. No action needed.</span>
+        </div>
+        <div class="route-option">
+          <span class="route-label">📥 Triage Queue</span>
+          <span class="route-desc">Add to triage queue for review.</span>
+        </div>
+        <div class="route-option">
+          <span class="route-label">🚨 Mission Control</span>
+          <span class="route-desc">Create MC alert for immediate action.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="editor-section">
+      <div class="editor-label">Escalation (Optional)</div>
+      <div class="escalation-row">
+        <span class="esc-label">⬆️ Escalate to</span>
+        <select class="editor-select" style="padding:4px 8px;font-size:12px;">
+          <option>Mission Control alert</option>
+          <option>Triage queue (high priority)</option>
+        </select>
+        <span style="font-size:12px;">when LLM returns</span>
+        <select class="editor-select" style="padding:4px 8px;font-size:12px;">
+          <option>action = "appeal"</option>
+          <option>confidence ≥ 0.8</option>
+          <option>reasonable = false</option>
+        </select>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+function toggleRule(el) {
+  el.classList.toggle('on');
+  el.closest('.rule-row').classList.toggle('disabled');
+}
+
+function toggleEditor() {
+  var editor = document.getElementById('rule-editor');
+  editor.classList.toggle('open');
+}
+
+function selectRule(row) {
+  document.querySelectorAll('.rule-row').forEach(function(r) { r.style.outline = ''; });
+  row.style.outline = '2px solid var(--accent)';
+  row.style.outlineOffset = '-1px';
+  var editor = document.getElementById('rule-editor');
+  editor.classList.add('open');
+  editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function filterRules(type, tab) {
+  document.querySelectorAll('.rule-tab').forEach(function(t) { t.classList.remove('active'); });
+  tab.classList.add('active');
+  document.querySelectorAll('.rule-row').forEach(function(r) {
+    if (type === 'all') { r.style.display = ''; }
+    else { r.style.display = r.dataset.type === type ? '' : 'none'; }
+  });
+}
+
+function switchEditorType(type) {
+  document.getElementById('editor-basic').style.display = type === 'basic' ? '' : 'none';
+  document.getElementById('editor-llm').style.display = type === 'llm' ? '' : 'none';
+  document.getElementById('editor-n8n').style.display = type === 'n8n' ? '' : 'none';
+}
+</script>
+
+</body>
+</html>

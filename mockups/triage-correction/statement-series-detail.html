@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Intelligence — Statement Series Detail & Correction</title>
+  <style>
+    :root {
+      --bg: #f5f6fa;
+      --card: #ffffff;
+      --border: #e0e3ea;
+      --text: #1a1d2e;
+      --muted: #6b7280;
+      --accent: #3498db;
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+      --purple: #8b5cf6;
+      --pink: #ec4899;
+      --series-a: #3498db;
+      --series-b: #8b5cf6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    /* ── Header ── */
+    .header { background: var(--card); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+    .back-link { color: var(--accent); font-weight: 600; font-size: 13px; text-decoration: none; }
+    .header-title { font-size: 17px; font-weight: 700; flex: 1; }
+    .header-badge { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; background: #ede9fe; color: var(--purple); }
+
+    /* ── Page ── */
+    .page { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+    /* ── Section ── */
+    .section { margin-bottom: 24px; }
+    .section-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+
+    /* ── Reason banner ── */
+    .reason-banner { background: #ede9fe; border: 1px solid #ddd6fe; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; font-size: 13px; line-height: 1.5; }
+    .reason-banner strong { color: #5b21b6; }
+
+    /* ── Series info card ── */
+    .series-info { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 16px; }
+    .info-item { }
+    .info-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 4px; }
+    .info-value { font-size: 14px; font-weight: 700; }
+    .info-value .sub { font-weight: 400; color: var(--muted); font-size: 12px; }
+
+    /* ── Action bar ── */
+    .action-bar { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+    .action-bar .label { font-size: 13px; font-weight: 600; color: var(--muted); margin-right: 8px; }
+    .btn { border: none; border-radius: 7px; padding: 9px 16px; font-size: 13px; cursor: pointer; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; transition: opacity 0.15s; }
+    .btn:hover { opacity: 0.85; }
+    .btn-split { background: var(--purple); color: #fff; }
+    .btn-merge { background: var(--accent); color: #fff; }
+    .btn-rename { background: transparent; color: var(--text); border: 1px solid var(--border); }
+    .btn-confirm { background: var(--success); color: #fff; margin-left: auto; }
+    .btn-dismiss { background: #f0f0f0; color: var(--muted); }
+
+    /* ── Timeline ── */
+    .timeline-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; overflow-x: auto; }
+    .timeline-container { min-width: 700px; }
+    .timeline-row { display: flex; align-items: center; gap: 0; margin-bottom: 8px; }
+    .timeline-label { width: 140px; font-size: 12px; font-weight: 600; flex-shrink: 0; display: flex; align-items: center; gap: 6px; }
+    .timeline-label .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .timeline-label .dot.a { background: var(--series-a); }
+    .timeline-label .dot.b { background: var(--series-b); }
+    .timeline-track { flex: 1; height: 36px; position: relative; background: #f8f9fc; border-radius: 6px; border: 1px solid var(--border); }
+    .timeline-doc { position: absolute; top: 4px; width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; cursor: pointer; transition: transform 0.15s; }
+    .timeline-doc:hover { transform: scale(1.15); z-index: 2; }
+    .timeline-doc.a { background: var(--series-a); }
+    .timeline-doc.b { background: var(--series-b); }
+    .timeline-doc.gap { background: transparent; border: 2px dashed var(--danger); color: var(--danger); width: 28px; }
+    .timeline-months { display: flex; margin-top: 4px; padding-left: 140px; }
+    .timeline-month { flex: 1; font-size: 10px; color: var(--muted); text-align: center; }
+
+    /* ── Document list ── */
+    .doc-list { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .doc-list-header { padding: 12px 16px; background: #f8f9fc; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; font-size: 12px; font-weight: 600; color: var(--muted); }
+    .doc-list-header .select-all { display: flex; align-items: center; gap: 6px; }
+    .doc-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); transition: background 0.1s; }
+    .doc-item:last-child { border-bottom: none; }
+    .doc-item:hover { background: #fafbfc; }
+    .doc-item.selected { background: #eef6ff; }
+    .doc-item.group-b { background: #f5f3ff; }
+    .doc-check { width: 18px; height: 18px; border-radius: 4px; border: 2px solid var(--border); cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .doc-check.checked { background: var(--purple); border-color: var(--purple); }
+    .doc-check.checked::after { content: "✓"; color: #fff; font-size: 11px; font-weight: 700; }
+    .doc-color { width: 4px; height: 32px; border-radius: 2px; flex-shrink: 0; }
+    .doc-color.a { background: var(--series-a); }
+    .doc-color.b { background: var(--series-b); }
+    .doc-info { flex: 1; }
+    .doc-title { font-size: 13px; font-weight: 600; }
+    .doc-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .doc-account { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 4px; }
+    .doc-account.acct-a { background: #dbeafe; color: #1e40af; }
+    .doc-account.acct-b { background: #ede9fe; color: #5b21b6; }
+    .doc-actions { display: flex; gap: 6px; }
+    .doc-action-btn { font-size: 11px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; }
+    .doc-action-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Similar series ── */
+    .similar-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    .similar-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+    .similar-item:last-child { margin-bottom: 0; }
+    .similar-info { flex: 1; }
+    .similar-name { font-size: 13px; font-weight: 600; }
+    .similar-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .similar-action { font-size: 12px; color: var(--accent); font-weight: 600; cursor: pointer; }
+
+    /* ── Split preview ── */
+    .split-preview { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 18px; margin-top: 16px; }
+    .split-title { font-size: 13px; font-weight: 700; color: #166534; margin-bottom: 12px; }
+    .split-columns { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: start; }
+    .split-col { }
+    .split-col-title { font-size: 12px; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+    .split-col-title .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .split-doc-list { font-size: 12px; color: var(--muted); }
+    .split-doc-list li { margin-bottom: 4px; list-style: none; padding-left: 12px; position: relative; }
+    .split-doc-list li::before { content: "•"; position: absolute; left: 0; color: var(--muted); }
+    .split-arrow { font-size: 24px; color: var(--muted); align-self: center; }
+    .split-form { margin-top: 12px; display: flex; gap: 8px; align-items: center; }
+    .split-input { border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 12px; flex: 1; }
+    .split-input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    .btn-sm { padding: 7px 14px; font-size: 12px; }
+  </style>
+</head>
+<body>
+
+<header class="header">
+  <a href="#" class="back-link">← Back to Queue</a>
+  <h1 class="header-title">Statement Series: Chase</h1>
+  <span class="header-badge">Grouping Issue</span>
+</header>
+
+<div class="page">
+
+  <!-- Reason banner -->
+  <div class="reason-banner">
+    <strong>🔍 Flagged:</strong> This series contains documents referencing <strong>two different account numbers</strong> — ending in <strong>4321</strong> (Sapphire Preferred) and <strong>8876</strong> (Freedom Unlimited). These are likely separate credit card accounts that should be tracked independently.
+  </div>
+
+  <!-- Series info -->
+  <div class="section">
+    <div class="series-info">
+      <div class="info-item">
+        <div class="info-label">Correspondent</div>
+        <div class="info-value">Chase</div>
+      </div>
+      <div class="info-item">
+        <div class="info-label">Frequency</div>
+        <div class="info-value">Monthly <span class="sub">(~30 days)</span></div>
+      </div>
+      <div class="info-item">
+        <div class="info-label">Documents</div>
+        <div class="info-value">18 <span class="sub">(Jan 2023 – Jul 2024)</span></div>
+      </div>
+      <div class="info-item">
+        <div class="info-label">Status</div>
+        <div class="info-value" style="color: var(--warning);">⚠️ Needs Split</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Action bar -->
+  <div class="action-bar">
+    <span class="label">Actions:</span>
+    <button class="btn btn-split">✂️ Split Series</button>
+    <button class="btn btn-merge">🔗 Merge with Another</button>
+    <button class="btn btn-rename">✏️ Rename / Add Account ID</button>
+    <button class="btn btn-confirm">✓ Looks Correct</button>
+  </div>
+
+  <!-- Timeline visualization -->
+  <div class="section">
+    <div class="section-title">📅 Document Timeline</div>
+    <div class="timeline-card">
+      <div class="timeline-container">
+        <!-- Legend -->
+        <div style="display: flex; gap: 16px; margin-bottom: 12px; font-size: 11px; color: var(--muted);">
+          <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background: var(--series-a); vertical-align: middle; margin-right: 4px;"></span>Account ...4321 (Sapphire)</span>
+          <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background: var(--series-b); vertical-align: middle; margin-right: 4px;"></span>Account ...8876 (Freedom)</span>
+          <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; border: 2px dashed var(--danger); vertical-align: middle; margin-right: 4px;"></span>Expected but missing</span>
+        </div>
+
+        <!-- Account 4321 row -->
+        <div class="timeline-row">
+          <div class="timeline-label"><span class="dot a"></span> ...4321 Sapphire</div>
+          <div class="timeline-track">
+            <div class="timeline-doc a" style="left: 2%;" title="Jan 2024">J</div>
+            <div class="timeline-doc a" style="left: 10%;" title="Feb 2024">F</div>
+            <div class="timeline-doc a" style="left: 18%;" title="Mar 2024">M</div>
+            <div class="timeline-doc a" style="left: 26%;" title="Apr 2024">A</div>
+            <div class="timeline-doc a" style="left: 34%;" title="May 2024">M</div>
+            <div class="timeline-doc a" style="left: 42%;" title="Jun 2024">J</div>
+            <div class="timeline-doc a" style="left: 50%;" title="Jul 2024">J</div>
+          </div>
+        </div>
+
+        <!-- Account 8876 row -->
+        <div class="timeline-row">
+          <div class="timeline-label"><span class="dot b"></span> ...8876 Freedom</div>
+          <div class="timeline-track">
+            <div class="timeline-doc b" style="left: 2%;" title="Jan 2024">J</div>
+            <div class="timeline-doc b" style="left: 10%;" title="Feb 2024">F</div>
+            <div class="timeline-doc b" style="left: 18%;" title="Mar 2024">M</div>
+            <div class="timeline-doc b" style="left: 26%;" title="Apr 2024">A</div>
+            <div class="timeline-doc gap" style="left: 34%;" title="May 2024 — MISSING">?</div>
+            <div class="timeline-doc b" style="left: 42%;" title="Jun 2024">J</div>
+            <div class="timeline-doc b" style="left: 50%;" title="Jul 2024">J</div>
+          </div>
+        </div>
+
+        <!-- Combined (current, incorrect) -->
+        <div class="timeline-row" style="opacity: 0.5; margin-top: 8px;">
+          <div class="timeline-label" style="color: var(--muted); font-style: italic;">Current (mixed)</div>
+          <div class="timeline-track" style="background: #fef2f2; border-color: #fecaca;">
+            <div class="timeline-doc a" style="left: 2%;">J</div>
+            <div class="timeline-doc b" style="left: 5%;">J</div>
+            <div class="timeline-doc a" style="left: 10%;">F</div>
+            <div class="timeline-doc b" style="left: 13%;">F</div>
+            <div class="timeline-doc a" style="left: 18%;">M</div>
+            <div class="timeline-doc b" style="left: 21%;">M</div>
+            <div class="timeline-doc a" style="left: 26%;">A</div>
+            <div class="timeline-doc b" style="left: 29%;">A</div>
+            <div class="timeline-doc a" style="left: 34%;">M</div>
+            <div class="timeline-doc a" style="left: 42%;">J</div>
+            <div class="timeline-doc b" style="left: 45%;">J</div>
+            <div class="timeline-doc a" style="left: 50%;">J</div>
+            <div class="timeline-doc b" style="left: 53%;">J</div>
+          </div>
+        </div>
+
+        <div class="timeline-months">
+          <span class="timeline-month">Jan</span>
+          <span class="timeline-month">Feb</span>
+          <span class="timeline-month">Mar</span>
+          <span class="timeline-month">Apr</span>
+          <span class="timeline-month">May</span>
+          <span class="timeline-month">Jun</span>
+          <span class="timeline-month">Jul</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Document list with selection for split -->
+  <div class="section">
+    <div class="section-title">📋 Documents in Series <span style="font-weight: 400; color: var(--muted); font-size: 12px;">(select documents to split into new series)</span></div>
+    <div class="doc-list">
+      <div class="doc-list-header">
+        <div class="select-all">
+          <input type="checkbox" /> Select all ...8876
+        </div>
+        <span style="margin-left: auto;">Showing 14 of 18 (recent)</span>
+      </div>
+
+      <!-- Account 4321 documents -->
+      <div class="doc-item">
+        <div class="doc-check"></div>
+        <div class="doc-color a"></div>
+        <div class="doc-info">
+          <div class="doc-title">Chase Sapphire Statement — July 2024</div>
+          <div class="doc-meta">Paperless #2104 · Added Jul 18, 2024 · PDF, 3 pages</div>
+        </div>
+        <span class="doc-account acct-a">...4321</span>
+        <div class="doc-actions">
+          <button class="doc-action-btn">↗️ Reassign</button>
+        </div>
+      </div>
+
+      <div class="doc-item group-b">
+        <div class="doc-check checked"></div>
+        <div class="doc-color b"></div>
+        <div class="doc-info">
+          <div class="doc-title">Chase Freedom Statement — July 2024</div>
+          <div class="doc-meta">Paperless #2098 · Added Jul 16, 2024 · PDF, 2 pages</div>
+        </div>
+        <span class="doc-account acct-b">...8876</span>
+        <div class="doc-actions">
+          <button class="doc-action-btn">↗️ Reassign</button>
+        </div>
+      </div>
+
+      <div class="doc-item">
+        <div class="doc-check"></div>
+        <div class="doc-color a"></div>
+        <div class="doc-info">
+          <div class="doc-title">Chase Sapphire Statement — June 2024</div>
+          <div class="doc-meta">Paperless #2056 · Added Jun 19, 2024 · PDF, 3 pages</div>
+        </div>
+        <span class="doc-account acct-a">...4321</span>
+        <div class="doc-actions">
+          <button class="doc-action-btn">↗️ Reassign</button>
+        </div>
+      </div>
+
+      <div class="doc-item group-b">
+        <div class="doc-check checked"></div>
+        <div class="doc-color b"></div>
+        <div class="doc-info">
+          <div class="doc-title">Chase Freedom Statement — June 2024</div>
+          <div class="doc-meta">Paperless #2048 · Added Jun 17, 2024 · PDF, 2 pages</div>
+        </div>
+        <span class="doc-account acct-b">...8876</span>
+        <div class="doc-actions">
+          <button class="doc-action-btn">↗️ Reassign</button>
+        </div>
+      </div>
+
+      <div class="doc-item">
+        <div class="doc-check"></div>
+        <div class="doc-color a"></div>
+        <div class="doc-info">
+          <div class="doc-title">Chase Sapphire Statement — May 2024</div>
+          <div class="doc-meta">Paperless #1987 · Added May 20, 2024 · PDF, 4 pages</div>
+        </div>
+        <span class="doc-account acct-a">...4321</span>
+        <div class="doc-actions">
+          <button class="doc-action-btn">↗️ Reassign</button>
+        </div>
+      </div>
+
+      <div class="doc-item group-b">
+        <div class="doc-check checked"></div>
+        <div class="doc-color b"></div>
+        <div class="doc-info">
+          <div class="doc-title">Chase Freedom Statement — April 2024</div>
+          <div class="doc-meta">Paperless #1940 · Added Apr 18, 2024 · PDF, 2 pages</div>
+        </div>
+        <span class="doc-account acct-b">...8876</span>
+        <div class="doc-actions">
+          <button class="doc-action-btn">↗️ Reassign</button>
+        </div>
+      </div>
+
+      <div class="doc-item">
+        <div class="doc-check"></div>
+        <div class="doc-color a"></div>
+        <div class="doc-info">
+          <div class="doc-title">Chase Sapphire Statement — April 2024</div>
+          <div class="doc-meta">Paperless #1935 · Added Apr 16, 2024 · PDF, 3 pages</div>
+        </div>
+        <span class="doc-account acct-a">...4321</span>
+        <div class="doc-actions">
+          <button class="doc-action-btn">↗️ Reassign</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Split preview -->
+  <div class="section">
+    <div class="split-preview">
+      <div class="split-title">✂️ Split Preview — 7 documents selected for new series</div>
+      <div class="split-columns">
+        <div class="split-col">
+          <div class="split-col-title"><span class="dot" style="background: var(--series-a);"></span> Stays: "Chase" (rename to "Chase Sapphire")</div>
+          <ul class="split-doc-list">
+            <li>Chase Sapphire Statement — Jul 2024</li>
+            <li>Chase Sapphire Statement — Jun 2024</li>
+            <li>Chase Sapphire Statement — May 2024</li>
+            <li>Chase Sapphire Statement — Apr 2024</li>
+            <li>+ 7 more (Jan 2023 – Mar 2024)</li>
+          </ul>
+        </div>
+        <div class="split-arrow">→</div>
+        <div class="split-col">
+          <div class="split-col-title"><span class="dot" style="background: var(--series-b);"></span> New: "Chase Freedom"</div>
+          <ul class="split-doc-list">
+            <li>Chase Freedom Statement — Jul 2024</li>
+            <li>Chase Freedom Statement — Jun 2024</li>
+            <li>Chase Freedom Statement — Apr 2024</li>
+            <li>+ 4 more (Jan 2024 – Mar 2024)</li>
+          </ul>
+          <div style="margin-top: 8px; padding: 6px 8px; background: #fef3c7; border-radius: 4px; font-size: 11px; color: #92400e;">
+            ⚠️ May 2024 statement not found — will be flagged as missing after split
+          </div>
+        </div>
+      </div>
+      <div class="split-form">
+        <label style="font-size: 12px; font-weight: 600; white-space: nowrap;">New series name:</label>
+        <input type="text" class="split-input" value="Chase Freedom" placeholder="e.g., Chase Freedom Unlimited" />
+        <label style="font-size: 12px; font-weight: 600; white-space: nowrap;">Account ID:</label>
+        <input type="text" class="split-input" value="...8876" placeholder="e.g., ending 8876" style="max-width: 120px;" />
+        <button class="btn btn-split btn-sm">✂️ Confirm Split</button>
+        <button class="btn btn-dismiss btn-sm">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Similar series (merge candidates) -->
+  <div class="section">
+    <div class="section-title">🔗 Other Series from Same Correspondent</div>
+    <div class="similar-card">
+      <div class="similar-item">
+        <div style="width: 4px; height: 32px; border-radius: 2px; background: #10b981; flex-shrink: 0;"></div>
+        <div class="similar-info">
+          <div class="similar-name">Chase Checking</div>
+          <div class="similar-meta">Monthly · 12 documents · Account ...9902 · Last: Jun 2024</div>
+        </div>
+        <span class="similar-action">Merge into ↗</span>
+      </div>
+      <div class="similar-item">
+        <div style="width: 4px; height: 32px; border-radius: 2px; background: #f97316; flex-shrink: 0;"></div>
+        <div class="similar-info">
+          <div class="similar-name">Chase Auto Loan</div>
+          <div class="similar-meta">Monthly · 8 documents · Account ...5567 · Last: Jul 2024</div>
+        </div>
+        <span class="similar-action">Merge into ↗</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
