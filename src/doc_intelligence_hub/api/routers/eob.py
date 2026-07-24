@@ -502,3 +502,56 @@ async def update_match(
         return _serialize_match(match, paperless_url)
     finally:
         db.close()
+
+
+class PurgeStaleRequest(BaseModel):
+    dry_run: bool = Field(default=False, description="If true, return stale records without deleting")
+
+
+@router.post("/purge-stale")
+async def purge_stale_records(body: PurgeStaleRequest | None = None) -> dict[str, Any]:
+    """Purge stale EOB records with garbage extracted data.
+
+    Identifies records where the provider_name field contains document
+    boilerplate text that was incorrectly extracted before validation was added.
+
+    Pass dry_run=true to preview which records would be deleted.
+    """
+    from doc_intelligence_hub.modules.eob_matching.purge import (
+        find_stale_eobs,
+        purge_stale_eobs,
+    )
+
+    init_db()
+    db = get_db_session()
+    dry_run = body.dry_run if body else False
+
+    try:
+        if dry_run:
+            stale = find_stale_eobs(db)
+            return {
+                "status": "dry_run",
+                "stale_count": len(stale),
+                "records": [
+                    {
+                        "id": r.id,
+                        "document_id": r.document_id,
+                        "provider_name": r.provider_name,
+                        "total_billed": r.total_billed,
+                        "total_allowed": r.total_allowed,
+                        "total_plan_pays": r.total_plan_pays,
+                        "total_patient_responsibility": r.total_patient_responsibility,
+                    }
+                    for r in stale
+                ],
+            }
+        else:
+            result = purge_stale_eobs(db)
+            return {
+                "status": "ok",
+                "purged_count": result.purged_count,
+                "orphaned_matches_removed": result.orphaned_matches_removed,
+                "document_ids": result.document_ids,
+            }
+    finally:
+        db.close()
