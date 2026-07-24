@@ -133,8 +133,10 @@ async def run_single_extraction(
         # Build EOB from response (same logic as llm_extractor)
         services = []
         for svc in data.get("services") or []:
+            if not isinstance(svc, dict):
+                continue
             services.append(ServiceLine(
-                description=svc.get("description", "Service"),
+                description=svc.get("description") or "Service",
                 cpt_code=svc.get("cpt_code"),
                 billed_amount=_safe_float(svc.get("billed_amount")),
                 allowed_amount=_safe_float(svc.get("allowed_amount")),
