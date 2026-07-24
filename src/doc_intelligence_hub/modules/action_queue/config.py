@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     write_to_paperless: bool = Field(default=True)
     rate_limit_delay: float = Field(default=1.0)
 
+    # Timeouts
+    llm_timeout_seconds: float = Field(default=60.0)
+    pipeline_max_duration_seconds: float = Field(default=300.0)
+
     @property
     def monitor_tags(self) -> list[str]:
         return [t.strip() for t in self.tags_to_monitor.split(",")]

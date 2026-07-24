@@ -10,7 +10,7 @@ from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_p
 from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer
 from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
 from doc_intelligence_hub.modules.action_queue.database import Action, get_session, init_db
-from doc_intelligence_hub.modules.action_queue.pipeline import run_pipeline
+from doc_intelligence_hub.modules.action_queue.pipeline import run_pipeline, get_pipeline_progress
 from doc_intelligence_hub.modules.statements.config import resolve_api_token
 
 router = APIRouter(prefix="/api/queue", tags=["action-queue"])
@@ -156,6 +156,7 @@ async def queue_status(request: Request) -> dict[str, Any]:
         **base_status,
         "read_only": not action_queue_settings.write_to_paperless,
         "database": _database_counts(),
+        "progress": get_pipeline_progress(),
     }
 
 

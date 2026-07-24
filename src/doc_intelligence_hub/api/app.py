@@ -14,6 +14,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from doc_intelligence_hub.api.routers import action_queue, admin, eob, mc_connector, statements, stats, system
 from doc_intelligence_hub.core.llm import get_llm_settings, validate_model_availability
+from doc_intelligence_hub.core.logging_config import configure_logging
 from doc_intelligence_hub.modules.statements.api import _STATIC_DIR as _STATEMENTS_STATIC_DIR
 from doc_intelligence_hub.modules.statements.config import load_config
 
@@ -97,6 +98,7 @@ def _register_exception_handlers(app: FastAPI) -> None:
 
 
 def create_app(settings: HubSettings | None = None) -> FastAPI:
+    configure_logging()
     settings = settings or HubSettings()
 
     app = FastAPI(

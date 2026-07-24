@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import time
 from typing import Optional
 
 from doc_intelligence_hub.core.llm import chat_json, get_llm_settings, health_check as llm_health_check
 
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a document analysis assistant. You analyze documents and extract actionable items.
 Respond with ONLY valid JSON — no markdown, no explanation."""
@@ -93,12 +98,18 @@ class OllamaAnalyzer:
     async def analyze_document(self, document: dict) -> Optional[dict]:
         """Send document text to LLM and parse the structured response.
 
+        Applies a configurable timeout (``settings.llm_timeout_seconds``). If the
+        first attempt times out or errors, retries once with a shorter timeout
+        before giving up and letting the caller fall back to the rule-based
+        analyzer.
+
         Args:
             document: Paperless document dict with 'content', 'title', etc.
 
         Returns:
             Parsed extraction dict, or None if analysis failed.
         """
+        doc_id = document.get("id")
         prompt = ANALYSIS_PROMPT.format(
             title=document.get("title", "Unknown"),
             correspondent=document.get("correspondent_name", document.get("correspondent", "Unknown")),
@@ -107,15 +118,59 @@ class OllamaAnalyzer:
             content=self._truncate_content(document.get("content", "")),
         )
 
-        data = await chat_json(
-            prompt,
-            system=SYSTEM_PROMPT,
-            model=self.model,
-            max_tokens=1024,
+        est_prompt_tokens = (len(prompt) + len(SYSTEM_PROMPT)) // 4
+        timeout = settings.llm_timeout_seconds
+        logger.info(
+            "LLM call starting: doc_id=%s model=%s est_prompt_tokens=%d timeout=%.0fs",
+            doc_id, self.model, est_prompt_tokens, timeout,
         )
+
+        data = await self._call_with_timeout(prompt, doc_id, timeout)
         if data is None:
+            retry_timeout = max(1.0, timeout / 2)
+            logger.warning(
+                "LLM call failed/timed out for doc_id=%s — retrying once with %.0fs timeout",
+                doc_id, retry_timeout,
+            )
+            data = await self._call_with_timeout(prompt, doc_id, retry_timeout)
+
+        if data is None:
+            logger.error(
+                "LLM call failed after retry for doc_id=%s — caller should fall back to rule-based analyzer",
+                doc_id,
+            )
             return None
+
         return self._validate_response(data)
+
+    async def _call_with_timeout(self, prompt: str, doc_id, timeout: float) -> Optional[dict]:
+        """Run a single LLM call bounded by ``timeout`` seconds, logging duration/outcome."""
+        start = time.monotonic()
+        try:
+            data = await asyncio.wait_for(
+                chat_json(prompt, system=SYSTEM_PROMPT, model=self.model, max_tokens=1024),
+                timeout=timeout,
+            )
+            elapsed = time.monotonic() - start
+            if data is None:
+                logger.warning(
+                    "LLM call for doc_id=%s returned no parsable data after %.2fs", doc_id, elapsed
+                )
+            else:
+                logger.info("LLM call for doc_id=%s succeeded in %.2fs", doc_id, elapsed)
+            return data
+        except asyncio.TimeoutError:
+            elapsed = time.monotonic() - start
+            logger.warning(
+                "LLM call for doc_id=%s timed out after %.2fs (limit %.0fs)", doc_id, elapsed, timeout
+            )
+            return None
+        except Exception as e:
+            elapsed = time.monotonic() - start
+            logger.error(
+                "LLM call for doc_id=%s raised an exception after %.2fs: %s", doc_id, elapsed, e, exc_info=True
+            )
+            return None
 
     def _validate_response(self, data: dict) -> Optional[dict]:
         """Validate and normalize the LLM response."""
