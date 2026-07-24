@@ -50,13 +50,16 @@ def cli(ctx, db_url):
 @click.option("--paperless-token", envvar="PAPERLESS_API_TOKEN", required=True, help="Paperless API token")
 @click.option("--tag", multiple=True, help="Filter by tag name (can specify multiple)")
 @click.option("--correspondent", type=str, default=None, help="Filter by correspondent name")
+@click.option("--document-type", type=str, default=None, help="Filter by Paperless document type")
+@click.option("--created-after", type=str, default=None, help="Only docs created on/after this date (YYYY-MM-DD)")
+@click.option("--created-before", type=str, default=None, help="Only docs created on/before this date (YYYY-MM-DD)")
 @click.option("--limit", type=int, default=50, help="Max documents to process")
 @click.option("--output", type=click.Path(), default=None, help="Save results to JSON file")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed extraction results")
 @click.option("--write-to-paperless", is_flag=True, envvar="WRITE_TO_PAPERLESS",
               help="Write match results back to Paperless custom fields")
 @click.pass_context
-def run(ctx, paperless_url, paperless_token, tag, correspondent, limit, output, verbose, write_to_paperless):
+def run(ctx, paperless_url, paperless_token, tag, correspondent, document_type, created_after, created_before, limit, output, verbose, write_to_paperless):
     """Run the full pipeline: fetch → classify → extract → match → store.
 
     Results are persisted to SQLite. Use --write-to-paperless to also
@@ -65,8 +68,8 @@ def run(ctx, paperless_url, paperless_token, tag, correspondent, limit, output, 
     Examples:\b
         eob-match run --tag medical --limit 20
         eob-match run --correspondent "UnitedHealthcare" --verbose
-        eob-match run --tag medical-eob --tag medical-bill --output results.json
-        eob-match run --tag medical --write-to-paperless
+        eob-match run --created-after 2026-01-01 --limit 50
+        eob-match run --document-type "EOB - Explanation of Benefits" --created-after 2026-06-01
     """
     _init_database(ctx.obj.get("db_url"))
     asyncio.run(_run_pipeline(
@@ -74,6 +77,9 @@ def run(ctx, paperless_url, paperless_token, tag, correspondent, limit, output, 
         paperless_token=paperless_token,
         tags=list(tag) if tag else None,
         correspondent=correspondent,
+        document_type=document_type,
+        created_after=created_after,
+        created_before=created_before,
         limit=limit,
         output_path=output,
         verbose=verbose,
@@ -85,20 +91,27 @@ def run(ctx, paperless_url, paperless_token, tag, correspondent, limit, output, 
 @click.option("--paperless-url", envvar="PAPERLESS_URL", required=True)
 @click.option("--paperless-token", envvar="PAPERLESS_API_TOKEN", required=True)
 @click.option("--tag", multiple=True, help="Filter by tag name")
+@click.option("--document-type", type=str, default=None, help="Filter by Paperless document type")
+@click.option("--created-after", type=str, default=None, help="Only docs created on/after this date (YYYY-MM-DD)")
+@click.option("--created-before", type=str, default=None, help="Only docs created on/before this date (YYYY-MM-DD)")
 @click.option("--limit", type=int, default=20, help="Max documents to scan")
-def classify(paperless_url, paperless_token, tag, limit):
+def classify(paperless_url, paperless_token, tag, document_type, created_after, created_before, limit):
     """Classify documents as EOB, Bill, or Unknown (read-only).
 
     Fetches documents and shows classification results without modifying anything.
 
     Examples:\b
         eob-match classify --tag medical --limit 10
-        eob-match classify --limit 50
+        eob-match classify --created-after 2026-01-01 --limit 50
+        eob-match classify --document-type "EOB - Explanation of Benefits" --limit 20
     """
     asyncio.run(_classify_only(
         paperless_url=paperless_url,
         paperless_token=paperless_token,
         tags=list(tag) if tag else None,
+        document_type=document_type,
+        created_after=created_after,
+        created_before=created_before,
         limit=limit,
     ))
 
@@ -315,14 +328,28 @@ def _show_status(last: int):
         db.close()
 
 
-async def _classify_only(paperless_url: str, paperless_token: str, tags: list[str] | None, limit: int):
+async def _classify_only(
+    paperless_url: str,
+    paperless_token: str,
+    tags: list[str] | None,
+    document_type: str | None,
+    created_after: str | None,
+    created_before: str | None,
+    limit: int,
+):
     """Fetch and classify documents."""
     client = PaperlessClient(base_url=paperless_url, token=paperless_token)
 
     console.print("[bold]EOB Matching — Document Classification[/bold]\n")
     console.print(f"[dim]Fetching up to {limit} documents...[/dim]")
 
-    documents = await client.list_documents(tags=tags, page_size=min(limit, 100))
+    documents = await client.list_documents(
+        tags=tags,
+        document_type=document_type,
+        created_after=created_after,
+        created_before=created_before,
+        page_size=min(limit, 100),
+    )
     documents = documents[:limit]
 
     console.print(f"[green]✓[/green] Fetched {len(documents)} documents\n")
@@ -364,6 +391,9 @@ async def _run_pipeline(
     paperless_token: str,
     tags: list[str] | None,
     correspondent: str | None,
+    document_type: str | None,
+    created_after: str | None,
+    created_before: str | None,
     limit: int,
     output_path: str | None,
     verbose: bool,
@@ -394,7 +424,14 @@ async def _run_pipeline(
 
     # Step 1: Fetch documents
     console.print("[bold]Step 1:[/bold] Fetching documents...")
-    documents = await client.list_documents(tags=tags, correspondent=correspondent, page_size=min(limit, 100))
+    documents = await client.list_documents(
+        tags=tags,
+        correspondent=correspondent,
+        document_type=document_type,
+        created_after=created_after,
+        created_before=created_before,
+        page_size=min(limit, 100),
+    )
     documents = documents[:limit]
     console.print(f"  [green]✓[/green] {len(documents)} documents fetched\n")
 
