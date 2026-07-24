@@ -11,12 +11,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from doc_intelligence_hub.api.routers import action_queue, eob, statements, stats, system
+from doc_intelligence_hub.api.routers import action_queue, admin, eob, statements, stats, system
 from doc_intelligence_hub.modules.statements.api import _STATIC_DIR as _STATEMENTS_STATIC_DIR
 from doc_intelligence_hub.modules.statements.config import load_config
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _HUB_STATIC_DIR = Path(__file__).resolve().parent / "static"
+_ADMIN_STATIC_DIR = _HUB_STATIC_DIR / "admin"
 
 
 def _default_statement_tracker_config() -> str:
@@ -100,6 +101,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
             {"name": "statement-tracker", "description": "Statement discovery, recommendations, and provider overrides."},
             {"name": "eob-matching", "description": "EOB classification, extraction, matching, and Paperless linking."},
             {"name": "action-queue", "description": "Action Queue connectivity, dry-runs, and pipeline status."},
+            {"name": "admin", "description": "Admin configuration: scoring weights, schedules, and debugging."},
             {"name": "stats", "description": "Aggregate statistics across all DI modules for MC integration."},
         ],
     )
@@ -109,6 +111,8 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.state.statement_tracker_config_loaded = _load_statement_tracker_config(settings.statement_tracker_config)
     app.state.last_queue_status = {"status": "idle", "message": "Action queue has not been run yet."}
     app.state.last_eob_results = None
+    app.state.eob_weights = None
+    app.state.admin_schedules = None
 
     _register_exception_handlers(app)
 
@@ -117,11 +121,16 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(statements.router, prefix="/api", include_in_schema=False)
     app.include_router(eob.router)
     app.include_router(action_queue.router)
+    app.include_router(admin.router)
     app.include_router(stats.router)
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
         return FileResponse(_HUB_STATIC_DIR / "index.html")
+
+    @app.get("/admin", include_in_schema=False)
+    async def admin_index() -> FileResponse:
+        return FileResponse(_ADMIN_STATIC_DIR / "index.html")
 
     # Legacy statement tracker dashboard at /statements/
     app.mount("/statements", StaticFiles(directory=str(_STATEMENTS_STATIC_DIR), html=True), name="statements-static")
