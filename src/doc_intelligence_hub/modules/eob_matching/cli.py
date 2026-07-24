@@ -192,6 +192,39 @@ def purge_stale(ctx, dry_run):
 
 
 @cli.command()
+@click.option("--models", type=str, required=True,
+              help="Comma-separated model names (e.g. phi3:mini,llama3.1:8b,gpt-4o-mini)")
+@click.option("--paperless-url", envvar="PAPERLESS_URL", required=True, help="Paperless-ngx URL")
+@click.option("--paperless-token", envvar="PAPERLESS_API_TOKEN", required=True, help="Paperless API token")
+@click.option("--tag", multiple=True, help="Filter by tag name")
+@click.option("--limit", type=int, default=5, help="Number of documents to test per model")
+@click.option("--output", type=click.Path(), default=None, help="Save results to JSON file")
+@click.option("--bifrost-url", envvar="LLM_BASE_URL",
+              default="https://service-001.example.invalid/openai/v1",
+              help="Bifrost gateway URL")
+def benchmark(models, paperless_url, paperless_token, tag, limit, output, bifrost_url):
+    """Benchmark LLM models on EOB extraction for speed and accuracy.
+
+    Fetches real EOB documents from Paperless and runs each model against them,
+    comparing extraction time, success rate, and confidence scores.
+
+    Examples:\b
+        eob-match benchmark --models phi3:mini,llama3.1:8b,gpt-4o-mini --limit 5
+        eob-match benchmark --models gpt-4o,gpt-4o-mini --tag medical-eob --limit 10
+        eob-match benchmark --models phi3:mini,mistral-nemo:latest --output results.json
+    """
+    asyncio.run(_run_benchmark(
+        models_str=models,
+        paperless_url=paperless_url,
+        paperless_token=paperless_token,
+        tags=list(tag) if tag else None,
+        limit=limit,
+        output_path=output,
+        bifrost_url=bifrost_url,
+    ))
+
+
+@cli.command()
 @click.option("--last", type=int, default=10, help="Number of recent runs to show")
 @click.pass_context
 def status(ctx, last):
@@ -600,6 +633,100 @@ async def _run_pipeline(
             "unmatched_bills": [b.document_id for b in extracted_bills if b.document_id not in {m.bill_id for m in matches}],
         }
         Path(output_path).write_text(json.dumps(output_data, indent=2), encoding="utf-8")
+        console.print(f"\n[dim]Results saved to {output_path}[/dim]")
+
+
+async def _run_benchmark(
+    models_str: str,
+    paperless_url: str,
+    paperless_token: str,
+    tags: list[str] | None,
+    limit: int,
+    output_path: str | None,
+    bifrost_url: str,
+):
+    """Run model comparison benchmark."""
+    from doc_intelligence_hub.core.llm import get_llm_settings, reset_llm_client, LLMSettings
+    from doc_intelligence_hub.modules.eob_matching.benchmark import (
+        benchmark_to_json,
+        fetch_eob_documents,
+        format_benchmark_table,
+        run_benchmark,
+    )
+
+    models = [m.strip() for m in models_str.split(",") if m.strip()]
+    if not models:
+        console.print("[red]✗ No models specified[/red]")
+        return
+
+    console.print("[bold]EOB Matching — Model Benchmark[/bold]\n")
+    console.print(f"  Models: {', '.join(models)}")
+    console.print(f"  Documents: {limit}")
+    console.print(f"  Bifrost URL: {bifrost_url}\n")
+
+    # Configure LLM client to use specified Bifrost URL
+    os.environ["LLM_BASE_URL"] = bifrost_url
+    reset_llm_client()
+
+    # Fetch documents
+    console.print("[dim]Fetching documents from Paperless...[/dim]")
+    try:
+        documents = await fetch_eob_documents(
+            paperless_url=paperless_url,
+            paperless_token=paperless_token,
+            limit=limit,
+            tags=tags,
+        )
+    except Exception as e:
+        console.print(f"[red]✗ Failed to fetch documents:[/red] {e}")
+        return
+
+    if not documents:
+        console.print("[yellow]No documents found matching criteria.[/yellow]")
+        return
+
+    console.print(f"[green]✓[/green] Fetched {len(documents)} documents\n")
+    console.print("[dim]Running benchmark (this may take a while)...[/dim]\n")
+
+    # Run benchmark
+    summaries = await run_benchmark(documents, models)
+
+    # Display results
+    console.print(Panel("[bold]Benchmark Results[/bold]"))
+    console.print()
+
+    # Rich table output
+    table = Table(title="Model Comparison", show_lines=True)
+    table.add_column("Model", style="bold", width=22)
+    table.add_column("Avg Time (s)", justify="right", width=12)
+    table.add_column("Success %", justify="right", width=10)
+    table.add_column("Avg Confidence", justify="right", width=14)
+    table.add_column("Cost (USD)", justify="right", width=12)
+
+    for s in summaries:
+        cost_str = f"${s.estimated_cost_usd:.6f}" if s.estimated_cost_usd is not None else "free"
+        success_style = "green" if s.success_rate >= 0.8 else "yellow" if s.success_rate >= 0.5 else "red"
+        table.add_row(
+            s.model,
+            f"{s.avg_time_seconds:.2f}",
+            f"[{success_style}]{s.success_rate * 100:.1f}%[/{success_style}]",
+            f"{s.avg_confidence:.3f}",
+            cost_str,
+        )
+
+    console.print(table)
+
+    # Show sample fields from best model
+    best = max(summaries, key=lambda s: (s.success_rate, s.avg_confidence))
+    if best.sample_fields:
+        console.print(f"\n[dim]Best model: {best.model} — sample extraction:[/dim]")
+        for k, v in best.sample_fields.items():
+            console.print(f"  {k}: {v}")
+
+    # Save to file if requested
+    if output_path:
+        results_json = benchmark_to_json(summaries)
+        Path(output_path).write_text(json.dumps(results_json, indent=2), encoding="utf-8")
         console.print(f"\n[dim]Results saved to {output_path}[/dim]")
 
 

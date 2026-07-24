@@ -555,3 +555,82 @@ async def purge_stale_records(body: PurgeStaleRequest | None = None) -> dict[str
             }
     finally:
         db.close()
+
+
+# ------------------------------------------------------------------
+# Benchmark endpoint
+# ------------------------------------------------------------------
+
+
+class BenchmarkRequest(BaseModel):
+    models: list[str] = Field(
+        ...,
+        min_length=1,
+        description="List of model names to benchmark (e.g. ['phi3:mini', 'gpt-4o-mini'])",
+    )
+    limit: int = Field(default=5, ge=1, le=50, description="Number of documents to test per model")
+    tags: list[str] | None = Field(default=None, description="Paperless tag filter")
+    bifrost_url: str = Field(
+        default="https://service-001.example.invalid/openai/v1",
+        description="Bifrost gateway URL override",
+    )
+
+
+@router.post("/benchmark")
+async def run_model_benchmark(request: Request, body: BenchmarkRequest) -> dict[str, Any]:
+    """Benchmark LLM models on EOB extraction for speed and accuracy.
+
+    Compares multiple models by running them against real EOB documents
+    from Paperless. Returns timing, success rate, confidence, and cost data.
+    """
+    import os
+
+    from doc_intelligence_hub.core.llm import reset_llm_client
+    from doc_intelligence_hub.modules.eob_matching.benchmark import (
+        benchmark_to_json,
+        fetch_eob_documents,
+        run_benchmark,
+    )
+
+    # Configure Bifrost URL
+    os.environ["LLM_BASE_URL"] = body.bifrost_url
+    reset_llm_client()
+
+    # Fetch documents from Paperless
+    settings = request.app.state.hub_settings
+
+    paperless_url = settings.paperless_url
+    paperless_token = settings.resolved_paperless_token
+
+    if not paperless_url or not paperless_token:
+        raise_api_error(
+            503,
+            "paperless_not_configured",
+            "Paperless connection settings required for benchmark.",
+        )
+
+    documents = await fetch_eob_documents(
+        paperless_url=paperless_url,
+        paperless_token=paperless_token,
+        limit=body.limit,
+        tags=body.tags,
+    )
+
+    if not documents:
+        return {
+            "status": "no_documents",
+            "message": "No documents found matching the specified criteria.",
+            "models": body.models,
+            "results": [],
+        }
+
+    # Run benchmark
+    summaries = await run_benchmark(documents, body.models)
+    results = benchmark_to_json(summaries)
+
+    return {
+        "status": "ok",
+        "documents_tested": len(documents),
+        "models_tested": len(body.models),
+        "results": results,
+    }
