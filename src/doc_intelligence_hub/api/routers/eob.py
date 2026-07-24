@@ -37,6 +37,13 @@ class ClassifyRequest(BaseModel):
     limit: int = Field(default=20, ge=1, le=500)
     tags: list[str] | None = None
     correspondent: str | None = None
+    document_type: str | None = Field(default=None, description="Paperless document type filter")
+    created_after: str | None = Field(
+        default=None, description="Only docs created on/after this date (YYYY-MM-DD)"
+    )
+    created_before: str | None = Field(
+        default=None, description="Only docs created on/before this date (YYYY-MM-DD)"
+    )
 
 
 class RunRequest(ClassifyRequest):
@@ -64,11 +71,17 @@ async def _load_documents(
     limit: int,
     tags: list[str] | None,
     correspondent: str | None,
+    document_type: str | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
 ) -> list[dict[str, Any]]:
     client = make_paperless_client(request, timeout=30.0)
     documents = await client.list_documents(
         tags=tags,
         correspondent=correspondent,
+        document_type=document_type,
+        created_after=created_after,
+        created_before=created_before,
         page_size=min(limit, 100),
     )
     documents = documents[:limit]
@@ -157,6 +170,9 @@ async def classify_documents(request: Request, body: ClassifyRequest) -> dict[st
         limit=body.limit,
         tags=body.tags,
         correspondent=body.correspondent,
+        document_type=body.document_type,
+        created_after=body.created_after,
+        created_before=body.created_before,
     )
 
     classifications: list[dict[str, Any]] = []
@@ -208,6 +224,9 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
             limit=body.limit,
             tags=body.tags,
             correspondent=body.correspondent,
+            document_type=body.document_type,
+            created_after=body.created_after,
+            created_before=body.created_before,
         )
 
         # Step 2: Classify + Extract
