@@ -24,6 +24,7 @@ services:
       PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
       STATEMENT_TRACKER_CONFIG: /app/config/config.docker.yaml
+      WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-true}
       # LLM via Bifrost gateway
       LLM_BASE_URL: ${LLM_BASE_URL:-http://bifrost:8080/openai/v1}
       LLM_API_KEY: ${LLM_API_KEY:-bifrost}
