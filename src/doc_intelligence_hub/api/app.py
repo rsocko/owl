@@ -40,7 +40,7 @@ class HubSettings(BaseSettings):
     statement_tracker_config: str = Field(default_factory=_default_statement_tracker_config)
     write_to_paperless: bool = False
     # LLM settings (used by admin UI status display; actual LLM config lives in LLM_* env vars)
-    llm_base_url: str = "http://bifrost:8080/openai/v1"
+    llm_base_url: str = "https://service-001.example.invalid/openai/v1"
     llm_model: str = "phi3:mini"
     # Legacy Ollama settings — kept for backwards compat with existing .env files
     ollama_url: str = "http://localhost:11434"
