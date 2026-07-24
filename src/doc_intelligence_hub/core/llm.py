@@ -4,7 +4,7 @@ All modules should use `get_llm_client()` for LLM calls. This routes through
 Bifrost, which handles model routing, failover, and provider abstraction.
 
 Environment variables:
-    LLM_BASE_URL: Bifrost gateway URL (default: http://bifrost:8080/openai/v1)
+    LLM_BASE_URL: Bifrost gateway URL (default: https://service-001.example.invalid/openai/v1)
     LLM_API_KEY: API key for Bifrost (default: "bifrost" — local gateway)
     LLM_MODEL: Default model to use (default: phi3:mini — routed through Bifrost to Ollama)
     LLM_TIMEOUT: Request timeout in seconds (default: 120)
@@ -23,7 +23,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class LLMSettings(BaseSettings):
     """LLM configuration — reads from environment with LLM_ prefix."""
 
-    base_url: str = "http://bifrost:8080/openai/v1"
+    base_url: str = "https://service-001.example.invalid/openai/v1"
     api_key: str = "bifrost"
     model: str = "phi3:mini"
     timeout: float = 120.0

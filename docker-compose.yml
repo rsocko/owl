@@ -26,7 +26,7 @@ services:
       STATEMENT_TRACKER_CONFIG: /app/config/config.docker.yaml
       WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-true}
       # LLM via Bifrost gateway
-      LLM_BASE_URL: ${LLM_BASE_URL:-http://bifrost:8080/openai/v1}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://service-001.example.invalid/openai/v1}
       LLM_API_KEY: ${LLM_API_KEY:-bifrost}
       LLM_MODEL: ${LLM_MODEL:-phi3:mini}
     healthcheck:
@@ -57,7 +57,7 @@ services:
       PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
       PAPERLESS_TOKEN: ${PAPERLESS_TOKEN}
       WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-false}
-      LLM_BASE_URL: ${LLM_BASE_URL:-http://bifrost:8080/openai/v1}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://service-001.example.invalid/openai/v1}
       LLM_API_KEY: ${LLM_API_KEY:-bifrost}
       LLM_MODEL: ${LLM_MODEL:-phi3:mini}
     volumes:
@@ -80,7 +80,7 @@ services:
     environment:
       PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
       PAPERLESS_TOKEN: ${PAPERLESS_TOKEN}
-      LLM_BASE_URL: ${LLM_BASE_URL:-http://bifrost:8080/openai/v1}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://service-001.example.invalid/openai/v1}
       LLM_API_KEY: ${LLM_API_KEY:-bifrost}
       LLM_MODEL: ${LLM_MODEL:-phi3:mini}
       WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-true}
