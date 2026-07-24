@@ -102,7 +102,7 @@ class OllamaAnalyzer:
         prompt = ANALYSIS_PROMPT.format(
             title=document.get("title", "Unknown"),
             correspondent=document.get("correspondent_name", document.get("correspondent", "Unknown")),
-            tags=", ".join(document.get("tag_names", document.get("tags", []))),
+            tags=", ".join(str(t) for t in document.get("tag_names", document.get("tags", []))),
             created=document.get("created", "Unknown"),
             content=self._truncate_content(document.get("content", "")),
         )
