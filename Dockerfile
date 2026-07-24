@@ -16,9 +16,9 @@ RUN mkdir -p /app/data
 
 EXPOSE 8001
 
-# Default: run the statement tracker web server
+# Default: run the unified hub API (includes /admin, /statements, /api/*)
 # Override with other commands for different modules:
 #   eob-match run --limit 100
 #   paq run --dry-run
-ENTRYPOINT ["doc-hub"]
-CMD ["serve", "--config", "/app/config/config.docker.yaml"]
+ENV STATEMENT_TRACKER_CONFIG=/app/config/config.docker.yaml
+ENTRYPOINT ["doc-hub-serve"]

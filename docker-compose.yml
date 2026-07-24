@@ -4,7 +4,7 @@
 #
 # Usage:
 #   docker compose up -d --build             # Build and start all services
-#   docker compose up -d --build statement-tracker  # Build and start just statement tracker
+#   docker compose up -d --build hub         # Build and start just the hub
 #   docker compose logs -f                   # Follow logs
 #
 # Build modes:
@@ -12,17 +12,18 @@
 #   no --build → pulls pre-built image from service-007.example.invalid (production)
 
 services:
-  # Statement Tracker — web dashboard + API for detecting missing statements
-  statement-tracker:
+  # Document Intelligence Hub — unified API with /admin, /statements, /api/*
+  hub:
     build:
       context: .
       dockerfile: Dockerfile
     image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
-    container_name: doc-intelligence-statement-tracker
+    container_name: doc-intelligence-hub
     restart: unless-stopped
-    command: ["serve", "--config", "/app/config/config.docker.yaml"]
     environment:
+      PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
+      STATEMENT_TRACKER_CONFIG: /app/config/config.docker.yaml
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 30s
