@@ -1,15 +1,20 @@
-"""Ollama-based document analyzer."""
+"""Document analyzer — uses shared LLM client via Bifrost gateway."""
+
+from __future__ import annotations
 
 import json
 from typing import Optional
 
-import httpx
+from doc_intelligence_hub.core.llm import chat_json, get_llm_settings, health_check as llm_health_check
 
 from .config import settings
 
-ANALYSIS_PROMPT = """You are a document analysis assistant. Analyze the following document text and extract ALL actionable items.
+SYSTEM_PROMPT = """You are a document analysis assistant. You analyze documents and extract actionable items.
+Respond with ONLY valid JSON — no markdown, no explanation."""
 
-Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
+ANALYSIS_PROMPT = """Analyze the following document and extract ALL actionable items.
+
+Return a JSON object with these fields:
 
 {{
   "actions": [
@@ -40,9 +45,9 @@ Respond with ONLY a JSON object (no markdown, no explanation) with these fields:
 }}
 
 IMPORTANT:
-- Most documents will have exactly ONE action. Only include multiple if the document genuinely requires separate actions (e.g., "pay bill AND return signed form").
+- Most documents will have exactly ONE action. Only include multiple if the document genuinely requires separate actions.
 - If the document requires NO action (informational receipt, old statement, etc.), set "requires_action": false and return an empty actions array.
-- If the text is unreadable or too garbled to understand, set text_quality to "unreadable" and requires_action to false.
+- If the text is unreadable or too garbled, set text_quality to "unreadable" and requires_action to false.
 
 Rules for urgency:
 - CRITICAL: Legal threats, final notices, collection actions, expired deadlines
@@ -73,14 +78,20 @@ Document content:
 
 
 class OllamaAnalyzer:
-    """Analyzes documents using Ollama (local LLM)."""
+    """Analyzes documents using LLM via Bifrost gateway.
+
+    Named OllamaAnalyzer for backwards compatibility, but now routes through
+    the shared LLM client (Bifrost → any provider).
+    """
 
     def __init__(self):
-        self.base_url = settings.ollama_url.rstrip("/")
-        self.model = settings.ollama_model
+        llm_settings = get_llm_settings()
+        # Allow action-queue config to override model if set
+        self.model = settings.llm_model or llm_settings.model
+        self.base_url = llm_settings.base_url
 
     async def analyze_document(self, document: dict) -> Optional[dict]:
-        """Send document text to Ollama and parse the structured response.
+        """Send document text to LLM and parse the structured response.
 
         Args:
             document: Paperless document dict with 'content', 'title', etc.
@@ -96,57 +107,18 @@ class OllamaAnalyzer:
             content=self._truncate_content(document.get("content", "")),
         )
 
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(
-                    f"{self.base_url}/api/generate",
-                    json={
-                        "model": self.model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "options": {
-                            "temperature": 0.1,  # Low temp for structured output
-                            "num_predict": 1024,
-                        },
-                    },
-                )
-                resp.raise_for_status()
-                result = resp.json()
-                response_text = result.get("response", "")
-                return self._parse_response(response_text)
-
-        except httpx.HTTPError as e:
-            print(f"Ollama HTTP error: {e}")
+        data = await chat_json(
+            prompt,
+            system=SYSTEM_PROMPT,
+            model=self.model,
+            max_tokens=1024,
+        )
+        if data is None:
             return None
-        except Exception as e:
-            print(f"Ollama analysis failed: {e}")
-            return None
+        return self._validate_response(data)
 
-    def _parse_response(self, text: str) -> Optional[dict]:
-        """Parse JSON from Ollama response, handling common issues."""
-        # Strip markdown code fences if present
-        text = text.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            text = "\n".join(lines[1:])
-            if text.endswith("```"):
-                text = text[:-3]
-            text = text.strip()
-
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            # Try to find JSON object in the response
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                try:
-                    data = json.loads(text[start:end])
-                except json.JSONDecodeError:
-                    return None
-            else:
-                return None
-
+    def _validate_response(self, data: dict) -> Optional[dict]:
+        """Validate and normalize the LLM response."""
         # Handle new multi-action format
         if "actions" in data and "document_assessment" in data:
             return self._validate_multi_action(data)
@@ -161,7 +133,6 @@ class OllamaAnalyzer:
         """Validate the multi-action response format."""
         assessment = data.get("document_assessment", {})
 
-        # Validate each action
         valid_types = {"PAY", "RESPOND", "FILE", "REVIEW", "SHARE", "SCHEDULE", "SIGN", "ARCHIVE"}
         valid_urgency = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 
@@ -179,7 +150,6 @@ class OllamaAnalyzer:
 
         data["actions"] = validated_actions
 
-        # Validate text_quality
         valid_quality = {"good", "fair", "poor", "unreadable"}
         if assessment.get("text_quality", "").lower() not in valid_quality:
             assessment["text_quality"] = "fair"
@@ -227,18 +197,11 @@ class OllamaAnalyzer:
         """Truncate document content to fit within model context."""
         if len(content) <= max_chars:
             return content
-        # Keep beginning and end (most important info is usually there)
         half = max_chars // 2
         return content[:half] + "\n\n[...content truncated...]\n\n" + content[-half:]
 
     async def health_check(self) -> bool:
-        """Verify Ollama is running and model is available."""
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(f"{self.base_url}/api/tags")
-                if resp.status_code != 200:
-                    return False
-                models = resp.json().get("models", [])
-                return any(m.get("name", "").startswith(self.model.split(":")[0]) for m in models)
-        except Exception:
-            return False
+        """Verify LLM gateway is running and responsive."""
+        result = await llm_health_check()
+        return result.get("status") == "ok"
+

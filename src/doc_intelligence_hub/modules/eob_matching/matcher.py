@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date
 
-from thefuzz import fuzz
+from rapidfuzz import fuzz
 
 from doc_intelligence_hub.modules.eob_matching.models import ExtractedBill, ExtractedEOB, MatchBreakdown, MatchConfidence, MatchResult
 

@@ -38,6 +38,10 @@ class HubSettings(BaseSettings):
     paperless_api_token: str | None = None
     statement_tracker_config: str = Field(default_factory=_default_statement_tracker_config)
     write_to_paperless: bool = False
+    # LLM settings (used by admin UI status display; actual LLM config lives in LLM_* env vars)
+    llm_base_url: str = "http://bifrost:8080/openai/v1"
+    llm_model: str = "phi3:mini"
+    # Legacy Ollama settings — kept for backwards compat with existing .env files
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "phi3:mini"
     cors_origins: str = "*"
@@ -141,9 +145,8 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     async def index() -> FileResponse:
         return FileResponse(_HUB_STATIC_DIR / "index.html")
 
-    @app.get("/admin", include_in_schema=False)
-    async def admin_index() -> FileResponse:
-        return FileResponse(_ADMIN_STATIC_DIR / "index.html")
+    # Admin dashboard — mount as StaticFiles so /admin, /admin/, and sub-paths all resolve
+    app.mount("/admin", StaticFiles(directory=str(_ADMIN_STATIC_DIR), html=True), name="admin-static")
 
     # Legacy statement tracker dashboard at /statements/
     app.mount("/statements", StaticFiles(directory=str(_STATEMENTS_STATIC_DIR), html=True), name="statements-static")

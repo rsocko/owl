@@ -7,15 +7,13 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
-from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer
-from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
+from doc_intelligence_hub.core.llm import get_llm_settings, health_check as llm_health_check
 
 router = APIRouter(prefix="/api", tags=["system"])
 
 
-class OllamaSettingsUpdate(BaseModel):
-    ollama_url: str | None = None
-    ollama_model: str | None = None
+class LLMSettingsUpdate(BaseModel):
+    llm_model: str | None = None
     write_to_paperless: bool | None = None
 
 
@@ -45,15 +43,12 @@ async def _statement_status(request: Request) -> dict[str, Any]:
 
 
 async def _queue_status(request: Request) -> dict[str, Any]:
-    hub_settings = request.app.state.hub_settings
-    action_queue_settings.ollama_url = hub_settings.ollama_url
-    action_queue_settings.ollama_model = hub_settings.ollama_model
-    action_queue_settings.write_to_paperless = hub_settings.write_to_paperless
-    analyzer = OllamaAnalyzer()
+    llm_settings = get_llm_settings()
+    health = await llm_health_check()
     return {
-        "status": "ok" if await analyzer.health_check() else "degraded",
-        "ollama_url": analyzer.base_url,
-        "ollama_model": analyzer.model,
+        "status": "ok" if health.get("status") == "ok" else "degraded",
+        "llm_base_url": llm_settings.base_url,
+        "llm_model": llm_settings.model,
         "last_run": request.app.state.last_queue_status,
         "write_to_paperless": request.app.state.hub_settings.write_to_paperless,
     }
@@ -114,37 +109,36 @@ async def paperless_stats(request: Request) -> dict[str, Any]:
 async def get_settings(request: Request) -> dict[str, Any]:
     """Get current runtime settings (safe subset)."""
     hub = request.app.state.hub_settings
+    llm = get_llm_settings()
     return {
-        "ollama_url": hub.ollama_url,
-        "ollama_model": hub.ollama_model,
+        "llm_base_url": llm.base_url,
+        "llm_model": llm.model,
         "write_to_paperless": hub.write_to_paperless,
         "paperless_url": hub.paperless_url,
+        # Legacy fields for backwards compat with existing admin UI
+        "ollama_url": llm.base_url,
+        "ollama_model": llm.model,
     }
 
 
 @router.put("/settings")
-async def update_settings(request: Request, body: OllamaSettingsUpdate) -> dict[str, Any]:
+async def update_settings(request: Request, body: LLMSettingsUpdate) -> dict[str, Any]:
     """Update runtime settings (persists for this server session)."""
     hub = request.app.state.hub_settings
     changed = []
-    if body.ollama_url is not None:
-        hub.ollama_url = body.ollama_url
-        action_queue_settings.ollama_url = body.ollama_url
-        changed.append("ollama_url")
-    if body.ollama_model is not None:
-        hub.ollama_model = body.ollama_model
-        action_queue_settings.ollama_model = body.ollama_model
-        changed.append("ollama_model")
+    if body.llm_model is not None:
+        hub.llm_model = body.llm_model
+        changed.append("llm_model")
     if body.write_to_paperless is not None:
         hub.write_to_paperless = body.write_to_paperless
-        action_queue_settings.write_to_paperless = body.write_to_paperless
         changed.append("write_to_paperless")
+    llm = get_llm_settings()
     return {
         "status": "ok",
         "changed": changed,
         "settings": {
-            "ollama_url": hub.ollama_url,
-            "ollama_model": hub.ollama_model,
+            "llm_base_url": llm.base_url,
+            "llm_model": hub.llm_model or llm.model,
             "write_to_paperless": hub.write_to_paperless,
         },
     }

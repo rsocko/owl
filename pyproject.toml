@@ -11,13 +11,14 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115.0",
   "httpx>=0.28.0",
+  "openai>=1.40.0",
   "pydantic>=2.10.0",
   "pydantic-settings>=2.0",
   "pyyaml>=6.0.0",
   "python-dateutil>=2.9.0",
   "uvicorn>=0.34.0",
   "pdfplumber>=0.11.0",
-  "thefuzz[speedup]>=0.22.0",
+  "rapidfuzz>=3.0",
   "sqlalchemy>=2.0",
   "click>=8.0",
   "rich>=13.0",
@@ -47,8 +48,10 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "doc_intelligence_hub" = [
-  "modules/statements/static/**",
-  "api/static/**",
+  "modules/statements/static/*",
+  "modules/statements/static/**/*",
+  "api/static/*",
+  "api/static/**/*",
 ]
 
 [tool.pytest.ini_options]

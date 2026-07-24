@@ -9,9 +9,12 @@ class Settings(BaseSettings):
     paperless_url: str = Field(default="http://paperless:8000")
     paperless_token: str = Field(default="")
 
-    # Ollama
-    ollama_url: str = Field(default="http://localhost:11434")
-    ollama_model: str = Field(default="phi3:mini")
+    # LLM (optional override — defaults come from core.llm LLM_* env vars)
+    llm_model: str = Field(default="")  # Empty = use default from LLM_MODEL
+
+    # Legacy Ollama settings (mapped to LLM_* for backwards compat)
+    ollama_url: str = Field(default="")
+    ollama_model: str = Field(default="")
 
     # Database
     database_url: str = Field(default="sqlite:///./data/actions.db")
@@ -21,8 +24,8 @@ class Settings(BaseSettings):
     tags_to_monitor: str = Field(default="Inbox,Todo")
 
     # Safety
-    write_to_paperless: bool = Field(default=True)  # Set False to disable all Paperless writes
-    rate_limit_delay: float = Field(default=1.0)  # Seconds between API writes (be nice to Paperless)
+    write_to_paperless: bool = Field(default=True)
+    rate_limit_delay: float = Field(default=1.0)
 
     @property
     def monitor_tags(self) -> list[str]:
