@@ -64,6 +64,7 @@ export const endpoints = {
   },
   statements: {
     missing: () => api.get('/api/statements/missing'),
+    providers: () => api.get('/api/statements/providers'),
     discoveryRun: () => api.post('/api/statements/discovery/run'),
     discoveryStreamUrl: '/api/statements/discovery/stream',
     recommendationsRun: (asOf: string) => api.post(`/api/statements/recommendations/run?as_of=${asOf}`),

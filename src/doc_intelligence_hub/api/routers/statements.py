@@ -22,6 +22,50 @@ from doc_intelligence_hub.modules.statements.service import run_discovery, run_r
 router = APIRouter(tags=["statement-tracker"])
 
 
+@router.get("/providers")
+async def list_discovered_providers(request: Request) -> dict[str, Any]:
+    """Return all providers from the latest discovery run."""
+    config = load_statement_config_from_request(request)
+    db = Database(config.runtime.database_path)
+    try:
+        discovery = db.load_latest_discovery()
+        if discovery is None:
+            return {"providers": [], "analyzed_documents": 0, "run_at": None}
+
+        # Also grab the run timestamp
+        runs = db.list_discovery_runs(limit=1)
+        run_at = runs[0]["run_at"] if runs else None
+
+        providers = [
+            {
+                "provider_key": p.provider_key,
+                "provider_name": p.provider_name,
+                "correspondent_id": p.correspondent_id,
+                "document_count": p.document_count,
+                "normalized_title": p.normalized_title,
+                "title_consistency": p.title_consistency,
+                "frequency": p.pattern.frequency,
+                "pattern_type": p.pattern.pattern_type,
+                "confidence": p.pattern.confidence,
+                "anchor_day": p.pattern.anchor_day,
+                "variance_days": p.pattern.variance_days,
+                "grace_period_days": p.pattern.grace_period_days,
+                "sample_document_ids": p.sample_document_ids,
+                "first_seen": p.first_seen.isoformat(),
+                "last_seen": p.last_seen.isoformat(),
+            }
+            for p in discovery.providers
+        ]
+
+        return {
+            "providers": providers,
+            "analyzed_documents": discovery.analyzed_documents,
+            "run_at": run_at,
+        }
+    finally:
+        db.close()
+
+
 @router.get("/health")
 async def statement_health(request: Request) -> dict[str, Any]:
     config = load_statement_config_from_request(request)
