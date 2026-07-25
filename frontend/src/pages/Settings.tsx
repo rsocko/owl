@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { api, endpoints } from '../lib/api';
 import { Badge, Button, Card, ErrorState, PageHeader, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
+import { CronScheduleEditor } from '../components/CronScheduleEditor';
 
 type ToastState = {
   message: string;
@@ -560,17 +561,17 @@ export default function Settings() {
                       </label>
                     </div>
 
-                    <div className="form-row" style={key === 'statement_discovery' || key === 'statement_gap_check' ? { gridTemplateColumns: '1fr' } : undefined}>
+                    <div className="form-row" style={{ gridTemplateColumns: '1fr' }}>
                       <div className="form-group">
-                        <label htmlFor={`${key}-cron`}>Cron</label>
-                        <input
+                        <label htmlFor={`${key}-cron`}>Schedule</label>
+                        <CronScheduleEditor
                           id={`${key}-cron`}
                           value={schedules[key].cron}
-                          onChange={(event) => setSchedules((current) => ({
+                          onChange={(cron) => setSchedules((current) => ({
                             ...current,
                             [key]: {
                               ...current[key],
-                              cron: event.target.value,
+                              cron,
                             },
                           }))}
                         />
