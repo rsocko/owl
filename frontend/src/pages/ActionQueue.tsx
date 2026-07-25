@@ -9,6 +9,7 @@ import {
   FilterPills,
   LoadingState,
   PageHeader,
+  SkeletonLoader,
   StatCard,
   StatGrid,
   Toast,
@@ -342,7 +343,7 @@ export default function ActionQueue() {
       </div>
 
       {loading ? (
-        <LoadingState label="Loading action queue…" />
+        <><SkeletonLoader variant="stat-grid" /><div className="section"><SkeletonLoader variant="table" /></div></>
       ) : error ? (
         <ErrorState message={error} onRetry={() => void loadData()} />
       ) : (

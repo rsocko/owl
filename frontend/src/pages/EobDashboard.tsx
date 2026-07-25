@@ -10,6 +10,7 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
+  SkeletonLoader,
   StatCard,
   StatGrid,
   Toast,
@@ -274,7 +275,8 @@ export default function EobDashboard() {
     return (
       <>
         <PageHeader title="EOB Matching" desc="Run the classification and matching pipeline for Explanation of Benefits documents." />
-        <LoadingState label="Loading EOB dashboard…" />
+        <SkeletonLoader variant="stat-grid" />
+        <div className="section"><SkeletonLoader variant="cards" /></div>
       </>
     );
   }

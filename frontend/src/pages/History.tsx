@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Badge, Button, Card, DataTable, ErrorState, FilterPills, LoadingState, PageHeader, StatCard, StatGrid } from '../components/ui';
+import { Badge, Button, Card, DataTable, ErrorState, FilterPills, LoadingState, PageHeader, SkeletonLoader, StatCard, StatGrid } from '../components/ui';
 import { endpoints } from '../lib/api';
 
 type EobRun = {
@@ -162,7 +162,7 @@ export default function History() {
       />
 
       {loading ? (
-        <LoadingState label="Loading run history…" />
+        <><SkeletonLoader variant="stat-grid" /><div className="section"><SkeletonLoader variant="table" /></div></>
       ) : error ? (
         <ErrorState message={error} onRetry={() => void loadHistory()} />
       ) : (

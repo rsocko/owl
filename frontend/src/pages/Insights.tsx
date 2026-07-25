@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, DataTable, ErrorState, FilterPills, LoadingState, PageHeader, StatCard, StatGrid, Toast } from '../components/ui';
+import { Badge, Button, Card, DataTable, ErrorState, FilterPills, LoadingState, PageHeader, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
 import { endpoints } from '../lib/api';
 
 type ToastState = {
@@ -207,7 +207,7 @@ export default function Insights() {
       {toast && <Toast message={toast.message} tone={toast.tone} />}
 
       {loading ? (
-        <LoadingState label="Loading alerts and trends…" />
+        <><SkeletonLoader variant="stat-grid" /><div className="section"><SkeletonLoader variant="table" /></div></>
       ) : error ? (
         <ErrorState message={error} onRetry={() => void loadData()} />
       ) : (

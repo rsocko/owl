@@ -11,6 +11,7 @@ import {
   LoadingState,
   PageHeader,
   SidePanel,
+  SkeletonLoader,
   Tabs,
   Toast,
 } from '../components/ui';
@@ -332,7 +333,7 @@ export default function OrphansDupes() {
       {toast && <Toast message={toast.message} tone={toast.tone} />}
 
       {loading ? (
-        <LoadingState label="Loading orphan and duplicate review queues…" />
+        <SkeletonLoader variant="table" rows={6} />
       ) : error ? (
         <ErrorState message={error} onRetry={() => void loadData()} />
       ) : (

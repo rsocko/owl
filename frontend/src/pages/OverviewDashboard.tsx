@@ -8,6 +8,7 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
+  SkeletonLoader,
   StatCard,
   StatGrid,
   StatusDot,
@@ -318,7 +319,12 @@ export default function OverviewDashboard() {
         actions={<Button onClick={() => void loadDashboard()} disabled={loading}>Refresh</Button>}
       />
 
-      {loading && !dashboard ? <LoadingState label="Loading dashboard…" /> : null}
+      {loading && !dashboard ? (
+        <>
+          <SkeletonLoader variant="stat-grid" />
+          <div className="section"><SkeletonLoader variant="cards" /></div>
+        </>
+      ) : null}
       {!loading && error && !dashboard ? <ErrorState message={error} onRetry={() => void loadDashboard()} /> : null}
 
       {dashboard ? (

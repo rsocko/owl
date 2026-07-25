@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { api, endpoints } from '../lib/api';
-import { Badge, Button, Card, ErrorState, LoadingState, PageHeader, StatCard, StatGrid, Toast } from '../components/ui';
+import { Badge, Button, Card, ErrorState, LoadingState, PageHeader, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
 
 type ToastState = {
   message: string;
@@ -340,7 +340,7 @@ export default function Settings() {
       {toast && <Toast message={toast.message} tone={toast.tone} />}
 
       {loading ? (
-        <LoadingState label="Loading runtime settings…" />
+        <><SkeletonLoader variant="stat-grid" /><div className="section"><SkeletonLoader variant="cards" /></div></>
       ) : error ? (
         <ErrorState message={error} onRetry={() => void loadSettings()} />
       ) : (
