@@ -7,12 +7,14 @@ import {
   EmptyState,
   ErrorState,
   PageHeader,
+  ProgressBanner,
   SkeletonLoader,
   StatCard,
   StatGrid,
   StatusDot,
   Toast,
 } from '../components/ui';
+import { useStreamingAction } from '../hooks/useStreamingAction';
 import { endpoints } from '../lib/api';
 import '../styles/overview-dashboard.css';
 
@@ -199,7 +201,8 @@ export default function OverviewDashboard() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [moduleRun, setModuleRun] = useState<'discovery' | 'recommendations' | null>(null);
+  const [discoveryState, runDiscoveryStream, cancelDiscovery] = useStreamingAction();
+  const [recsState, runRecsStream, cancelRecs] = useStreamingAction();
   const [alertBusyId, setAlertBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
 
@@ -258,27 +261,30 @@ export default function OverviewDashboard() {
     };
   }, [dashboard?.stats.modules]);
 
-  const runStatementsAction = useCallback(
-    async (action: 'discovery' | 'recommendations') => {
-      try {
-        setModuleRun(action);
-        if (action === 'discovery') {
-          await endpoints.statements.discoveryRun();
-          setToast({ message: 'Statement discovery run completed.', tone: 'success' });
-        } else {
-          const todayIso = new Date().toISOString().slice(0, 10);
-          await endpoints.statements.recommendationsRun(todayIso);
-          setToast({ message: 'Statement recommendations run completed.', tone: 'success' });
-        }
-        await loadDashboard();
-      } catch (err) {
-        setToast({ message: getErrorMessage(err), tone: 'error' });
-      } finally {
-        setModuleRun(null);
-      }
-    },
-    [loadDashboard],
-  );
+  // Show streaming errors as toasts
+  useEffect(() => {
+    if (discoveryState.error) setToast({ message: discoveryState.error, tone: 'error' });
+  }, [discoveryState.error]);
+  useEffect(() => {
+    if (recsState.error) setToast({ message: recsState.error, tone: 'error' });
+  }, [recsState.error]);
+
+  const anyModuleRunning = discoveryState.running || recsState.running;
+
+  const runStatementsDiscovery = useCallback(() => {
+    runDiscoveryStream(endpoints.statements.discoveryStreamUrl, () => {
+      setToast({ message: 'Statement discovery run completed.', tone: 'success' });
+      void loadDashboard();
+    });
+  }, [runDiscoveryStream, loadDashboard]);
+
+  const runStatementsRecommendations = useCallback(() => {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    runRecsStream(endpoints.statements.recommendationsStreamUrl(todayIso), () => {
+      setToast({ message: 'Statement recommendations run completed.', tone: 'success' });
+      void loadDashboard();
+    });
+  }, [runRecsStream, loadDashboard]);
 
   const updateAlert = useCallback(async (alertId: number, action: 'acknowledge' | 'resolve') => {
     try {
@@ -384,14 +390,32 @@ export default function OverviewDashboard() {
                 </div>
               </div>
               <div className="btn-group">
-                <Button variant="primary" onClick={() => void runStatementsAction('discovery')} disabled={moduleRun !== null}>
-                  {moduleRun === 'discovery' ? 'Running discovery…' : 'Run discovery'}
+                <Button variant="primary" onClick={runStatementsDiscovery} disabled={anyModuleRunning}>
+                  {discoveryState.running ? 'Running discovery…' : 'Run discovery'}
                 </Button>
-                <Button variant="success" onClick={() => void runStatementsAction('recommendations')} disabled={moduleRun !== null}>
-                  {moduleRun === 'recommendations' ? 'Running recommendations…' : 'Run recommendations'}
+                <Button variant="success" onClick={runStatementsRecommendations} disabled={anyModuleRunning}>
+                  {recsState.running ? 'Running recommendations…' : 'Run recommendations'}
                 </Button>
                 <Button onClick={() => navigate('/statements')}>Open statements</Button>
               </div>
+              {discoveryState.running && discoveryState.progress && (
+                <ProgressBanner
+                  stage={discoveryState.progress.stage}
+                  message={discoveryState.progress.message}
+                  current={discoveryState.progress.current}
+                  total={discoveryState.progress.total}
+                  onCancel={cancelDiscovery}
+                />
+              )}
+              {recsState.running && recsState.progress && (
+                <ProgressBanner
+                  stage={recsState.progress.stage}
+                  message={recsState.progress.message}
+                  current={recsState.progress.current}
+                  total={recsState.progress.total}
+                  onCancel={cancelRecs}
+                />
+              )}
             </Card>
 
             <Card

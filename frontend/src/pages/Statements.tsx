@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
+import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, ProgressBanner, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
+import { useStreamingAction } from '../hooks/useStreamingAction';
 import { endpoints } from '../lib/api';
 import '../styles/statements.css';
 
@@ -41,7 +42,8 @@ export default function Statements() {
   const [rows, setRows] = useState<MissingStatement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [actionLoading, setActionLoading] = useState<'discovery' | 'recommendations' | null>(null);
+  const [discoveryState, runDiscoveryStream, cancelDiscovery] = useStreamingAction();
+  const [recsState, runRecsStream, cancelRecs] = useStreamingAction();
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
 
   const loadStatements = useCallback(async () => {
@@ -67,6 +69,14 @@ export default function Statements() {
     return () => window.clearTimeout(timeoutId);
   }, [toast]);
 
+  // Show streaming errors as toasts
+  useEffect(() => {
+    if (discoveryState.error) setToast({ message: discoveryState.error, tone: 'error' });
+  }, [discoveryState.error]);
+  useEffect(() => {
+    if (recsState.error) setToast({ message: recsState.error, tone: 'error' });
+  }, [recsState.error]);
+
   const summary = useMemo(() => {
     const severe = rows.filter((row) => (row.days_overdue ?? 0) >= 45).length;
     const overdueDays = rows.map((row) => row.days_overdue ?? 0);
@@ -74,27 +84,22 @@ export default function Statements() {
     return { severe, maxOverdue };
   }, [rows]);
 
-  const runAction = useCallback(
-    async (action: 'discovery' | 'recommendations') => {
-      try {
-        setActionLoading(action);
-        if (action === 'discovery') {
-          await endpoints.statements.discoveryRun();
-          setToast({ message: 'Statement discovery run completed.', tone: 'success' });
-        } else {
-          const todayIso = new Date().toISOString().slice(0, 10);
-          await endpoints.statements.recommendationsRun(todayIso);
-          setToast({ message: 'Statement recommendations run completed.', tone: 'success' });
-        }
-        await loadStatements();
-      } catch (err) {
-        setToast({ message: getErrorMessage(err), tone: 'error' });
-      } finally {
-        setActionLoading(null);
-      }
-    },
-    [loadStatements],
-  );
+  const anyRunning = discoveryState.running || recsState.running;
+
+  const runDiscovery = useCallback(() => {
+    runDiscoveryStream(endpoints.statements.discoveryStreamUrl, () => {
+      setToast({ message: 'Statement discovery run completed.', tone: 'success' });
+      void loadStatements();
+    });
+  }, [runDiscoveryStream, loadStatements]);
+
+  const runRecommendations = useCallback(() => {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    runRecsStream(endpoints.statements.recommendationsStreamUrl(todayIso), () => {
+      setToast({ message: 'Statement recommendations run completed.', tone: 'success' });
+      void loadStatements();
+    });
+  }, [runRecsStream, loadStatements]);
 
   return (
     <>
@@ -103,15 +108,34 @@ export default function Statements() {
         desc="Track expected statement periods, trigger discovery, and review providers that still need documents."
         actions={
           <div className="btn-group">
-            <Button variant="primary" onClick={() => void runAction('discovery')} disabled={actionLoading !== null}>
-              {actionLoading === 'discovery' ? 'Running discovery…' : 'Run discovery'}
+            <Button variant="primary" onClick={runDiscovery} disabled={anyRunning}>
+              {discoveryState.running ? 'Running discovery…' : 'Run discovery'}
             </Button>
-            <Button variant="success" onClick={() => void runAction('recommendations')} disabled={actionLoading !== null}>
-              {actionLoading === 'recommendations' ? 'Running recommendations…' : 'Run recommendations'}
+            <Button variant="success" onClick={runRecommendations} disabled={anyRunning}>
+              {recsState.running ? 'Running recommendations…' : 'Run recommendations'}
             </Button>
           </div>
         }
       />
+
+      {discoveryState.running && discoveryState.progress && (
+        <ProgressBanner
+          stage={discoveryState.progress.stage}
+          message={discoveryState.progress.message}
+          current={discoveryState.progress.current}
+          total={discoveryState.progress.total}
+          onCancel={cancelDiscovery}
+        />
+      )}
+      {recsState.running && recsState.progress && (
+        <ProgressBanner
+          stage={recsState.progress.stage}
+          message={recsState.progress.message}
+          current={recsState.progress.current}
+          total={recsState.progress.total}
+          onCancel={cancelRecs}
+        />
+      )}
 
       <StatGrid>
         <StatCard title="Missing series" metric={rows.length} desc="Providers with an outstanding expected statement" />
