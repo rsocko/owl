@@ -229,7 +229,7 @@ class PaperlessClient:
                 params["document_type__id"] = type_id
 
         return await self._paginate(
-            client, "/api/documents/", params, limit=limit or effective_page_size, on_progress=on_progress
+            client, "/api/documents/", params, limit=limit, on_progress=on_progress
         )
 
     async def list_documents_by_tag_ids(
