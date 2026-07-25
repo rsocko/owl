@@ -270,6 +270,17 @@ export default function EobMatchReview() {
             >
               {savingStatus === 'rejected' ? 'Rejecting…' : 'Reject'}
             </Button>
+            <Button
+              onClick={() =>
+                navigate(
+                  `/triage/manual-search?matchId=${match.id}&docId=${match.eob_document_id ?? ''}`,
+                )
+              }
+              disabled={savingStatus !== null}
+              title="Re-link to Different (R)"
+            >
+              Re-link to Different
+            </Button>
             <Button onClick={() => navigate('/eob')} disabled={savingStatus !== null}>
               Skip
             </Button>
@@ -300,6 +311,17 @@ export default function EobMatchReview() {
                 disabled={savingStatus !== null}
               >
                 Reject match
+              </Button>
+              <Button
+                onClick={() =>
+                  navigate(
+                    `/triage/manual-search?matchId=${match.id}&docId=${match.eob_document_id ?? ''}`,
+                  )
+                }
+                disabled={savingStatus !== null}
+                title="Re-link to Different (R)"
+              >
+                Re-link to Different
               </Button>
               <Button onClick={() => void handleUpdate('candidate')} disabled={savingStatus !== null}>
                 Reset to pending
