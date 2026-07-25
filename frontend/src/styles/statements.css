@@ -24,3 +24,32 @@
   font-size: 0.78rem;
   color: var(--text-muted);
 }
+
+.statements-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 0;
+}
+
+.statements-tab {
+  padding: 10px 20px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.statements-tab:hover {
+  color: var(--text);
+}
+
+.statements-tab--active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
