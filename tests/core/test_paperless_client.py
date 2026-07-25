@@ -229,6 +229,24 @@ class TestFetchWithLimit:
         doc_requests = [r for r in requests_seen if r.url.path == "/api/documents/"]
         assert len(doc_requests) == 3
 
+    @pytest.mark.asyncio
+    async def test_list_documents_by_tag_ids_single_page_with_huge_collection(self, monkeypatch):
+        """Even with 5000+ documents sharing the requested tags, a small
+        `limit` must result in exactly one /api/documents/ request — no
+        multi-page walk through the entire tagged collection.
+        """
+        client, requests_seen = _make_client_with_pages(monkeypatch, num_docs=5000, page_size=100)
+
+        docs = await client.list_documents_by_tag_ids([1, 2], limit=5)
+
+        assert len(docs) == 5
+        doc_requests = [r for r in requests_seen if r.url.path == "/api/documents/"]
+        assert len(doc_requests) == 1
+        # page_size sent to Paperless should be capped to the limit, not the
+        # default page_size, so the single page returned is exactly enough.
+        assert doc_requests[0].url.params.get("page_size") == "5"
+        assert doc_requests[0].url.params.get("page") == "1"
+
 
 class TestServerSideFiltering:
     """Filters must be sent as Paperless query params, not applied client-side."""
@@ -253,6 +271,56 @@ class TestServerSideFiltering:
         tag_requests = [r for r in requests_seen if r.url.path == "/api/tags/"]
         # Tag names rarely change — the second call should reuse the cached mapping.
         assert len(tag_requests) == 1
+
+
+class TestHttpxTimeoutConfig:
+    """A hung request must be bounded by real httpx-level timeouts, not just
+    the outer asyncio.wait_for wrapper (task cancellation doesn't always
+    interrupt a blocking socket read promptly).
+    """
+
+    @pytest.mark.asyncio
+    async def test_make_client_configures_httpx_timeout(self):
+        client = PaperlessClient(base_url="https://paperless.test", token="test-token")
+        async_client = client._make_client()
+        try:
+            timeout = async_client.timeout
+            assert isinstance(timeout, httpx.Timeout)
+            assert timeout.connect == 10.0
+            assert timeout.read == 30.0
+            assert timeout.write == 10.0
+            assert timeout.pool == 10.0
+        finally:
+            await async_client.aclose()
+
+    @pytest.mark.asyncio
+    async def test_make_client_honors_custom_timeout_overrides(self):
+        client = PaperlessClient(
+            base_url="https://paperless.test",
+            token="test-token",
+            connect_timeout=5.0,
+            read_timeout=15.0,
+            write_timeout=5.0,
+            pool_timeout=5.0,
+        )
+        async_client = client._make_client()
+        try:
+            timeout = async_client.timeout
+            assert timeout.connect == 5.0
+            assert timeout.read == 15.0
+            assert timeout.write == 5.0
+            assert timeout.pool == 5.0
+        finally:
+            await async_client.aclose()
+
+    @pytest.mark.asyncio
+    async def test_make_client_read_timeout_defaults_to_timeout_param(self):
+        client = PaperlessClient(base_url="https://paperless.test", token="test-token", timeout=45.0)
+        async_client = client._make_client()
+        try:
+            assert async_client.timeout.read == 45.0
+        finally:
+            await async_client.aclose()
 
 
 class TestFetchPerformanceLogging:

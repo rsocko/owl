@@ -143,10 +143,12 @@ class Pipeline:
         # don't walk the full (potentially thousands-strong) result set just to
         # keep a handful of documents. When `force` is False we still need to
         # filter out already-processed documents afterwards, so we fetch a
-        # generous multiple of `limit` as a buffer rather than an unbounded set.
+        # small multiple of `limit` as a buffer rather than an unbounded set —
+        # a large buffer (e.g. limit*10) defeats the point of a small limit
+        # since it still has to be requested/paginated as a single page.
         fetch_limit: Optional[int] = None
         if limit is not None and not document_id:
-            fetch_limit = limit if force else max(limit * 10, 50)
+            fetch_limit = limit if force else limit * 3
 
         fetch_start = time.monotonic()
         try:

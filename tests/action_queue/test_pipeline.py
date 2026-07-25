@@ -229,6 +229,43 @@ class TestPipelineFetchLimit:
 
         assert received_kwargs.get("limit") is None
 
+    @pytest.mark.asyncio
+    async def test_non_force_fetch_limit_uses_small_multiplier(self, db, monkeypatch):
+        """When `force` is False, the fetch buffer should be a small multiple
+        (limit*3) of the requested limit — not a large buffer like limit*10
+        (min 50) — so we don't pull in large amounts of data before local
+        already-processed filtering.
+        """
+        docs = _make_docs(2)
+        pipeline = Pipeline()
+
+        monkeypatch.setattr(aq_settings, "write_to_paperless", False)
+
+        received_kwargs = {}
+
+        async def fake_list_correspondents():
+            return []
+
+        async def fake_list_documents(**kwargs):
+            received_kwargs.update(kwargs)
+            return docs
+
+        async def fake_get_document_content(doc_id):
+            return "Invoice: your payment of $50.00 is due by the end of the month."
+
+        async def fake_health_check():
+            return False
+
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", fake_list_correspondents)
+        monkeypatch.setattr(pipeline.paperless, "list_documents", fake_list_documents)
+        monkeypatch.setattr(pipeline.paperless, "get_document_content", fake_get_document_content)
+        monkeypatch.setattr(pipeline.analyzer, "health_check", fake_health_check)
+        monkeypatch.setattr(pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION)
+
+        await pipeline.run(force=False, dry_run=False, limit=5)
+
+        assert received_kwargs.get("limit") == 15  # 5 * 3, not max(5*10, 50) == 50
+
 
 class TestPipelineFetchTimeout:
     """The fetch phase itself must be bounded by pipeline_fetch_timeout_seconds,
