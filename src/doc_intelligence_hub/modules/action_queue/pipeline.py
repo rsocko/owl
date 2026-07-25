@@ -138,35 +138,54 @@ class Pipeline:
                 logger.warning("Custom fields check failed: %s — writes to Paperless disabled for this run", e)
                 self._enrichment_available = False
 
-        # Step 2: Fetch documents based on provided filters
-        if document_id:
-            console.print(f"[dim]Fetching document #{document_id}...[/dim]")
-            doc = await self.paperless.get_document(document_id)
-            documents = [doc] if doc else []
-        elif saved_view_id:
-            console.print(f"[dim]Fetching documents from saved view #{saved_view_id}...[/dim]")
-            documents = await self.paperless.list_documents(saved_view=saved_view_id)
-        elif any([created_after, created_before, added_after, added_before, correspondent, document_type]):
-            # Use flexible query with date/correspondent/type filters
-            tags = [tag_override] if tag_override else None
-            console.print("[dim]Fetching documents with custom filters...[/dim]")
-            documents = await self.paperless.list_documents(
-                tags=tags,
-                created_after=created_after,
-                created_before=created_before,
-                added_after=added_after,
-                added_before=added_before,
-                correspondent=correspondent,
-                document_type=document_type,
-            )
-        else:
-            # Default: use configured tags (Inbox, Todo)
-            tags = [tag_override] if tag_override else settings.monitor_tags
-            console.print(f"[dim]Fetching documents tagged: {tags}[/dim]")
-            documents = await self.paperless.list_documents(tags=tags)
+        # Step 2: Fetch documents based on provided filters.
+        # When a `limit` is given we push it down to the Paperless query so we
+        # don't walk the full (potentially thousands-strong) result set just to
+        # keep a handful of documents. When `force` is False we still need to
+        # filter out already-processed documents afterwards, so we fetch a
+        # generous multiple of `limit` as a buffer rather than an unbounded set.
+        fetch_limit: Optional[int] = None
+        if limit is not None and not document_id:
+            fetch_limit = limit if force else max(limit * 10, 50)
 
+        fetch_start = time.monotonic()
+        try:
+            documents = await asyncio.wait_for(
+                self._fetch_documents(
+                    document_id=document_id,
+                    saved_view_id=saved_view_id,
+                    tag_override=tag_override,
+                    created_after=created_after,
+                    created_before=created_before,
+                    added_after=added_after,
+                    added_before=added_before,
+                    correspondent=correspondent,
+                    document_type=document_type,
+                    fetch_limit=fetch_limit,
+                ),
+                timeout=settings.pipeline_fetch_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            fetch_duration = time.monotonic() - fetch_start
+            console.print(
+                f"[red]✗[/red] Document fetch timed out after {settings.pipeline_fetch_timeout_seconds:.0f}s"
+            )
+            logger.error(
+                "Document fetch exceeded fetch timeout (%.0fs) — aborting run after %.2fs",
+                settings.pipeline_fetch_timeout_seconds, fetch_duration,
+            )
+            _set_progress(current_step="complete", progress="0/0 documents processed (fetch timed out)")
+            return {
+                "processed": 0, "skipped": 0, "failed": 0,
+                "fetch_timed_out": True, "duration_seconds": round(time.monotonic() - run_start, 2),
+            }
+
+        fetch_duration = time.monotonic() - fetch_start
         console.print(f"[green]✓[/green] Found {len(documents)} documents")
-        logger.info("Document fetch: found %d documents matching filters", len(documents))
+        logger.info(
+            "Document fetch: found %d documents matching filters (fetch_limit=%s, duration=%.2fs)",
+            len(documents), fetch_limit, fetch_duration,
+        )
 
         console.print()
 
@@ -439,6 +458,53 @@ class Pipeline:
         )
         stats["duration_seconds"] = round(total_duration, 2)
         return stats
+
+    async def _fetch_documents(
+        self,
+        *,
+        document_id: Optional[int],
+        saved_view_id: Optional[int],
+        tag_override: Optional[str],
+        created_after: Optional[str],
+        created_before: Optional[str],
+        added_after: Optional[str],
+        added_before: Optional[str],
+        correspondent: Optional[str],
+        document_type: Optional[str],
+        fetch_limit: Optional[int],
+    ) -> list[dict]:
+        """Fetch the candidate document set for this run, applying server-side
+        filtering (tags/dates/correspondent) and — when possible — a limit so
+        we don't paginate through the entire Paperless collection.
+        """
+        if document_id:
+            console.print(f"[dim]Fetching document #{document_id}...[/dim]")
+            doc = await self.paperless.get_document(document_id)
+            return [doc] if doc else []
+
+        if saved_view_id:
+            console.print(f"[dim]Fetching documents from saved view #{saved_view_id}...[/dim]")
+            return await self.paperless.list_documents(saved_view=saved_view_id, limit=fetch_limit)
+
+        if any([created_after, created_before, added_after, added_before, correspondent, document_type]):
+            # Use flexible query with date/correspondent/type filters
+            tags = [tag_override] if tag_override else None
+            console.print("[dim]Fetching documents with custom filters...[/dim]")
+            return await self.paperless.list_documents(
+                tags=tags,
+                created_after=created_after,
+                created_before=created_before,
+                added_after=added_after,
+                added_before=added_before,
+                correspondent=correspondent,
+                document_type=document_type,
+                limit=fetch_limit,
+            )
+
+        # Default: use configured tags (Inbox, Todo)
+        tags = [tag_override] if tag_override else settings.monitor_tags
+        console.print(f"[dim]Fetching documents tagged: {tags}[/dim]")
+        return await self.paperless.list_documents(tags=tags, limit=fetch_limit)
 
     def _store_action(self, db, document: dict, action_data: dict, assessment: dict, is_primary: bool = True) -> Action:
         """Store or update an action in the internal database.

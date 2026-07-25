@@ -158,3 +158,105 @@ class TestPipelineOverallTimeout:
         assert stats["skipped"] > 0
         assert stats["processed"] + stats["skipped"] == 5
         assert stats["processed"] < 5  # did not get through all documents
+
+
+class TestPipelineFetchLimit:
+    """When `limit` is provided, it should be pushed down into the Paperless fetch."""
+
+    @pytest.mark.asyncio
+    async def test_limit_is_forwarded_to_list_documents(self, db, monkeypatch):
+        docs = _make_docs(2)
+        pipeline = Pipeline()
+
+        monkeypatch.setattr(aq_settings, "write_to_paperless", False)
+
+        received_kwargs = {}
+
+        async def fake_list_correspondents():
+            return []
+
+        async def fake_list_documents(**kwargs):
+            received_kwargs.update(kwargs)
+            return docs
+
+        async def fake_get_document_content(doc_id):
+            return "Invoice: your payment of $50.00 is due by the end of the month."
+
+        async def fake_health_check():
+            return False
+
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", fake_list_correspondents)
+        monkeypatch.setattr(pipeline.paperless, "list_documents", fake_list_documents)
+        monkeypatch.setattr(pipeline.paperless, "get_document_content", fake_get_document_content)
+        monkeypatch.setattr(pipeline.analyzer, "health_check", fake_health_check)
+        monkeypatch.setattr(pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION)
+
+        await pipeline.run(force=True, dry_run=False, limit=5)
+
+        # force=True means no post-fetch filtering is needed, so the exact
+        # requested limit should be pushed straight down to the Paperless query.
+        assert received_kwargs.get("limit") == 5
+
+    @pytest.mark.asyncio
+    async def test_no_limit_forwards_none(self, db, monkeypatch):
+        docs = _make_docs(2)
+        pipeline = Pipeline()
+
+        monkeypatch.setattr(aq_settings, "write_to_paperless", False)
+
+        received_kwargs = {}
+
+        async def fake_list_correspondents():
+            return []
+
+        async def fake_list_documents(**kwargs):
+            received_kwargs.update(kwargs)
+            return docs
+
+        async def fake_get_document_content(doc_id):
+            return "Invoice: your payment of $50.00 is due by the end of the month."
+
+        async def fake_health_check():
+            return False
+
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", fake_list_correspondents)
+        monkeypatch.setattr(pipeline.paperless, "list_documents", fake_list_documents)
+        monkeypatch.setattr(pipeline.paperless, "get_document_content", fake_get_document_content)
+        monkeypatch.setattr(pipeline.analyzer, "health_check", fake_health_check)
+        monkeypatch.setattr(pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION)
+
+        await pipeline.run(force=True, dry_run=False)
+
+        assert received_kwargs.get("limit") is None
+
+
+class TestPipelineFetchTimeout:
+    """The fetch phase itself must be bounded by pipeline_fetch_timeout_seconds,
+    independent of the per-document analysis timeout loop.
+    """
+
+    @pytest.mark.asyncio
+    async def test_fetch_phase_timeout_aborts_run(self, db, monkeypatch):
+        pipeline = Pipeline()
+
+        monkeypatch.setattr(aq_settings, "pipeline_fetch_timeout_seconds", 0.05)
+        monkeypatch.setattr(aq_settings, "write_to_paperless", False)
+
+        async def fake_list_correspondents():
+            return []
+
+        async def hanging_list_documents(**kwargs):
+            await asyncio.sleep(5)  # simulate a Paperless instance that never responds in time
+            return []  # pragma: no cover - never reached
+
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", fake_list_correspondents)
+        monkeypatch.setattr(pipeline.paperless, "list_documents", hanging_list_documents)
+
+        start = time.monotonic()
+        stats = await pipeline.run(force=True, dry_run=False, limit=5)
+        elapsed = time.monotonic() - start
+
+        assert stats.get("fetch_timed_out") is True
+        assert stats["processed"] == 0
+        # Should abort well before the simulated 5s hang.
+        assert elapsed < 2.0

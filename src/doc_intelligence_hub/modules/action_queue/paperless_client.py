@@ -23,19 +23,20 @@ class ActionQueuePaperlessClient:
     def __init__(self):
         self._client = _get_client()
 
-    async def get_documents_by_tags(self, tag_names: list[str]) -> list[dict]:
-        """Fetch all documents that have any of the specified tags."""
-        # Resolve tag names to IDs, then fetch by each (union)
-        all_tags = await self._client.list_tags()
-        name_to_id = {t["name"]: t["id"] for t in all_tags}
-        tag_ids = [name_to_id[n] for n in tag_names if n in name_to_id]
+    async def get_documents_by_tags(self, tag_names: list[str], *, limit: Optional[int] = None) -> list[dict]:
+        """Fetch documents that have any of the specified tags.
+
+        Resolves tag names to IDs (cached) and issues a single server-side
+        ``tags__id__in`` query instead of one query per tag.
+        """
+        tag_ids = await self._client.resolve_tag_ids(tag_names)
         if not tag_ids:
             return []
-        return await self._client.list_documents_by_tag_ids(tag_ids)
+        return await self._client.list_documents_by_tag_ids(tag_ids, limit=limit)
 
-    async def get_documents_by_saved_view(self, view_id: int) -> list[dict]:
-        """Fetch all documents matching a Paperless saved view."""
-        return await self._client.list_documents(saved_view=view_id)
+    async def get_documents_by_saved_view(self, view_id: int, *, limit: Optional[int] = None) -> list[dict]:
+        """Fetch documents matching a Paperless saved view."""
+        return await self._client.list_documents(saved_view=view_id, limit=limit)
 
     async def get_documents_by_query(
         self,
@@ -47,6 +48,7 @@ class ActionQueuePaperlessClient:
         added_before: Optional[str] = None,
         correspondent: Optional[str] = None,
         document_type: Optional[str] = None,
+        limit: Optional[int] = None,
     ) -> list[dict]:
         """Flexible document query using Paperless API filter parameters."""
         return await self._client.list_documents(
@@ -58,6 +60,7 @@ class ActionQueuePaperlessClient:
             added_before=added_before,
             correspondent=correspondent,
             document_type=document_type,
+            limit=limit,
         )
 
     async def list_saved_views(self) -> list[dict]:

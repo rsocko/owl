@@ -349,6 +349,7 @@ async def _classify_only(
         created_after=created_after,
         created_before=created_before,
         page_size=min(limit, 100),
+        limit=limit,
     )
     documents = documents[:limit]
 
@@ -431,6 +432,7 @@ async def _run_pipeline(
         created_after=created_after,
         created_before=created_before,
         page_size=min(limit, 100),
+        limit=limit,
     )
     documents = documents[:limit]
     console.print(f"  [green]✓[/green] {len(documents)} documents fetched\n")
