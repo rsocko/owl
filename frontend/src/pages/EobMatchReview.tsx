@@ -205,6 +205,27 @@ export default function EobMatchReview() {
     [loadMatch, matchId],
   );
 
+  const handleRelink = useCallback(() => {
+    if (!match || savingStatus !== null) return;
+    const params = new URLSearchParams({ matchId: String(match.id) });
+    if (match.eob_document_id != null) {
+      params.set('docId', String(match.eob_document_id));
+    }
+    navigate(`/triage/manual-search?${params.toString()}`);
+  }, [match, savingStatus, navigate]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        handleRelink();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleRelink]);
+
   if (loading) {
     return (
       <>
@@ -271,11 +292,7 @@ export default function EobMatchReview() {
               {savingStatus === 'rejected' ? 'Rejecting…' : 'Reject'}
             </Button>
             <Button
-              onClick={() =>
-                navigate(
-                  `/triage/manual-search?matchId=${match.id}&docId=${match.eob_document_id ?? ''}`,
-                )
-              }
+              onClick={handleRelink}
               disabled={savingStatus !== null}
               title="Re-link to Different (R)"
             >
@@ -313,11 +330,7 @@ export default function EobMatchReview() {
                 Reject match
               </Button>
               <Button
-                onClick={() =>
-                  navigate(
-                    `/triage/manual-search?matchId=${match.id}&docId=${match.eob_document_id ?? ''}`,
-                  )
-                }
+                onClick={handleRelink}
                 disabled={savingStatus !== null}
                 title="Re-link to Different (R)"
               >
