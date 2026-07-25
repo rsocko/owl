@@ -52,6 +52,9 @@ class AnalysisConfig(BaseModel):
     default_grace_period_days: int = 5
     max_inactive_cycles_for_recommendations: int = 6
     max_recommendations_per_provider: int = 1
+    # When set, document_type matching uses this explicit set instead of keyword heuristics.
+    # None means no mapping configured (use keyword fallback).
+    enabled_document_type_names: set[str] | None = None
 
 
 class RuntimeConfig(BaseModel):
