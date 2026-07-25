@@ -3,6 +3,7 @@ import {
   Badge,
   Button,
   Card,
+  ConfidenceBar,
   DataTable,
   EmptyState,
   ErrorState,
@@ -211,15 +212,23 @@ export default function ActionQueue() {
   }, [actions, search]);
 
   useEffect(() => {
-    if (filteredActions.length === 0) {
-      setSelectedActionId(null);
-      return;
-    }
-
+    if (selectedActionId === null) return;
     if (!filteredActions.some((action) => action.id === selectedActionId)) {
-      setSelectedActionId(filteredActions[0]?.id ?? null);
+      setSelectedActionId(null);
     }
   }, [filteredActions, selectedActionId]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectedActionId !== null) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        setSelectedActionId(null);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [selectedActionId]);
 
   const selectedAction = useMemo(
     () => filteredActions.find((action) => action.id === selectedActionId) ?? null,
@@ -278,6 +287,10 @@ export default function ActionQueue() {
       setBusyKey(null);
     }
   };
+
+  const handleClosePanel = useCallback(() => {
+    setSelectedActionId(null);
+  }, []);
 
   const counts = status?.database ?? {};
   const progress = status?.progress;
@@ -362,14 +375,20 @@ export default function ActionQueue() {
                   {
                     key: 'item',
                     header: 'Action item',
-                    render: (row) => (
-                      <button className="aq-link-button" onClick={() => setSelectedActionId(row.id)}>
-                        <div className={selectedActionId === row.id ? 'aq-row-title selected' : 'aq-row-title'}>
-                          {row.title || row.document_title || `Action #${row.id}`}
-                        </div>
-                        <div className="text-muted">{row.correspondent || row.document_title || 'No document metadata'}</div>
-                      </button>
-                    ),
+                    render: (row) => {
+                      const { tone } = dueMeta(row);
+                      return (
+                        <button className="aq-link-button" onClick={() => setSelectedActionId(row.id)}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span className={`aq-urgency-dot ${tone}`} />
+                            <div className={selectedActionId === row.id ? 'aq-row-title selected' : 'aq-row-title'}>
+                              {row.title || row.document_title || `Action #${row.id}`}
+                            </div>
+                          </div>
+                          <div className="text-muted">{row.correspondent || row.document_title || 'No document metadata'}</div>
+                        </button>
+                      );
+                    },
                   },
                   {
                     key: 'type',
@@ -456,9 +475,16 @@ export default function ActionQueue() {
           </Card>
 
           <div className="aq-side-column">
-            <Card title="Selected action">
-              {selectedAction ? (
-                <div className="aq-detail-list">
+            {selectedAction ? (
+              <Card
+                title="Action detail"
+                actions={
+                  <Button variant="ghost" size="sm" onClick={handleClosePanel} title="Close panel">
+                    ✕
+                  </Button>
+                }
+              >
+                <div className="aq-detail-list" role="region" aria-live="polite" aria-label="Action detail panel">
                   <div>
                     <div className="aq-detail-title">{selectedAction.title || selectedAction.document_title || `Action #${selectedAction.id}`}</div>
                     <div className="text-muted">{selectedAction.summary || 'No summary provided.'}</div>
@@ -474,15 +500,38 @@ export default function ActionQueue() {
                     <Badge tone={dueMeta(selectedAction).tone}>{dueMeta(selectedAction).label}</Badge>
                   </div>
 
+                  {selectedAction.preview_url && /^https?:\/\//i.test(selectedAction.preview_url) ? (
+                    <a
+                      className="aq-pdf-preview"
+                      href={selectedAction.preview_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="Open document in Paperless"
+                    >
+                      <span className="aq-pdf-icon">📄</span>
+                      <span className="aq-pdf-title">{selectedAction.correspondent || selectedAction.document_title || 'Document'}</span>
+                      <span className="aq-pdf-hint">Open in Paperless ↗</span>
+                    </a>
+                  ) : (
+                    <div className="aq-pdf-preview">
+                      <span className="aq-pdf-icon">📄</span>
+                      <span className="aq-pdf-title">{selectedAction.correspondent || selectedAction.document_title || 'No document'}</span>
+                      <span className="aq-pdf-hint">No preview available</span>
+                    </div>
+                  )}
+
                   <div className="aq-meta-list">
                     <div className="aq-meta-row"><span>Document</span><span>{selectedAction.document_title || `#${selectedAction.document_id ?? '—'}`}</span></div>
                     <div className="aq-meta-row"><span>Correspondent</span><span>{selectedAction.correspondent || '—'}</span></div>
                     <div className="aq-meta-row"><span>Amount</span><span>{formatCurrency(selectedAction.amount)}</span></div>
                     <div className="aq-meta-row"><span>Due date</span><span>{formatDate(selectedAction.due_date)}</span></div>
-                    <div className="aq-meta-row"><span>Confidence</span><span>{selectedAction.confidence != null ? `${selectedAction.confidence}%` : '—'}</span></div>
                     <div className="aq-meta-row"><span>Created</span><span>{formatDateTime(selectedAction.created_at)}</span></div>
                     <div className="aq-meta-row"><span>Completed</span><span>{formatDateTime(selectedAction.completed_at)}</span></div>
                   </div>
+
+                  {selectedAction.confidence != null && (
+                    <ConfidenceBar label="AI confidence" pct={selectedAction.confidence} />
+                  )}
 
                   {selectedAction.ai_reasoning && (
                     <div>
@@ -491,58 +540,71 @@ export default function ActionQueue() {
                     </div>
                   )}
 
-                  <div className="btn-group">
-                    <Button
-                      variant="success"
-                      onClick={() => void updateAction(selectedAction.id, 'completed')}
-                      disabled={busyKey !== null}
-                    >
-                      Mark complete
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={() => void updateAction(selectedAction.id, 'dismissed')}
-                      disabled={busyKey !== null}
-                    >
-                      Dismiss
-                    </Button>
-                    {selectedAction.preview_url ? (
-                      <a className="aq-preview-link" href={selectedAction.preview_url} target="_blank" rel="noreferrer">
-                        Open in Paperless
-                      </a>
-                    ) : null}
-                  </div>
+                  {(() => {
+                    const currentStatus = normalizeStatus(selectedAction.status);
+                    return (
+                      <div className="btn-group">
+                        {currentStatus !== 'completed' && (
+                          <Button
+                            variant="success"
+                            onClick={() => void updateAction(selectedAction.id, 'completed')}
+                            disabled={busyKey !== null}
+                          >
+                            Confirm
+                          </Button>
+                        )}
+                        {currentStatus !== 'dismissed' && (
+                          <Button
+                            variant="danger"
+                            onClick={() => void updateAction(selectedAction.id, 'dismissed')}
+                            disabled={busyKey !== null}
+                          >
+                            Reject
+                          </Button>
+                        )}
+                        {currentStatus !== 'pending' && (
+                          <Button
+                            variant="ghost"
+                            onClick={() => void updateAction(selectedAction.id, 'pending')}
+                            disabled={busyKey !== null}
+                          >
+                            Requeue
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
-              ) : (
-                <EmptyState title="Select an action" desc="Pick an item from the queue to inspect its due date, status, and AI reasoning." />
-              )}
-            </Card>
+              </Card>
+            ) : (
+              <EmptyState title="Select an action" desc="Pick an item from the queue to inspect its due date, status, and AI reasoning." />
+            )}
 
             <Card title="Run health">
-              {health ? (
-                <div className="aq-meta-list">
-                  <div className="aq-meta-row">
-                    <span>Queue</span>
-                    <Badge tone={healthTone(health.status)}>{health.status ?? 'unknown'}</Badge>
+                {health ? (
+                  <div className="aq-meta-list">
+                    <div className="aq-meta-row">
+                      <span>Queue</span>
+                      <Badge tone={healthTone(health.status)}>{health.status ?? 'unknown'}</Badge>
+                    </div>
+                    <div className="aq-meta-row">
+                      <span>Paperless</span>
+                      <Badge tone={healthTone(health.paperless?.status)}>{health.paperless?.status ?? 'unknown'}</Badge>
+                    </div>
+                    <div className="aq-meta-row">
+                      <span>Ollama</span>
+                      <Badge tone={healthTone(health.ollama?.status)}>{health.ollama?.status ?? 'unknown'}</Badge>
+                    </div>
+                    <div className="aq-meta-row"><span>Model</span><span>{health.ollama?.model ?? '—'}</span></div>
+                    <div className="aq-meta-row"><span>Mode</span><span>{health.read_only ? 'Read only' : 'Write enabled'}</span></div>
                   </div>
-                  <div className="aq-meta-row">
-                    <span>Paperless</span>
-                    <Badge tone={healthTone(health.paperless?.status)}>{health.paperless?.status ?? 'unknown'}</Badge>
-                  </div>
-                  <div className="aq-meta-row">
-                    <span>Ollama</span>
-                    <Badge tone={healthTone(health.ollama?.status)}>{health.ollama?.status ?? 'unknown'}</Badge>
-                  </div>
-                  <div className="aq-meta-row"><span>Model</span><span>{health.ollama?.model ?? '—'}</span></div>
-                  <div className="aq-meta-row"><span>Mode</span><span>{health.read_only ? 'Read only' : 'Write enabled'}</span></div>
-                </div>
-              ) : (
-                <EmptyState
-                  icon="🩺"
-                  title="No health check yet"
-                  desc="Run Check services to verify Paperless and Ollama connectivity before starting the pipeline."
-                />
-              )}
+                ) : (
+                  <EmptyState
+                    icon="🩺"
+                    title="No health check yet"
+                    desc="Run Check services to verify Paperless and Ollama connectivity before starting the pipeline."
+                  />
+                )}
             </Card>
           </div>
         </div>
