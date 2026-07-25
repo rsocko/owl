@@ -65,7 +65,9 @@ export const endpoints = {
   statements: {
     missing: () => api.get('/api/statements/missing'),
     discoveryRun: () => api.post('/api/statements/discovery/run'),
+    discoveryStreamUrl: '/api/statements/discovery/stream',
     recommendationsRun: (asOf: string) => api.post(`/api/statements/recommendations/run?as_of=${asOf}`),
+    recommendationsStreamUrl: (asOf: string) => `/api/statements/recommendations/stream?as_of=${asOf}`,
     providerOverrides: () => api.get('/api/statements/providers/overrides'),
     setProviderOverride: (key: string, body: unknown) => api.post(`/api/statements/providers/${key}/override`, body),
     clearProviderOverride: (key: string) => api.delete(`/api/statements/providers/${key}/override`),

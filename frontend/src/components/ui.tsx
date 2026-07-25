@@ -318,6 +318,54 @@ export function Toast({ message, tone = 'success' }: { message: string; tone?: '
   return <div className={`toast ${tone}`}>{message}</div>;
 }
 
+/**
+ * Inline progress banner for long-running operations (discovery, recommendations, etc.).
+ * Shows stage label, message, and a progress bar with counts when total > 0.
+ */
+export function ProgressBanner({
+  stage,
+  message,
+  current,
+  total,
+  onCancel,
+}: {
+  stage: string;
+  message: string;
+  current: number;
+  total: number;
+  onCancel?: () => void;
+}) {
+  const pct = total > 0 ? Math.round((current / total) * 100) : null;
+  const stageLabel = stage.charAt(0).toUpperCase() + stage.slice(1);
+
+  return (
+    <div className="progress-banner">
+      <div className="progress-banner-header">
+        <div className="progress-banner-stage">
+          <span className="spinner spinner-sm" />
+          {stageLabel}
+        </div>
+        {onCancel && (
+          <button className="btn ghost sm" onClick={onCancel} type="button">
+            Cancel
+          </button>
+        )}
+      </div>
+      <div className="progress-banner-message">{message}</div>
+      {total > 0 && (
+        <div className="progress-banner-bar-wrapper">
+          <div className="progress-banner-bar">
+            <div className="progress-banner-bar-fill" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="progress-banner-counts">
+            {current} / {total}{pct !== null ? ` (${pct}%)` : ''}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PageHeader({ title, desc, actions }: { title: ReactNode; desc?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
