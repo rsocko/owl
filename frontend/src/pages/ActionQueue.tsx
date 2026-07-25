@@ -220,11 +220,15 @@ export default function ActionQueue() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSelectedActionId(null);
+      if (e.key === 'Escape' && selectedActionId !== null) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        setSelectedActionId(null);
+      }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [selectedActionId]);
 
   const selectedAction = useMemo(
     () => filteredActions.find((action) => action.id === selectedActionId) ?? null,
@@ -355,7 +359,7 @@ export default function ActionQueue() {
       ) : error ? (
         <ErrorState message={error} onRetry={() => void loadData()} />
       ) : (
-        <div className={`action-queue-layout${selectedAction ? ' panel-open' : ''}`}>
+        <div className="action-queue-layout">
           <Card title={`Pending actions (${filteredActions.length})`} className="aq-table-card">
             {filteredActions.length === 0 ? (
               <EmptyState
@@ -470,8 +474,8 @@ export default function ActionQueue() {
             )}
           </Card>
 
-          {selectedAction && (
-            <div className="aq-side-column">
+          <div className="aq-side-column">
+            {selectedAction ? (
               <Card
                 title="Action detail"
                 actions={
@@ -480,7 +484,7 @@ export default function ActionQueue() {
                   </Button>
                 }
               >
-                <div className="aq-detail-list">
+                <div className="aq-detail-list" role="region" aria-live="polite" aria-label="Action detail panel">
                   <div>
                     <div className="aq-detail-title">{selectedAction.title || selectedAction.document_title || `Action #${selectedAction.id}`}</div>
                     <div className="text-muted">{selectedAction.summary || 'No summary provided.'}</div>
@@ -496,7 +500,7 @@ export default function ActionQueue() {
                     <Badge tone={dueMeta(selectedAction).tone}>{dueMeta(selectedAction).label}</Badge>
                   </div>
 
-                  {selectedAction.preview_url ? (
+                  {selectedAction.preview_url && /^https?:\/\//i.test(selectedAction.preview_url) ? (
                     <a
                       className="aq-pdf-preview"
                       href={selectedAction.preview_url}
@@ -536,39 +540,47 @@ export default function ActionQueue() {
                     </div>
                   )}
 
-                  <div className="btn-group">
-                    {normalizeStatus(selectedAction.status) !== 'completed' && (
-                      <Button
-                        variant="success"
-                        onClick={() => void updateAction(selectedAction.id, 'completed')}
-                        disabled={busyKey !== null}
-                      >
-                        Confirm
-                      </Button>
-                    )}
-                    {normalizeStatus(selectedAction.status) !== 'dismissed' && (
-                      <Button
-                        variant="danger"
-                        onClick={() => void updateAction(selectedAction.id, 'dismissed')}
-                        disabled={busyKey !== null}
-                      >
-                        Reject
-                      </Button>
-                    )}
-                    {normalizeStatus(selectedAction.status) !== 'pending' && (
-                      <Button
-                        variant="ghost"
-                        onClick={() => void updateAction(selectedAction.id, 'pending')}
-                        disabled={busyKey !== null}
-                      >
-                        Reassign
-                      </Button>
-                    )}
-                  </div>
+                  {(() => {
+                    const currentStatus = normalizeStatus(selectedAction.status);
+                    return (
+                      <div className="btn-group">
+                        {currentStatus !== 'completed' && (
+                          <Button
+                            variant="success"
+                            onClick={() => void updateAction(selectedAction.id, 'completed')}
+                            disabled={busyKey !== null}
+                          >
+                            Confirm
+                          </Button>
+                        )}
+                        {currentStatus !== 'dismissed' && (
+                          <Button
+                            variant="danger"
+                            onClick={() => void updateAction(selectedAction.id, 'dismissed')}
+                            disabled={busyKey !== null}
+                          >
+                            Reject
+                          </Button>
+                        )}
+                        {currentStatus !== 'pending' && (
+                          <Button
+                            variant="ghost"
+                            onClick={() => void updateAction(selectedAction.id, 'pending')}
+                            disabled={busyKey !== null}
+                          >
+                            Requeue
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </Card>
+            ) : (
+              <EmptyState title="Select an action" desc="Pick an item from the queue to inspect its due date, status, and AI reasoning." />
+            )}
 
-              <Card title="Run health">
+            <Card title="Run health">
                 {health ? (
                   <div className="aq-meta-list">
                     <div className="aq-meta-row">
@@ -593,9 +605,8 @@ export default function ActionQueue() {
                     desc="Run Check services to verify Paperless and Ollama connectivity before starting the pipeline."
                   />
                 )}
-              </Card>
-            </div>
-          )}
+            </Card>
+          </div>
         </div>
       )}
 

@@ -1,12 +1,8 @@
 .action-queue-layout {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 380px);
   gap: 16px;
   align-items: start;
-}
-
-.action-queue-layout.panel-open {
-  grid-template-columns: minmax(0, 2fr) minmax(280px, 380px);
 }
 
 .aq-toolbar {
@@ -223,8 +219,13 @@ a.aq-pdf-preview .aq-pdf-hint {
 }
 
 @media (max-width: 980px) {
-  .action-queue-layout.panel-open {
+  .action-queue-layout {
     grid-template-columns: 1fr;
+  }
+
+  .aq-side-column {
+    max-height: 70vh;
+    overflow-y: auto;
   }
 
   .aq-search {
