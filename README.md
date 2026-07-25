@@ -320,6 +320,36 @@ experiments/document-intelligence/
 - Testing with real documents
 - Docker image optimization
 
+## Testing
+
+### Running Tests
+
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Run all tests
+pytest
+
+# Run only the API integration tests
+pytest tests/api/ -v
+
+# Run tests for a specific module
+pytest tests/api/test_eob.py -v
+```
+
+### Test Suite
+
+| Directory | Coverage | Tests |
+|-----------|----------|-------|
+| `tests/api/` | All REST endpoints (85 integration tests) | Health, statements, EOB, action queue, alerts, admin, stats, MC connector |
+| `tests/statements/` | Statement tracker unit tests | Detector, database, recommendations |
+| `tests/eob_matching/` | EOB matching unit tests | Classifier, extractor, matcher |
+| `tests/action_queue/` | Action queue unit tests | Pipeline, analyzer |
+| `tests/core/` | Core module unit tests | Paperless client, LLM |
+
+The API integration tests (`tests/api/`) use **FastAPI TestClient** with fully mocked external dependencies (Paperless, LLM gateway) and isolated temp SQLite databases. They require no network access.
+
 ## Related Issues
 
 - [#10](https://github.com/rsocko/ideation/issues/10) — Medical EOB & Bill matching

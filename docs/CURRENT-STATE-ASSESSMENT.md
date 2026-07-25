@@ -143,9 +143,26 @@ All design docs are comprehensive and implementation-ready:
 1. **No end-to-end test against live Paperless** — Everything runs in fixture/dry-run mode
 2. **No unified frontend** — Each module has its own static HTML or nothing; no SPA shell
 3. **Shared extractors empty** — `core/extractors/__init__.py` is empty; each module has its own extraction
-4. **No unified alert system** — Designed but not coded
-5. **No settings page** — Designed but not coded
+4. ~~**No unified alert system**~~ — ✅ Implemented (`/api/insights/alerts/*`)
+5. ~~**No settings page**~~ — ✅ Implemented (`/api/settings`)
 6. **OCR pipeline** — 6 design docs, zero code
+
+### ✅ API Integration Test Suite (Added July 2026)
+
+A comprehensive integration test suite covering all DI Hub REST endpoints was added in [#856](https://github.com/rsocko/ideation/issues/856):
+
+| Test File | Endpoints | Tests |
+|-----------|-----------|-------|
+| `tests/api/test_health.py` | `/health`, `/api/status`, `/api/paperless/*`, `/api/settings`, `/api/llm/*`, `/api/documents/*/preview` | 14 |
+| `tests/api/test_statements.py` | `/api/statements/*` (discovery, recommendations, overrides, config, documents) | 10 |
+| `tests/api/test_eob.py` | `/api/eob/*` (check, results, runs, matches, purge-stale) | 16 |
+| `tests/api/test_action_queue.py` | `/api/queue/*` (check, status, actions, updates) | 13 |
+| `tests/api/test_alerts.py` | `/api/insights/alerts/*` (list, acknowledge, resolve, summary, cleanup) | 16 |
+| `tests/api/test_admin.py` | `/api/admin/*` (weights, schedules) | 6 |
+| `tests/api/test_mc_connector.py` | MC connector flat-array endpoints | 10 |
+| **Total** | **All DI Hub REST endpoints** | **85** |
+
+Tests use FastAPI TestClient with mocked Paperless/LLM and in-memory SQLite. Run with `pytest tests/api/ -v`.
 
 ---
 
