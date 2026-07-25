@@ -158,6 +158,7 @@ export default function ActionQueue() {
   const [filter, setFilter] = useState<ActionFilter>('pending');
   const [search, setSearch] = useState('');
   const [selectedActionId, setSelectedActionId] = useState<number | null>(null);
+  const [pdfExpanded, setPdfExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -378,7 +379,7 @@ export default function ActionQueue() {
                     render: (row) => {
                       const { tone } = dueMeta(row);
                       return (
-                        <button className="aq-link-button" onClick={() => setSelectedActionId(row.id)}>
+                        <button className="aq-link-button" onClick={() => { setSelectedActionId(row.id); setPdfExpanded(false); }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span className={`aq-urgency-dot ${tone}`} />
                             <div className={selectedActionId === row.id ? 'aq-row-title selected' : 'aq-row-title'}>
@@ -500,18 +501,52 @@ export default function ActionQueue() {
                     <Badge tone={dueMeta(selectedAction).tone}>{dueMeta(selectedAction).label}</Badge>
                   </div>
 
-                  {selectedAction.preview_url && /^https?:\/\//i.test(selectedAction.preview_url) ? (
-                    <a
-                      className="aq-pdf-preview"
-                      href={selectedAction.preview_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-label="Open document in Paperless"
-                    >
-                      <span className="aq-pdf-icon">📄</span>
-                      <span className="aq-pdf-title">{selectedAction.correspondent || selectedAction.document_title || 'Document'}</span>
-                      <span className="aq-pdf-hint">Open in Paperless ↗</span>
-                    </a>
+                  {selectedAction.document_id ? (
+                    <div className="aq-doc-preview-section">
+                      {pdfExpanded ? (
+                        <div className="aq-pdf-embed-wrapper">
+                          <div className="aq-pdf-embed-toolbar">
+                            <button className="aq-pdf-collapse-btn" onClick={() => setPdfExpanded(false)} title="Collapse PDF viewer">
+                              ▾ Collapse
+                            </button>
+                            {selectedAction.preview_url && /^https?:\/\//i.test(selectedAction.preview_url) && (
+                              <a href={selectedAction.preview_url} target="_blank" rel="noreferrer" className="aq-pdf-open-external">
+                                Open in Paperless ↗
+                              </a>
+                            )}
+                          </div>
+                          <iframe
+                            className="aq-pdf-embed"
+                            src={endpoints.documents.preview(String(selectedAction.document_id))}
+                            title="Document PDF preview"
+                          />
+                        </div>
+                      ) : (
+                        <button
+                          className="aq-thumb-preview"
+                          onClick={() => setPdfExpanded(true)}
+                          title="Click to expand PDF viewer"
+                          aria-label="Expand document preview"
+                        >
+                          <img
+                            className="aq-thumb-img"
+                            src={endpoints.statements.documentThumb(String(selectedAction.document_id))}
+                            alt={`Thumbnail of ${selectedAction.document_title || 'document'}`}
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).style.display = 'none';
+                              (e.currentTarget.nextElementSibling as HTMLElement)?.style.setProperty('display', 'flex');
+                            }}
+                          />
+                          <div className="aq-thumb-fallback" style={{ display: 'none' }}>
+                            <span className="aq-pdf-icon">📄</span>
+                          </div>
+                          <div className="aq-thumb-overlay">
+                            <span className="aq-thumb-label">{selectedAction.correspondent || selectedAction.document_title || 'Document'}</span>
+                            <span className="aq-thumb-hint">Click to preview PDF</span>
+                          </div>
+                        </button>
+                      )}
+                    </div>
                   ) : (
                     <div className="aq-pdf-preview">
                       <span className="aq-pdf-icon">📄</span>
