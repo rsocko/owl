@@ -7,7 +7,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,7 +20,6 @@ from doc_intelligence_hub.modules.statements.config import load_config
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _HUB_STATIC_DIR = Path(__file__).resolve().parent / "static"
-_ADMIN_STATIC_DIR = _HUB_STATIC_DIR / "admin"
 
 
 def _default_statement_tracker_config() -> str:
@@ -148,8 +147,12 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     async def index() -> FileResponse:
         return FileResponse(_HUB_STATIC_DIR / "index.html")
 
-    # Admin dashboard — mount as StaticFiles so /admin, /admin/, and sub-paths all resolve
-    app.mount("/admin", StaticFiles(directory=str(_ADMIN_STATIC_DIR), html=True), name="admin-static")
+    # Admin dashboard — redirect to main hub UI (admin features merged into Settings)
+    @app.get("/admin", include_in_schema=False)
+    @app.get("/admin/", include_in_schema=False)
+    @app.get("/admin/{path:path}", include_in_schema=False)
+    async def admin_redirect(path: str = "") -> RedirectResponse:
+        return RedirectResponse(url="/#settings", status_code=301)
 
     # Legacy statement tracker dashboard at /statements/
     app.mount("/statements", StaticFiles(directory=str(_STATEMENTS_STATIC_DIR), html=True), name="statements-static")
