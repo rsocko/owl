@@ -37,11 +37,27 @@ class PaperlessClient:
         token: str,
         verify_ssl: bool = True,
         timeout: float = 30.0,
+        connect_timeout: float = 10.0,
+        read_timeout: Optional[float] = None,
+        write_timeout: float = 10.0,
+        pool_timeout: float = 10.0,
     ):
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.verify_ssl = verify_ssl
         self.timeout = timeout
+        # Per-phase httpx timeouts. `asyncio.wait_for` around the overall
+        # fetch is only a backstop — cancelling an asyncio task does not
+        # reliably interrupt a blocking socket read/connect inside httpx, so
+        # a stalled connect or a server that accepts the connection but never
+        # sends a response body could otherwise hang well past the outer
+        # timeout. Configuring these directly on the transport means httpx
+        # itself raises (and fails fast) long before that backstop ever needs
+        # to fire.
+        self.connect_timeout = connect_timeout
+        self.read_timeout = timeout if read_timeout is None else read_timeout
+        self.write_timeout = write_timeout
+        self.pool_timeout = pool_timeout
         # Reused across calls so we don't pay a fresh TCP/TLS handshake for
         # every single request (health check, per-tag lookups, per-document
         # content fetches, etc). Created lazily on first use.
@@ -59,7 +75,12 @@ class PaperlessClient:
                 "Content-Type": "application/json",
             },
             verify=self.verify_ssl,
-            timeout=self.timeout,
+            timeout=httpx.Timeout(
+                connect=self.connect_timeout,
+                read=self.read_timeout,
+                write=self.write_timeout,
+                pool=self.pool_timeout,
+            ),
             follow_redirects=True,
         )
 
@@ -223,7 +244,12 @@ class PaperlessClient:
         if not tag_ids:
             return []
         client = self._get_client()
-        params = {"tags__id__in": ",".join(str(t) for t in tag_ids), "page_size": page_size}
+        # When a limit is given, request exactly that page size (capped by
+        # the caller-provided page_size) so _paginate's early-stop check
+        # after page 1 is guaranteed to succeed and we never walk into a
+        # second page — even when thousands of documents share these tags.
+        effective_page_size = min(page_size, limit) if limit is not None else page_size
+        params = {"tags__id__in": ",".join(str(t) for t in tag_ids), "page_size": effective_page_size}
         return await self._paginate(client, "/api/documents/", params, limit=limit)
 
     async def get_document(self, document_id: int) -> dict:
