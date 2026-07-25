@@ -217,6 +217,10 @@
         <div class="nav-item active" onclick="showView('overview')">
             <span class="icon">📊</span> Dashboard
         </div>
+        <div class="nav-item" onclick="showView('alerts')">
+            <span class="icon">🔔</span> Alerts
+            <span class="nav-badge" id="nav-alerts-badge" style="display:none">0</span>
+        </div>
 
         <div class="nav-section">Modules</div>
         <div class="nav-item" onclick="showView('queue')">
@@ -255,9 +259,40 @@
             </div>
             <div class="card-grid" id="overview-cards"><div class="loading"><span class="spinner"></span>Loading status...</div></div>
             <div class="panel">
-                <div class="panel-header"><span class="panel-title">⚠️ Alerts & Actions</span><button class="btn" onclick="loadOverview()">Refresh</button></div>
+                <div class="panel-header"><span class="panel-title">🔔 Alert Summary</span><button class="btn" onclick="loadAlertSummary()">Refresh</button></div>
+                <div class="panel-body" id="overview-alert-summary"><div class="loading"><span class="spinner"></span>Loading...</div></div>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><span class="panel-title">⚠️ Recent Alerts</span><button class="btn" onclick="showView('alerts'); document.querySelectorAll('.nav-item')[1].click();">View All →</button></div>
                 <div class="panel-body" id="overview-alerts"><div class="loading"><span class="spinner"></span>Loading...</div></div>
             </div>
+        </div>
+
+        <!-- ALERTS -->
+        <div class="view" id="view-alerts">
+            <div class="page-header">
+                <h1>Alerts</h1>
+                <p>Unified alerts from all DI Hub modules</p>
+            </div>
+            <div class="card-grid" id="alerts-summary-cards"><div class="loading"><span class="spinner"></span>Loading...</div></div>
+            <div class="btn-group">
+                <button class="btn" onclick="loadAlertsView()">Refresh</button>
+                <select id="alerts-filter-module" onchange="loadAlertsView()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:0.78rem;">
+                    <option value="">All Modules</option>
+                    <option value="statements">Statements</option>
+                    <option value="eob">EOB Matching</option>
+                    <option value="action_queue">Action Queue</option>
+                </select>
+                <select id="alerts-filter-severity" onchange="loadAlertsView()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:0.78rem;">
+                    <option value="">All Severities</option>
+                    <option value="critical">Critical</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                    <option value="info">Info</option>
+                </select>
+            </div>
+            <div id="alerts-table-content"><div class="loading"><span class="spinner"></span>Loading alerts...</div></div>
         </div>
 
         <!-- ACTION QUEUE -->
@@ -482,6 +517,7 @@
         event.currentTarget.classList.add('active');
         if (id === 'queue') loadQueue();
         if (id === 'statements') loadStatements();
+        if (id === 'alerts') loadAlertsView();
         if (id === 'settings') loadSettings();
         if (id === 'eob') loadMatches();
     }
@@ -545,8 +581,9 @@
     }
 
     function renderOverviewAlerts(data) {
-        const el = document.getElementById('overview-alerts');
-        el.innerHTML = `<p style="color:var(--text-muted); font-size:0.82rem;">Run Statement Tracker or Action Queue to see alerts here.</p>`;
+        // Load alert summary and recent alerts into the overview
+        loadAlertSummary();
+        loadRecentAlerts();
     }
 
     function updateSidebar(data) {
@@ -557,6 +594,145 @@
             <span class="status-dot ${pStatus}"></span> Paperless ${pStatus}<br>
             <span style="margin-left:12px;display:inline-block;margin-top:3px;">${pDocs.toLocaleString()} documents</span>
         `;
+    }
+
+    // ===== ALERTS =====
+    async function loadAlertSummary() {
+        try {
+            const res = await fetch(API + '/api/insights/alerts/summary');
+            const data = await res.json();
+            const el = document.getElementById('overview-alert-summary');
+            if (el) {
+                el.innerHTML = `
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;">
+                        <div style="text-align:center;"><span class="badge critical" style="font-size:1.2rem;padding:4px 12px;">${data.by_severity?.critical || 0}</span><div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px;">Critical</div></div>
+                        <div style="text-align:center;"><span class="badge high" style="font-size:1.2rem;padding:4px 12px;">${data.by_severity?.high || 0}</span><div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px;">High</div></div>
+                        <div style="text-align:center;"><span class="badge medium" style="font-size:1.2rem;padding:4px 12px;">${data.by_severity?.medium || 0}</span><div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px;">Medium</div></div>
+                        <div style="text-align:center;"><span class="badge low" style="font-size:1.2rem;padding:4px 12px;">${data.by_severity?.low || 0}</span><div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px;">Low</div></div>
+                        <div style="text-align:center;"><span class="badge pending" style="font-size:1.2rem;padding:4px 12px;">${data.by_severity?.info || 0}</span><div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px;">Info</div></div>
+                    </div>
+                    <div style="margin-top:12px;display:flex;gap:18px;font-size:0.78rem;color:var(--text-muted);">
+                        <span>Total: <strong style="color:var(--text)">${data.total || 0}</strong></span>
+                        <span>Unacknowledged: <strong style="color:var(--warning)">${data.unacknowledged || 0}</strong></span>
+                        <span>Statements: ${data.by_module?.statements || 0}</span>
+                        <span>EOB: ${data.by_module?.eob || 0}</span>
+                        <span>Actions: ${data.by_module?.action_queue || 0}</span>
+                    </div>
+                `;
+            }
+            // Update nav badge
+            const badge = document.getElementById('nav-alerts-badge');
+            if (data.unacknowledged > 0) { badge.textContent = data.unacknowledged; badge.style.display = ''; }
+            else { badge.style.display = 'none'; }
+        } catch(e) {
+            const el = document.getElementById('overview-alert-summary');
+            if (el) el.innerHTML = `<p style="color:var(--text-muted);font-size:0.82rem;">No alerts data available.</p>`;
+        }
+    }
+
+    async function loadRecentAlerts() {
+        const el = document.getElementById('overview-alerts');
+        try {
+            const res = await fetch(API + '/api/insights/alerts?limit=5&resolved=false');
+            const data = await res.json();
+            const alerts = data.alerts || [];
+            if (alerts.length === 0) {
+                el.innerHTML = `<p style="color:var(--text-muted);font-size:0.82rem;">No active alerts. Run module pipelines to generate alerts.</p>`;
+                return;
+            }
+            el.innerHTML = `<table><thead><tr><th>Severity</th><th>Module</th><th>Alert</th><th>Time</th><th></th></tr></thead><tbody>
+                ${alerts.map(a => `<tr>
+                    <td><span class="badge ${a.severity}">${a.severity}</span></td>
+                    <td style="font-size:0.75rem;">${a.module}</td>
+                    <td><strong>${escapeHtml(a.title)}</strong>${a.description ? `<br><span style="font-size:0.72rem;color:var(--text-muted)">${escapeHtml(a.description)}</span>` : ''}</td>
+                    <td style="font-size:0.72rem;color:var(--text-muted)">${a.created_at ? new Date(a.created_at).toLocaleString() : ''}</td>
+                    <td>${!a.acknowledged_at ? `<button class="btn" onclick="acknowledgeAlert(${a.id})" style="font-size:0.7rem;padding:3px 8px;">Ack</button>` : '<span style="font-size:0.7rem;color:var(--success)">✓</span>'}</td>
+                </tr>`).join('')}
+            </tbody></table>`;
+        } catch(e) {
+            el.innerHTML = `<p style="color:var(--text-muted);font-size:0.82rem;">Could not load alerts.</p>`;
+        }
+    }
+
+    async function loadAlertsView() {
+        const module = document.getElementById('alerts-filter-module')?.value || '';
+        const severity = document.getElementById('alerts-filter-severity')?.value || '';
+        let url = API + '/api/insights/alerts?limit=100&resolved=false';
+        if (module) url += '&module=' + module;
+        if (severity) url += '&severity=' + severity;
+
+        // Load summary cards
+        try {
+            const summaryRes = await fetch(API + '/api/insights/alerts/summary');
+            const summary = await summaryRes.json();
+            document.getElementById('alerts-summary-cards').innerHTML = `
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Total Active</span><span class="card-status ${summary.total > 0 ? 'warn' : 'ok'}">${summary.total}</span></div>
+                    <div class="card-metric">${summary.total || 0}</div>
+                    <div class="card-desc">${summary.unacknowledged || 0} unacknowledged</div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Critical / High</span><span class="card-status ${(summary.by_severity?.critical || 0) > 0 ? 'err' : 'ok'}">alerts</span></div>
+                    <div class="card-metric">${(summary.by_severity?.critical || 0) + (summary.by_severity?.high || 0)}</div>
+                    <div class="card-desc">${summary.by_severity?.critical || 0} critical, ${summary.by_severity?.high || 0} high</div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">By Module</span><span class="card-status ok">breakdown</span></div>
+                    <div class="card-metric" style="font-size:1rem;">S:${summary.by_module?.statements || 0} E:${summary.by_module?.eob || 0} A:${summary.by_module?.action_queue || 0}</div>
+                    <div class="card-desc">Statements · EOB · Actions</div>
+                </div>
+            `;
+        } catch(e) {}
+
+        // Load alerts table
+        const el = document.getElementById('alerts-table-content');
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            const alerts = data.alerts || [];
+            if (alerts.length === 0) {
+                el.innerHTML = `<div class="empty-state"><div class="icon">🔔</div><p>No active alerts matching filters.</p></div>`;
+                return;
+            }
+            el.innerHTML = `
+                <div class="panel"><div class="panel-header"><span class="panel-title">Active Alerts (${data.total})</span></div><div class="panel-body">
+                <table><thead><tr><th>Severity</th><th>Module</th><th>Type</th><th>Alert</th><th>Created</th><th>Status</th><th></th></tr></thead><tbody>
+                ${alerts.map(a => `<tr>
+                    <td><span class="badge ${a.severity}">${a.severity}</span></td>
+                    <td style="font-size:0.75rem;">${a.module}</td>
+                    <td style="font-size:0.72rem;color:var(--text-muted);">${a.alert_type}</td>
+                    <td><strong>${escapeHtml(a.title)}</strong>${a.description ? `<br><span style="font-size:0.72rem;color:var(--text-muted)">${escapeHtml(a.description)}</span>` : ''}</td>
+                    <td style="font-size:0.72rem;color:var(--text-muted)">${a.created_at ? new Date(a.created_at).toLocaleString() : ''}</td>
+                    <td>${a.acknowledged_at ? '<span class="badge completed">ack\'d</span>' : '<span class="badge pending">new</span>'}</td>
+                    <td style="white-space:nowrap;">
+                        ${!a.acknowledged_at ? `<button class="btn" onclick="acknowledgeAlert(${a.id})" style="font-size:0.7rem;padding:3px 8px;">Ack</button>` : ''}
+                        <button class="btn" onclick="resolveAlert(${a.id})" style="font-size:0.7rem;padding:3px 8px;">Resolve</button>
+                    </td>
+                </tr>`).join('')}
+                </tbody></table>
+                </div></div>
+            `;
+        } catch(e) {
+            el.innerHTML = `<div class="panel"><div class="panel-body">Error loading alerts: ${e.message}</div></div>`;
+        }
+    }
+
+    async function acknowledgeAlert(id) {
+        try {
+            await fetch(API + `/api/insights/alerts/${id}/acknowledge`, { method: 'PATCH' });
+            loadAlertSummary();
+            loadRecentAlerts();
+            if (document.getElementById('view-alerts').classList.contains('active')) loadAlertsView();
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    async function resolveAlert(id) {
+        try {
+            await fetch(API + `/api/insights/alerts/${id}/resolve`, { method: 'PATCH' });
+            loadAlertSummary();
+            loadRecentAlerts();
+            if (document.getElementById('view-alerts').classList.contains('active')) loadAlertsView();
+        } catch(e) { alert('Error: ' + e.message); }
     }
 
     // ===== ACTION QUEUE =====

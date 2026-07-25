@@ -134,6 +134,34 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
 
     result = await run_pipeline(limit=body.limit, dry_run=body.dry_run, force=body.force)
     finished_at = datetime.utcnow().isoformat()
+
+    # Emit unified alerts for pending actions (best-effort)
+    if not body.dry_run:
+        try:
+            from doc_intelligence_hub.core.alerts import emit_action_queue_alerts
+
+            init_db()
+            db = get_session()
+            try:
+                pending_actions = db.query(Action).filter_by(status="pending").all()
+                action_dicts = [
+                    {
+                        "id": a.id,
+                        "title": a.title,
+                        "document_title": a.document_title,
+                        "urgency": a.urgency,
+                        "status": a.status,
+                        "due_date": a.due_date.isoformat() if a.due_date else None,
+                        "action_type": a.action_type,
+                    }
+                    for a in pending_actions
+                ]
+                emit_action_queue_alerts(action_dicts)
+            finally:
+                db.close()
+        except Exception:
+            pass  # Alert emission is best-effort
+
     status = {
         "status": "ok",
         "started_at": started_at,

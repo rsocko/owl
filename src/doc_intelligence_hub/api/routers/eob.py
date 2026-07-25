@@ -363,6 +363,29 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
         run_record.finished_at = datetime.now(UTC)
         db.commit()
 
+        # Emit unified alerts for unmatched EOBs and low-confidence matches
+        try:
+            from doc_intelligence_hub.core.alerts import emit_eob_alerts
+
+            unmatched = [
+                {"document_id": int(e.document_id), "provider_name": e.provider_name}
+                for e in extracted_eobs
+                if e.document_id not in matched_eob_ids
+            ]
+            low_conf = [
+                {
+                    "eob_document_id": int(m.eob_id),
+                    "bill_document_id": int(m.bill_id),
+                    "score": m.score,
+                    "confidence": m.confidence.value,
+                }
+                for m in matches
+                if m.confidence.value == "LOW"
+            ]
+            emit_eob_alerts(unmatched_eobs=unmatched, low_confidence_matches=low_conf)
+        except Exception:
+            pass  # Alert emission is best-effort
+
         paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
 
         return {
