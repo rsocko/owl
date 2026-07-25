@@ -40,6 +40,15 @@ def _mock_transport():
                     "next": None,
                 },
             )
+        if request.url.path == "/api/document_types/":
+            return httpx.Response(
+                200,
+                json={
+                    "count": 2,
+                    "results": [{"id": 1, "name": "Statement"}, {"id": 2, "name": "Invoice"}],
+                    "next": None,
+                },
+            )
         if request.url.path == "/api/documents/1/":
             return httpx.Response(200, json={"id": 1, "title": "Doc A", "content": "Hello world", "custom_fields": []})
         if request.url.path == "/api/custom_fields/":
@@ -96,9 +105,10 @@ async def test_get_document_content(client):
 
 @pytest.mark.asyncio
 async def test_fetch_all_metadata(client):
-    correspondents, tags = await client.fetch_all_metadata()
+    correspondents, tags, document_types = await client.fetch_all_metadata()
     assert correspondents == {10: "Acme", 20: "Globex"}
     assert tags == {1: "bills", 2: "monthly", 3: "annual"}
+    assert document_types == {1: "Statement", 2: "Invoice"}
 
 
 @pytest.mark.asyncio
@@ -131,6 +141,8 @@ async def test_string_and_int_id_handling(monkeypatch):
             return httpx.Response(200, json={"count": 1, "results": [{"id": "5", "name": "StringID"}], "next": None})
         if request.url.path == "/api/tags/":
             return httpx.Response(200, json={"count": 1, "results": [{"id": "9", "name": "string-tag"}], "next": None})
+        if request.url.path == "/api/document_types/":
+            return httpx.Response(200, json={"count": 0, "results": [], "next": None})
         return httpx.Response(404)
 
     transport = httpx.MockTransport(handler)
@@ -142,7 +154,7 @@ async def test_string_and_int_id_handling(monkeypatch):
 
     monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
     client = PaperlessClient(base_url="https://test.local", token="t")
-    correspondents, tags = await client.fetch_all_metadata()
+    correspondents, tags, document_types = await client.fetch_all_metadata()
 
     # Keys should be int even when API returns string IDs
     assert correspondents[5] == "StringID"

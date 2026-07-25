@@ -40,8 +40,8 @@ async def fetch_paperless_documents(
         timeout=float(timeout_seconds),
     )
 
-    # Fetch metadata (correspondents + tags) for enrichment
-    correspondents, tags = await client.fetch_all_metadata(on_progress=on_progress)
+    # Fetch metadata (correspondents + tags + document types) for enrichment
+    correspondents, tags, document_types = await client.fetch_all_metadata(on_progress=on_progress)
 
     # Fetch all documents with progress
     raw_documents = await client.list_documents(on_progress=on_progress)
@@ -55,7 +55,7 @@ async def fetch_paperless_documents(
             title=item.get("title") or "Untitled",
             correspondent_id=item.get("correspondent"),
             correspondent_name=correspondents.get(item.get("correspondent"), "Unknown"),
-            document_type=str(item.get("document_type")) if item.get("document_type") is not None else None,
+            document_type=document_types.get(item.get("document_type")) if item.get("document_type") is not None else None,
             created=item["created_date"] if item.get("created_date") else item["created"],
             added=item.get("added"),
             tags=[tags.get(tag_id, str(tag_id)) for tag_id in item.get("tags", [])],
