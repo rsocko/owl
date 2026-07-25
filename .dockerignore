@@ -20,6 +20,9 @@ examples/
 dashboard/
 _category_.json
 
+# Frontend build tooling (rebuilt fresh in the frontend-build Docker stage)
+frontend/node_modules/
+
 # Tests
 tests/
 

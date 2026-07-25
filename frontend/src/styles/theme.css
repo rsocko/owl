@@ -1,0 +1,86 @@
+/*
+ * Design tokens for the Document Intelligence Hub.
+ * Light theme (default) matches the `mockups/` design language.
+ * Dark theme (data-theme="dark") matches the legacy hub UI for users who prefer it.
+ */
+:root {
+  --bg: #f5f6fa;
+  --card: #ffffff;
+  --surface-hover: #f8f9fc;
+  --border: #e0e3ea;
+  --text: #1a1d2e;
+  --text-muted: #6b7280;
+  --accent: #3498db;
+  --accent-hover: #2e86c1;
+  --success: #2ecc71;
+  --warning: #f39c12;
+  --danger: #e74c3c;
+  --purple: #8b5cf6;
+  --pink: #ec4899;
+  --selected-bg: #eef6ff;
+  --selected-border: #3498db;
+
+  --success-bg: rgba(46, 204, 113, 0.15);
+  --warning-bg: rgba(243, 156, 18, 0.15);
+  --danger-bg: rgba(231, 76, 60, 0.15);
+  --accent-bg: rgba(52, 152, 219, 0.12);
+  --muted-bg: rgba(107, 114, 128, 0.12);
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --topnav-height: 52px;
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+[data-theme='dark'] {
+  --bg: #0f1117;
+  --card: #1a1d27;
+  --surface-hover: #222633;
+  --border: #2a2e3b;
+  --text: #e4e7ef;
+  --text-muted: #8b92a8;
+  --accent: #4f8ff7;
+  --accent-hover: #6ba0f9;
+  --success: #3dd68c;
+  --warning: #f5a623;
+  --danger: #ef5350;
+  --purple: #a78bfa;
+  --pink: #f472b6;
+  --selected-bg: #1e2a3d;
+  --selected-border: #4f8ff7;
+
+  --success-bg: rgba(61, 214, 140, 0.15);
+  --warning-bg: rgba(245, 166, 35, 0.15);
+  --danger-bg: rgba(239, 83, 80, 0.15);
+  --accent-bg: rgba(79, 143, 247, 0.15);
+  --muted-bg: rgba(139, 146, 168, 0.15);
+  --shadow-card: none;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  transition: background 0.15s, color 0.15s;
+}
+
+a { color: inherit; }
+
+button, input, select, textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+::-webkit-scrollbar-track { background: transparent; }

@@ -1,0 +1,437 @@
+.triage-shell {
+  display: grid;
+  grid-template-columns: minmax(72px, 360px) minmax(0, 1fr);
+  align-items: stretch;
+  min-height: 70vh;
+}
+
+.triage-queue-panel,
+.triage-detail-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+
+.triage-queue-panel {
+  border-right: none;
+  border-radius: var(--radius) 0 0 var(--radius);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.triage-queue-panel.collapsed {
+  width: 72px;
+}
+
+.triage-detail-panel {
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 20px;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.triage-queue-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.triage-queue-header-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.triage-queue-panel.collapsed .triage-queue-header-content,
+.triage-queue-panel.collapsed .triage-bulk-bar,
+.triage-queue-panel.collapsed .triage-list-toolbar,
+.triage-queue-panel.collapsed .triage-queue-list {
+  display: none;
+}
+
+.triage-collapse-button {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+}
+
+.triage-queue-title {
+  font-size: 1rem;
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+
+.triage-queue-title span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-left: 6px;
+}
+
+.triage-bulk-bar,
+.triage-list-toolbar,
+.triage-collapsed-strip {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.triage-bulk-bar,
+.triage-list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.triage-collapsed-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-weight: 700;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+.triage-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.triage-queue-list {
+  overflow: auto;
+}
+
+.triage-item {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.triage-item:hover {
+  background: var(--surface-hover);
+}
+
+.triage-item.selected {
+  background: var(--selected-bg);
+  border-left: 3px solid var(--selected-border);
+  padding-left: 13px;
+}
+
+.triage-item-top,
+.triage-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.triage-item-top {
+  margin-bottom: 8px;
+}
+
+.triage-score {
+  margin-left: auto;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.triage-score.high {
+  color: var(--success);
+}
+
+.triage-score.medium {
+  color: var(--warning);
+}
+
+.triage-score.low {
+  color: var(--danger);
+}
+
+.triage-item-title {
+  font-weight: 700;
+  margin-bottom: 5px;
+}
+
+.triage-item-reason {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  margin-bottom: 8px;
+  line-height: 1.45;
+}
+
+.triage-item-meta {
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.triage-priority.high {
+  color: var(--danger);
+}
+
+.triage-priority.medium {
+  color: var(--warning);
+}
+
+.triage-priority.low {
+  color: var(--success);
+}
+
+.triage-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.triage-detail-title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.triage-reason-banner {
+  border: 1px solid var(--warning);
+  background: var(--warning-bg);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  line-height: 1.5;
+}
+
+.triage-paperless-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.triage-confidence-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.triage-overall-score {
+  font-size: 2rem;
+  font-weight: 800;
+}
+
+.triage-overall-score.high {
+  color: var(--success);
+}
+
+.triage-overall-score.medium {
+  color: var(--warning);
+}
+
+.triage-overall-score.low {
+  color: var(--danger);
+}
+
+.triage-confidence-list {
+  display: grid;
+  gap: 10px;
+}
+
+.triage-amount-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.triage-amount-card.ok {
+  background: var(--success-bg);
+  border-color: var(--success);
+}
+
+.triage-amount-card.warn {
+  background: var(--warning-bg);
+  border-color: var(--warning);
+}
+
+.triage-amount-card.danger {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+
+.triage-amount-title,
+.triage-amount-score {
+  font-weight: 700;
+}
+
+.triage-compare-grid,
+.triage-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.triage-compare-col {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.triage-compare-header {
+  padding: 12px 14px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+}
+
+.triage-compare-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.triage-compare-row:last-child {
+  border-bottom: none;
+}
+
+.triage-compare-row span,
+.triage-compare-row a {
+  color: var(--text-muted);
+}
+
+.triage-compare-row strong {
+  text-align: right;
+}
+
+.triage-compare-row.ok strong {
+  color: var(--success);
+}
+
+.triage-compare-row.warn strong {
+  color: var(--warning);
+}
+
+.triage-compare-row.danger strong {
+  color: var(--danger);
+}
+
+.triage-alt-list,
+.triage-history-list,
+.triage-group-docs {
+  display: grid;
+  gap: 10px;
+}
+
+.triage-alt-item,
+.triage-group-doc {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.triage-alt-item {
+  cursor: pointer;
+  color: var(--text);
+  text-align: left;
+}
+
+.triage-alt-score {
+  display: inline-flex;
+  min-width: 52px;
+  font-weight: 800;
+  color: var(--accent);
+}
+
+.triage-history-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.triage-history-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--text-muted);
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.triage-history-dot.auto {
+  background: var(--accent);
+}
+
+.triage-history-dot.confirm {
+  background: var(--success);
+}
+
+.triage-group-summary {
+  display: grid;
+  gap: 10px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.triage-group-doc a,
+.triage-compare-row a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.triage-keyboard-hint {
+  margin-top: 14px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.triage-keyboard-hint kbd {
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 2px 6px;
+  background: var(--card);
+  color: var(--text);
+}
+
+@media (max-width: 1080px) {
+  .triage-shell,
+  .triage-compare-grid,
+  .triage-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .triage-queue-panel {
+    border-right: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+  }
+
+  .triage-detail-panel {
+    border-radius: var(--radius);
+  }
+}
