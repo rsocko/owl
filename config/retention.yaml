@@ -1,0 +1,42 @@
+# Data Retention Policy — Document Intelligence Hub
+#
+# Each module specifies how long to keep records (in days).
+# Set any value to 0 for infinite retention (never delete).
+#
+# Override any value via environment variable:
+#   RETENTION_PROCESSING_HISTORY_DAYS=60
+#   RETENTION_ALERTS_DAYS=14
+#   RETENTION_ACTIONS_DAYS=0          # keep forever
+#   RETENTION_MATCHES_DAYS=180
+#   RETENTION_DISCOVERY_RUNS_DAYS=180
+#
+# Use the API or CLI to trigger cleanup:
+#   POST /api/admin/cleanup         (API, supports dry_run)
+#   doc-hub cleanup --dry-run       (CLI)
+#
+# View storage usage:
+#   GET /api/admin/storage          (API)
+#   Settings → Data & Storage       (UI)
+#
+# Scheduled: weekly, Sunday 2:00 AM (see scheduling.md)
+
+retention:
+  # Action Queue — processing history (which docs were scanned)
+  # Set to 0 to keep forever
+  processing_history_days: 90
+
+  # Unified Alerts — resolved/acknowledged alerts
+  # Set to 0 to keep forever
+  alerts_days: 30
+
+  # Action Queue — completed/dismissed actions
+  # Set to 0 to keep forever
+  actions_days: 365
+
+  # EOB Matching — old matching runs, EOB/bill records, match records
+  # Set to 0 to keep forever
+  matches_days: 365
+
+  # Statement Tracker — old discovery & recommendation runs
+  # Set to 0 to keep forever
+  discovery_runs_days: 365

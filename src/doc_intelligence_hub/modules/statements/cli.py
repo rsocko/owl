@@ -34,6 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
     serve = subparsers.add_parser("serve")
     serve.add_argument("--config", required=True)
 
+    # Data retention cleanup
+    cleanup = subparsers.add_parser("cleanup", help="Run data retention cleanup across all DI modules")
+    cleanup.add_argument("--dry-run", action="store_true", default=False, help="Preview only — don't delete anything")
+    cleanup.add_argument("--config", required=False, help="Path to retention.yaml config file")
+
     return parser
 
 
@@ -42,6 +47,17 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
+        if args.command == "cleanup":
+            from pathlib import Path
+
+            from doc_intelligence_hub.core.retention import load_retention_config, run_cleanup
+
+            config_path = Path(args.config) if getattr(args, "config", None) else None
+            cfg = load_retention_config(config_path)
+            result = run_cleanup(dry_run=args.dry_run, config=cfg)
+            print(json.dumps(result.to_dict(), indent=2))
+            return
+
         if args.command == "discover":
             result = asyncio.run(run_discovery(args.config))
             print(json.dumps(result.model_dump(mode="json"), indent=2))
