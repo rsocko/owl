@@ -204,12 +204,13 @@
 }
 
 .triage-reason-banner {
-  border: 1px solid var(--warning);
+  border-left: 4px solid var(--warning);
   background: var(--warning-bg);
   color: var(--text);
   border-radius: var(--radius-sm);
-  padding: 14px 16px;
+  padding: 10px 14px;
   line-height: 1.5;
+  font-size: 0.88rem;
 }
 
 .triage-paperless-link {
