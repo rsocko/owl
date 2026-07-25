@@ -1,0 +1,35 @@
+# Document Intelligence Hub — Crontab Entries
+# =============================================
+# Fallback scheduling for environments without n8n.
+# Copy relevant entries to your crontab: crontab -e
+#
+# Adjust COMPOSE_FILE to your docker-compose.yml location.
+# All times are in the server's local timezone.
+
+COMPOSE_FILE=/opt/doc-intelligence/docker-compose.yml
+HUB_URL=http://localhost:8071
+
+# --- Statement Tracker ---
+
+# Statement Discovery — daily at 9:00 AM
+0 9 * * *   ***REMOVED*** -sf -X POST "$HUB_URL/api/statements/discovery/run" -o /dev/null && echo "[$(date)] Statement discovery OK" >> /var/log/doc-intelligence-cron.log
+
+# Statement Gap Check — daily at 9:30 AM (uses today's date)
+30 9 * * *  ***REMOVED*** -sf -X POST "$HUB_URL/api/statements/recommendations/run?as_of=$(date +\%Y-\%m-\%d)" -o /dev/null && echo "[$(date)] Gap check OK" >> /var/log/doc-intelligence-cron.log
+
+# --- EOB Matching ---
+
+# EOB Matching pipeline — weekly on Sunday at 10:00 AM
+0 10 * * 0  ***REMOVED*** -sf -X POST "$HUB_URL/api/eob/run" -H 'Content-Type: application/json' -d '{"limit":200,"tags":["medical"]}' -o /dev/null && echo "[$(date)] EOB matching OK" >> /var/log/doc-intelligence-cron.log
+
+# --- Action Queue ---
+
+# Action Queue processing — daily at 8:00 AM and 2:00 PM
+0 8 * * *   ***REMOVED*** -sf -X POST "$HUB_URL/api/queue/run" -H 'Content-Type: application/json' -d '{"dry_run":false,"limit":50}' -o /dev/null && echo "[$(date)] Action queue (AM) OK" >> /var/log/doc-intelligence-cron.log
+0 14 * * *  ***REMOVED*** -sf -X POST "$HUB_URL/api/queue/run" -H 'Content-Type: application/json' -d '{"dry_run":false,"limit":50}' -o /dev/null && echo "[$(date)] Action queue (PM) OK" >> /var/log/doc-intelligence-cron.log
+
+# --- Alternative: Docker Compose one-shot jobs ---
+# Use these if the hub API is not reachable from the cron host:
+#
+# 0 10 * * 0  docker compose -f $COMPOSE_FILE run --rm eob-matching
+# 0 8 * * *   docker compose -f $COMPOSE_FILE run --rm action-queue

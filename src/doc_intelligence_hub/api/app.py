@@ -15,6 +15,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from doc_intelligence_hub.api.routers import action_queue, admin, alerts, eob, mc_connector, statements, stats, system
 from doc_intelligence_hub.core.llm import get_llm_settings, validate_model_availability
 from doc_intelligence_hub.core.logging_config import configure_logging
+from doc_intelligence_hub.core.scheduler import HubScheduler
 from doc_intelligence_hub.modules.statements.api import _STATIC_DIR as _STATEMENTS_STATIC_DIR
 from doc_intelligence_hub.modules.statements.config import load_config
 
@@ -122,6 +123,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.state.last_eob_results = None
     app.state.eob_weights = None
     app.state.admin_schedules = None
+    app.state.scheduler = HubScheduler(port=settings.port)
 
     # CORS — allow Mission Control (and other local services) to reach the API
     origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
@@ -217,6 +219,26 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
             logger.info("✓ Alerts DB initialized. Auto-resolved %d stale alerts.", resolved)
         except Exception as exc:
             logger.warning("⚠️  Could not initialize alerts DB: %s", exc)
+
+    @app.on_event("startup")
+    async def _start_scheduler() -> None:
+        """Start the built-in job scheduler."""
+        import logging
+
+        logger = logging.getLogger("doc_intelligence_hub.startup")
+        scheduler: HubScheduler = app.state.scheduler
+        try:
+            scheduler.configure()
+            scheduler.start()
+            logger.info("✓ Built-in scheduler started with %d jobs.", len(scheduler.get_schedules()))
+        except Exception as exc:
+            logger.warning("⚠️  Could not start scheduler: %s", exc)
+
+    @app.on_event("shutdown")
+    async def _stop_scheduler() -> None:
+        """Shut down the built-in job scheduler."""
+        scheduler: HubScheduler = app.state.scheduler
+        scheduler.shutdown()
 
     return app
 

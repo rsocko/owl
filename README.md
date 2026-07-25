@@ -226,12 +226,15 @@ experiments/document-intelligence/
 │   ├── config.fixture.yaml           # Fixture test config
 │   ├── config.paperless.example.yaml # Paperless connection template
 │   ├── docker-compose.image.yaml     # Docker Compose reference
-│   └── statement-tracker-pyproject.toml # Python deps reference
+│   ├── statement-tracker-pyproject.toml # Python deps reference
+│   ├── schedules.yaml                # Central schedule definitions
+│   └── crontab.example               # Fallback crontab entries
 │
 └── src/                               # (Phase 2: code migration)
     ├── core/                          # Shared infrastructure
     │   ├── paperless/                 # Paperless API client
     │   ├── extractors/                # Entity extraction pipeline
+    │   ├── scheduler.py               # Built-in APScheduler job runner
     │   ├── database.py                # DB connection + migrations
     │   └── models.py                  # Shared data models
     │
@@ -267,6 +270,57 @@ experiments/document-intelligence/
 | **Frontend** | Vanilla JS → React | Start simple, upgrade if needed |
 | **Deployment** | Docker | Single container on homelab |
 | **Orchestration** | n8n | Already running; handles scheduling + notifications |
+
+## Scheduling
+
+The hub includes a **built-in scheduler** (APScheduler) that runs all module pipelines automatically — no external orchestrator (n8n, cron) required. Schedules are configurable at runtime via the admin API and UI.
+
+### Schedule Overview
+
+| Module | Job | Default Schedule | Endpoint |
+|--------|-----|-----------------|----------|
+| **Statement Tracker** | Discovery | Daily 9:00 AM | `POST /api/statements/discovery/run` |
+| **Statement Tracker** | Gap Check | Daily 9:30 AM | `POST /api/statements/recommendations/run?as_of=TODAY` |
+| **EOB Matching** | Full pipeline | Weekly Sun 10:00 AM | `POST /api/eob/run` |
+| **Action Queue** | Triage pipeline | Daily 8:00 AM & 2:00 PM | `POST /api/queue/run` |
+
+### How It Works
+
+The scheduler starts automatically when the hub boots. It calls the hub's own API endpoints via `httpx` on each cron tick, so all middleware, error handling, and state management is exercised identically to external callers.
+
+- **No external dependencies** — everything runs inside the single Docker container
+- **Runtime configuration** — change cron expressions, limits, and enable/disable via the admin UI or API
+- **Last-run tracking** — the scheduler records status, timestamps, and errors for each job
+
+### Admin API
+
+```bash
+# View current schedules (includes next_run, last_run info)
+***REMOVED*** http://localhost:8071/api/admin/schedules
+
+# Update a schedule (takes effect immediately)
+***REMOVED*** -X PUT http://localhost:8071/api/admin/schedules \
+  -H 'Content-Type: application/json' \
+  -d '{"statement_discovery": {"cron": "0 8 * * *", "enabled": true}}'
+
+# Disable a schedule
+***REMOVED*** -X PUT http://localhost:8071/api/admin/schedules \
+  -H 'Content-Type: application/json' \
+  -d '{"eob_matching": {"enabled": false}}'
+```
+
+### Admin UI
+
+The **Scan Schedules** page in the admin panel (`/admin` → 🕐) shows all four module schedules with:
+- Editable cron expressions and document limits
+- Enable/disable toggles
+- Next scheduled run time
+- Last run status and timestamp
+- "Run Now" buttons for immediate execution
+
+### Fallback: Crontab
+
+For environments where the built-in scheduler is not suitable, `config/crontab.example` provides equivalent cron entries that call the hub API via `***REMOVED***`.
 
 ## What Changes from Existing Designs
 

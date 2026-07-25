@@ -1,0 +1,61 @@
+# Document Intelligence Hub — Schedule Definitions
+# =================================================
+# Central configuration for all scheduled jobs.
+# These defaults are compiled into the built-in scheduler
+# (src/doc_intelligence_hub/core/scheduler.py) and can be
+# overridden at runtime via PUT /api/admin/schedules.
+#
+# Also referenced by config/crontab.example for fallback.
+#
+# Each module defines its schedule(s) with:
+#   cron     — Standard 5-field cron expression
+#   endpoint — Hub API endpoint to call
+#   method   — HTTP method (default: POST)
+#   body     — Optional JSON request body
+#   limit    — Max items to process per run
+#   enabled  — Whether the schedule is active
+#   timeout  — Max execution time in seconds
+
+statement_tracker:
+  discovery:
+    description: "Discover new recurring statements from Paperless documents"
+    cron: "0 9 * * *"          # Daily at 9:00 AM
+    endpoint: "/api/statements/discovery/run"
+    method: POST
+    enabled: true
+    timeout: 120
+
+  gap_check:
+    description: "Detect missing/late statements and generate recommendations"
+    cron: "30 9 * * *"         # Daily at 9:30 AM
+    endpoint: "/api/statements/recommendations/run"
+    method: POST
+    # Note: requires ?as_of=YYYY-MM-DD query parameter (today's date)
+    enabled: true
+    timeout: 120
+
+eob_matching:
+  run:
+    description: "Classify and match EOBs to medical bills"
+    cron: "0 10 * * 0"         # Weekly on Sunday at 10:00 AM
+    endpoint: "/api/eob/run"
+    method: POST
+    body:
+      limit: 200
+      tags: ["medical"]
+    limit: 200
+    enabled: true
+    timeout: 300
+
+action_queue:
+  run:
+    description: "Triage inbox documents and create action items"
+    cron: "0 8,14 * * *"       # Daily at 8:00 AM and 2:00 PM
+    endpoint: "/api/queue/run"
+    method: POST
+    body:
+      dry_run: false
+      limit: 50
+    limit: 50
+    enabled: true
+    timeout: 180

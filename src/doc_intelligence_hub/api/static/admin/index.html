@@ -219,48 +219,57 @@
         <!-- Scan Schedules -->
         <section class="page" id="page-schedules">
             <h1 class="page-title">Scan Schedules</h1>
-            <p class="page-desc">Configure when Action Queue and EOB Matching pipelines run.</p>
+            <p class="page-desc">Configure when each DI Hub module runs automatically. Changes take effect immediately on the built-in scheduler.</p>
             <div class="card">
                 <div class="card-title">Active Schedules</div>
                 <table class="schedule-table">
                     <thead>
-                        <tr><th>Pipeline</th><th>Schedule</th><th>Last Run</th><th>Status</th><th></th></tr>
+                        <tr><th>Pipeline</th><th>Cron Schedule</th><th>Limit</th><th>Enabled</th><th>Next Run</th><th>Last Run</th><th></th></tr>
                     </thead>
                     <tbody id="schedule-body">
-                        <tr>
-                            <td>Action Queue</td>
-                            <td><input type="text" id="sched-aq-cron" value="0 */6 * * *" style="width:120px; padding:4px 8px; background:var(--bg); border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:0.8rem;"></td>
-                            <td id="sched-aq-last">—</td>
-                            <td><span id="sched-aq-status" class="badge badge-ok">idle</span></td>
-                            <td><button class="btn btn-secondary" onclick="triggerPipeline('queue')">Run Now</button></td>
+                        <tr data-sched="statement_discovery">
+                            <td>📋 Statement Discovery</td>
+                            <td><input type="text" class="sched-cron" value="0 9 * * *" style="width:120px; padding:4px 8px; background:var(--bg); border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:0.8rem;"></td>
+                            <td><span style="color:var(--text-muted); font-size:0.8rem;">—</span></td>
+                            <td><input type="checkbox" class="sched-enabled" checked></td>
+                            <td class="sched-next" style="font-size:0.8rem; color:var(--text-muted);">—</td>
+                            <td class="sched-last" style="font-size:0.8rem; color:var(--text-muted);">—</td>
+                            <td><button class="btn btn-secondary" onclick="triggerPipeline('statement_discovery')">Run Now</button></td>
                         </tr>
-                        <tr>
-                            <td>EOB Matching</td>
-                            <td><input type="text" id="sched-eob-cron" value="0 2 * * *" style="width:120px; padding:4px 8px; background:var(--bg); border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:0.8rem;"></td>
-                            <td id="sched-eob-last">—</td>
-                            <td><span id="sched-eob-status" class="badge badge-ok">idle</span></td>
-                            <td><button class="btn btn-secondary" onclick="triggerPipeline('eob')">Run Now</button></td>
+                        <tr data-sched="statement_gap_check">
+                            <td>🔍 Statement Gap Check</td>
+                            <td><input type="text" class="sched-cron" value="30 9 * * *" style="width:120px; padding:4px 8px; background:var(--bg); border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:0.8rem;"></td>
+                            <td><span style="color:var(--text-muted); font-size:0.8rem;">—</span></td>
+                            <td><input type="checkbox" class="sched-enabled" checked></td>
+                            <td class="sched-next" style="font-size:0.8rem; color:var(--text-muted);">—</td>
+                            <td class="sched-last" style="font-size:0.8rem; color:var(--text-muted);">—</td>
+                            <td><button class="btn btn-secondary" onclick="triggerPipeline('statement_gap_check')">Run Now</button></td>
+                        </tr>
+                        <tr data-sched="action_queue">
+                            <td>📬 Action Queue</td>
+                            <td><input type="text" class="sched-cron" value="0 8,14 * * *" style="width:120px; padding:4px 8px; background:var(--bg); border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:0.8rem;"></td>
+                            <td><input type="number" class="sched-limit" value="50" min="1" max="500" style="width:60px; padding:4px; background:var(--bg); border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:0.8rem;"></td>
+                            <td><input type="checkbox" class="sched-enabled" checked></td>
+                            <td class="sched-next" style="font-size:0.8rem; color:var(--text-muted);">—</td>
+                            <td class="sched-last" style="font-size:0.8rem; color:var(--text-muted);">—</td>
+                            <td><button class="btn btn-secondary" onclick="triggerPipeline('action_queue')">Run Now</button></td>
+                        </tr>
+                        <tr data-sched="eob_matching">
+                            <td>🏥 EOB Matching</td>
+                            <td><input type="text" class="sched-cron" value="0 10 * * 0" style="width:120px; padding:4px 8px; background:var(--bg); border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:0.8rem;"></td>
+                            <td><input type="number" class="sched-limit" value="200" min="1" max="500" style="width:60px; padding:4px; background:var(--bg); border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:0.8rem;"></td>
+                            <td><input type="checkbox" class="sched-enabled" checked></td>
+                            <td class="sched-next" style="font-size:0.8rem; color:var(--text-muted);">—</td>
+                            <td class="sched-last" style="font-size:0.8rem; color:var(--text-muted);">—</td>
+                            <td><button class="btn btn-secondary" onclick="triggerPipeline('eob_matching')">Run Now</button></td>
                         </tr>
                     </tbody>
                 </table>
             </div>
-            <div class="card">
-                <div class="card-title">Schedule Configuration</div>
-                <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:12px;">
-                    Schedules are managed via cron, systemd timers, or n8n workflows. The values above reflect the
-                    recommended intervals. Use the "Run Now" buttons to trigger a pipeline immediately via the API.
-                </p>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Action Queue — Document Limit</label>
-                        <input type="number" id="sched-aq-limit" value="50" min="1" max="500">
-                    </div>
-                    <div class="form-group">
-                        <label>EOB Matching — Document Limit</label>
-                        <input type="number" id="sched-eob-limit" value="200" min="1" max="500">
-                    </div>
-                </div>
-                <button class="btn btn-primary" onclick="saveScheduleSettings()">Save Defaults</button>
+            <div class="card" style="display:flex; gap:12px; align-items:center;">
+                <button class="btn btn-primary" onclick="saveAllSchedules()">Save All Schedules</button>
+                <button class="btn btn-secondary" onclick="loadSchedules()">Refresh</button>
+                <span id="sched-save-status" style="font-size:0.8rem; color:var(--text-muted);"></span>
             </div>
         </section>
 
@@ -457,41 +466,72 @@
     }
 
     // --- Schedules ---
+    const PIPELINE_ENDPOINTS = {
+        statement_discovery: { method: 'POST', path: '/statements/discovery/run' },
+        statement_gap_check: { method: 'POST', path: '/statements/recommendations/run?as_of=' + new Date().toISOString().slice(0, 10) },
+        action_queue: { method: 'POST', path: '/queue/run', bodyFn: () => ({ dry_run: false, limit: parseInt(document.querySelector('[data-sched="action_queue"] .sched-limit')?.value) || 50 }) },
+        eob_matching: { method: 'POST', path: '/eob/run', bodyFn: () => ({ limit: parseInt(document.querySelector('[data-sched="eob_matching"] .sched-limit')?.value) || 200 }) },
+    };
+
     async function triggerPipeline(type) {
+        const ep = PIPELINE_ENDPOINTS[type];
+        if (!ep) { showToast('Unknown pipeline: ' + type, 'error'); return; }
         try {
-            if (type === 'queue') {
-                const limit = parseInt(document.getElementById('sched-aq-limit').value) || 50;
-                await apiPost('/queue/run', { dry_run: false, limit });
-                showToast('Action Queue triggered');
-            } else {
-                const limit = parseInt(document.getElementById('sched-eob-limit').value) || 200;
-                await apiPost('/eob/run', { limit });
-                showToast('EOB Matching triggered');
-            }
+            const body = ep.bodyFn ? ep.bodyFn() : {};
+            await apiPost(ep.path, body);
+            showToast(type.replace(/_/g, ' ') + ' triggered');
+            setTimeout(loadSchedules, 1000);
         } catch (e) { showToast('Trigger failed: ' + e.message, 'error'); }
     }
 
-    function saveScheduleSettings() {
-        localStorage.setItem('di-admin-schedules', JSON.stringify({
-            aq_cron: document.getElementById('sched-aq-cron').value,
-            eob_cron: document.getElementById('sched-eob-cron').value,
-            aq_limit: document.getElementById('sched-aq-limit').value,
-            eob_limit: document.getElementById('sched-eob-limit').value,
-        }));
-        showToast('Schedule defaults saved locally');
+    async function loadSchedules() {
+        try {
+            const schedules = await apiGet('/admin/schedules');
+            for (const [key, config] of Object.entries(schedules)) {
+                const row = document.querySelector(`[data-sched="${key}"]`);
+                if (!row) continue;
+                const cronInput = row.querySelector('.sched-cron');
+                const enabledInput = row.querySelector('.sched-enabled');
+                const limitInput = row.querySelector('.sched-limit');
+                const nextTd = row.querySelector('.sched-next');
+                const lastTd = row.querySelector('.sched-last');
+
+                if (cronInput) cronInput.value = config.cron || '';
+                if (enabledInput) enabledInput.checked = config.enabled !== false;
+                if (limitInput && config.limit) limitInput.value = config.limit;
+                if (nextTd) nextTd.textContent = config.next_run ? new Date(config.next_run).toLocaleString() : '—';
+                if (lastTd && config.last_run) {
+                    const lr = config.last_run;
+                    const badge = lr.status === 'ok' ? '✓' : '✗';
+                    lastTd.innerHTML = `<span style="color:${lr.status === 'ok' ? 'var(--success)' : 'var(--danger)'}">${badge}</span> ${lr.finished_at ? new Date(lr.finished_at).toLocaleTimeString() : ''}`;
+                } else if (lastTd) {
+                    lastTd.textContent = '—';
+                }
+            }
+        } catch (e) { console.warn('Failed to load schedules:', e); }
     }
 
-    // Restore saved schedule settings
-    (function() {
-        const saved = localStorage.getItem('di-admin-schedules');
-        if (saved) {
-            const s = JSON.parse(saved);
-            if (s.aq_cron) document.getElementById('sched-aq-cron').value = s.aq_cron;
-            if (s.eob_cron) document.getElementById('sched-eob-cron').value = s.eob_cron;
-            if (s.aq_limit) document.getElementById('sched-aq-limit').value = s.aq_limit;
-            if (s.eob_limit) document.getElementById('sched-eob-limit').value = s.eob_limit;
-        }
-    })();
+    async function saveAllSchedules() {
+        const body = {};
+        document.querySelectorAll('[data-sched]').forEach(row => {
+            const key = row.dataset.sched;
+            const cron = row.querySelector('.sched-cron')?.value;
+            const enabled = row.querySelector('.sched-enabled')?.checked ?? true;
+            const limitInput = row.querySelector('.sched-limit');
+            const entry = { cron, enabled };
+            if (limitInput) entry.limit = parseInt(limitInput.value) || null;
+            body[key] = entry;
+        });
+        try {
+            await apiPut('/admin/schedules', body);
+            showToast('Schedules saved and applied');
+            document.getElementById('sched-save-status').textContent = 'Saved at ' + new Date().toLocaleTimeString();
+            loadSchedules();
+        } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+    }
+
+    // Load schedules on page init
+    loadSchedules();
 
     // --- Scoring Weights ---
     const DEFAULT_WEIGHTS = { date: 30, provider: 25, patient: 20, amount: 15, procedures: 10 };

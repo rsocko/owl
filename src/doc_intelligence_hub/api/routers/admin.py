@@ -7,6 +7,8 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
+from doc_intelligence_hub.core.scheduler import DEFAULT_SCHEDULES
+
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 # Default EOB matching weights (must sum to 1.0)
@@ -58,39 +60,64 @@ async def update_weights(request: Request, body: WeightsUpdate) -> dict[str, Any
     return {"status": "ok", "weights": weights, "sum": round(total, 2)}
 
 
+_DEFAULT_SCHEDULES = DEFAULT_SCHEDULES
+
+
 @router.get("/schedules")
 async def get_schedules(request: Request) -> dict[str, Any]:
-    """Get current schedule configuration."""
+    """Get current schedule configuration for all DI Hub modules.
+
+    If the built-in scheduler is running, returns live schedule state
+    including next_run and last_run info.
+    """
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler and scheduler.running:
+        return scheduler.get_schedules()
+    # Fallback: return static config
     schedules = getattr(request.app.state, "admin_schedules", None)
     if schedules is None:
-        schedules = {
-            "action_queue": {"cron": "0 */6 * * *", "limit": 50, "enabled": True},
-            "eob_matching": {"cron": "0 2 * * *", "limit": 200, "enabled": True},
-        }
+        schedules = {k: dict(v) for k, v in _DEFAULT_SCHEDULES.items()}
     return schedules
 
 
 class ScheduleConfig(BaseModel):
     cron: str = "0 */6 * * *"
-    limit: int = Field(default=50, ge=1, le=500)
+    limit: int | None = Field(default=None, ge=1, le=500)
     enabled: bool = True
 
 
 class SchedulesUpdate(BaseModel):
+    statement_discovery: ScheduleConfig | None = None
+    statement_gap_check: ScheduleConfig | None = None
     action_queue: ScheduleConfig | None = None
     eob_matching: ScheduleConfig | None = None
 
 
 @router.put("/schedules")
 async def update_schedules(request: Request, body: SchedulesUpdate) -> dict[str, Any]:
-    """Update schedule configuration (persists for this server session)."""
-    current = getattr(request.app.state, "admin_schedules", None) or {
-        "action_queue": {"cron": "0 */6 * * *", "limit": 50, "enabled": True},
-        "eob_matching": {"cron": "0 2 * * *", "limit": 200, "enabled": True},
-    }
-    if body.action_queue:
-        current["action_queue"] = body.action_queue.model_dump()
-    if body.eob_matching:
-        current["eob_matching"] = body.eob_matching.model_dump()
+    """Update schedule configuration and reschedule jobs on the live scheduler."""
+    scheduler = getattr(request.app.state, "scheduler", None)
+
+    # Build merged config
+    if scheduler and scheduler.running:
+        current = scheduler.get_schedules()
+    else:
+        current = getattr(request.app.state, "admin_schedules", None) or {
+            k: dict(v) for k, v in _DEFAULT_SCHEDULES.items()
+        }
+
+    for key in ("statement_discovery", "statement_gap_check", "action_queue", "eob_matching"):
+        update = getattr(body, key, None)
+        if update:
+            merged = {**current.get(key, {}), **update.model_dump(exclude_none=True)}
+            current[key] = merged
+            # Live-update the scheduler if running
+            if scheduler and scheduler.running:
+                scheduler.update_schedule(key, merged)
+
     request.app.state.admin_schedules = current
+
+    # Return live state if scheduler is active
+    if scheduler and scheduler.running:
+        return {"status": "ok", "schedules": scheduler.get_schedules()}
     return {"status": "ok", "schedules": current}

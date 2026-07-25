@@ -1,93 +1,56 @@
 # Document Intelligence Hub — Scheduling Configuration
 #
-# Both Action Queue (paq) and EOB Matching (eob-match) can be scheduled
-# to run periodically using cron, systemd timers, or Docker labels.
+# The hub has a BUILT-IN SCHEDULER (APScheduler) that runs all module
+# pipelines automatically. No external orchestrator is needed.
+#
+# Schedule defaults are defined in config/schedules.yaml and can be
+# changed at runtime via the admin API or admin UI.
 #
 # ===================================================================
-# Option 1: Cron (simplest)
+# Architecture
 # ===================================================================
 #
-# Add to your crontab (crontab -e):
-#
-# # Action Queue — run every 6 hours against inbox documents
-# 0 */6 * * * docker compose -f /path/to/docker-compose.yml run --rm action-queue
-#
-# # EOB Matching — run daily at 2 AM
-# 0 2 * * * docker compose -f /path/to/docker-compose.yml run --rm eob-matching
+# The scheduler lives in src/doc_intelligence_hub/core/scheduler.py.
+# It starts automatically on app boot and calls the hub's own API
+# endpoints via httpx on each cron tick — same path as any external
+# caller, so all middleware/error handling is exercised.
 #
 # ===================================================================
-# Option 2: Systemd Timers (recommended for homelab)
+# Module Schedule Summary
 # ===================================================================
 #
-# Create two files per job:
-#
-# --- /etc/systemd/system/doc-intelligence-action-queue.service ---
-# [Unit]
-# Description=Document Intelligence — Action Queue Pipeline
-# After=docker.service
-# Requires=docker.service
-#
-# [Service]
-# Type=oneshot
-# WorkingDirectory=/opt/doc-intelligence
-# ExecStart=/usr/bin/docker compose run --rm action-queue
-# TimeoutStartSec=300
-#
-# --- /etc/systemd/system/doc-intelligence-action-queue.timer ---
-# [Unit]
-# Description=Run Action Queue every 6 hours
-#
-# [Timer]
-# OnCalendar=*-*-* 00/6:00:00
-# Persistent=true
-# RandomizedDelaySec=300
-#
-# [Install]
-# WantedBy=timers.target
-#
-# --- /etc/systemd/system/doc-intelligence-eob-matching.service ---
-# [Unit]
-# Description=Document Intelligence — EOB Matching Pipeline
-# After=docker.service
-# Requires=docker.service
-#
-# [Service]
-# Type=oneshot
-# WorkingDirectory=/opt/doc-intelligence
-# ExecStart=/usr/bin/docker compose run --rm eob-matching
-# TimeoutStartSec=600
-#
-# --- /etc/systemd/system/doc-intelligence-eob-matching.timer ---
-# [Unit]
-# Description=Run EOB Matching daily at 2 AM
-#
-# [Timer]
-# OnCalendar=*-*-* 02:00:00
-# Persistent=true
-# RandomizedDelaySec=300
-#
-# [Install]
-# WantedBy=timers.target
-#
-# Enable timers:
-#   sudo systemctl enable --now doc-intelligence-action-queue.timer
-#   sudo systemctl enable --now doc-intelligence-eob-matching.timer
-#
-# Check status:
-#   systemctl list-timers doc-intelligence-*
+# Statement Discovery    — Daily 9:00 AM  — POST /api/statements/discovery/run
+# Statement Gap Check    — Daily 9:30 AM  — POST /api/statements/recommendations/run?as_of=TODAY
+# EOB Matching           — Weekly Sun 10 AM — POST /api/eob/run
+# Action Queue           — Daily 8 AM & 2 PM — POST /api/queue/run
 #
 # ===================================================================
-# Option 3: n8n Workflow (if using n8n for orchestration)
+# Admin API
 # ===================================================================
 #
-# Create a workflow with:
-#   1. Schedule Trigger node → Cron: 0 */6 * * *
-#   2. HTTP Request node → POST http://doc-hub:8001/api/queue/run
-#      Body: {"dry_run": false, "limit": 50}
-#   3. IF node → Check result.failed > 0
-#   4. (Optional) Send notification on failures
+# GET  /api/admin/schedules       — view all schedules (with next_run, last_run)
+# PUT  /api/admin/schedules       — update & reschedule (takes effect immediately)
 #
-# For EOB matching:
-#   1. Schedule Trigger node → Cron: 0 2 * * *
-#   2. HTTP Request node → POST http://doc-hub:8001/api/eob/run
-#      Body: {"limit": 200, "tags": ["medical"]}
+# Example:
+#   ***REMOVED*** -X PUT http://localhost:8071/api/admin/schedules \
+#     -H 'Content-Type: application/json' \
+#     -d '{"eob_matching": {"cron": "0 10 * * 1", "enabled": true}}'
+#
+# ===================================================================
+# Admin UI
+# ===================================================================
+#
+# The "Scan Schedules" page in the admin panel shows all four module
+# schedules with editable cron expressions, limits, enable/disable
+# toggles, next run times, last run status, and "Run Now" buttons.
+#
+# ===================================================================
+# Fallback: Crontab (external scheduling)
+# ===================================================================
+#
+# For environments where the built-in scheduler is not suitable,
+# config/crontab.example provides equivalent cron entries that call
+# the hub API via ***REMOVED***. Copy them into your crontab:
+#
+#   crontab -e
+#   # Paste entries from config/crontab.example
