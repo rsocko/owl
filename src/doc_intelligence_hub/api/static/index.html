@@ -377,6 +377,7 @@
                 <div class="tab active" onclick="showSettingsTab('connections')">Connections</div>
                 <div class="tab" onclick="showSettingsTab('weights')">Scoring Weights</div>
                 <div class="tab" onclick="showSettingsTab('schedules')">Schedules</div>
+                <div class="tab" onclick="showSettingsTab('storage')">Data &amp; Storage</div>
                 <div class="tab" onclick="showSettingsTab('ocr')">OCR Quality</div>
             </div>
 
@@ -496,6 +497,55 @@
                 </div>
             </div>
 
+            <!-- Data & Storage tab -->
+            <div class="settings-tab-content" id="stab-storage" style="display:none;">
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-title">💾 Storage Usage</span>
+                        <span id="storage-total" style="font-size:0.8rem; color:var(--text-muted);"></span>
+                    </div>
+                    <div class="panel-body">
+                        <div id="storage-databases" style="margin-bottom:18px;">
+                            <div class="loading"><span class="spinner"></span>Loading...</div>
+                        </div>
+                        <div id="storage-tables"></div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-header"><span class="panel-title">📋 Retention Policy</span></div>
+                    <div class="panel-body">
+                        <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:14px;">
+                            How long each data type is kept before cleanup. Toggle <strong>∞</strong> for infinite retention (never delete).
+                            Changes persist for this server session; edit <code>config/retention.yaml</code> for permanent changes.
+                        </p>
+                        <div id="retention-policy"><div class="loading"><span class="spinner"></span>Loading...</div></div>
+                        <div style="margin-top:14px; display:flex; gap:8px; align-items:center;">
+                            <button class="btn primary" onclick="saveRetentionPolicy()">Save Retention Settings</button>
+                            <span id="retention-save-status" style="font-size:0.75rem; color:var(--text-muted);"></span>
+                        </div>
+                        <p style="margin-top:10px; font-size:0.72rem; color:var(--text-muted);">
+                            Settings persist for this server session. Restart the service to reset to config/env defaults.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-header"><span class="panel-title">🧹 Manual Cleanup</span></div>
+                    <div class="panel-body">
+                        <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:14px;">
+                            Preview or run a cleanup sweep across all modules. Cleanup runs automatically every Sunday at 2 AM.
+                        </p>
+                        <div style="display:flex; gap:8px; align-items:center; margin-bottom:14px;">
+                            <button class="btn" onclick="runCleanup(true)">Preview (Dry Run)</button>
+                            <button class="btn primary" onclick="runCleanup(false)">Run Cleanup Now</button>
+                            <span id="cleanup-status" style="font-size:0.75rem; color:var(--text-muted);"></span>
+                        </div>
+                        <div id="cleanup-results"></div>
+                    </div>
+                </div>
+            </div>
+
             <!-- OCR Quality tab -->
             <div class="settings-tab-content" id="stab-ocr" style="display:none;">
                 <div class="panel">
@@ -556,6 +606,7 @@
         if (tab === 'connections') loadSettings();
         if (tab === 'weights') loadWeights();
         if (tab === 'schedules') loadSchedules();
+        if (tab === 'storage') loadStorageTab();
     }
 
     // ===== OVERVIEW =====
@@ -1364,6 +1415,207 @@
         } catch (e) {
             area.innerHTML = `<p style="color:var(--danger); font-size:0.8rem;">Error: ${e.message}</p>`;
         }
+    }
+
+    // ===== SETTINGS — Data & Storage =====
+    async function loadStorageTab() {
+        await Promise.all([loadStorageStats(), loadRetentionPolicy()]);
+    }
+
+    async function loadStorageStats() {
+        const dbEl = document.getElementById('storage-databases');
+        const tblEl = document.getElementById('storage-tables');
+        const totalEl = document.getElementById('storage-total');
+        try {
+            const res = await fetch(API + '/api/admin/storage');
+            const data = await res.json();
+            totalEl.textContent = 'Total: ' + data.total_size_human;
+
+            // Database file sizes
+            let dbHtml = '<table><thead><tr><th>Database</th><th>Size</th><th>Status</th></tr></thead><tbody>';
+            for (const db of data.databases) {
+                const statusBadge = db.exists
+                    ? '<span class="badge completed">active</span>'
+                    : '<span class="badge" style="background:rgba(139,146,168,0.15);color:var(--text-muted);">not created</span>';
+                dbHtml += `<tr><td style="font-family:monospace;font-size:0.78rem">${escapeHtml(db.name)}</td><td>${db.size_human}</td><td>${statusBadge}</td></tr>`;
+            }
+            dbHtml += '</tbody></table>';
+            dbEl.innerHTML = dbHtml;
+
+            // Table row counts grouped by module
+            const modules = {};
+            for (const t of data.tables) {
+                if (!modules[t.module]) modules[t.module] = [];
+                modules[t.module].push(t);
+            }
+
+            let tblHtml = '<table><thead><tr><th>Module</th><th>Table</th><th style="text-align:right">Rows</th></tr></thead><tbody>';
+            for (const [mod, tables] of Object.entries(modules)) {
+                for (const t of tables) {
+                    tblHtml += `<tr><td>${escapeHtml(mod)}</td><td>${escapeHtml(t.label)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${t.row_count.toLocaleString()}</td></tr>`;
+                }
+            }
+            tblHtml += '</tbody></table>';
+            tblEl.innerHTML = tblHtml;
+        } catch(e) {
+            dbEl.innerHTML = `<p style="color:var(--danger);font-size:0.8rem">Error loading storage stats: ${e.message}</p>`;
+        }
+    }
+
+    const RETENTION_ITEMS = [
+        { label: 'Processing History', key: 'processing_history_days', desc: 'Which documents were scanned by Action Queue' },
+        { label: 'Resolved Alerts', key: 'alerts_days', desc: 'Alerts that have been resolved or acknowledged' },
+        { label: 'Completed Actions', key: 'actions_days', desc: 'Completed or dismissed action items' },
+        { label: 'EOB Match Records', key: 'matches_days', desc: 'EOB matching runs, EOB/bill records, matches' },
+        { label: 'Discovery Runs', key: 'discovery_runs_days', desc: 'Statement discovery and recommendation runs' },
+    ];
+
+    async function loadRetentionPolicy() {
+        const el = document.getElementById('retention-policy');
+        try {
+            const res = await fetch(API + '/api/admin/retention');
+            const cfg = await res.json();
+
+            let html = '<table><thead><tr><th>Data Type</th><th>Retention (days)</th><th style="text-align:center">∞ Forever</th></tr></thead><tbody>';
+            for (const item of RETENTION_ITEMS) {
+                const isInfinite = cfg[item.key] <= 0;
+                const inputStyle = 'width:80px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:0.8rem;text-align:right;';
+                html += `<tr>
+                    <td>
+                        <div>${item.label}</div>
+                        <div style="font-size:0.7rem;color:var(--text-muted)">${item.desc}</div>
+                    </td>
+                    <td>
+                        <input type="number" id="ret-${item.key}" min="1" max="9999" value="${isInfinite ? '' : cfg[item.key]}"
+                            style="${inputStyle}" ${isInfinite ? 'disabled' : ''}
+                            placeholder="—">
+                    </td>
+                    <td style="text-align:center">
+                        <label style="cursor:pointer;font-size:1.1rem;" title="Keep forever">
+                            <input type="checkbox" id="ret-inf-${item.key}" ${isInfinite ? 'checked' : ''}
+                                onchange="toggleRetentionInfinite('${item.key}')"
+                                style="display:none;">
+                            <span id="ret-inf-icon-${item.key}" style="color:${isInfinite ? 'var(--accent)' : 'var(--text-muted)'};font-weight:bold;font-size:1.2rem;user-select:none;">∞</span>
+                        </label>
+                    </td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            el.innerHTML = html;
+        } catch(e) {
+            el.innerHTML = `<p style="color:var(--danger);font-size:0.8rem">Error: ${e.message}</p>`;
+        }
+    }
+
+    function toggleRetentionInfinite(key) {
+        const cb = document.getElementById('ret-inf-' + key);
+        const input = document.getElementById('ret-' + key);
+        const icon = document.getElementById('ret-inf-icon-' + key);
+        if (cb.checked) {
+            input.disabled = true;
+            input.value = '';
+            input.placeholder = '—';
+            icon.style.color = 'var(--accent)';
+        } else {
+            input.disabled = false;
+            icon.style.color = 'var(--text-muted)';
+            // Restore a sensible default
+            const defaults = { processing_history_days: 90, alerts_days: 30, actions_days: 365, matches_days: 365, discovery_runs_days: 365 };
+            input.value = defaults[key] || 365;
+        }
+    }
+
+    async function saveRetentionPolicy() {
+        const statusEl = document.getElementById('retention-save-status');
+        statusEl.textContent = 'Saving...';
+        try {
+            const body = {};
+            for (const item of RETENTION_ITEMS) {
+                const cb = document.getElementById('ret-inf-' + item.key);
+                const input = document.getElementById('ret-' + item.key);
+                if (cb.checked) {
+                    body[item.key] = 0;
+                } else {
+                    const val = parseInt(input.value);
+                    if (!val || val < 1) {
+                        statusEl.textContent = `Invalid value for ${item.label}`;
+                        statusEl.style.color = 'var(--danger)';
+                        return;
+                    }
+                    body[item.key] = val;
+                }
+            }
+            const res = await fetch(API + '/api/admin/retention', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            if (!res.ok) throw new Error(await res.text());
+            statusEl.textContent = '✓ Saved';
+            statusEl.style.color = 'var(--success)';
+            showToast('Retention settings saved');
+            setTimeout(() => { statusEl.textContent = ''; }, 3000);
+        } catch(e) {
+            statusEl.textContent = 'Save failed: ' + e.message;
+            statusEl.style.color = 'var(--danger)';
+            showToast('Save failed: ' + e.message, 'error');
+        }
+    }
+
+    async function runCleanup(dryRun) {
+        const statusEl = document.getElementById('cleanup-status');
+        const resultsEl = document.getElementById('cleanup-results');
+        statusEl.textContent = dryRun ? 'Running preview...' : 'Running cleanup...';
+        resultsEl.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+
+        try {
+            const res = await fetch(API + '/api/admin/cleanup', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ dry_run: dryRun })
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            statusEl.textContent = '';
+
+            let html = `<div style="font-size:0.8rem; margin-bottom:10px;">
+                <strong>${dryRun ? '🔍 Preview' : '✅ Cleanup complete'}</strong> —
+                ${data.total_deleted.toLocaleString()} records ${dryRun ? 'would be ' : ''}deleted`;
+            if (!dryRun && data.space_reclaimed_bytes > 0) {
+                html += `, ${_humanBytes(data.space_reclaimed_bytes)} reclaimed`;
+            }
+            html += '</div>';
+
+            html += '<table><thead><tr><th>Module</th><th style="text-align:right">Records</th><th>Status</th></tr></thead><tbody>';
+            for (const m of data.modules) {
+                const badge = m.records_deleted > 0
+                    ? `<span class="badge" style="background:rgba(79,143,247,0.15);color:var(--accent)">${m.records_deleted.toLocaleString()}</span>`
+                    : '<span class="badge completed">0</span>';
+                const errHtml = m.errors.length > 0
+                    ? ` <span style="color:var(--danger);font-size:0.72rem">⚠ ${escapeHtml(m.errors[0])}</span>`
+                    : '';
+                html += `<tr><td>${escapeHtml(m.module)}</td><td style="text-align:right">${badge}</td><td>${errHtml || '✓'}</td></tr>`;
+            }
+            html += '</tbody></table>';
+            resultsEl.innerHTML = html;
+
+            if (!dryRun) {
+                showToast(`Cleanup complete: ${data.total_deleted} records deleted`);
+                loadStorageStats();  // Refresh storage stats
+            }
+        } catch(e) {
+            statusEl.textContent = '';
+            resultsEl.innerHTML = `<p style="color:var(--danger);font-size:0.8rem">Error: ${e.message}</p>`;
+            showToast('Cleanup failed: ' + e.message, 'error');
+        }
+    }
+
+    function _humanBytes(bytes) {
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let i = 0;
+        let val = bytes;
+        while (val >= 1024 && i < units.length - 1) { val /= 1024; i++; }
+        return val.toFixed(1) + ' ' + units[i];
     }
 
     // ===== Boot =====

@@ -1,13 +1,16 @@
-"""Admin API router — scoring weights, schedule config, match debugging."""
+"""Admin API router — scoring weights, schedule config, match debugging, data cleanup."""
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.core.scheduler import DEFAULT_SCHEDULES
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -121,3 +124,105 @@ async def update_schedules(request: Request, body: SchedulesUpdate) -> dict[str,
     if scheduler and scheduler.running:
         return {"status": "ok", "schedules": scheduler.get_schedules()}
     return {"status": "ok", "schedules": current}
+
+
+# ------------------------------------------------------------------
+# Data retention / cleanup
+# ------------------------------------------------------------------
+
+
+class CleanupRequest(BaseModel):
+    dry_run: bool = Field(default=True, description="Preview what would be deleted without actually deleting.")
+
+
+class RetentionPolicyResponse(BaseModel):
+    processing_history_days: int = Field(description="0 = keep forever (infinite)")
+    alerts_days: int = Field(description="0 = keep forever (infinite)")
+    actions_days: int = Field(description="0 = keep forever (infinite)")
+    matches_days: int = Field(description="0 = keep forever (infinite)")
+    discovery_runs_days: int = Field(description="0 = keep forever (infinite)")
+
+
+class RetentionPolicyUpdate(BaseModel):
+    processing_history_days: int = Field(default=90, ge=0, description="0 = keep forever")
+    alerts_days: int = Field(default=30, ge=0, description="0 = keep forever")
+    actions_days: int = Field(default=365, ge=0, description="0 = keep forever")
+    matches_days: int = Field(default=365, ge=0, description="0 = keep forever")
+    discovery_runs_days: int = Field(default=365, ge=0, description="0 = keep forever")
+
+
+def _get_effective_retention(request: Request):
+    """Return the effective RetentionConfig, merging runtime overrides."""
+    from doc_intelligence_hub.core.retention import RetentionConfig, load_retention_config
+
+    cfg = load_retention_config()
+    overrides = getattr(request.app.state, "retention_overrides", None)
+    if overrides:
+        for key in (
+            "processing_history_days", "alerts_days", "actions_days",
+            "matches_days", "discovery_runs_days",
+        ):
+            if key in overrides:
+                setattr(cfg, key, overrides[key])
+    return cfg
+
+
+@router.get("/retention", response_model=RetentionPolicyResponse)
+async def get_retention_policy(request: Request) -> RetentionPolicyResponse:
+    """Return the current data retention policy (config + runtime overrides)."""
+    cfg = _get_effective_retention(request)
+    return RetentionPolicyResponse(
+        processing_history_days=cfg.processing_history_days,
+        alerts_days=cfg.alerts_days,
+        actions_days=cfg.actions_days,
+        matches_days=cfg.matches_days,
+        discovery_runs_days=cfg.discovery_runs_days,
+    )
+
+
+@router.put("/retention")
+async def update_retention_policy(request: Request, body: RetentionPolicyUpdate) -> dict[str, Any]:
+    """Update retention policy (persists for this server session).
+
+    Set any value to ``0`` for infinite retention (never delete).
+    Restart the service to reset to config file / env defaults.
+    """
+    overrides = {
+        "processing_history_days": body.processing_history_days,
+        "alerts_days": body.alerts_days,
+        "actions_days": body.actions_days,
+        "matches_days": body.matches_days,
+        "discovery_runs_days": body.discovery_runs_days,
+    }
+    request.app.state.retention_overrides = overrides
+    logger.info("Retention policy updated: %s", overrides)
+    return {"status": "ok", "retention": overrides}
+
+
+@router.post("/cleanup")
+async def run_cleanup(request: Request, body: CleanupRequest) -> dict[str, Any]:
+    """Trigger a data cleanup across all DI Hub modules.
+
+    With ``dry_run=true`` (default), returns a preview of what *would*
+    be deleted.  Set ``dry_run=false`` to actually delete stale records
+    and VACUUM the databases.
+    """
+    from doc_intelligence_hub.core.retention import run_cleanup as _run_cleanup
+
+    cfg = _get_effective_retention(request)
+    logger.info("Admin cleanup triggered (dry_run=%s)", body.dry_run)
+    result = _run_cleanup(dry_run=body.dry_run, config=cfg)
+    return {"status": "ok", **result.to_dict()}
+
+
+@router.get("/storage")
+async def get_storage_stats() -> dict[str, Any]:
+    """Return storage usage breakdown by database and table.
+
+    Shows file sizes, row counts per table, and module groupings
+    so users can assess which data types are growing and whether
+    retention settings are appropriate.
+    """
+    from doc_intelligence_hub.core.retention import get_storage_stats as _get_storage_stats
+
+    return _get_storage_stats().to_dict()

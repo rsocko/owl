@@ -45,6 +45,28 @@
 # toggles, next run times, last run status, and "Run Now" buttons.
 #
 # ===================================================================
+# Data Retention Cleanup (weekly)
+# ===================================================================
+#
+# Cleanup of stale records runs weekly (Sunday 2 AM by default).
+# It can be triggered via the built-in scheduler, the admin API,
+# or the CLI.
+#
+# --- Admin API ---
+#   POST /api/admin/cleanup        — trigger cleanup (supports dry_run)
+#   GET  /api/admin/retention       — view retention policy
+#   PUT  /api/admin/retention       — update retention policy at runtime
+#   GET  /api/admin/storage         — view storage usage breakdown
+#
+# --- CLI (manual / dry-run) ---
+#   doc-hub cleanup --dry-run      # Preview what would be deleted
+#   doc-hub cleanup                # Actually delete stale records
+#
+# --- Fallback: Crontab ---
+#   0 2 * * 0 ***REMOVED*** -s -X POST http://localhost:8071/api/admin/cleanup \
+#     -H 'Content-Type: application/json' -d '{"dry_run": false}'
+#
+# ===================================================================
 # Fallback: Crontab (external scheduling)
 # ===================================================================
 #
