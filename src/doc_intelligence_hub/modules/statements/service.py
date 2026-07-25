@@ -66,6 +66,7 @@ async def run_recommendations(config_path: str, as_of: date) -> RecommendationRe
         max_recommendations_per_provider=config.analysis.max_recommendations_per_provider,
     )
     _save_recommendations_to_database(config.runtime.database_path, result)
+    _emit_recommendation_alerts(result)
     return result
 
 
@@ -137,3 +138,23 @@ def _save_recommendations_to_database(database_path: str, result: Recommendation
         db.save_recommendations(result)
     finally:
         db.close()
+
+
+def _emit_recommendation_alerts(result: RecommendationResult) -> None:
+    """Emit unified alerts from statement recommendations."""
+    try:
+        from doc_intelligence_hub.core.alerts import emit_statement_alerts
+
+        recs = [
+            {
+                "provider_name": r.provider_name,
+                "provider_key": r.provider_key,
+                "status": r.status,
+                "days_late": r.days_late,
+                "expected_date": r.expected_date.isoformat(),
+            }
+            for r in result.recommendations
+        ]
+        emit_statement_alerts(recs)
+    except Exception:
+        pass  # Alert emission is best-effort

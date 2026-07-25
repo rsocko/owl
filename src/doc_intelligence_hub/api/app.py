@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from doc_intelligence_hub.api.routers import action_queue, admin, eob, mc_connector, statements, stats, system
+from doc_intelligence_hub.api.routers import action_queue, admin, alerts, eob, mc_connector, statements, stats, system
 from doc_intelligence_hub.core.llm import get_llm_settings, validate_model_availability
 from doc_intelligence_hub.core.logging_config import configure_logging
 from doc_intelligence_hub.modules.statements.api import _STATIC_DIR as _STATEMENTS_STATIC_DIR
@@ -109,6 +109,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
             {"name": "statement-tracker", "description": "Statement discovery, recommendations, and provider overrides."},
             {"name": "eob-matching", "description": "EOB classification, extraction, matching, and Paperless linking."},
             {"name": "action-queue", "description": "Action Queue connectivity, dry-runs, and pipeline status."},
+            {"name": "alerts", "description": "Unified alerts feed across all DI modules."},
             {"name": "admin", "description": "Admin configuration: scoring weights, schedules, and debugging."},
             {"name": "stats", "description": "Aggregate statistics across all DI modules for MC integration."},
         ],
@@ -139,6 +140,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(statements.router, prefix="/api", include_in_schema=False)
     app.include_router(eob.router)
     app.include_router(action_queue.router)
+    app.include_router(alerts.router)
     app.include_router(admin.router)
     app.include_router(stats.router)
     app.include_router(mc_connector.router)
@@ -200,6 +202,21 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
             )
         else:
             logger.info("✓ LLM model '%s' confirmed available via gateway.", llm_settings.model)
+
+    @app.on_event("startup")
+    async def _init_alerts_db() -> None:
+        """Initialize the unified alerts database and run retention cleanup."""
+        import logging
+
+        from doc_intelligence_hub.core.alerts import cleanup_old_alerts, init_db as alerts_init_db
+
+        logger = logging.getLogger("doc_intelligence_hub.startup")
+        try:
+            alerts_init_db()
+            resolved = cleanup_old_alerts(days=30)
+            logger.info("✓ Alerts DB initialized. Auto-resolved %d stale alerts.", resolved)
+        except Exception as exc:
+            logger.warning("⚠️  Could not initialize alerts DB: %s", exc)
 
     return app
 
