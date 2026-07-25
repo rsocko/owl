@@ -394,14 +394,14 @@ class PaperlessClient:
         self,
         *,
         on_progress: Optional[ProgressCallback] = None,
-    ) -> tuple[dict[int, str], dict[int, str]]:
-        """Fetch all correspondents and tags as {id: name} mappings.
+    ) -> tuple[dict[int, str], dict[int, str], dict[int, str]]:
+        """Fetch all correspondents, tags, and document types as {id: name} mappings.
 
         Useful for enriching document records with human-readable names.
         """
         client = self._get_client()
         if on_progress:
-            await on_progress("metadata", "Loading correspondents and tags...", 0, 0)
+            await on_progress("metadata", "Loading correspondents, tags, and document types...", 0, 0)
 
         correspondents: dict[int, str] = {}
         page = 1
@@ -423,7 +423,17 @@ class PaperlessClient:
                 break
             page += 1
 
-        return correspondents, tags
+        document_types: dict[int, str] = {}
+        page = 1
+        while True:
+            data = await self._safe_list(client, "/api/document_types/", page=page)
+            for item in data.get("results", []):
+                document_types[int(item["id"])] = item["name"]
+            if not data.get("next"):
+                break
+            page += 1
+
+        return correspondents, tags, document_types
 
     # ------------------------------------------------------------------
     # Internal helpers
