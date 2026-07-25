@@ -517,7 +517,7 @@ export default function ActionQueue() {
                           </div>
                           <iframe
                             className="aq-pdf-embed"
-                            src={endpoints.documents.preview(String(selectedAction.document_id))}
+                            src={endpoints.documents.download(String(selectedAction.document_id))}
                             title="Document PDF preview"
                           />
                         </div>
