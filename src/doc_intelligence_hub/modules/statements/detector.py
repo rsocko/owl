@@ -157,8 +157,16 @@ def _is_statement_like(document: DocumentRecord, config: AnalysisConfig) -> bool
     lowered_tags = {tag.lower() for tag in document.tags}
     if lowered_tags.intersection({tag.lower() for tag in config.allowed_tags}):
         return True
-    if document.document_type and any(keyword in document.document_type.lower() for keyword in ("statement", "bill", "invoice", "eob")):
-        return True
+    # Document type matching: use configured mapping if available, otherwise keyword heuristics
+    if document.document_type:
+        if config.enabled_document_type_names is not None:
+            # Explicit mapping configured — match against enabled type names
+            if document.document_type in config.enabled_document_type_names:
+                return True
+        else:
+            # Keyword fallback when no mapping is configured
+            if any(keyword in document.document_type.lower() for keyword in ("statement", "bill", "invoice", "eob")):
+                return True
     normalized = normalize_title(document.title)
     return any(keyword in normalized for keyword in ("statement", "bill", "invoice", "eob", "explanation of benefits"))
 
