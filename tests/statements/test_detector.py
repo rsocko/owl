@@ -241,6 +241,52 @@ def test_debug_discovery_rejects_sparse_long_running_groups() -> None:
     assert result.groups[0].reason == "coverage_not_supported"
 
 
+def test_discover_providers_with_document_type_mapping_does_not_suppress_keyword_matches() -> None:
+    """Regression test: document type mapping should expand matches, never suppress keyword heuristics.
+
+    When a mapping is saved but empty (all types disabled), documents whose
+    document_type matches keywords like 'Statement' must still be discovered.
+    """
+    config = load_config("config/config.fixture.yaml")
+    documents = [
+        DocumentRecord(
+            id=i,
+            title=f"Chase Visa {date(2025, month, 15).strftime('%B %Y')}",
+            correspondent_id=10,
+            correspondent_name="Chase Visa",
+            document_type="Statement",
+            created=date(2025, month, 15),
+            tags=["financial"],  # not in allowed_tags
+        )
+        for i, month in enumerate(range(1, 7), start=1)
+    ]
+
+    # Empty mapping — must NOT block keyword-based document_type matching
+    config.analysis.enabled_document_type_names = set()
+    result = discover_providers(documents, config.analysis)
+    assert len(result.providers) == 1, f"Expected 1 provider, got {len(result.providers)}"
+    assert result.providers[0].provider_name == "Chase Visa"
+
+    # Mapping with a custom type should expand discovery to include it
+    custom_docs = documents + [
+        DocumentRecord(
+            id=100 + i,
+            title=f"Custom Report {date(2025, month, 15).strftime('%B %Y')}",
+            correspondent_id=20,
+            correspondent_name="Custom Co",
+            document_type="Financial Report",
+            created=date(2025, month, 15),
+            tags=["financial"],
+        )
+        for i, month in enumerate(range(1, 7), start=1)
+    ]
+    config.analysis.enabled_document_type_names = {"Financial Report"}
+    result = discover_providers(custom_docs, config.analysis)
+    provider_names = {p.provider_name for p in result.providers}
+    assert "Chase Visa" in provider_names, "Keyword-matched provider must still be found"
+    assert "Custom Co" in provider_names, "Mapping-matched provider must be found"
+
+
 def test_validate_source_config_requires_token_for_paperless(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PAPERLESS_API_TOKEN", raising=False)
     config = load_config("config/config.paperless.example.yaml")
