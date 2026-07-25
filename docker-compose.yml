@@ -58,7 +58,7 @@ services:
     image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
     container_name: doc-intelligence-eob-matching
     restart: "no"
-    entrypoint: ["eob-match"]
+    entrypoint: ["/docker-entrypoint.sh", "eob-match"]
     command: ["run", "--limit", "200", "--verbose"]
     environment:
       PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
@@ -83,7 +83,7 @@ services:
     image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
     container_name: doc-intelligence-action-queue
     restart: "no"
-    entrypoint: ["paq"]
+    entrypoint: ["/docker-entrypoint.sh", "paq"]
     command: ["run", "--limit", "20"]
     environment:
       PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}

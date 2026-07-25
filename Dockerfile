@@ -45,20 +45,22 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install the pre-built wheel (no build tools needed in runtime)
+# Install the pre-built wheel and gosu for privilege drop
 COPY --from=builder /build/dist/*.whl /tmp/
-RUN pip install --no-cache-dir /tmp/*.whl && rm -rf /tmp/*.whl
+RUN pip install --no-cache-dir /tmp/*.whl && rm -rf /tmp/*.whl && \
+    apt-get update && apt-get install -y --no-install-recommends gosu && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy runtime config
+# Copy runtime config and entrypoint
 COPY config/config.docker.yaml ./config/config.docker.yaml
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
 # Create non-root user and data directory
 RUN groupadd --gid 1000 appuser && \
     useradd --uid 1000 --gid appuser --shell /bin/false --create-home appuser && \
     mkdir -p /app/data && \
     chown -R appuser:appuser /app
-
-USER appuser
 
 EXPOSE 8001
 
@@ -71,4 +73,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 #   eob-match run --limit 100
 #   paq run --dry-run
 ENV STATEMENT_TRACKER_CONFIG=/app/config/config.docker.yaml
-ENTRYPOINT ["doc-hub-serve"]
+
+# Entrypoint runs as root, fixes data volume permissions, then drops to appuser
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["doc-hub-serve"]
