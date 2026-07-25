@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Badge, Button, Card, EmptyState, ErrorState, LoadingState, PageHeader, Toast } from '../components/ui';
+import { Badge, Button, Card, EmptyState, ErrorState, LoadingState, PageHeader, SkeletonLoader, Toast } from '../components/ui';
 import { endpoints } from '../lib/api';
 import '../styles/statement-series-detail.css';
 
@@ -234,7 +234,7 @@ export default function StatementSeriesDetail() {
         }
       />
 
-      {loading ? <LoadingState label="Loading statement series…" /> : null}
+      {loading ? <SkeletonLoader variant="cards" /> : null}
       {!loading && error ? <ErrorState message={error} onRetry={() => void loadDetail()} /> : null}
       {!loading && !error ? (
         <>

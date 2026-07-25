@@ -8,6 +8,7 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
+  SkeletonLoader,
   Toast,
 } from '../components/ui';
 import { endpoints } from '../lib/api';
@@ -218,7 +219,7 @@ export default function ManualMatchSearch() {
       />
 
       {loading ? (
-        <LoadingState label="Loading candidate matches…" />
+        <SkeletonLoader variant="table" rows={6} />
       ) : error ? (
         <ErrorState message={error} onRetry={() => window.location.reload()} />
       ) : (

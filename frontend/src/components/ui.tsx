@@ -168,6 +168,76 @@ export function LoadingState({ label = 'Loading…' }: { label?: string }) {
   );
 }
 
+/**
+ * Skeleton UI shimmer block. Use `variant` to match the page layout being loaded.
+ * - "stat-grid": 4 stat-card placeholders
+ * - "cards": 2 card placeholders with content lines
+ * - "table": a table header + rows
+ * - "default": generic content block
+ */
+export function SkeletonLoader({ variant = 'default', rows = 5 }: { variant?: 'stat-grid' | 'cards' | 'table' | 'default'; rows?: number }) {
+  if (variant === 'stat-grid') {
+    return (
+      <div className="skeleton-grid stat-grid">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="skeleton-stat-card stat-card">
+            <div className="skeleton-line skeleton-line-sm" style={{ width: '60%' }} />
+            <div className="skeleton-line skeleton-line-lg" style={{ width: '40%' }} />
+            <div className="skeleton-line skeleton-line-sm" style={{ width: '75%' }} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (variant === 'cards') {
+    return (
+      <div className="skeleton-cards">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <div key={i} className="skeleton-card card">
+            <div className="card-header">
+              <div className="skeleton-line skeleton-line-sm" style={{ width: '35%' }} />
+            </div>
+            <div className="card-body">
+              <div className="skeleton-line" style={{ width: '90%' }} />
+              <div className="skeleton-line" style={{ width: '70%' }} />
+              <div className="skeleton-line" style={{ width: '50%' }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (variant === 'table') {
+    return (
+      <div className="skeleton-table">
+        <div className="skeleton-table-header">
+          <div className="skeleton-line skeleton-line-sm" style={{ width: '20%' }} />
+          <div className="skeleton-line skeleton-line-sm" style={{ width: '25%' }} />
+          <div className="skeleton-line skeleton-line-sm" style={{ width: '15%' }} />
+          <div className="skeleton-line skeleton-line-sm" style={{ width: '20%' }} />
+        </div>
+        {Array.from({ length: rows }).map((_, i) => (
+          <div key={i} className="skeleton-table-row">
+            <div className="skeleton-line" style={{ width: `${60 + (i % 3) * 10}%` }} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // default
+  return (
+    <div className="skeleton-default">
+      <div className="skeleton-line skeleton-line-lg" style={{ width: '45%' }} />
+      <div className="skeleton-line" style={{ width: '80%' }} />
+      <div className="skeleton-line" style={{ width: '65%' }} />
+      <div className="skeleton-line" style={{ width: '72%' }} />
+    </div>
+  );
+}
+
 export function EmptyState({ icon = '📭', title, desc }: { icon?: string; title: ReactNode; desc?: ReactNode }) {
   return (
     <div className="empty-state">

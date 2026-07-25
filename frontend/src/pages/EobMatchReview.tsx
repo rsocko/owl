@@ -9,6 +9,7 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
+  SkeletonLoader,
   Toast,
   confidenceTone,
 } from '../components/ui';
@@ -209,7 +210,7 @@ export default function EobMatchReview() {
     return (
       <>
         <PageHeader title="Match review" desc="Inspect the candidate pair and decide whether it should be confirmed." />
-        <LoadingState label="Loading match review…" />
+        <SkeletonLoader variant="cards" />
       </>
     );
   }

@@ -10,6 +10,7 @@ import {
   FilterPills,
   LoadingState,
   PageHeader,
+  SkeletonLoader,
   StatCard,
   StatGrid,
 } from '../components/ui';
@@ -126,7 +127,7 @@ export default function EobUnmatched() {
     return (
       <>
         <PageHeader title="Unmatched EOBs" desc="EOB documents that do not yet have a confirmed bill match." />
-        <LoadingState label="Loading unmatched EOBs…" />
+        <SkeletonLoader variant="table" rows={6} />
       </>
     );
   }

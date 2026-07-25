@@ -9,6 +9,7 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
+  SkeletonLoader,
   Tabs,
   Toast,
 } from '../components/ui';
@@ -413,7 +414,7 @@ export default function TriageQueue() {
       />
 
       {loading ? (
-        <LoadingState label="Loading triage queue…" />
+        <SkeletonLoader variant="table" rows={8} />
       ) : error ? (
         <ErrorState message={error} onRetry={() => void loadData()} />
       ) : (

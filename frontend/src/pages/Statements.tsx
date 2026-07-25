@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Badge, Button, Card, EmptyState, ErrorState, LoadingState, PageHeader, StatCard, StatGrid, Toast } from '../components/ui';
+import { Badge, Button, Card, EmptyState, ErrorState, LoadingState, PageHeader, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
 import { endpoints } from '../lib/api';
 import '../styles/statements.css';
 
@@ -121,7 +121,7 @@ export default function Statements() {
 
       <div className="section" style={{ marginTop: 18 }}>
         <Card title="Missing statements" actions={<span className="text-muted">Click a row to open the series detail view.</span>}>
-          {loading ? <LoadingState label="Loading missing statements…" /> : null}
+          {loading ? <SkeletonLoader variant="table" /> : null}
           {!loading && error ? <ErrorState message={error} onRetry={() => void loadStatements()} /> : null}
           {!loading && !error && rows.length === 0 ? (
             <EmptyState title="No missing statements" desc="Run recommendations to refresh expected periods if you recently ingested new statements." />

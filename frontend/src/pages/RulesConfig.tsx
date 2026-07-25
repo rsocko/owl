@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, ErrorState, LoadingState, PageHeader, StatCard, StatGrid, Toast } from '../components/ui';
+import { Badge, Button, Card, ErrorState, LoadingState, PageHeader, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
 import { endpoints } from '../lib/api';
 
 type WeightsMap = Record<string, number>;
@@ -149,7 +149,7 @@ export default function RulesConfig() {
       {toast && <Toast message={toast.message} tone={toast.tone} />}
 
       {loading ? (
-        <LoadingState label="Loading scoring weights…" />
+        <><SkeletonLoader variant="stat-grid" /><div className="section"><SkeletonLoader variant="cards" /></div></>
       ) : error ? (
         <ErrorState message={error} onRetry={() => void loadWeights()} />
       ) : (
