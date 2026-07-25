@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import signal
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -101,10 +104,64 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     configure_logging()
     settings = settings or HubSettings()
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """Manage startup/shutdown lifecycle."""
+        logger = logging.getLogger("doc_intelligence_hub.lifecycle")
+
+        # --- Startup ---
+        # Validate LLM model availability
+        llm_settings = get_llm_settings()
+        logger.info("LLM config: model=%s base_url=%s", llm_settings.model, llm_settings.base_url)
+
+        result = await validate_model_availability()
+        app.state.llm_model_validation = result
+
+        if result.get("available") is False:
+            logger.warning(
+                "LLM MODEL NOT AVAILABLE: %s — %s",
+                llm_settings.model,
+                result.get("message", "Model not found in gateway"),
+            )
+        elif result.get("available") is None:
+            logger.warning(
+                "Could not verify model availability: %s",
+                result.get("message", "Gateway unreachable"),
+            )
+        else:
+            logger.info("LLM model '%s' confirmed available via gateway.", llm_settings.model)
+
+        # Initialize alerts database
+        try:
+            from doc_intelligence_hub.core.alerts import cleanup_old_alerts, init_db as alerts_init_db
+
+            alerts_init_db()
+            resolved = cleanup_old_alerts(days=30)
+            logger.info("Alerts DB initialized. Auto-resolved %d stale alerts.", resolved)
+        except Exception as exc:
+            logger.warning("Could not initialize alerts DB: %s", exc)
+
+        # Start the built-in job scheduler
+        scheduler: HubScheduler = app.state.scheduler
+        try:
+            scheduler.configure()
+            scheduler.start()
+            logger.info("Built-in scheduler started with %d jobs.", len(scheduler.get_schedules()))
+        except Exception as exc:
+            logger.warning("Could not start scheduler: %s", exc)
+
+        logger.info("Document Intelligence Hub started successfully.")
+
+        yield
+
+        # --- Shutdown ---
+        logger.info("Shutting down Document Intelligence Hub gracefully...")
+        scheduler.shutdown()
+
     app = FastAPI(
         title="Document Intelligence Hub",
         summary="Unified API for statements, EOB matching, and action queue workflows.",
-        version="0.1.0",
+        version="0.2.0",
         openapi_tags=[
             {"name": "system", "description": "Service health, connectivity, and shared Paperless metadata."},
             {"name": "statement-tracker", "description": "Statement discovery, recommendations, and provider overrides."},
@@ -114,6 +171,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
             {"name": "admin", "description": "Admin configuration: scoring weights, schedules, and debugging."},
             {"name": "stats", "description": "Aggregate statistics across all DI modules for MC integration."},
         ],
+        lifespan=lifespan,
     )
 
     app.state.hub_settings = settings
@@ -175,76 +233,23 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
             },
         }
 
-    @app.on_event("startup")
-    async def _validate_llm_on_startup() -> None:
-        """Validate LLM model availability at startup and log warnings."""
-        import logging
-
-        logger = logging.getLogger("doc_intelligence_hub.startup")
-        llm_settings = get_llm_settings()
-        logger.info(
-            "LLM config: model=%s base_url=%s",
-            llm_settings.model,
-            llm_settings.base_url,
-        )
-
-        result = await validate_model_availability()
-        app.state.llm_model_validation = result
-
-        if result.get("available") is False:
-            logger.warning(
-                "⚠️  LLM MODEL NOT AVAILABLE: %s — %s",
-                llm_settings.model,
-                result.get("message", "Model not found in gateway"),
-            )
-        elif result.get("available") is None:
-            logger.warning(
-                "⚠️  Could not verify model availability: %s",
-                result.get("message", "Gateway unreachable"),
-            )
-        else:
-            logger.info("✓ LLM model '%s' confirmed available via gateway.", llm_settings.model)
-
-    @app.on_event("startup")
-    async def _init_alerts_db() -> None:
-        """Initialize the unified alerts database and run retention cleanup."""
-        import logging
-
-        from doc_intelligence_hub.core.alerts import cleanup_old_alerts, init_db as alerts_init_db
-
-        logger = logging.getLogger("doc_intelligence_hub.startup")
-        try:
-            alerts_init_db()
-            resolved = cleanup_old_alerts(days=30)
-            logger.info("✓ Alerts DB initialized. Auto-resolved %d stale alerts.", resolved)
-        except Exception as exc:
-            logger.warning("⚠️  Could not initialize alerts DB: %s", exc)
-
-    @app.on_event("startup")
-    async def _start_scheduler() -> None:
-        """Start the built-in job scheduler."""
-        import logging
-
-        logger = logging.getLogger("doc_intelligence_hub.startup")
-        scheduler: HubScheduler = app.state.scheduler
-        try:
-            scheduler.configure()
-            scheduler.start()
-            logger.info("✓ Built-in scheduler started with %d jobs.", len(scheduler.get_schedules()))
-        except Exception as exc:
-            logger.warning("⚠️  Could not start scheduler: %s", exc)
-
-    @app.on_event("shutdown")
-    async def _stop_scheduler() -> None:
-        """Shut down the built-in job scheduler."""
-        scheduler: HubScheduler = app.state.scheduler
-        scheduler.shutdown()
-
     return app
 
 
 def main() -> None:
+    configure_logging()
+    logger = logging.getLogger("doc_intelligence_hub.main")
     settings = HubSettings()
+
+    # Graceful shutdown: translate SIGTERM (Docker stop) into clean Uvicorn exit
+    def _handle_signal(signum: int, _frame: object) -> None:
+        sig_name = signal.Signals(signum).name
+        logger.info("Received %s, initiating graceful shutdown...", sig_name)
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, _handle_signal)
+
+    logger.info("Starting Document Intelligence Hub on %s:%d", settings.host, settings.port)
     uvicorn.run(create_app(settings), host=settings.host, port=settings.port)
 
 
