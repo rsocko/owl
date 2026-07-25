@@ -112,6 +112,16 @@ export default function EobUnmatched() {
     });
   }, [activeFilter, items]);
 
+  const filterCounts = useMemo(
+    () => ({
+      all: items.length,
+      recent: items.filter((item) => { const age = ageInDays(item); return age !== null && age <= 7; }).length,
+      aging: items.filter((item) => { const age = ageInDays(item); return age !== null && age > 14; }).length,
+      'high-value': items.filter((item) => (item.patient_responsibility ?? item.amount ?? 0) >= 100).length,
+    }),
+    [items],
+  );
+
   const oldestAge = useMemo(() => {
     const ages = items.map(ageInDays).filter((age): age is number => age !== null);
     return ages.length ? Math.max(...ages) : null;
@@ -186,10 +196,10 @@ export default function EobUnmatched() {
               active={activeFilter}
               onChange={(value) => setActiveFilter(value as FilterKey)}
               options={[
-                { key: 'all', label: `All (${items.length})` },
-                { key: 'recent', label: 'Recent ≤ 7d' },
-                { key: 'aging', label: 'Aging > 14d' },
-                { key: 'high-value', label: 'High value ≥ $100' },
+                { key: 'all', label: `All (${filterCounts.all})` },
+                { key: 'recent', label: `Recent ≤ 7d (${filterCounts.recent})` },
+                { key: 'aging', label: `Aging > 14d (${filterCounts.aging})` },
+                { key: 'high-value', label: `High value ≥ $100 (${filterCounts['high-value']})` },
               ]}
             />
             <div className="eob-field-note">

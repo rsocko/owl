@@ -338,10 +338,10 @@ export default function ActionQueue() {
           active={filter}
           onChange={(value) => setFilter(value as ActionFilter)}
           options={[
-            { key: 'pending', label: 'Pending' },
-            { key: 'completed', label: 'Completed' },
-            { key: 'dismissed', label: 'Dismissed' },
-            { key: 'all', label: 'All' },
+            { key: 'pending', label: `Pending (${counts.pending ?? 0})` },
+            { key: 'completed', label: `Completed (${counts.completed ?? 0})` },
+            { key: 'dismissed', label: `Dismissed (${counts.dismissed ?? 0})` },
+            { key: 'all', label: `All (${counts.total ?? 0})` },
           ]}
         />
         <div className="aq-search">
