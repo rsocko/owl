@@ -6,7 +6,22 @@
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Stage 1: builder — install deps, build wheel
+# Stage 1: frontend-build — build the React/Vite UI
+# ---------------------------------------------------------------------------
+FROM node:20-slim AS frontend-build
+
+WORKDIR /frontend
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend ./
+# Override vite.config.ts's outDir (which targets the local repo checkout) so
+# the build lands in a clean, self-contained directory for the next stage.
+RUN npm run build -- --outDir /frontend-dist --emptyOutDir
+
+# ---------------------------------------------------------------------------
+# Stage 2: builder — install deps, build wheel
 # ---------------------------------------------------------------------------
 FROM python:3.12-slim AS builder
 
@@ -21,11 +36,16 @@ RUN pip install --no-cache-dir build
 COPY pyproject.toml README.md ./
 COPY src ./src
 
+# Overlay the freshly-built frontend on top of whatever's committed under
+# api/static/, so the wheel always ships the current frontend build rather
+# than whatever happened to be committed to source control.
+COPY --from=frontend-build /frontend-dist ./src/doc_intelligence_hub/api/static
+
 # Build wheel
 RUN python -m build --wheel --outdir /build/dist
 
 # ---------------------------------------------------------------------------
-# Stage 2: runtime — slim production image
+# Stage 3: runtime — slim production image
 # ---------------------------------------------------------------------------
 FROM python:3.12-slim AS runtime
 

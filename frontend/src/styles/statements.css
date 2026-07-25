@@ -1,0 +1,26 @@
+.statements-table-wrapper {
+  overflow-x: auto;
+}
+
+.statements-table .statements-row {
+  cursor: pointer;
+}
+
+.statements-table .statements-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.statements-provider {
+  font-weight: 700;
+}
+
+.statements-subtle {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.statements-series-key {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}

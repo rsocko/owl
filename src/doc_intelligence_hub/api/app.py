@@ -209,12 +209,32 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     async def index() -> FileResponse:
         return FileResponse(_HUB_STATIC_DIR / "index.html")
 
+    # Built React/Vite assets (hashed JS/CSS bundles). The app itself uses
+    # HashRouter, so no server-side catch-all route is needed for deep links.
+    _assets_dir = _HUB_STATIC_DIR / "assets"
+    if _assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="hub-assets")
+
+    @app.get("/favicon.svg", include_in_schema=False, response_model=None)
+    async def favicon() -> FileResponse | JSONResponse:
+        favicon_path = _HUB_STATIC_DIR / "favicon.svg"
+        if not favicon_path.exists():
+            return JSONResponse(status_code=404, content={"error": {"code": "not_found", "message": "favicon.svg not found"}})
+        return FileResponse(favicon_path)
+
+    @app.get("/icons.svg", include_in_schema=False, response_model=None)
+    async def icons() -> FileResponse | JSONResponse:
+        icons_path = _HUB_STATIC_DIR / "icons.svg"
+        if not icons_path.exists():
+            return JSONResponse(status_code=404, content={"error": {"code": "not_found", "message": "icons.svg not found"}})
+        return FileResponse(icons_path)
+
     # Admin dashboard — redirect to main hub UI (admin features merged into Settings)
     @app.get("/admin", include_in_schema=False)
     @app.get("/admin/", include_in_schema=False)
     @app.get("/admin/{path:path}", include_in_schema=False)
     async def admin_redirect(path: str = "") -> RedirectResponse:
-        return RedirectResponse(url="/#settings", status_code=301)
+        return RedirectResponse(url="/#/settings", status_code=301)
 
     # Legacy statement tracker dashboard at /statements/
     app.mount("/statements", StaticFiles(directory=str(_STATEMENTS_STATIC_DIR), html=True), name="statements-static")

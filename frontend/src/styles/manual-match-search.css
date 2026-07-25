@@ -1,0 +1,140 @@
+.manual-search-shell {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.manual-context-column,
+.manual-results-column {
+  display: grid;
+  gap: 16px;
+}
+
+.manual-context-list,
+.manual-selected-summary,
+.manual-factor-list {
+  display: grid;
+  gap: 10px;
+}
+
+.manual-context-row,
+.manual-factor-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.manual-context-row span,
+.manual-factor-row span {
+  color: var(--text-muted);
+}
+
+.manual-context-note {
+  border: 1px solid var(--warning);
+  background: var(--warning-bg);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 12px;
+  line-height: 1.5;
+  font-size: 0.82rem;
+}
+
+.manual-selected-title {
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.manual-selected-badges,
+.manual-phase-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.manual-phase-banner {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text-muted);
+}
+
+.manual-results-header {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.manual-results-list {
+  display: grid;
+  gap: 12px;
+}
+
+.manual-result-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  padding: 16px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.manual-result-card:hover {
+  border-color: var(--accent);
+}
+
+.manual-result-card.selected {
+  background: var(--selected-bg);
+  border-color: var(--selected-border);
+}
+
+.manual-result-top,
+.manual-result-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.manual-result-title {
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.manual-result-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.manual-result-field {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
+.manual-result-field span {
+  color: var(--text-muted);
+}
+
+.manual-result-footer a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+@media (max-width: 1040px) {
+  .manual-search-shell,
+  .manual-result-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,156 @@
+.action-queue-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.aq-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 18px 0 16px;
+  flex-wrap: wrap;
+}
+
+.aq-search {
+  min-width: 280px;
+  flex: 1;
+  max-width: 440px;
+}
+
+.aq-search input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text);
+}
+
+.aq-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.aq-table-card .card-body {
+  padding: 0;
+}
+
+.aq-side-column {
+  display: grid;
+  gap: 16px;
+}
+
+.aq-link-button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+}
+
+.aq-row-title {
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.aq-row-title.selected,
+.aq-link-button:hover .aq-row-title {
+  color: var(--accent);
+}
+
+.aq-inline-note {
+  font-size: 0.75rem;
+  margin-top: 3px;
+}
+
+.aq-inline-note.success {
+  color: var(--success);
+}
+
+.aq-inline-note.warning {
+  color: var(--warning);
+}
+
+.aq-inline-note.danger {
+  color: var(--danger);
+}
+
+.aq-inline-note.muted {
+  color: var(--text-muted);
+}
+
+.aq-detail-list {
+  display: grid;
+  gap: 16px;
+}
+
+.aq-detail-title {
+  font-size: 1rem;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.aq-badge-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.aq-meta-list {
+  display: grid;
+}
+
+.aq-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.aq-meta-row span:first-child {
+  color: var(--text-muted);
+}
+
+.aq-meta-row span:last-child {
+  text-align: right;
+  font-weight: 600;
+}
+
+.aq-meta-row:last-child {
+  border-bottom: none;
+}
+
+.aq-reasoning {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.aq-preview-link {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+@media (max-width: 980px) {
+  .action-queue-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .aq-search {
+    max-width: none;
+  }
+}
