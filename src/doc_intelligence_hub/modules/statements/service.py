@@ -34,6 +34,7 @@ async def load_documents(config: AppConfig, on_progress=None):
 
 async def run_discovery(config_path: str) -> DiscoveryResult:
     config = load_config(config_path)
+    _inject_document_type_mapping(config)
     documents = await load_documents(config)
     result = discover_providers(documents, config.analysis)
     if config.provider_hints:
@@ -48,12 +49,14 @@ async def run_discovery(config_path: str) -> DiscoveryResult:
 
 async def run_discovery_debug(config_path: str, limit: int) -> DiscoveryDiagnosticResult:
     config = load_config(config_path)
+    _inject_document_type_mapping(config)
     documents = await load_documents(config)
     return debug_discovery(documents, config.analysis, limit=limit)
 
 
 async def run_recommendations(config_path: str, as_of: date) -> RecommendationResult:
     config = load_config(config_path)
+    _inject_document_type_mapping(config)
     documents = await load_documents(config)
     discovery = discover_providers(documents, config.analysis)
     providers = discovery.providers
@@ -116,6 +119,17 @@ def validate_source_config(config: AppConfig) -> None:
         return
 
     raise ValueError(f"Unsupported source mode: {config.source.mode}")
+
+
+def _inject_document_type_mapping(config: AppConfig) -> None:
+    """Load document type mapping from DB and inject into analysis config."""
+    db = Database(config.runtime.database_path)
+    try:
+        enabled_names = db.get_enabled_document_type_names()
+        if enabled_names is not None:
+            config.analysis.enabled_document_type_names = enabled_names
+    finally:
+        db.close()
 
 
 def _write_snapshot(snapshot_path: str, payload: dict) -> None:

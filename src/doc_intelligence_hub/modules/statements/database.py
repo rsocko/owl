@@ -86,6 +86,13 @@ CREATE TABLE IF NOT EXISTS provider_overrides (
     notes TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS document_type_mapping (
+    document_type_id INTEGER PRIMARY KEY,
+    document_type_name TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -333,3 +340,42 @@ class Database:
         conn = self.connect()
         conn.execute("DELETE FROM provider_overrides WHERE provider_key = ?", (provider_key,))
         conn.commit()
+
+    # ----- Document type mapping -----
+
+    def save_document_type_mapping(self, mapping: list[dict]) -> None:
+        """Save document type mapping. Each entry: {id, name, enabled}."""
+        conn = self.connect()
+        conn.execute("DELETE FROM document_type_mapping")
+        for entry in mapping:
+            conn.execute(
+                """INSERT INTO document_type_mapping (document_type_id, document_type_name, enabled, updated_at)
+                VALUES (?, ?, ?, datetime('now'))""",
+                (entry["id"], entry["name"], 1 if entry.get("enabled") else 0),
+            )
+        conn.commit()
+
+    def load_document_type_mapping(self) -> list[dict]:
+        """Load the saved document type mapping."""
+        conn = self.connect()
+        rows = conn.execute(
+            "SELECT document_type_id, document_type_name, enabled FROM document_type_mapping"
+        ).fetchall()
+        return [
+            {"id": row["document_type_id"], "name": row["document_type_name"], "enabled": bool(row["enabled"])}
+            for row in rows
+        ]
+
+    def get_enabled_document_type_names(self) -> set[str] | None:
+        """Return the set of enabled document type names, or None if no mapping configured."""
+        conn = self.connect()
+        rows = conn.execute(
+            "SELECT document_type_name FROM document_type_mapping WHERE enabled = 1"
+        ).fetchall()
+        if not rows:
+            # Check if there's *any* mapping saved (all disabled vs not configured)
+            total = conn.execute("SELECT COUNT(*) FROM document_type_mapping").fetchone()[0]
+            if total == 0:
+                return None  # No mapping configured — use keyword fallback
+            return set()  # Mapping exists but nothing enabled
+        return {row["document_type_name"] for row in rows}

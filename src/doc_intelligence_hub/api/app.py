@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from doc_intelligence_hub.api.routers import action_queue, admin, alerts, eob, mc_connector, statements, stats, system
+from doc_intelligence_hub.api.routers import action_queue, admin, alerts, document_types, eob, mc_connector, statements, stats, system
 from doc_intelligence_hub.core.llm import get_llm_settings, validate_model_availability
 from doc_intelligence_hub.core.logging_config import configure_logging
 from doc_intelligence_hub.core.scheduler import HubScheduler
@@ -202,6 +202,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(action_queue.router)
     app.include_router(alerts.router)
     app.include_router(admin.router)
+    app.include_router(document_types.router)
     app.include_router(stats.router)
     app.include_router(mc_connector.router)
 
