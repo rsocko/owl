@@ -1,16 +1,33 @@
 # Keep Docker build context small and secret-free
+
+# Secrets & environment
 .env
 *.env
 config/*.env*
 config/config.paperless.yaml
+
+# Runtime artifacts
 data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Documentation & non-build assets
 docs/
 mockups/
 examples/
-tests/
 dashboard/
+_category_.json
+
+# Tests
+tests/
+
+# Version control
 .git/
 .gitignore
+
+# Python artifacts
 .venv/
 venv/
 __pycache__/
@@ -18,11 +35,16 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-*.db
-*.sqlite
-*.sqlite3
-*.log
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# OS junk
 .DS_Store
 Thumbs.db
-_category_.json
+
+# Docker files (not needed in build context)
 docker-compose.yml
+docker-compose.*.yml
+.dockerignore
+Dockerfile
