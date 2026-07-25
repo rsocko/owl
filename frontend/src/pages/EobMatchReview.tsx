@@ -35,6 +35,7 @@ interface EobMatch {
   bill_preview_url?: string | null;
   created_at?: string | null;
   confirmed_at?: string | null;
+  flag_reason?: string | null;
 }
 
 interface EobMatchesResponse {
@@ -309,13 +310,15 @@ export default function EobMatchReview() {
         </Card>
 
         <div className={`eob-reason-banner ${weakestFactor && weakestFactor.pct < 70 ? 'danger' : ''}`}>
-          <strong>Why this pair is in review:</strong>{' '}
-          {weakestFactor
+          <strong>⚠️ Why this was flagged:</strong>{' '}
+          {match.flag_reason ?? (weakestFactor
             ? `${weakestFactor.label} scored ${weakestFactor.pct}%, so the matcher could not fully auto-confirm this pair.`
-            : 'This candidate pair needs manual confirmation.'}
-          <span className="eob-banner-note">
-            The current API exposes score factors and document references, but not the extracted field values themselves.
-          </span>
+            : 'This candidate pair needs manual confirmation.')}
+          {!match.flag_reason && (
+            <span className="eob-banner-note">
+              The current API exposes score factors and document references, but not the extracted field values themselves.
+            </span>
+          )}
         </div>
 
         <div className="eob-grid-2">

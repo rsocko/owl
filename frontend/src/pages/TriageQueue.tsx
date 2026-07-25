@@ -36,6 +36,7 @@ interface MatchRecord {
   bill_preview_url?: string | null;
   created_at?: string | null;
   confirmed_at?: string | null;
+  flag_reason?: string | null;
 }
 
 interface MatchesResponse {
@@ -217,7 +218,7 @@ export default function TriageQueue() {
           key: `match-${match.id}`,
           kind: 'eob' as const,
           title: `EOB #${match.eob_document_id ?? '—'} ↔ Bill #${match.bill_document_id ?? '—'}`,
-          reason: `${weakest.label} factor needs review (${weakest.value}%).`,
+          reason: match.flag_reason ?? `${weakest.label} factor needs review (${weakest.value}%).`,
           score,
           priority: priorityForScore(score),
           createdAt: match.created_at,
