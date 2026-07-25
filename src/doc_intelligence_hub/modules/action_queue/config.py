@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     # Timeouts
     llm_timeout_seconds: float = Field(default=60.0)
     pipeline_max_duration_seconds: float = Field(default=300.0)
+    pipeline_fetch_timeout_seconds: float = Field(default=60.0)
 
     @property
     def monitor_tags(self) -> list[str]:

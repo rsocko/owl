@@ -147,3 +147,145 @@ async def test_string_and_int_id_handling(monkeypatch):
     # Keys should be int even when API returns string IDs
     assert correspondents[5] == "StringID"
     assert tags[9] == "string-tag"
+
+
+def _make_client_with_pages(monkeypatch, num_docs: int, page_size: int = 100):
+    """Build a PaperlessClient whose /api/documents/ endpoint is backed by a
+    large, paginated result set — used to test limit/early-stop behavior and
+    to assert on the query params Paperless actually receives.
+    """
+    all_docs = [{"id": i, "title": f"Doc {i}", "tags": [1]} for i in range(1, num_docs + 1)]
+    requests_seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests_seen.append(request)
+        if request.url.path == "/api/tags/":
+            return httpx.Response(
+                200, json={"count": 2, "results": [{"id": 1, "name": "Inbox"}, {"id": 2, "name": "Todo"}], "next": None}
+            )
+        if request.url.path == "/api/documents/":
+            page = int(request.url.params.get("page", "1"))
+            size = int(request.url.params.get("page_size", str(page_size)))
+            start = (page - 1) * size
+            end = start + size
+            page_docs = all_docs[start:end]
+            has_next = end < len(all_docs)
+            return httpx.Response(
+                200,
+                json={
+                    "count": len(all_docs),
+                    "next": "http://x/next" if has_next else None,
+                    "results": page_docs,
+                },
+            )
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    client = PaperlessClient(base_url="https://paperless.test", token="test-token")
+    return client, requests_seen
+
+
+class TestFetchWithLimit:
+    """A `limit` should stop pagination early instead of walking every page."""
+
+    @pytest.mark.asyncio
+    async def test_list_documents_stops_at_limit(self, monkeypatch):
+        client, requests_seen = _make_client_with_pages(monkeypatch, num_docs=500, page_size=100)
+
+        docs = await client.list_documents(tags=["Inbox"], limit=5)
+
+        assert len(docs) == 5
+        # Only /api/tags/ (tag resolution) + a single /api/documents/ page — not
+        # 5 pages worth of requests for a 500-document collection.
+        doc_requests = [r for r in requests_seen if r.url.path == "/api/documents/"]
+        assert len(doc_requests) == 1
+
+    @pytest.mark.asyncio
+    async def test_list_documents_by_tag_ids_single_query_with_limit(self, monkeypatch):
+        client, requests_seen = _make_client_with_pages(monkeypatch, num_docs=500, page_size=100)
+
+        docs = await client.list_documents_by_tag_ids([1, 2], limit=5)
+
+        assert len(docs) == 5
+        doc_requests = [r for r in requests_seen if r.url.path == "/api/documents/"]
+        # A single tags__id__in query — not one request per tag ID.
+        assert len(doc_requests) == 1
+        assert doc_requests[0].url.params.get("tags__id__in") == "1,2"
+
+    @pytest.mark.asyncio
+    async def test_list_documents_without_limit_paginates_all_pages(self, monkeypatch):
+        client, requests_seen = _make_client_with_pages(monkeypatch, num_docs=250, page_size=100)
+
+        docs = await client.list_documents_by_tag_ids([1], page_size=100)
+
+        assert len(docs) == 250
+        doc_requests = [r for r in requests_seen if r.url.path == "/api/documents/"]
+        assert len(doc_requests) == 3
+
+
+class TestServerSideFiltering:
+    """Filters must be sent as Paperless query params, not applied client-side."""
+
+    @pytest.mark.asyncio
+    async def test_tags_use_tags_id_in_param(self, monkeypatch):
+        client, requests_seen = _make_client_with_pages(monkeypatch, num_docs=3, page_size=100)
+
+        await client.list_documents(tags=["Inbox", "Todo"])
+
+        doc_requests = [r for r in requests_seen if r.url.path == "/api/documents/"]
+        assert len(doc_requests) == 1
+        assert doc_requests[0].url.params.get("tags__id__in") == "1,2"
+
+    @pytest.mark.asyncio
+    async def test_tag_name_to_id_lookup_is_cached(self, monkeypatch):
+        client, requests_seen = _make_client_with_pages(monkeypatch, num_docs=3, page_size=100)
+
+        await client.list_documents(tags=["Inbox"])
+        await client.list_documents(tags=["Todo"])
+
+        tag_requests = [r for r in requests_seen if r.url.path == "/api/tags/"]
+        # Tag names rarely change — the second call should reuse the cached mapping.
+        assert len(tag_requests) == 1
+
+
+class TestFetchPerformanceLogging:
+    """_paginate should log fetch duration/page/doc-count metrics."""
+
+    @pytest.mark.asyncio
+    async def test_paginate_logs_metrics(self, monkeypatch):
+        client, _ = _make_client_with_pages(monkeypatch, num_docs=10, page_size=100)
+
+        # Attach a handler directly to the client module's logger rather than
+        # relying on caplog/root propagation — `configure_logging()` (invoked
+        # by the FastAPI app elsewhere in the suite) sets
+        # `doc_intelligence_hub.propagate = False`, which would otherwise
+        # prevent caplog's root-attached handler from ever seeing these records.
+        import logging as _logging
+
+        records: list[_logging.LogRecord] = []
+
+        class _ListHandler(_logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        target_logger = _logging.getLogger("doc_intelligence_hub.core.paperless.client")
+        handler = _ListHandler(level=_logging.INFO)
+        target_logger.addHandler(handler)
+        previous_level = target_logger.level
+        target_logger.setLevel(_logging.INFO)
+        try:
+            await client.list_documents(tags=["Inbox"], limit=5)
+        finally:
+            target_logger.removeHandler(handler)
+            target_logger.setLevel(previous_level)
+
+        messages = [r.getMessage() for r in records]
+        assert any("Paperless fetch complete" in m for m in messages)
+        assert any("stopped_early=True" in m for m in messages)

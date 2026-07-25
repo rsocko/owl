@@ -107,6 +107,7 @@ async def fetch_eob_documents(
         created_after=created_after,
         created_before=created_before,
         page_size=min(limit, 100),
+        limit=limit,
     )
     documents = documents[:limit]
 
