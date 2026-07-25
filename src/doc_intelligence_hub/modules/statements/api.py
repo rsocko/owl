@@ -140,18 +140,12 @@ def create_app(config_path: str) -> FastAPI:
 async def _discovery_event_generator(config_path: str):
     """Generate SSE events for discovery with progress updates."""
     from doc_intelligence_hub.modules.statements.config import load_config
-    from doc_intelligence_hub.modules.statements.service import _save_to_database, _write_snapshot
+    from doc_intelligence_hub.modules.statements.hints import apply_hints
+    from doc_intelligence_hub.modules.statements.models import DiscoveryResult
+    from doc_intelligence_hub.modules.statements.service import _inject_document_type_mapping, _save_to_database, _write_snapshot
 
     config = load_config(config_path)
-
-    async def on_progress(stage, message, current, total):
-        data = json.dumps({"stage": stage, "message": message, "current": current, "total": total})
-        yield f"data: {data}\n\n"
-
-    progress_events = []
-
-    async def collect_progress(stage, message, current, total):
-        progress_events.append({"stage": stage, "message": message, "current": current, "total": total})
+    _inject_document_type_mapping(config)
 
     # We need to yield from inside the generator, so use a queue
     queue: asyncio.Queue = asyncio.Queue()
@@ -165,6 +159,11 @@ async def _discovery_event_generator(config_path: str):
             documents = await load_documents(config, on_progress=send_progress)
             await send_progress("analyzing", "Analyzing patterns...", 0, 0)
             result = discover_providers(documents, config.analysis)
+            if config.provider_hints:
+                result = DiscoveryResult(
+                    analyzed_documents=result.analyzed_documents,
+                    providers=apply_hints(result.providers, documents, config.provider_hints),
+                )
             _write_snapshot(config.runtime.snapshot_path, result.model_dump(mode="json"))
             _save_to_database(config.runtime.database_path, result)
             await queue.put({"stage": "complete", "result": result.model_dump(mode="json")})
@@ -186,9 +185,11 @@ async def _discovery_event_generator(config_path: str):
 async def _recommendations_event_generator(config_path: str, as_of: date):
     """Generate SSE events for recommendations with progress updates."""
     from doc_intelligence_hub.modules.statements.config import load_config
-    from doc_intelligence_hub.modules.statements.service import _save_recommendations_to_database, _save_to_database, _write_snapshot
+    from doc_intelligence_hub.modules.statements.hints import apply_hints
+    from doc_intelligence_hub.modules.statements.service import _inject_document_type_mapping, _save_recommendations_to_database, _save_to_database, _write_snapshot
 
     config = load_config(config_path)
+    _inject_document_type_mapping(config)
 
     queue: asyncio.Queue = asyncio.Queue()
 
@@ -201,9 +202,12 @@ async def _recommendations_event_generator(config_path: str, as_of: date):
             documents = await load_documents(config, on_progress=send_progress)
             await send_progress("analyzing", "Discovering providers...", 0, 0)
             discovery = discover_providers(documents, config.analysis)
+            providers = discovery.providers
+            if config.provider_hints:
+                providers = apply_hints(providers, documents, config.provider_hints)
             await send_progress("recommending", "Calculating recommendations...", 0, 0)
             result = build_recommendations(
-                discovery.providers,
+                providers,
                 as_of,
                 max_inactive_cycles=config.analysis.max_inactive_cycles_for_recommendations,
                 max_recommendations_per_provider=config.analysis.max_recommendations_per_provider,
