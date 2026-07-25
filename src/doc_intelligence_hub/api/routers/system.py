@@ -211,8 +211,8 @@ async def list_available_models() -> dict[str, Any]:
     return await validate_model_availability()
 
 
-@router.get("/documents/{document_id}/preview")
-async def document_preview(request: Request, document_id: int) -> dict[str, Any]:
+@router.get("/documents/{document_id}/metadata")
+async def document_metadata(request: Request, document_id: int) -> dict[str, Any]:
     """Get document metadata and text content for inline preview."""
     client = make_paperless_client(request, timeout=15.0)
     doc = await client.get_document(document_id)

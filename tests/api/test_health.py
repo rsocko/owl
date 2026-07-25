@@ -155,7 +155,7 @@ class TestLLMEndpoints:
 
 
 class TestDocumentPreview:
-    """Tests for GET /api/documents/{id}/preview."""
+    """Tests for GET /api/documents/{id}/metadata."""
 
     def test_document_preview(self, client, mock_paperless):
         mock_paperless.get_document.return_value = {
@@ -168,7 +168,7 @@ class TestDocumentPreview:
         }
         mock_paperless.get_document_content.return_value = "A" * 5000
 
-        resp = client.get("/api/documents/42/preview")
+        resp = client.get("/api/documents/42/metadata")
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == 42

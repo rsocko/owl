@@ -121,7 +121,7 @@ export const endpoints = {
     },
   },
   documents: {
-    preview: (id: string) => `/api/documents/${id}/preview`,
+    preview: (id: string) => `/api/documents/${id}/metadata`,
     download: (id: string) => `/api/documents/${id}/download`,
   },
 };
