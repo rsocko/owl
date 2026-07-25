@@ -160,6 +160,12 @@ function itemBadgeTone(kind: QueueKind) {
   return 'danger' as const;
 }
 
+function priorityBadgeTone(priority: 'high' | 'medium' | 'low') {
+  if (priority === 'high') return 'danger' as const;
+  if (priority === 'medium') return 'warning' as const;
+  return 'muted' as const;
+}
+
 function itemBadgeLabel(kind: QueueKind) {
   if (kind === 'eob') return 'EOB';
   if (kind === 'grouping') return 'GROUPING';
@@ -498,7 +504,7 @@ export default function TriageQueue() {
                         <div className="triage-item-title">{item.title}</div>
                         <div className="triage-item-reason">{item.reason}</div>
                         <div className="triage-item-meta">
-                          <span className={`triage-priority ${item.priority}`}>● {priorityLabels[item.priority]}</span>
+                          <Badge tone={priorityBadgeTone(item.priority)}>{priorityLabels[item.priority]}</Badge>
                           <span>{timeAgo(item.createdAt)}</span>
                         </div>
                       </article>

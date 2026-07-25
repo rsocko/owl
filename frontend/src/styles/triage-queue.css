@@ -177,18 +177,6 @@
   font-size: 0.76rem;
 }
 
-.triage-priority.high {
-  color: var(--danger);
-}
-
-.triage-priority.medium {
-  color: var(--warning);
-}
-
-.triage-priority.low {
-  color: var(--success);
-}
-
 .triage-detail-header {
   display: flex;
   align-items: flex-start;
