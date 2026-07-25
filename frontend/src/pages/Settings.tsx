@@ -98,6 +98,18 @@ type CleanupResult = {
   [key: string]: unknown;
 };
 
+type DocumentTypeEntry = {
+  id: number;
+  name: string;
+  suggested: boolean;
+  enabled: boolean;
+};
+
+type DocumentTypesResponse = {
+  types: DocumentTypeEntry[];
+  has_saved_mapping: boolean;
+};
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Something went wrong.';
 }
@@ -160,6 +172,10 @@ export default function Settings() {
   const [retention, setRetention] = useState<RetentionPolicy>(DEFAULT_RETENTION);
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [cleanupPreview, setCleanupPreview] = useState<CleanupResult | null>(null);
+  const [documentTypes, setDocumentTypes] = useState<DocumentTypeEntry[]>([]);
+  const [documentTypesLoading, setDocumentTypesLoading] = useState(false);
+  const [documentTypesSaving, setDocumentTypesSaving] = useState(false);
+  const [documentTypesHasSaved, setDocumentTypesHasSaved] = useState(false);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -324,6 +340,43 @@ export default function Settings() {
       setCleanupRunning(false);
     }
   };
+
+  const loadDocumentTypes = async () => {
+    setDocumentTypesLoading(true);
+    try {
+      const response = await endpoints.admin.documentTypes() as DocumentTypesResponse;
+      setDocumentTypes(response.types);
+      setDocumentTypesHasSaved(response.has_saved_mapping);
+    } catch (err) {
+      setToast({ message: `Document types: ${getErrorMessage(err)}`, tone: 'error' });
+    } finally {
+      setDocumentTypesLoading(false);
+    }
+  };
+
+  const handleSaveDocumentTypeMapping = async () => {
+    setDocumentTypesSaving(true);
+    try {
+      await endpoints.admin.documentTypeMapping.update({ types: documentTypes });
+      setDocumentTypesHasSaved(true);
+      setToast({ message: 'Document type mapping saved.', tone: 'success' });
+    } catch (err) {
+      setToast({ message: getErrorMessage(err), tone: 'error' });
+    } finally {
+      setDocumentTypesSaving(false);
+    }
+  };
+
+  const handleToggleDocumentType = (id: number) => {
+    setDocumentTypes((current) =>
+      current.map((t) => (t.id === id ? { ...t, enabled: !t.enabled } : t)),
+    );
+  };
+
+  const enabledDocumentTypeCount = useMemo(
+    () => documentTypes.filter((t) => t.enabled).length,
+    [documentTypes],
+  );
 
   return (
     <>
@@ -551,6 +604,82 @@ export default function Settings() {
                   {scheduleSaving ? 'Saving…' : 'Save schedules'}
                 </Button>
               </div>
+            </Card>
+          </div>
+
+          <div className="section">
+            <Card
+              title="Document type mapping"
+              actions={
+                documentTypes.length > 0
+                  ? <Badge tone={documentTypesHasSaved ? 'success' : 'warning'}>{documentTypesHasSaved ? `${enabledDocumentTypeCount} enabled` : 'Not configured'}</Badge>
+                  : undefined
+              }
+            >
+              <div className="text-muted" style={{ fontSize: '0.82rem', marginBottom: 16 }}>
+                Configure which Paperless document types are considered "statement-like" for the discovery pipeline.
+                Types with a <Badge tone="info">suggested</Badge> badge
+                match common statement keywords and are pre-selected when no mapping is saved yet.
+              </div>
+
+              {documentTypes.length === 0 ? (
+                <div className="btn-group">
+                  <Button onClick={() => void loadDocumentTypes()} disabled={documentTypesLoading}>
+                    {documentTypesLoading ? 'Fetching…' : 'Fetch document types from Paperless'}
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <div
+                    style={{
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-sm)',
+                      maxHeight: 320,
+                      overflowY: 'auto',
+                      marginBottom: 16,
+                    }}
+                  >
+                    <table className="data-table" style={{ margin: 0 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ width: 50 }}>Enable</th>
+                          <th>Document type</th>
+                          <th style={{ width: 90 }}>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {documentTypes.map((docType) => (
+                          <tr key={docType.id}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={docType.enabled}
+                                onChange={() => handleToggleDocumentType(docType.id)}
+                                style={{ width: 'auto' }}
+                              />
+                            </td>
+                            <td>{docType.name}</td>
+                            <td>
+                              {docType.suggested && (
+                                <Badge tone="info">suggested</Badge>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="btn-group">
+                    <Button variant="primary" onClick={() => void handleSaveDocumentTypeMapping()} disabled={documentTypesSaving}>
+                      {documentTypesSaving ? 'Saving…' : 'Save mapping'}
+                    </Button>
+                    <Button onClick={() => void loadDocumentTypes()} disabled={documentTypesLoading}>
+                      {documentTypesLoading ? 'Refreshing…' : 'Refresh types'}
+                    </Button>
+                  </div>
+                </>
+              )}
             </Card>
           </div>
 

@@ -114,6 +114,11 @@ export const endpoints = {
     },
     cleanup: (body: unknown) => api.post('/api/admin/cleanup', body),
     storage: () => api.get('/api/admin/storage'),
+    documentTypes: () => api.get('/api/admin/document-types'),
+    documentTypeMapping: {
+      get: () => api.get('/api/admin/document-type-mapping'),
+      update: (body: unknown) => api.put('/api/admin/document-type-mapping', body),
+    },
   },
   documents: {
     preview: (id: string) => `/api/documents/${id}/preview`,
