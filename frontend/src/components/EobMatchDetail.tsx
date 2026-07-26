@@ -18,6 +18,8 @@ import {
   confidenceTone,
 } from './ui';
 import { endpoints } from '../lib/api';
+import ManualMatchModal from './ManualMatchModal';
+import DocumentPreview from './DocumentPreview';
 import '../styles/eob-pages.css';
 
 // ------------------------------------------------------------------
@@ -198,6 +200,7 @@ export default function EobMatchDetail({
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
   const [notes, setNotes] = useState('');
+  const [showManualMatch, setShowManualMatch] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [match, setMatch] = useState<EobMatch | null>(null);
   const [alternatives, setAlternatives] = useState<EobMatch[]>([]);
@@ -354,7 +357,11 @@ export default function EobMatchDetail({
   }, [match, saving, notes, triageItemId, loadMatch, onResolved]);
 
   const handleRelink = useCallback(() => {
-    onRelink?.();
+    if (onRelink) {
+      onRelink();
+    } else {
+      setShowManualMatch(true);
+    }
   }, [onRelink]);
 
   const handleSkip = useCallback(() => {
@@ -365,6 +372,8 @@ export default function EobMatchDetail({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Suppress shortcuts when modal is open or focus is in a form field
+      if (showManualMatch) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       switch (e.key.toLowerCase()) {
         case 'y':
@@ -387,7 +396,7 @@ export default function EobMatchDetail({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleConfirm, handleReject, handleSkip, handleRelink]);
+  }, [handleConfirm, handleReject, handleSkip, handleRelink, showManualMatch]);
 
   // ---- Render ----
 
@@ -446,7 +455,7 @@ export default function EobMatchDetail({
             >
               {saving === 'reject' ? 'Rejecting…' : '✗ Reject (N)'}
             </Button>
-            <Button onClick={handleRelink} disabled={saving !== null || !onRelink} title="Re-link (R)">
+            <Button onClick={handleRelink} disabled={saving !== null} title="Re-link (R)">
               🔗 Re-link (R)
             </Button>
             <Button onClick={handleSkip} disabled={saving !== null} title="Skip (S)">
@@ -622,28 +631,30 @@ export default function EobMatchDetail({
       {/* Document preview thumbnails */}
       <div className="eob-grid-2">
         <Card title="EOB document preview">
-          <div className="eob-preview-placeholder">
-            {match.eob_preview_url ? (
-              <a className="eob-link" href={match.eob_preview_url} target="_blank" rel="noreferrer">
-                <div className="eob-preview-thumb">📄</div>
-                <span>Open EOB in Paperless →</span>
-              </a>
-            ) : (
-              <div className="eob-preview-thumb muted">Preview unavailable</div>
-            )}
-          </div>
+          {match.eob_document_id ? (
+            <DocumentPreview
+              documentId={match.eob_document_id}
+              paperlessUrl={match.eob_preview_url}
+              label="EOB"
+            />
+          ) : (
+            <div className="eob-preview-placeholder">
+              <div className="eob-preview-thumb muted">No EOB document linked</div>
+            </div>
+          )}
         </Card>
         <Card title="Bill document preview">
-          <div className="eob-preview-placeholder">
-            {match.bill_preview_url ? (
-              <a className="eob-link" href={match.bill_preview_url} target="_blank" rel="noreferrer">
-                <div className="eob-preview-thumb">📄</div>
-                <span>Open Bill in Paperless →</span>
-              </a>
-            ) : (
-              <div className="eob-preview-thumb muted">Preview unavailable</div>
-            )}
-          </div>
+          {match.bill_document_id ? (
+            <DocumentPreview
+              documentId={match.bill_document_id}
+              paperlessUrl={match.bill_preview_url}
+              label="Bill"
+            />
+          ) : (
+            <div className="eob-preview-placeholder">
+              <div className="eob-preview-thumb muted">No bill document linked</div>
+            </div>
+          )}
         </Card>
       </div>
 
@@ -755,6 +766,20 @@ export default function EobMatchDetail({
       </div>
 
       {toast ? <Toast message={toast.message} tone={toast.tone} /> : null}
+
+      <ManualMatchModal
+        open={showManualMatch}
+        onClose={() => setShowManualMatch(false)}
+        sourceDocId={match?.eob_document_id ?? undefined}
+        matchId={match?.id ?? undefined}
+        triageItemId={triageItemId}
+        onMatchCreated={() => {
+          setShowManualMatch(false);
+          setToast({ message: 'Manual match created successfully.', tone: 'success' });
+          void loadMatch();
+          onResolved?.();
+        }}
+      />
     </div>
   );
 }

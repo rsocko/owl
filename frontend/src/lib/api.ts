@@ -158,8 +158,12 @@ export const endpoints = {
     test: (id: string, body: unknown) => api.post(`/api/rules/${id}/test`, body),
   },
   documents: {
-    preview: (id: string) => `/api/documents/${id}/metadata`,
-    download: (id: string) => `/api/documents/${id}/download`,
+    metadata: (id: string | number) => api.get(`/api/documents/${id}/metadata`),
+    preview: (id: string | number) => `/api/documents/${id}/metadata`,
+    download: (id: string | number) => `/api/documents/${id}/download`,
+    thumbnailUrl: (id: string | number) => `/api/statements/documents/${id}/thumb`,
+    previewUrl: (id: string | number) => `/api/statements/documents/${id}/preview`,
+    downloadUrl: (id: string | number) => `/api/documents/${id}/download`,
   },
   triage: {
     queue: (params?: string) => api.get(`/api/triage/queue${params ? `?${params}` : ''}`),
@@ -176,6 +180,13 @@ export const endpoints = {
       api.post<{ affected: number }>('/api/triage/queue/bulk-confirm-threshold', body),
     stats: () => api.get('/api/triage/stats'),
     populate: () => api.post('/api/triage/queue/populate'),
+    orphans: {
+      findMatch: (id: string) => api.post(`/api/triage/orphans/${id}/find-match`),
+      defer: (id: string) => api.post(`/api/triage/orphans/${id}/defer`),
+      selfPay: (id: string) => api.post(`/api/triage/orphans/${id}/self-pay`),
+      alreadyPaid: (id: string) => api.post(`/api/triage/orphans/${id}/already-paid`),
+      notMedical: (id: string) => api.post(`/api/triage/orphans/${id}/not-medical`),
+    },
   },
   duplicates: {
     list: (params?: string) => api.get(`/api/duplicates${params ? `?${params}` : ''}`),
