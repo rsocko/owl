@@ -600,13 +600,12 @@ export default function EobMatchReview() {
                         <div className="eob-field-note">
                           {match.confirmed_at ? formatDateTime(match.confirmed_at) : 'Awaiting reviewer action'}
                         </div>
+                        {match.notes && (
+                          <div className="eob-field-note" style={{ marginTop: 4, fontStyle: 'italic' }}>
+                            &ldquo;{match.notes}&rdquo;
+                          </div>
+                        )}
                       </div>
-                    </div>
-                      {match.notes && (
-                        <div className="eob-field-note" style={{ marginTop: 4, fontStyle: 'italic' }}>
-                          &ldquo;{match.notes}&rdquo;
-                        </div>
-                      )}
                     </div>
                   </div>
                 )}
