@@ -9,6 +9,7 @@ import { Badge, Button, Card } from '../ui';
 import { endpoints } from '../../lib/api';
 import { SplitSeriesFlow } from './SplitSeriesFlow';
 import { MergeSeriesFlow } from './MergeSeriesFlow';
+import { SeriesTimeline } from './SeriesTimeline';
 import './statement-grouping.css';
 
 // ------------------------------------------------------------------
@@ -117,7 +118,7 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
       });
       setActiveFlow('none');
       await fetchDetail();
-      // Don't call onResolved — rename doesn't fix the grouping issue
+      onResolved('rename');
     } catch { /* ignore */ } finally {
       setBusy(false);
     }
@@ -132,8 +133,7 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
 
   const handleMergeComplete = async () => {
     setActiveFlow('none');
-    // Don't refetch — the current series was deleted by the merge.
-    // The parent will auto-advance to the next triage item.
+    await fetchDetail();
     onResolved('merge');
   };
 
@@ -150,19 +150,6 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
     if (!detail) return;
     const ids = detail.documents.filter(d => d.account_hint === account).map(d => d.document_id);
     setSelectedDocs(new Set(ids));
-  };
-
-  const handleReassign = async (documentId: string, targetSeriesId: string) => {
-    setBusy(true);
-    try {
-      await endpoints.statements.seriesReassign(seriesId, {
-        document_id: documentId,
-        target_series_id: targetSeriesId,
-      });
-      await fetchDetail();
-    } catch { /* ignore */ } finally {
-      setBusy(false);
-    }
   };
 
   // ---- Loading / Error ----
@@ -314,6 +301,7 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
           series={series}
           documents={documents}
           similarSeries={similar_series}
+          sourceTimeline={timeline}
           onComplete={handleMergeComplete}
           onCancel={() => setActiveFlow('none')}
         />
@@ -321,74 +309,13 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
 
       {/* Timeline visualization */}
       <Card title="📅 Document Timeline">
-        <div className="sg-timeline-container">
-          {/* Legend */}
-          {accounts.length > 0 && (
-            <div className="sg-timeline-legend">
-              {accounts.map(acct => (
-                <span key={acct} className="sg-legend-item">
-                  <span className="sg-legend-dot" style={{ background: accountColorMap[acct] }} />
-                  {acct}
-                </span>
-              ))}
-              <span className="sg-legend-item">
-                <span className="sg-legend-dot sg-legend-gap" />
-                Large gap (&gt;60 days)
-              </span>
-            </div>
-          )}
-
-          {/* Timeline tracks — one row per account, or single row if no accounts */}
-          {accounts.length > 1 ? (
-            accounts.map(acct => {
-              const acctDocs = timeline.filter(t => t.account_hint === acct);
-              return (
-                <div key={acct} className="sg-timeline-row">
-                  <div className="sg-timeline-label">
-                    <span className="sg-timeline-dot" style={{ background: accountColorMap[acct] }} />
-                    {acct}
-                  </div>
-                  <div className="sg-timeline-track">
-                    {acctDocs.map((entry, idx) => (
-                      <div
-                        key={entry.document_id}
-                        className={`sg-timeline-doc${entry.gap_before_days && entry.gap_before_days > 60 ? ' gap' : ''}`}
-                        style={{
-                          left: `${(idx / Math.max(acctDocs.length - 1, 1)) * 90 + 2}%`,
-                          background: entry.gap_before_days && entry.gap_before_days > 60 ? undefined : accountColorMap[acct],
-                        }}
-                        title={`${entry.title || ''}\n${entry.statement_date || ''}`}
-                      >
-                        {entry.period_label?.charAt(0) || entry.statement_date?.slice(5, 7) || '?'}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })
-          ) : (
-            <div className="sg-timeline-row">
-              <div className="sg-timeline-label">All documents</div>
-              <div className="sg-timeline-track">
-                {timeline.map((entry, idx) => (
-                  <div
-                    key={entry.document_id}
-                    className={`sg-timeline-doc${entry.gap_before_days && entry.gap_before_days > 60 ? ' gap' : ''}`}
-                    style={{
-                      left: `${(idx / Math.max(timeline.length - 1, 1)) * 90 + 2}%`,
-                      background: entry.gap_before_days && entry.gap_before_days > 60
-                        ? undefined
-                        : accountColorMap[entry.account_hint || ''] || 'var(--series-a)',
-                    }}
-                    title={`${entry.title || ''}\n${entry.statement_date || ''}`}
-                  >
-                    {entry.period_label?.charAt(0) || entry.statement_date?.slice(5, 7) || '?'}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+        <SeriesTimeline
+          entries={timeline}
+          accounts={accounts}
+          accountColorMap={accountColorMap}
+          selectedDocIds={activeFlow === 'split' ? selectedDocs : undefined}
+          onDocClick={activeFlow === 'split' ? toggleDocSelection : undefined}
+        />
       </Card>
 
       {/* Document list */}
@@ -432,23 +359,6 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
                   <span className="sg-doc-account" style={{ background: `${acctColor}22`, color: acctColor }}>
                     {doc.account_hint}
                   </span>
-                )}
-                {similar_series.length > 0 && activeFlow === 'none' && (
-                  <div className="sg-doc-actions">
-                    <select
-                      className="sg-reassign-select"
-                      value=""
-                      disabled={busy}
-                      onChange={e => {
-                        if (e.target.value) void handleReassign(doc.document_id, e.target.value);
-                      }}
-                    >
-                      <option value="">↗️ Reassign…</option>
-                      {similar_series.map(s => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
-                  </div>
                 )}
               </div>
             );
