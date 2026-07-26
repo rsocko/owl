@@ -190,3 +190,23 @@ async def mc_unmatched_eobs(request: Request) -> list[dict[str, Any]]:
             db.close()
     except Exception:
         return []
+
+
+@router.get("/api/triage/badge-count")
+async def mc_triage_badge_count() -> dict[str, Any]:
+    """Return pending triage count for MC badge display.
+
+    Designed to be polled every 15 minutes by the MC connector.
+    """
+    try:
+        from doc_intelligence_hub.modules.triage.database import get_queue_stats, init_db as triage_init_db
+
+        triage_init_db()
+        stats = get_queue_stats()
+        return {
+            "pending": stats.get("pending", 0),
+            "total": stats.get("total", 0),
+            "by_type": stats.get("by_type", {}),
+        }
+    except Exception:
+        return {"pending": 0, "total": 0, "by_type": {}}

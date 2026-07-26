@@ -57,12 +57,28 @@ class CorrectionEvent(Base):
     __tablename__ = "correction_events"
 
     id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex[:12])
-    event_type = Column(String, nullable=False)
-    target_type = Column(String, nullable=False)
+    event_type = Column(String, nullable=False, index=True)
+    target_type = Column(String, nullable=False, index=True)
     target_id = Column(String, nullable=False)
     payload_json = Column("payload", Text, nullable=False)
+    paperless_synced = Column(Integer, default=0)  # 0=not synced, 1=synced
+    paperless_synced_at = Column(DateTime, nullable=True)
+    undone = Column(Integer, default=0)  # 0=active, 1=undone
+    undone_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     created_by = Column(String, default="user")
+
+
+class NotificationConfig(Base):
+    """Notification configuration for triage alerts and digests."""
+
+    __tablename__ = "notification_config"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    channel = Column(String, nullable=False, unique=True)  # 'email_digest', 'mc_alerts', 'mc_badge'
+    enabled = Column(Integer, default=1)  # 0=disabled, 1=enabled
+    config_json = Column("config", Text, nullable=True)  # channel-specific config (e.g. schedule)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class ExtractionCorrection(Base):
@@ -567,6 +583,326 @@ def list_recent_corrections(
         query = query.order_by(ExtractionCorrection.created_at.desc())
         rows = query.offset(offset).limit(limit).all()
         return [_correction_to_dict(c) for c in rows]
+    finally:
+        session.close()
+
+
+# ------------------------------------------------------------------
+# Dashboard stats helpers
+# ------------------------------------------------------------------
+
+
+def get_dashboard_stats() -> dict[str, Any]:
+    """Aggregate dashboard metrics: key stats, queue breakdown, and activity summary."""
+    from datetime import timedelta
+
+    session = get_session()
+    try:
+        now = datetime.now(UTC)
+        month_ago = now - timedelta(days=30)
+
+        # Pending count
+        pending = session.query(TriageQueueItem).filter(
+            TriageQueueItem.status == "pending"
+        ).count()
+
+        # Triaged this month (resolved items)
+        triaged_this_month = session.query(TriageQueueItem).filter(
+            TriageQueueItem.status == "resolved",
+            TriageQueueItem.resolved_at >= month_ago,
+        ).count()
+
+        # Queue breakdown by type (pending only)
+        type_rows = (
+            session.query(TriageQueueItem.item_type, func.count(TriageQueueItem.id))
+            .filter(TriageQueueItem.status == "pending")
+            .group_by(TriageQueueItem.item_type)
+            .all()
+        )
+        queue_breakdown = [{"type": t, "count": c} for t, c in type_rows]
+
+        # Status breakdown
+        status_rows = (
+            session.query(TriageQueueItem.status, func.count(TriageQueueItem.id))
+            .group_by(TriageQueueItem.status)
+            .all()
+        )
+        by_status = {s: c for s, c in status_rows}
+
+        # Correction events count (for accuracy calculation)
+        total_corrections = session.query(CorrectionEvent).filter(
+            CorrectionEvent.undone == 0,
+        ).count()
+
+        confirmed_corrections = session.query(CorrectionEvent).filter(
+            CorrectionEvent.event_type.in_(["triage_confirm", "triage_bulk_confirm_threshold"]),
+            CorrectionEvent.undone == 0,
+        ).count()
+
+        return {
+            "pending_count": pending,
+            "triaged_this_month": triaged_this_month,
+            "queue_breakdown": queue_breakdown,
+            "by_status": by_status,
+            "total_corrections": total_corrections,
+            "confirmed_corrections": confirmed_corrections,
+        }
+    finally:
+        session.close()
+
+
+def get_activity_feed(limit: int = 20) -> list[dict[str, Any]]:
+    """Get recent correction events for the activity feed."""
+    import json
+
+    session = get_session()
+    try:
+        events = (
+            session.query(CorrectionEvent)
+            .filter(CorrectionEvent.undone == 0)
+            .order_by(CorrectionEvent.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        result = []
+        for e in events:
+            payload = {}
+            if e.payload_json:
+                try:
+                    payload = json.loads(e.payload_json)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            result.append({
+                "id": e.id,
+                "event_type": e.event_type,
+                "target_type": e.target_type,
+                "target_id": e.target_id,
+                "payload": payload,
+                "paperless_synced": bool(e.paperless_synced),
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "created_by": e.created_by,
+            })
+        return result
+    finally:
+        session.close()
+
+
+def get_match_rate_trend(months: int = 6) -> list[dict[str, Any]]:
+    """Calculate match rate trend by month from correction events."""
+    import json
+    from datetime import timedelta
+
+    session = get_session()
+    try:
+        now = datetime.now(UTC)
+        trend = []
+        for i in range(months - 1, -1, -1):
+            month_start = now - timedelta(days=30 * (i + 1))
+            month_end = now - timedelta(days=30 * i)
+
+            total = session.query(CorrectionEvent).filter(
+                CorrectionEvent.created_at >= month_start,
+                CorrectionEvent.created_at < month_end,
+                CorrectionEvent.event_type.in_([
+                    "triage_confirm", "triage_reject",
+                    "triage_bulk_confirm_threshold",
+                ]),
+                CorrectionEvent.undone == 0,
+            ).count()
+
+            confirmed = session.query(CorrectionEvent).filter(
+                CorrectionEvent.created_at >= month_start,
+                CorrectionEvent.created_at < month_end,
+                CorrectionEvent.event_type.in_([
+                    "triage_confirm", "triage_bulk_confirm_threshold",
+                ]),
+                CorrectionEvent.undone == 0,
+            ).count()
+
+            rate = round((confirmed / total * 100) if total > 0 else 0)
+            trend.append({
+                "month": month_start.strftime("%b"),
+                "rate": rate,
+                "confirmed": confirmed,
+                "total": total,
+            })
+        return trend
+    finally:
+        session.close()
+
+
+# ------------------------------------------------------------------
+# Correction history CRUD
+# ------------------------------------------------------------------
+
+
+def list_correction_events(
+    *,
+    limit: int = 50,
+    offset: int = 0,
+    event_type: str | None = None,
+    target_type: str | None = None,
+    include_undone: bool = False,
+) -> list[dict[str, Any]]:
+    """List correction events for the history view."""
+    import json
+
+    session = get_session()
+    try:
+        query = session.query(CorrectionEvent)
+        if not include_undone:
+            query = query.filter(CorrectionEvent.undone == 0)
+        if event_type:
+            query = query.filter(CorrectionEvent.event_type == event_type)
+        if target_type:
+            query = query.filter(CorrectionEvent.target_type == target_type)
+        query = query.order_by(CorrectionEvent.created_at.desc())
+        events = query.offset(offset).limit(limit).all()
+
+        result = []
+        for e in events:
+            payload = {}
+            if e.payload_json:
+                try:
+                    payload = json.loads(e.payload_json)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            result.append({
+                "id": e.id,
+                "event_type": e.event_type,
+                "target_type": e.target_type,
+                "target_id": e.target_id,
+                "payload": payload,
+                "paperless_synced": bool(e.paperless_synced),
+                "paperless_synced_at": e.paperless_synced_at.isoformat() if e.paperless_synced_at else None,
+                "undone": bool(e.undone),
+                "undone_at": e.undone_at.isoformat() if e.undone_at else None,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "created_by": e.created_by,
+            })
+        return result
+    finally:
+        session.close()
+
+
+def undo_correction_event(event_id: str) -> dict[str, Any] | None:
+    """Mark a correction event as undone. Returns the updated event or None."""
+    import json
+
+    session = get_session()
+    try:
+        event = session.query(CorrectionEvent).filter(CorrectionEvent.id == event_id).first()
+        if not event:
+            return None
+
+        event.undone = 1
+        event.undone_at = datetime.now(UTC)
+        session.commit()
+
+        payload = {}
+        if event.payload_json:
+            try:
+                payload = json.loads(event.payload_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        return {
+            "id": event.id,
+            "event_type": event.event_type,
+            "target_type": event.target_type,
+            "target_id": event.target_id,
+            "payload": payload,
+            "undone": True,
+            "undone_at": event.undone_at.isoformat() if event.undone_at else None,
+            "created_at": event.created_at.isoformat() if event.created_at else None,
+        }
+    finally:
+        session.close()
+
+
+def mark_correction_synced(event_id: str) -> bool:
+    """Mark a correction event as synced to Paperless. Returns True if found."""
+    session = get_session()
+    try:
+        event = session.query(CorrectionEvent).filter(CorrectionEvent.id == event_id).first()
+        if not event:
+            return False
+        event.paperless_synced = 1
+        event.paperless_synced_at = datetime.now(UTC)
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
+# ------------------------------------------------------------------
+# Notification config CRUD
+# ------------------------------------------------------------------
+
+
+def get_notification_configs() -> list[dict[str, Any]]:
+    """Get all notification channel configurations."""
+    import json
+
+    session = get_session()
+    try:
+        rows = session.query(NotificationConfig).all()
+        result = []
+        for r in rows:
+            config = {}
+            if r.config_json:
+                try:
+                    config = json.loads(r.config_json)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            result.append({
+                "id": r.id,
+                "channel": r.channel,
+                "enabled": bool(r.enabled),
+                "config": config,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            })
+        return result
+    finally:
+        session.close()
+
+
+def upsert_notification_config(channel: str, *, enabled: bool = True, config: dict | None = None) -> dict[str, Any]:
+    """Create or update a notification channel configuration."""
+    import json
+
+    session = get_session()
+    try:
+        row = session.query(NotificationConfig).filter(NotificationConfig.channel == channel).first()
+        if row:
+            row.enabled = 1 if enabled else 0
+            if config is not None:
+                row.config_json = json.dumps(config)
+            row.updated_at = datetime.now(UTC)
+        else:
+            row = NotificationConfig(
+                channel=channel,
+                enabled=1 if enabled else 0,
+                config_json=json.dumps(config) if config else None,
+            )
+            session.add(row)
+        session.commit()
+        session.refresh(row)
+
+        parsed_config = {}
+        if row.config_json:
+            try:
+                parsed_config = json.loads(row.config_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        return {
+            "id": row.id,
+            "channel": row.channel,
+            "enabled": bool(row.enabled),
+            "config": parsed_config,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
     finally:
         session.close()
 
