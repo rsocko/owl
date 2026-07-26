@@ -130,9 +130,7 @@ class HubScheduler:
 
     def configure(self, schedules: dict[str, dict[str, Any]] | None = None) -> None:
         """Load schedule configs and add/update jobs on the scheduler."""
-        self._schedules = {
-            k: dict(v) for k, v in (schedules or DEFAULT_SCHEDULES).items()
-        }
+        self._schedules = {k: dict(v) for k, v in (schedules or DEFAULT_SCHEDULES).items()}
         for key, config in self._schedules.items():
             self._upsert_job(key, config)
 
@@ -206,12 +204,17 @@ class HubScheduler:
             if status == "ok":
                 logger.info(
                     "✓ Job '%s' completed (HTTP %d) in %s→%s.",
-                    job_key, resp.status_code, started_at, finished_at,
+                    job_key,
+                    resp.status_code,
+                    started_at,
+                    finished_at,
                 )
             else:
                 logger.warning(
                     "⚠ Job '%s' returned HTTP %d: %s",
-                    job_key, resp.status_code, resp.text[:200],
+                    job_key,
+                    resp.status_code,
+                    resp.text[:200],
                 )
 
         except Exception as exc:

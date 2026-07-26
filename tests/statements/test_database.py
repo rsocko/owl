@@ -118,7 +118,9 @@ def test_save_and_load_discovery(tmp_path) -> None:
         assert chase.last_seen == date(2025, 12, 3)
         assert chase.sample_document_ids == [10, 11, 12]
 
-        vanguard = next(p for p in loaded.providers if p.provider_key == "vanguard-investment-statement")
+        vanguard = next(
+            p for p in loaded.providers if p.provider_key == "vanguard-investment-statement"
+        )
         assert vanguard.pattern.frequency == "quarterly"
     finally:
         db.close()
@@ -216,6 +218,7 @@ def test_service_persists_to_database(tmp_path) -> None:
     # Temporarily patch
     config_mod.load_config = patched_load
     import doc_intelligence_hub.modules.statements.service as svc_mod
+
     svc_mod.load_config = patched_load
 
     try:

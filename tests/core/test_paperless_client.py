@@ -21,22 +21,42 @@ def _mock_transport():
                     "count": 2,
                     "next": None,
                     "results": [
-                        {"id": 1, "title": "Doc A", "correspondent": 10, "tags": [1, 2], "created_date": "2026-01-01"},
-                        {"id": 2, "title": "Doc B", "correspondent": 20, "tags": [3], "created_date": "2026-02-01"},
+                        {
+                            "id": 1,
+                            "title": "Doc A",
+                            "correspondent": 10,
+                            "tags": [1, 2],
+                            "created_date": "2026-01-01",
+                        },
+                        {
+                            "id": 2,
+                            "title": "Doc B",
+                            "correspondent": 20,
+                            "tags": [3],
+                            "created_date": "2026-02-01",
+                        },
                     ],
                 },
             )
         if request.url.path == "/api/correspondents/":
             return httpx.Response(
                 200,
-                json={"count": 2, "results": [{"id": 10, "name": "Acme"}, {"id": 20, "name": "Globex"}], "next": None},
+                json={
+                    "count": 2,
+                    "results": [{"id": 10, "name": "Acme"}, {"id": 20, "name": "Globex"}],
+                    "next": None,
+                },
             )
         if request.url.path == "/api/tags/":
             return httpx.Response(
                 200,
                 json={
                     "count": 3,
-                    "results": [{"id": 1, "name": "bills"}, {"id": 2, "name": "monthly"}, {"id": 3, "name": "annual"}],
+                    "results": [
+                        {"id": 1, "name": "bills"},
+                        {"id": 2, "name": "monthly"},
+                        {"id": 3, "name": "annual"},
+                    ],
                     "next": None,
                 },
             )
@@ -50,9 +70,13 @@ def _mock_transport():
                 },
             )
         if request.url.path == "/api/documents/1/":
-            return httpx.Response(200, json={"id": 1, "title": "Doc A", "content": "Hello world", "custom_fields": []})
+            return httpx.Response(
+                200, json={"id": 1, "title": "Doc A", "content": "Hello world", "custom_fields": []}
+            )
         if request.url.path == "/api/custom_fields/":
-            return httpx.Response(200, json={"results": [{"id": 1, "name": "Status", "data_type": "string"}]})
+            return httpx.Response(
+                200, json={"results": [{"id": 1, "name": "Status", "data_type": "string"}]}
+            )
         if request.url.path == "/api/saved_views/":
             return httpx.Response(200, json={"results": [{"id": 1, "name": "Inbox"}]})
         return httpx.Response(404)
@@ -138,9 +162,13 @@ async def test_string_and_int_id_handling(monkeypatch):
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/correspondents/":
-            return httpx.Response(200, json={"count": 1, "results": [{"id": "5", "name": "StringID"}], "next": None})
+            return httpx.Response(
+                200, json={"count": 1, "results": [{"id": "5", "name": "StringID"}], "next": None}
+            )
         if request.url.path == "/api/tags/":
-            return httpx.Response(200, json={"count": 1, "results": [{"id": "9", "name": "string-tag"}], "next": None})
+            return httpx.Response(
+                200, json={"count": 1, "results": [{"id": "9", "name": "string-tag"}], "next": None}
+            )
         if request.url.path == "/api/document_types/":
             return httpx.Response(200, json={"count": 0, "results": [], "next": None})
         return httpx.Response(404)
@@ -173,7 +201,12 @@ def _make_client_with_pages(monkeypatch, num_docs: int, page_size: int = 100):
         requests_seen.append(request)
         if request.url.path == "/api/tags/":
             return httpx.Response(
-                200, json={"count": 2, "results": [{"id": 1, "name": "Inbox"}, {"id": 2, "name": "Todo"}], "next": None}
+                200,
+                json={
+                    "count": 2,
+                    "results": [{"id": 1, "name": "Inbox"}, {"id": 2, "name": "Todo"}],
+                    "next": None,
+                },
             )
         if request.url.path == "/api/documents/":
             page = int(request.url.params.get("page", "1"))
@@ -327,7 +360,9 @@ class TestHttpxTimeoutConfig:
 
     @pytest.mark.asyncio
     async def test_make_client_read_timeout_defaults_to_timeout_param(self):
-        client = PaperlessClient(base_url="https://paperless.test", token="test-token", timeout=45.0)
+        client = PaperlessClient(
+            base_url="https://paperless.test", token="test-token", timeout=45.0
+        )
         async_client = client._make_client()
         try:
             assert async_client.timeout.read == 45.0

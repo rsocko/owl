@@ -16,7 +16,10 @@ from rich.panel import Panel
 from doc_intelligence_hub.core.paperless import PaperlessClient
 from doc_intelligence_hub.modules.eob_matching.classifier import classify_document
 from doc_intelligence_hub.modules.eob_matching.extractor import extract_eob, extract_bill
-from doc_intelligence_hub.modules.eob_matching.llm_extractor import extract_eob_llm, extract_bill_llm
+from doc_intelligence_hub.modules.eob_matching.llm_extractor import (
+    extract_eob_llm,
+    extract_bill_llm,
+)
 from doc_intelligence_hub.modules.eob_matching.matcher import match_documents
 from doc_intelligence_hub.modules.eob_matching.models import DocumentType, MatchConfidence
 
@@ -48,25 +51,67 @@ def cli(ctx, db_url):
 
 @cli.command()
 @click.option("--paperless-url", envvar="PAPERLESS_URL", required=True, help="Paperless-ngx URL")
-@click.option("--paperless-token", envvar="PAPERLESS_API_TOKEN", required=True, help="Paperless API token")
+@click.option(
+    "--paperless-token", envvar="PAPERLESS_API_TOKEN", required=True, help="Paperless API token"
+)
 @click.option("--tag", multiple=True, help="Filter by tag name (can specify multiple)")
 @click.option("--correspondent", type=str, default=None, help="Filter by correspondent name")
 @click.option("--document-type", type=str, default=None, help="Filter by Paperless document type")
-@click.option("--created-after", type=str, default=None, help="Only docs created on/after this date (YYYY-MM-DD)")
-@click.option("--created-before", type=str, default=None, help="Only docs created on/before this date (YYYY-MM-DD)")
+@click.option(
+    "--created-after",
+    type=str,
+    default=None,
+    help="Only docs created on/after this date (YYYY-MM-DD)",
+)
+@click.option(
+    "--created-before",
+    type=str,
+    default=None,
+    help="Only docs created on/before this date (YYYY-MM-DD)",
+)
 @click.option("--limit", type=int, default=50, help="Max documents to process")
 @click.option("--output", type=click.Path(), default=None, help="Save results to JSON file")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed extraction results")
-@click.option("--write-to-paperless", is_flag=True, envvar="WRITE_TO_PAPERLESS",
-              help="Write match results back to Paperless custom fields")
-@click.option("--skip-processed/--no-skip-processed", default=True,
-              help="Skip documents that were successfully extracted in a prior run (default: enabled)")
-@click.option("--use-llm/--no-llm", default=None,
-              help="Use LLM extractor (default: auto-detect from LLM_BASE_URL)")
-@click.option("--since-last-run", is_flag=True, default=False,
-              help="Only process documents created since the last successful run (mutually exclusive with --created-after)")
+@click.option(
+    "--write-to-paperless",
+    is_flag=True,
+    envvar="WRITE_TO_PAPERLESS",
+    help="Write match results back to Paperless custom fields",
+)
+@click.option(
+    "--skip-processed/--no-skip-processed",
+    default=True,
+    help="Skip documents that were successfully extracted in a prior run (default: enabled)",
+)
+@click.option(
+    "--use-llm/--no-llm",
+    default=None,
+    help="Use LLM extractor (default: auto-detect from LLM_BASE_URL)",
+)
+@click.option(
+    "--since-last-run",
+    is_flag=True,
+    default=False,
+    help="Only process documents created since the last successful run (mutually exclusive with --created-after)",
+)
 @click.pass_context
-def run(ctx, paperless_url, paperless_token, tag, correspondent, document_type, created_after, created_before, limit, output, verbose, write_to_paperless, skip_processed, use_llm, since_last_run):
+def run(
+    ctx,
+    paperless_url,
+    paperless_token,
+    tag,
+    correspondent,
+    document_type,
+    created_after,
+    created_before,
+    limit,
+    output,
+    verbose,
+    write_to_paperless,
+    skip_processed,
+    use_llm,
+    since_last_run,
+):
     """Run the full pipeline: fetch → classify → extract → match → store.
 
     Results are persisted to SQLite. Use --write-to-paperless to also
@@ -89,34 +134,41 @@ def run(ctx, paperless_url, paperless_token, tag, correspondent, document_type, 
             get_session as get_db_session,
             last_successful_run,
         )
+
         db = get_db_session()
         try:
             last_run = last_successful_run(db)
             if last_run and last_run.finished_at:
                 created_after = last_run.finished_at.strftime("%Y-%m-%d")
-                console.print(f"  [dim]--since-last-run: using created_after={created_after} "
-                              f"(from run #{last_run.id}, finished {last_run.finished_at.isoformat()})[/dim]")
+                console.print(
+                    f"  [dim]--since-last-run: using created_after={created_after} "
+                    f"(from run #{last_run.id}, finished {last_run.finished_at.isoformat()})[/dim]"
+                )
             else:
-                console.print("  [dim]--since-last-run: no prior successful run found, processing all documents[/dim]")
+                console.print(
+                    "  [dim]--since-last-run: no prior successful run found, processing all documents[/dim]"
+                )
         finally:
             db.close()
 
     try:
-        asyncio.run(_run_pipeline(
-            paperless_url=paperless_url,
-            paperless_token=paperless_token,
-            tags=list(tag) if tag else None,
-            correspondent=correspondent,
-            document_type=document_type,
-            created_after=created_after,
-            created_before=created_before,
-            limit=limit,
-            output_path=output,
-            verbose=verbose,
-            write_to_paperless=write_to_paperless,
-            skip_processed=skip_processed,
-            use_llm=use_llm,
-        ))
+        asyncio.run(
+            _run_pipeline(
+                paperless_url=paperless_url,
+                paperless_token=paperless_token,
+                tags=list(tag) if tag else None,
+                correspondent=correspondent,
+                document_type=document_type,
+                created_after=created_after,
+                created_before=created_before,
+                limit=limit,
+                output_path=output,
+                verbose=verbose,
+                write_to_paperless=write_to_paperless,
+                skip_processed=skip_processed,
+                use_llm=use_llm,
+            )
+        )
     except Exception as exc:
         # Emit failure alert for monitoring
         try:
@@ -141,10 +193,22 @@ def run(ctx, paperless_url, paperless_token, tag, correspondent, document_type, 
 @click.option("--paperless-token", envvar="PAPERLESS_API_TOKEN", required=True)
 @click.option("--tag", multiple=True, help="Filter by tag name")
 @click.option("--document-type", type=str, default=None, help="Filter by Paperless document type")
-@click.option("--created-after", type=str, default=None, help="Only docs created on/after this date (YYYY-MM-DD)")
-@click.option("--created-before", type=str, default=None, help="Only docs created on/before this date (YYYY-MM-DD)")
+@click.option(
+    "--created-after",
+    type=str,
+    default=None,
+    help="Only docs created on/after this date (YYYY-MM-DD)",
+)
+@click.option(
+    "--created-before",
+    type=str,
+    default=None,
+    help="Only docs created on/before this date (YYYY-MM-DD)",
+)
 @click.option("--limit", type=int, default=20, help="Max documents to scan")
-def classify(paperless_url, paperless_token, tag, document_type, created_after, created_before, limit):
+def classify(
+    paperless_url, paperless_token, tag, document_type, created_after, created_before, limit
+):
     """Classify documents as EOB, Bill, or Unknown (read-only).
 
     Fetches documents and shows classification results without modifying anything.
@@ -154,15 +218,17 @@ def classify(paperless_url, paperless_token, tag, document_type, created_after, 
         eob-match classify --created-after 2026-01-01 --limit 50
         eob-match classify --document-type "EOB - Explanation of Benefits" --limit 20
     """
-    asyncio.run(_classify_only(
-        paperless_url=paperless_url,
-        paperless_token=paperless_token,
-        tags=list(tag) if tag else None,
-        document_type=document_type,
-        created_after=created_after,
-        created_before=created_before,
-        limit=limit,
-    ))
+    asyncio.run(
+        _classify_only(
+            paperless_url=paperless_url,
+            paperless_token=paperless_token,
+            tags=list(tag) if tag else None,
+            document_type=document_type,
+            created_after=created_after,
+            created_before=created_before,
+            limit=limit,
+        )
+    )
 
 
 @cli.command()
@@ -254,20 +320,50 @@ def purge_stale(ctx, dry_run):
 
 
 @cli.command()
-@click.option("--models", type=str, required=True,
-              help="Comma-separated model names (e.g. phi3:mini,llama3.1:8b,gpt-4o-mini)")
+@click.option(
+    "--models",
+    type=str,
+    required=True,
+    help="Comma-separated model names (e.g. phi3:mini,llama3.1:8b,gpt-4o-mini)",
+)
 @click.option("--paperless-url", envvar="PAPERLESS_URL", required=True, help="Paperless-ngx URL")
-@click.option("--paperless-token", envvar="PAPERLESS_API_TOKEN", required=True, help="Paperless API token")
+@click.option(
+    "--paperless-token", envvar="PAPERLESS_API_TOKEN", required=True, help="Paperless API token"
+)
 @click.option("--tag", multiple=True, help="Filter by tag name")
 @click.option("--document-type", type=str, default=None, help="Filter by Paperless document type")
-@click.option("--created-after", type=str, default=None, help="Only docs created on/after this date (YYYY-MM-DD)")
-@click.option("--created-before", type=str, default=None, help="Only docs created on/before this date (YYYY-MM-DD)")
+@click.option(
+    "--created-after",
+    type=str,
+    default=None,
+    help="Only docs created on/after this date (YYYY-MM-DD)",
+)
+@click.option(
+    "--created-before",
+    type=str,
+    default=None,
+    help="Only docs created on/before this date (YYYY-MM-DD)",
+)
 @click.option("--limit", type=int, default=5, help="Number of documents to test per model")
 @click.option("--output", type=click.Path(), default=None, help="Save results to JSON file")
-@click.option("--bifrost-url", envvar="LLM_BASE_URL",
-              default="https://service-001.example.invalid/openai/v1",
-              help="Bifrost gateway URL")
-def benchmark(models, paperless_url, paperless_token, tag, document_type, created_after, created_before, limit, output, bifrost_url):
+@click.option(
+    "--bifrost-url",
+    envvar="LLM_BASE_URL",
+    default="https://service-001.example.invalid/openai/v1",
+    help="Bifrost gateway URL",
+)
+def benchmark(
+    models,
+    paperless_url,
+    paperless_token,
+    tag,
+    document_type,
+    created_after,
+    created_before,
+    limit,
+    output,
+    bifrost_url,
+):
     """Benchmark LLM models on EOB extraction for speed and accuracy.
 
     Fetches real EOB documents from Paperless and runs each model against them,
@@ -278,18 +374,20 @@ def benchmark(models, paperless_url, paperless_token, tag, document_type, create
         eob-match benchmark --models gpt-4o,gpt-4o-mini --limit 10
         eob-match benchmark --models phi3:mini,mistral-nemo:latest --output results.json
     """
-    asyncio.run(_run_benchmark(
-        models_str=models,
-        paperless_url=paperless_url,
-        paperless_token=paperless_token,
-        tags=list(tag) if tag else None,
-        document_type=document_type,
-        created_after=created_after,
-        created_before=created_before,
-        limit=limit,
-        output_path=output,
-        bifrost_url=bifrost_url,
-    ))
+    asyncio.run(
+        _run_benchmark(
+            models_str=models,
+            paperless_url=paperless_url,
+            paperless_token=paperless_token,
+            tags=list(tag) if tag else None,
+            document_type=document_type,
+            created_after=created_after,
+            created_before=created_before,
+            limit=limit,
+            output_path=output,
+            bifrost_url=bifrost_url,
+        )
+    )
 
 
 @cli.command()
@@ -305,15 +403,22 @@ def dedup(ctx, dry_run):
     _init_database(ctx.obj.get("db_url"))
 
     from doc_intelligence_hub.modules.eob_matching.database import (
-        EOBRecord, BillRecord, MatchRecord,
+        EOBRecord,
+        BillRecord,
+        MatchRecord,
         get_session as get_db_session,
     )
     from sqlalchemy import func
 
     db = get_db_session()
 
-    console.print(Panel("[bold]EOB Matching — Cross-Run Deduplication[/bold]"
-                        + (" [dim](dry run)[/dim]" if dry_run else ""), style="blue"))
+    console.print(
+        Panel(
+            "[bold]EOB Matching — Cross-Run Deduplication[/bold]"
+            + (" [dim](dry run)[/dim]" if dry_run else ""),
+            style="blue",
+        )
+    )
     console.print()
 
     # --- Deduplicate EOBRecords ---
@@ -384,9 +489,15 @@ def dedup(ctx, dry_run):
     db.close()
 
     action = "Would remove" if dry_run else "Removed"
-    console.print(f"  EOB records:   {action} {eob_removed} duplicate(s) across {len(dup_eobs)} document(s)")
-    console.print(f"  Bill records:  {action} {bill_removed} duplicate(s) across {len(dup_bills)} document(s)")
-    console.print(f"  Match records: {action} {match_removed} duplicate(s) across {len(dup_matches)} pair(s)")
+    console.print(
+        f"  EOB records:   {action} {eob_removed} duplicate(s) across {len(dup_eobs)} document(s)"
+    )
+    console.print(
+        f"  Bill records:  {action} {bill_removed} duplicate(s) across {len(dup_bills)} document(s)"
+    )
+    console.print(
+        f"  Match records: {action} {match_removed} duplicate(s) across {len(dup_matches)} pair(s)"
+    )
 
     total = eob_removed + bill_removed + match_removed
     if total == 0:
@@ -538,7 +649,9 @@ async def _classify_only(
         )
 
     console.print(table)
-    console.print(f"\n  EOBs: {counts['EOB']} | Bills: {counts['BILL']} | Unknown: {counts['UNKNOWN']}")
+    console.print(
+        f"\n  EOBs: {counts['EOB']} | Bills: {counts['BILL']} | Unknown: {counts['UNKNOWN']}"
+    )
 
 
 async def _run_pipeline(
@@ -562,8 +675,15 @@ async def _run_pipeline(
         use_llm = bool(os.environ.get("LLM_BASE_URL"))
 
     from doc_intelligence_hub.modules.eob_matching.database import (
-        MatchingRun, EOBRecord, BillRecord, MatchRecord,
-        get_session as get_db_session, store_run, store_eob, store_bill, store_match,
+        MatchingRun,
+        EOBRecord,
+        BillRecord,
+        MatchRecord,
+        get_session as get_db_session,
+        store_run,
+        store_eob,
+        store_bill,
+        store_match,
     )
 
     client = PaperlessClient(base_url=paperless_url, token=paperless_token)
@@ -576,13 +696,17 @@ async def _run_pipeline(
     )
     store_run(db, run_record)
 
-    extractor_label = "[magenta]LLM extractor[/magenta]" if use_llm else "[dim]regex extractor[/dim]"
-    console.print(Panel(
-        f"[bold]EOB Matching Pipeline[/bold] (run #{run_record.id})"
-        + (" — [green]LIVE mode[/green]" if write_to_paperless else " — [dim]read-only[/dim]")
-        + f" — {extractor_label}",
-        style="blue",
-    ))
+    extractor_label = (
+        "[magenta]LLM extractor[/magenta]" if use_llm else "[dim]regex extractor[/dim]"
+    )
+    console.print(
+        Panel(
+            f"[bold]EOB Matching Pipeline[/bold] (run #{run_record.id})"
+            + (" — [green]LIVE mode[/green]" if write_to_paperless else " — [dim]read-only[/dim]")
+            + f" — {extractor_label}",
+            style="blue",
+        )
+    )
     console.print()
 
     # Step 1: Fetch documents
@@ -620,10 +744,14 @@ async def _run_pipeline(
         else:
             unknown_docs.append(doc)
 
-    console.print(f"  [cyan]EOBs:[/cyan] {len(eob_docs)} | [yellow]Bills:[/yellow] {len(bill_docs)} | [dim]Unknown:[/dim] {len(unknown_docs)}\n")
+    console.print(
+        f"  [cyan]EOBs:[/cyan] {len(eob_docs)} | [yellow]Bills:[/yellow] {len(bill_docs)} | [dim]Unknown:[/dim] {len(unknown_docs)}\n"
+    )
 
     if not eob_docs and not bill_docs:
-        console.print("[yellow]No medical documents classified. Try broader filters or more documents.[/yellow]")
+        console.print(
+            "[yellow]No medical documents classified. Try broader filters or more documents.[/yellow]"
+        )
         run_record.documents_scanned = len(documents)
         run_record.finished_at = datetime.now(UTC)
         db.commit()
@@ -650,72 +778,102 @@ async def _run_pipeline(
         skipped_eobs = classified_eob_count - len(eob_docs)
         skipped_bills = classified_bill_count - len(bill_docs)
         if skipped_eobs or skipped_bills:
-            console.print(f"  [dim]Skipped {skipped_eobs} EOBs and {skipped_bills} bills (already processed)[/dim]")
+            console.print(
+                f"  [dim]Skipped {skipped_eobs} EOBs and {skipped_bills} bills (already processed)[/dim]"
+            )
 
     extracted_eobs = []
     extracted_bills = []
 
     for doc, classification in eob_docs:
         content = doc.get("content", "")
-        extracted = extract_eob_llm(content, document_id=str(doc["id"])) if use_llm else extract_eob(content, document_id=str(doc["id"]))
+        extracted = (
+            extract_eob_llm(content, document_id=str(doc["id"]))
+            if use_llm
+            else extract_eob(content, document_id=str(doc["id"]))
+        )
         extracted_eobs.append(extracted)
 
         # Persist EOB record
-        store_eob(db, EOBRecord(
-            document_id=doc["id"],
-            run_id=run_record.id,
-            title=doc.get("title"),
-            classification_score=classification.confidence_score,
-            insurance_company=extracted.insurance_company,
-            policy_number=extracted.policy_number,
-            patient_name=extracted.patient_name,
-            claim_number=extracted.claim_number,
-            date_of_service=str(extracted.date_of_service) if extracted.date_of_service else None,
-            provider_name=extracted.provider_name,
-            total_billed=extracted.total_billed,
-            total_allowed=extracted.total_allowed,
-            total_plan_pays=extracted.total_plan_pays,
-            total_patient_responsibility=extracted.total_patient_responsibility,
-            services_json=json.dumps([s.model_dump(mode="json") for s in extracted.services]) if extracted.services else None,
-            last_processed_at=datetime.now(UTC),
-        ))
+        store_eob(
+            db,
+            EOBRecord(
+                document_id=doc["id"],
+                run_id=run_record.id,
+                title=doc.get("title"),
+                classification_score=classification.confidence_score,
+                insurance_company=extracted.insurance_company,
+                policy_number=extracted.policy_number,
+                patient_name=extracted.patient_name,
+                claim_number=extracted.claim_number,
+                date_of_service=str(extracted.date_of_service)
+                if extracted.date_of_service
+                else None,
+                provider_name=extracted.provider_name,
+                total_billed=extracted.total_billed,
+                total_allowed=extracted.total_allowed,
+                total_plan_pays=extracted.total_plan_pays,
+                total_patient_responsibility=extracted.total_patient_responsibility,
+                services_json=json.dumps([s.model_dump(mode="json") for s in extracted.services])
+                if extracted.services
+                else None,
+                last_processed_at=datetime.now(UTC),
+            ),
+        )
 
         if verbose:
-            console.print(f"  [cyan]EOB #{doc['id']}[/cyan]: provider={extracted.provider_name or '?'}, "
-                         f"patient={extracted.patient_name or '?'}, "
-                         f"date={extracted.date_of_service or '?'}, "
-                         f"patient_resp=${extracted.total_patient_responsibility or 0:.2f}")
+            console.print(
+                f"  [cyan]EOB #{doc['id']}[/cyan]: provider={extracted.provider_name or '?'}, "
+                f"patient={extracted.patient_name or '?'}, "
+                f"date={extracted.date_of_service or '?'}, "
+                f"patient_resp=${extracted.total_patient_responsibility or 0:.2f}"
+            )
 
     for doc, classification in bill_docs:
         content = doc.get("content", "")
-        extracted = extract_bill_llm(content, document_id=str(doc["id"])) if use_llm else extract_bill(content, document_id=str(doc["id"]))
+        extracted = (
+            extract_bill_llm(content, document_id=str(doc["id"]))
+            if use_llm
+            else extract_bill(content, document_id=str(doc["id"]))
+        )
         extracted_bills.append(extracted)
 
         # Persist Bill record
-        store_bill(db, BillRecord(
-            document_id=doc["id"],
-            run_id=run_record.id,
-            title=doc.get("title"),
-            classification_score=classification.confidence_score,
-            provider_name=extracted.provider_name,
-            patient_name=extracted.patient_name,
-            invoice_number=extracted.invoice_number,
-            date_of_service=str(extracted.date_of_service) if extracted.date_of_service else None,
-            due_date=str(extracted.due_date) if extracted.due_date else None,
-            total_amount=extracted.total_amount,
-            balance_due=extracted.balance_due,
-            payment_status=extracted.payment_status,
-            services_json=json.dumps([s.model_dump(mode="json") for s in extracted.services]) if extracted.services else None,
-            last_processed_at=datetime.now(UTC),
-        ))
+        store_bill(
+            db,
+            BillRecord(
+                document_id=doc["id"],
+                run_id=run_record.id,
+                title=doc.get("title"),
+                classification_score=classification.confidence_score,
+                provider_name=extracted.provider_name,
+                patient_name=extracted.patient_name,
+                invoice_number=extracted.invoice_number,
+                date_of_service=str(extracted.date_of_service)
+                if extracted.date_of_service
+                else None,
+                due_date=str(extracted.due_date) if extracted.due_date else None,
+                total_amount=extracted.total_amount,
+                balance_due=extracted.balance_due,
+                payment_status=extracted.payment_status,
+                services_json=json.dumps([s.model_dump(mode="json") for s in extracted.services])
+                if extracted.services
+                else None,
+                last_processed_at=datetime.now(UTC),
+            ),
+        )
 
         if verbose:
-            console.print(f"  [yellow]Bill #{doc['id']}[/yellow]: provider={extracted.provider_name or '?'}, "
-                         f"patient={extracted.patient_name or '?'}, "
-                         f"date={extracted.date_of_service or '?'}, "
-                         f"balance=${extracted.balance_due or 0:.2f}")
+            console.print(
+                f"  [yellow]Bill #{doc['id']}[/yellow]: provider={extracted.provider_name or '?'}, "
+                f"patient={extracted.patient_name or '?'}, "
+                f"date={extracted.date_of_service or '?'}, "
+                f"balance=${extracted.balance_due or 0:.2f}"
+            )
 
-    console.print(f"  [green]✓[/green] Extracted {len(extracted_eobs)} EOBs, {len(extracted_bills)} bills\n")
+    console.print(
+        f"  [green]✓[/green] Extracted {len(extracted_eobs)} EOBs, {len(extracted_bills)} bills\n"
+    )
 
     # Step 4: Match
     console.print("[bold]Step 4:[/bold] Running matching engine...")
@@ -725,36 +883,47 @@ async def _run_pipeline(
     skipped_matches = 0
     stored_matches = []
     for match in matches:
-        existing = db.query(MatchRecord).filter_by(
-            eob_document_id=int(match.eob_id),
-            bill_document_id=int(match.bill_id),
-            status="confirmed",
-        ).first()
+        existing = (
+            db.query(MatchRecord)
+            .filter_by(
+                eob_document_id=int(match.eob_id),
+                bill_document_id=int(match.bill_id),
+                status="confirmed",
+            )
+            .first()
+        )
         if existing:
             skipped_matches += 1
             continue
 
         stored_matches.append(match)
-        store_match(db, MatchRecord(
-            run_id=run_record.id,
-            eob_document_id=int(match.eob_id),
-            bill_document_id=int(match.bill_id),
-            score=match.score,
-            confidence=match.confidence.value,
-            breakdown_date=match.breakdown.date,
-            breakdown_provider=match.breakdown.provider,
-            breakdown_patient=match.breakdown.patient,
-            breakdown_amount=match.breakdown.amount,
-            breakdown_procedures=match.breakdown.procedures,
-            status="candidate",
-        ))
+        store_match(
+            db,
+            MatchRecord(
+                run_id=run_record.id,
+                eob_document_id=int(match.eob_id),
+                bill_document_id=int(match.bill_id),
+                score=match.score,
+                confidence=match.confidence.value,
+                breakdown_date=match.breakdown.date,
+                breakdown_provider=match.breakdown.provider,
+                breakdown_patient=match.breakdown.patient,
+                breakdown_amount=match.breakdown.amount,
+                breakdown_procedures=match.breakdown.procedures,
+                status="candidate",
+            ),
+        )
 
     if skipped_matches:
-        console.print(f"  [dim]Skipped {skipped_matches} match(es) already confirmed in prior runs[/dim]")
+        console.print(
+            f"  [dim]Skipped {skipped_matches} match(es) already confirmed in prior runs[/dim]"
+        )
 
     if not matches:
         console.print("  [yellow]No matches found.[/yellow]")
-        console.print("  [dim]This could mean documents don't have overlapping providers/dates,[/dim]")
+        console.print(
+            "  [dim]This could mean documents don't have overlapping providers/dates,[/dim]"
+        )
         console.print("  [dim]or extraction didn't capture enough data for matching.[/dim]\n")
     else:
         console.print(f"  [green]✓[/green] Found {len(matches)} match(es)\n")
@@ -811,9 +980,13 @@ async def _run_pipeline(
                     patient_responsibility=patient_resp,
                 )
                 linked += 1
-                console.print(f"  [green]✓[/green] Linked EOB #{match.eob_id} ↔ Bill #{match.bill_id}")
+                console.print(
+                    f"  [green]✓[/green] Linked EOB #{match.eob_id} ↔ Bill #{match.bill_id}"
+                )
             except Exception as e:
-                console.print(f"  [red]✗[/red] Failed to link #{match.eob_id} ↔ #{match.bill_id}: {e}")
+                console.print(
+                    f"  [red]✗[/red] Failed to link #{match.eob_id} ↔ #{match.bill_id}: {e}"
+                )
         console.print(f"  Linked {linked}/{len(stored_matches)} matches in Paperless")
 
     # Step 5: Summary
@@ -836,18 +1009,26 @@ async def _run_pipeline(
     db.commit()
     db.close()
 
-    console.print(Panel(
-        f"[bold]Summary (Run #{run_record.id})[/bold]\n"
-        f"  Documents scanned: {len(documents)}\n"
-        f"  Classified: {classified_eob_count} EOBs, {classified_bill_count} bills, {len(unknown_docs)} unknown\n"
-        f"  Extracted: {len(extracted_eobs)} EOBs, {len(extracted_bills)} bills"
-        + (f" (skipped {skipped_eobs + skipped_bills} already processed)" if skip_processed and (skipped_eobs + skipped_bills) else "") + "\n"
-        f"  Matches: {high} high, {medium} medium, {low} low confidence"
-        + (f" (skipped {skipped_matches} already confirmed)" if skipped_matches else "") + "\n"
-        f"  Unmatched: {unmatched_eobs} EOBs, {unmatched_bills} bills waiting\n"
-        f"  Results persisted to database",
-        style="green" if stored_matches else "yellow",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Summary (Run #{run_record.id})[/bold]\n"
+            f"  Documents scanned: {len(documents)}\n"
+            f"  Classified: {classified_eob_count} EOBs, {classified_bill_count} bills, {len(unknown_docs)} unknown\n"
+            f"  Extracted: {len(extracted_eobs)} EOBs, {len(extracted_bills)} bills"
+            + (
+                f" (skipped {skipped_eobs + skipped_bills} already processed)"
+                if skip_processed and (skipped_eobs + skipped_bills)
+                else ""
+            )
+            + "\n"
+            f"  Matches: {high} high, {medium} medium, {low} low confidence"
+            + (f" (skipped {skipped_matches} already confirmed)" if skipped_matches else "")
+            + "\n"
+            f"  Unmatched: {unmatched_eobs} EOBs, {unmatched_bills} bills waiting\n"
+            f"  Results persisted to database",
+            style="green" if stored_matches else "yellow",
+        )
+    )
 
     # Save output if requested
     if output_path:
@@ -876,8 +1057,16 @@ async def _run_pipeline(
                 }
                 for m in matches
             ],
-            "unmatched_eobs": [e.document_id for e in extracted_eobs if e.document_id not in {m.eob_id for m in matches}],
-            "unmatched_bills": [b.document_id for b in extracted_bills if b.document_id not in {m.bill_id for m in matches}],
+            "unmatched_eobs": [
+                e.document_id
+                for e in extracted_eobs
+                if e.document_id not in {m.eob_id for m in matches}
+            ],
+            "unmatched_bills": [
+                b.document_id
+                for b in extracted_bills
+                if b.document_id not in {m.bill_id for m in matches}
+            ],
         }
         Path(output_path).write_text(json.dumps(output_data, indent=2), encoding="utf-8")
         console.print(f"\n[dim]Results saved to {output_path}[/dim]")
@@ -896,11 +1085,10 @@ async def _run_benchmark(
     bifrost_url: str,
 ):
     """Run model comparison benchmark."""
-    from doc_intelligence_hub.core.llm import get_llm_settings, reset_llm_client, LLMSettings
+    from doc_intelligence_hub.core.llm import reset_llm_client
     from doc_intelligence_hub.modules.eob_matching.benchmark import (
         benchmark_to_json,
         fetch_eob_documents,
-        format_benchmark_table,
         run_benchmark,
     )
 
@@ -958,7 +1146,9 @@ async def _run_benchmark(
 
     for s in summaries:
         cost_str = f"${s.estimated_cost_usd:.6f}" if s.estimated_cost_usd is not None else "free"
-        success_style = "green" if s.success_rate >= 0.8 else "yellow" if s.success_rate >= 0.5 else "red"
+        success_style = (
+            "green" if s.success_rate >= 0.8 else "yellow" if s.success_rate >= 0.5 else "red"
+        )
         table.add_row(
             s.model,
             f"{s.avg_time_seconds:.2f}",

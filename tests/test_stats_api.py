@@ -1,6 +1,6 @@
 """Tests for the /api/stats endpoint — aggregate metrics across DI modules."""
 
-from datetime import UTC, datetime, date, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -54,52 +54,64 @@ def seeded_client(client, tmp_path):
     # Seed action queue
     db = get_aq_session()
     try:
-        db.add(Action(
-            document_id=1,
-            document_title="Electric Bill",
-            action_type="PAY",
-            title="Pay electric bill",
-            summary="Monthly electric bill",
-            urgency="CRITICAL",
-            status="pending",
-            created_at=datetime.now(UTC),
-        ))
-        db.add(Action(
-            document_id=2,
-            document_title="Insurance Card",
-            action_type="FILE",
-            title="File insurance card",
-            summary="File for records",
-            urgency="LOW",
-            status="pending",
-            created_at=datetime.now(UTC),
-        ))
-        db.add(Action(
-            document_id=3,
-            document_title="Old Bill",
-            action_type="PAY",
-            title="Pay old bill",
-            summary="Already paid",
-            urgency="MEDIUM",
-            status="completed",
-            completed_at=datetime.now(UTC) - timedelta(days=5),
-            created_at=datetime.now(UTC) - timedelta(days=10),
-        ))
-        db.add(ProcessingHistory(
-            document_id=1,
-            processed_at=datetime.now(UTC) - timedelta(days=2),
-            success=1,
-        ))
-        db.add(ProcessingHistory(
-            document_id=2,
-            processed_at=datetime.now(UTC) - timedelta(days=1),
-            success=1,
-        ))
-        db.add(ProcessingHistory(
-            document_id=3,
-            processed_at=datetime.now(UTC) - timedelta(days=40),
-            success=1,
-        ))
+        db.add(
+            Action(
+                document_id=1,
+                document_title="Electric Bill",
+                action_type="PAY",
+                title="Pay electric bill",
+                summary="Monthly electric bill",
+                urgency="CRITICAL",
+                status="pending",
+                created_at=datetime.now(UTC),
+            )
+        )
+        db.add(
+            Action(
+                document_id=2,
+                document_title="Insurance Card",
+                action_type="FILE",
+                title="File insurance card",
+                summary="File for records",
+                urgency="LOW",
+                status="pending",
+                created_at=datetime.now(UTC),
+            )
+        )
+        db.add(
+            Action(
+                document_id=3,
+                document_title="Old Bill",
+                action_type="PAY",
+                title="Pay old bill",
+                summary="Already paid",
+                urgency="MEDIUM",
+                status="completed",
+                completed_at=datetime.now(UTC) - timedelta(days=5),
+                created_at=datetime.now(UTC) - timedelta(days=10),
+            )
+        )
+        db.add(
+            ProcessingHistory(
+                document_id=1,
+                processed_at=datetime.now(UTC) - timedelta(days=2),
+                success=1,
+            )
+        )
+        db.add(
+            ProcessingHistory(
+                document_id=2,
+                processed_at=datetime.now(UTC) - timedelta(days=1),
+                success=1,
+            )
+        )
+        db.add(
+            ProcessingHistory(
+                document_id=3,
+                processed_at=datetime.now(UTC) - timedelta(days=40),
+                success=1,
+            )
+        )
         db.commit()
     finally:
         db.close()
@@ -122,36 +134,44 @@ def seeded_client(client, tmp_path):
         eob_db.commit()
         eob_db.refresh(run)
 
-        eob_db.add(EOBRecord(
-            document_id=100,
-            run_id=run.id,
-            title="EOB from UHC",
-            total_patient_responsibility=150.00,
-        ))
-        eob_db.add(EOBRecord(
-            document_id=101,
-            run_id=run.id,
-            title="EOB from Aetna",
-            total_patient_responsibility=75.50,
-        ))
+        eob_db.add(
+            EOBRecord(
+                document_id=100,
+                run_id=run.id,
+                title="EOB from UHC",
+                total_patient_responsibility=150.00,
+            )
+        )
+        eob_db.add(
+            EOBRecord(
+                document_id=101,
+                run_id=run.id,
+                title="EOB from Aetna",
+                total_patient_responsibility=75.50,
+            )
+        )
 
-        eob_db.add(MatchRecord(
-            run_id=run.id,
-            eob_document_id=100,
-            bill_document_id=200,
-            score=0.92,
-            confidence="HIGH",
-            status="confirmed",
-            confirmed_at=datetime(2026, 7, 20, 11, 0, 0, tzinfo=UTC),
-        ))
-        eob_db.add(MatchRecord(
-            run_id=run.id,
-            eob_document_id=101,
-            bill_document_id=201,
-            score=0.65,
-            confidence="MEDIUM",
-            status="candidate",
-        ))
+        eob_db.add(
+            MatchRecord(
+                run_id=run.id,
+                eob_document_id=100,
+                bill_document_id=200,
+                score=0.92,
+                confidence="HIGH",
+                status="confirmed",
+                confirmed_at=datetime(2026, 7, 20, 11, 0, 0, tzinfo=UTC),
+            )
+        )
+        eob_db.add(
+            MatchRecord(
+                run_id=run.id,
+                eob_document_id=101,
+                bill_document_id=201,
+                score=0.65,
+                confidence="MEDIUM",
+                status="candidate",
+            )
+        )
         eob_db.commit()
     finally:
         eob_db.close()

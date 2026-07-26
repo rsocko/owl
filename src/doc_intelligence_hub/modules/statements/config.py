@@ -19,12 +19,14 @@ class SourceConfig(BaseModel):
 
 class ProviderHintGroup(BaseModel):
     """A manually defined sub-group within a correspondent."""
+
     name: str
     title_match: str  # substring match against normalized title
 
 
 class ProviderHint(BaseModel):
     """Hints for how to handle a specific correspondent or provider."""
+
     correspondent: str | None = None
     provider_key: str | None = None
     action: Literal["split", "merge", "rename", "ignore", "define"] = "split"
@@ -89,9 +91,15 @@ def load_config(config_path: str) -> AppConfig:
     config = AppConfig.model_validate(raw)
 
     if config.source.fixture_path:
-        config.source.fixture_path = str(_resolve_path(resolved_config_path.parent, config.source.fixture_path))
-    config.runtime.snapshot_path = str(_resolve_path(resolved_config_path.parent, config.runtime.snapshot_path))
-    config.runtime.database_path = str(_resolve_path(resolved_config_path.parent, config.runtime.database_path))
+        config.source.fixture_path = str(
+            _resolve_path(resolved_config_path.parent, config.source.fixture_path)
+        )
+    config.runtime.snapshot_path = str(
+        _resolve_path(resolved_config_path.parent, config.runtime.snapshot_path)
+    )
+    config.runtime.database_path = str(
+        _resolve_path(resolved_config_path.parent, config.runtime.database_path)
+    )
     return config
 
 

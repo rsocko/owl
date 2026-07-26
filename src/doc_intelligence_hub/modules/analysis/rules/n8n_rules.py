@@ -66,12 +66,16 @@ class N8nWebhookRule(AnalysisRule):
     async def execute(self, context: ContextData) -> RuleExecutionResult:
         webhook_url = self.get_param("webhook_url")
         if not webhook_url:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No webhook_url configured")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No webhook_url configured"
+            )
 
         # SSRF protection
         url_error = _validate_webhook_url(webhook_url)
         if url_error:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error=f"Unsafe webhook URL: {url_error}")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error=f"Unsafe webhook URL: {url_error}"
+            )
 
         timeout = min(self.get_param("timeout", 30), 120)  # Cap at 2 minutes
 
@@ -92,7 +96,8 @@ class N8nWebhookRule(AnalysisRule):
             # Guard against oversized responses
             if len(resp.content) > _MAX_RESPONSE_BYTES:
                 return RuleExecutionResult(
-                    rule_id=self.config.id, success=False,
+                    rule_id=self.config.id,
+                    success=False,
                     error=f"Webhook response too large ({len(resp.content)} bytes)",
                 )
 
@@ -100,10 +105,14 @@ class N8nWebhookRule(AnalysisRule):
             return self._map_response(result_data, context)
 
         except httpx.TimeoutException:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error=f"Webhook timed out after {timeout}s")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error=f"Webhook timed out after {timeout}s"
+            )
         except Exception as exc:
             logger.error("n8n webhook call failed: %s", exc)
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error=f"Webhook call failed: {exc}")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error=f"Webhook call failed: {exc}"
+            )
 
     def _build_payload(self, context: ContextData) -> dict[str, Any]:
         """Build the webhook payload from context and configured payload template."""
@@ -138,10 +147,15 @@ class N8nWebhookRule(AnalysisRule):
         response_mapping = self.get_param("response_mapping", {})
 
         # Allow the webhook to return a structured result directly
-        title = data.get(response_mapping.get("title", "title"), data.get("title", f"n8n result: {self.config.name}"))
+        title = data.get(
+            response_mapping.get("title", "title"),
+            data.get("title", f"n8n result: {self.config.name}"),
+        )
         summary = data.get(response_mapping.get("summary", "summary"), data.get("summary", ""))
         severity_str = data.get(response_mapping.get("severity", "severity"), "info")
-        insight_type_str = data.get(response_mapping.get("insight_type", "insight_type"), "extraction")
+        insight_type_str = data.get(
+            response_mapping.get("insight_type", "insight_type"), "extraction"
+        )
 
         try:
             severity = InsightSeverity(severity_str)
@@ -178,7 +192,8 @@ class CrossReferenceCheck(AnalysisRule):
         webhook_url = self.get_param("webhook_url")
         if not webhook_url:
             return RuleExecutionResult(
-                rule_id=self.config.id, success=False,
+                rule_id=self.config.id,
+                success=False,
                 error="No webhook_url configured for cross-reference check",
             )
 
@@ -186,13 +201,16 @@ class CrossReferenceCheck(AnalysisRule):
         url_error = _validate_webhook_url(webhook_url)
         if url_error:
             return RuleExecutionResult(
-                rule_id=self.config.id, success=False,
+                rule_id=self.config.id,
+                success=False,
                 error=f"Unsafe webhook URL: {url_error}",
             )
 
         doc = context.current_document
         if not doc:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No current document")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No current document"
+            )
 
         timeout = min(self.get_param("timeout", 60), 120)
 
@@ -215,7 +233,8 @@ class CrossReferenceCheck(AnalysisRule):
 
             if resp.status_code >= 400:
                 return RuleExecutionResult(
-                    rule_id=self.config.id, success=False,
+                    rule_id=self.config.id,
+                    success=False,
                     error=f"Cross-reference webhook returned HTTP {resp.status_code}",
                 )
 
@@ -224,7 +243,9 @@ class CrossReferenceCheck(AnalysisRule):
             discrepancies = data.get("discrepancies", [])
 
             if not matches_found and not discrepancies:
-                return RuleExecutionResult(rule_id=self.config.id, success=False, error="No cross-reference results")
+                return RuleExecutionResult(
+                    rule_id=self.config.id, success=False, error="No cross-reference results"
+                )
 
             severity = InsightSeverity.WARNING if discrepancies else InsightSeverity.INFO
 
@@ -233,14 +254,22 @@ class CrossReferenceCheck(AnalysisRule):
                 success=True,
                 insight_type=InsightType.COMPLIANCE,
                 title=f"Cross-reference: {matches_found} match(es), {len(discrepancies)} discrepanc{'y' if len(discrepancies) == 1 else 'ies'}",
-                summary=data.get("summary", f"Found {matches_found} matches across external systems"),
+                summary=data.get(
+                    "summary", f"Found {matches_found} matches across external systems"
+                ),
                 detail=data,
                 suggested_severity=severity,
                 document_ids=[doc["id"]] if "id" in doc else [],
             )
 
         except httpx.TimeoutException:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error=f"Cross-reference timed out after {timeout}s")
+            return RuleExecutionResult(
+                rule_id=self.config.id,
+                success=False,
+                error=f"Cross-reference timed out after {timeout}s",
+            )
         except Exception as exc:
             logger.error("Cross-reference check failed: %s", exc)
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error=f"Cross-reference failed: {exc}")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error=f"Cross-reference failed: {exc}"
+            )

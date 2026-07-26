@@ -10,7 +10,13 @@ import uvicorn
 
 from doc_intelligence_hub.modules.statements.api import create_app
 from doc_intelligence_hub.modules.statements.config import load_config
-from doc_intelligence_hub.modules.statements.service import run_connection_test, run_discovery, run_discovery_debug, run_recommendations, validate_source_config
+from doc_intelligence_hub.modules.statements.service import (
+    run_connection_test,
+    run_discovery,
+    run_discovery_debug,
+    run_recommendations,
+    validate_source_config,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,8 +41,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--config", required=True)
 
     # Data retention cleanup
-    cleanup = subparsers.add_parser("cleanup", help="Run data retention cleanup across all DI modules")
-    cleanup.add_argument("--dry-run", action="store_true", default=False, help="Preview only — don't delete anything")
+    cleanup = subparsers.add_parser(
+        "cleanup", help="Run data retention cleanup across all DI modules"
+    )
+    cleanup.add_argument(
+        "--dry-run", action="store_true", default=False, help="Preview only — don't delete anything"
+    )
     cleanup.add_argument("--config", required=False, help="Path to retention.yaml config file")
 
     return parser
@@ -103,4 +113,3 @@ def main() -> None:
         )
 
     parser.error(f"Unsupported command: {args.command}")
-

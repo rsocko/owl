@@ -44,88 +44,104 @@ def seeded_db(db):
     db.refresh(run)
 
     # Good record — short provider name with real data
-    db.add(EOBRecord(
-        document_id=100,
-        run_id=run.id,
-        provider_name="Dr. Smith",
-        total_billed=150.0,
-        total_allowed=120.0,
-        total_plan_pays=100.0,
-        total_patient_responsibility=20.0,
-    ))
+    db.add(
+        EOBRecord(
+            document_id=100,
+            run_id=run.id,
+            provider_name="Dr. Smith",
+            total_billed=150.0,
+            total_allowed=120.0,
+            total_plan_pays=100.0,
+            total_patient_responsibility=20.0,
+        )
+    )
 
     # Stale record — boilerplate provider (>8 words)
-    db.add(EOBRecord(
-        document_id=101,
-        run_id=run.id,
-        provider_name="The summary below is intended to help you understand",
-        total_billed=0,
-        total_allowed=0,
-        total_plan_pays=0,
-        total_patient_responsibility=0,
-    ))
+    db.add(
+        EOBRecord(
+            document_id=101,
+            run_id=run.id,
+            provider_name="The summary below is intended to help you understand",
+            total_billed=0,
+            total_allowed=0,
+            total_plan_pays=0,
+            total_patient_responsibility=0,
+        )
+    )
 
     # Stale record — contains boilerplate phrase
-    db.add(EOBRecord(
-        document_id=102,
-        run_id=run.id,
-        provider_name="This is not a bill for services",
-        total_billed=0,
-        total_allowed=0,
-        total_plan_pays=0,
-        total_patient_responsibility=0,
-    ))
+    db.add(
+        EOBRecord(
+            document_id=102,
+            run_id=run.id,
+            provider_name="This is not a bill for services",
+            total_billed=0,
+            total_allowed=0,
+            total_plan_pays=0,
+            total_patient_responsibility=0,
+        )
+    )
 
     # Stale record — explanation of benefits phrase
-    db.add(EOBRecord(
-        document_id=103,
-        run_id=run.id,
-        provider_name="Explanation of Benefits statement",
-        total_billed=0,
-        total_allowed=None,
-        total_plan_pays=None,
-        total_patient_responsibility=None,
-    ))
+    db.add(
+        EOBRecord(
+            document_id=103,
+            run_id=run.id,
+            provider_name="Explanation of Benefits statement",
+            total_billed=0,
+            total_allowed=None,
+            total_plan_pays=None,
+            total_patient_responsibility=None,
+        )
+    )
 
     # Good record — short name, has amounts
-    db.add(EOBRecord(
-        document_id=104,
-        run_id=run.id,
-        provider_name="UnitedHealthcare",
-        total_billed=500.0,
-        total_allowed=400.0,
-        total_plan_pays=350.0,
-        total_patient_responsibility=50.0,
-    ))
+    db.add(
+        EOBRecord(
+            document_id=104,
+            run_id=run.id,
+            provider_name="UnitedHealthcare",
+            total_billed=500.0,
+            total_allowed=400.0,
+            total_plan_pays=350.0,
+            total_patient_responsibility=50.0,
+        )
+    )
 
     # Stale record — all amounts zero with >4 word provider
-    db.add(EOBRecord(
-        document_id=105,
-        run_id=run.id,
-        provider_name="Some random text that is long enough",
-        total_billed=0,
-        total_allowed=0,
-        total_plan_pays=0,
-        total_patient_responsibility=0,
-    ))
+    db.add(
+        EOBRecord(
+            document_id=105,
+            run_id=run.id,
+            provider_name="Some random text that is long enough",
+            total_billed=0,
+            total_allowed=0,
+            total_plan_pays=0,
+            total_patient_responsibility=0,
+        )
+    )
 
     # Add a match referencing a stale EOB
-    db.add(MatchRecord(
-        run_id=run.id,
-        eob_document_id=101,
-        bill_document_id=200,
-        score=0.5,
-        confidence="LOW",
-    ))
+    db.add(
+        MatchRecord(
+            run_id=run.id,
+            eob_document_id=101,
+            bill_document_id=200,
+            score=0.5,
+            confidence="LOW",
+        )
+    )
 
     # Add a match referencing a good EOB
-    db.add(MatchRecord(
-        run_id=run.id,
-        eob_document_id=100,
-        bill_document_id=201,
-        score=0.9,
-        confidence="HIGH",
-    ))
+    db.add(
+        MatchRecord(
+            run_id=run.id,
+            eob_document_id=100,
+            bill_document_id=201,
+            score=0.9,
+            confidence="HIGH",
+        )
+    )
 
     db.commit()
     return db
@@ -258,20 +274,24 @@ class TestPurgeStaleApi:
         db.commit()
         db.refresh(run)
 
-        db.add(EOBRecord(
-            document_id=200,
-            run_id=run.id,
-            provider_name="The summary below is intended to help you understand",
-            total_billed=0,
-            total_allowed=0,
-        ))
-        db.add(EOBRecord(
-            document_id=201,
-            run_id=run.id,
-            provider_name="Dr. Good Provider",
-            total_billed=100.0,
-            total_allowed=80.0,
-        ))
+        db.add(
+            EOBRecord(
+                document_id=200,
+                run_id=run.id,
+                provider_name="The summary below is intended to help you understand",
+                total_billed=0,
+                total_allowed=0,
+            )
+        )
+        db.add(
+            EOBRecord(
+                document_id=201,
+                run_id=run.id,
+                provider_name="Dr. Good Provider",
+                total_billed=100.0,
+                total_allowed=80.0,
+            )
+        )
         db.commit()
         db.close()
         return api_client

@@ -7,7 +7,6 @@ document classification, and coverage analysis. Cost: ~$0.02-0.05 per analysis.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from doc_intelligence_hub.modules.analysis.models import (
     ContextData,
@@ -27,18 +26,25 @@ class DocumentClassification(AnalysisRule):
     async def execute(self, context: ContextData) -> RuleExecutionResult:
         doc = context.current_document
         if not doc:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No current document")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No current document"
+            )
 
         # Build classification prompt
         doc_title = doc.get("title", "")
         doc_content = doc.get("content", "")[:2000]  # Limit context size
         doc_tags = doc.get("tags", [])
         correspondent = doc.get("correspondent", {})
-        corr_name = correspondent.get("name", "") if isinstance(correspondent, dict) else str(correspondent or "")
+        corr_name = (
+            correspondent.get("name", "")
+            if isinstance(correspondent, dict)
+            else str(correspondent or "")
+        )
 
-        categories = self.get_param("categories", [
-            "statement", "bill", "eob", "receipt", "letter", "notice", "contract", "other"
-        ])
+        categories = self.get_param(
+            "categories",
+            ["statement", "bill", "eob", "receipt", "letter", "notice", "contract", "other"],
+        )
 
         prompt = (
             f"Classify this document into one of these categories: {', '.join(categories)}\n\n"
@@ -46,7 +52,7 @@ class DocumentClassification(AnalysisRule):
             f"Correspondent: {corr_name}\n"
             f"Tags: {', '.join(str(t) for t in doc_tags) if doc_tags else 'none'}\n"
             f"Content preview:\n{doc_content}\n\n"
-            "Respond with JSON: {\"category\": \"<category>\", \"confidence\": <0-100>, \"reasoning\": \"<brief explanation>\"}"
+            'Respond with JSON: {"category": "<category>", "confidence": <0-100>, "reasoning": "<brief explanation>"}'
         )
 
         try:
@@ -86,7 +92,9 @@ class DocumentClassification(AnalysisRule):
 
         except Exception as exc:
             logger.error("LLM classification failed: %s", exc)
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error=f"LLM call failed: {exc}")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error=f"LLM call failed: {exc}"
+            )
 
 
 @register_rule("coverage-analysis")
@@ -98,7 +106,9 @@ class CoverageAnalysis(AnalysisRule):
         series_info = context.series_info
 
         if len(history) < 2:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="Insufficient history for analysis")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="Insufficient history for analysis"
+            )
 
         # Build analysis prompt from EOB history
         eob_summaries = []
@@ -106,7 +116,9 @@ class CoverageAnalysis(AnalysisRule):
             summary = {
                 "date": h.get("created", h.get("added", "")),
                 "amount": h.get("total_amount") or h.get("amount"),
-                "provider": h.get("correspondent", {}).get("name", "") if isinstance(h.get("correspondent"), dict) else str(h.get("correspondent", "")),
+                "provider": h.get("correspondent", {}).get("name", "")
+                if isinstance(h.get("correspondent"), dict)
+                else str(h.get("correspondent", "")),
             }
             eob_summaries.append(summary)
 
@@ -124,11 +136,11 @@ class CoverageAnalysis(AnalysisRule):
         prompt += (
             "\nProvide analysis as JSON:\n"
             "{\n"
-            "  \"trend\": \"increasing|decreasing|stable\",\n"
-            "  \"avg_claim_amount\": <number>,\n"
-            "  \"notable_patterns\": [\"pattern1\", \"pattern2\"],\n"
-            "  \"recommendations\": [\"rec1\", \"rec2\"],\n"
-            "  \"summary\": \"<one-line summary>\"\n"
+            '  "trend": "increasing|decreasing|stable",\n'
+            '  "avg_claim_amount": <number>,\n'
+            '  "notable_patterns": ["pattern1", "pattern2"],\n'
+            '  "recommendations": ["rec1", "rec2"],\n'
+            '  "summary": "<one-line summary>"\n'
             "}"
         )
 
@@ -170,4 +182,6 @@ class CoverageAnalysis(AnalysisRule):
 
         except Exception as exc:
             logger.error("LLM coverage analysis failed: %s", exc)
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error=f"LLM call failed: {exc}")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error=f"LLM call failed: {exc}"
+            )

@@ -7,7 +7,11 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
-from doc_intelligence_hub.core.llm import get_llm_settings, health_check as llm_health_check, validate_model_availability
+from doc_intelligence_hub.core.llm import (
+    get_llm_settings,
+    health_check as llm_health_check,
+    validate_model_availability,
+)
 
 router = APIRouter(prefix="/api", tags=["system"])
 
@@ -89,7 +93,9 @@ async def api_status(request: Request) -> dict[str, Any]:
     eob = _eob_status(request)
 
     module_states = [paperless["status"], statements["status"], queue["status"], eob["status"]]
-    overall = "error" if "error" in module_states else "degraded" if "degraded" in module_states else "ok"
+    overall = (
+        "error" if "error" in module_states else "degraded" if "degraded" in module_states else "ok"
+    )
 
     return {
         "status": overall,
@@ -220,7 +226,9 @@ async def document_metadata(request: Request, document_id: int) -> dict[str, Any
 
     # Build Paperless deep link
     paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
-    paperless_doc_url = f"{paperless_url}/documents/{document_id}/details" if paperless_url else None
+    paperless_doc_url = (
+        f"{paperless_url}/documents/{document_id}/details" if paperless_url else None
+    )
 
     return {
         "id": doc["id"],
@@ -245,6 +253,7 @@ async def document_download(request: Request, document_id: int) -> Response:
     """Proxy the document PDF/file from Paperless for viewing."""
     client = make_paperless_client(request, timeout=30.0)
     import httpx
+
     async with httpx.AsyncClient(
         base_url=client.base_url,
         headers={"Authorization": f"Token {client.token}"},

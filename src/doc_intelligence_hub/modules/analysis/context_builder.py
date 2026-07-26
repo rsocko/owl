@@ -221,7 +221,13 @@ def _extract_fields(document: dict[str, Any], field_names: list[str]) -> dict[st
     if not field_names:
         # Return all known numeric/important fields
         result = {}
-        for key in ("total_amount", "closing_balance", "statement_period", "due_date", "amount_due"):
+        for key in (
+            "total_amount",
+            "closing_balance",
+            "statement_period",
+            "due_date",
+            "amount_due",
+        ):
             if key in document:
                 result[key] = document[key]
         custom = document.get("custom_fields", {})

@@ -12,7 +12,10 @@ from doc_intelligence_hub.modules.statements.paperless import (
     load_fixture_documents,
     test_paperless_connection as run_paperless_connection_test,
 )
-from doc_intelligence_hub.modules.statements.service import run_connection_test, validate_source_config
+from doc_intelligence_hub.modules.statements.service import (
+    run_connection_test,
+    validate_source_config,
+)
 
 
 def test_discover_monthly_providers() -> None:
@@ -287,7 +290,9 @@ def test_discover_providers_with_document_type_mapping_does_not_suppress_keyword
     assert "Custom Co" in provider_names, "Mapping-matched provider must be found"
 
 
-def test_validate_source_config_requires_token_for_paperless(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_validate_source_config_requires_token_for_paperless(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("PAPERLESS_API_TOKEN", raising=False)
     config = load_config("config/config.paperless.example.yaml")
 
@@ -316,7 +321,6 @@ async def test_paperless_connection_allows_restricted_metadata_endpoints() -> No
         return httpx.Response(404)
 
     transport = httpx.MockTransport(handler)
-    original_client = httpx.AsyncClient
 
     class MockAsyncClient(httpx.AsyncClient):
         def __init__(self, *args, **kwargs):
@@ -388,9 +392,14 @@ async def test_fetch_paperless_documents_allows_restricted_metadata_endpoints() 
 async def test_fetch_paperless_documents_matches_string_and_integer_ids() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/correspondents/":
-            return httpx.Response(200, json={"count": 1, "results": [{"id": "15", "name": "National Grid"}], "next": None})
+            return httpx.Response(
+                200,
+                json={"count": 1, "results": [{"id": "15", "name": "National Grid"}], "next": None},
+            )
         if request.url.path == "/api/tags/":
-            return httpx.Response(200, json={"count": 1, "results": [{"id": "7", "name": "statement"}], "next": None})
+            return httpx.Response(
+                200, json={"count": 1, "results": [{"id": "7", "name": "statement"}], "next": None}
+            )
         if request.url.path == "/api/documents/":
             return httpx.Response(
                 200,

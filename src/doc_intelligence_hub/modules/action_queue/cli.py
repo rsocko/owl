@@ -12,6 +12,7 @@ console = Console()
 def cli():
     """Paperless Action Queue — Extract actions from your documents."""
     from doc_intelligence_hub.core.logging_config import configure_logging
+
     configure_logging()
 
 
@@ -19,17 +20,41 @@ def cli():
 @click.option("--force", is_flag=True, help="Re-analyze all documents, ignoring history")
 @click.option("--limit", type=int, default=None, help="Max number of documents to process")
 @click.option("--document-id", type=int, default=None, help="Analyze a single document by ID")
-@click.option("--tag", type=str, default=None, help="Filter by tag name (default: Inbox,Todo from config)")
-@click.option("--saved-view", type=int, default=None, help="Use a Paperless saved view ID as the source")
-@click.option("--created-after", type=str, default=None, help="Only docs created after date (YYYY-MM-DD)")
-@click.option("--created-before", type=str, default=None, help="Only docs created before date (YYYY-MM-DD)")
-@click.option("--added-after", type=str, default=None, help="Only docs added after date (YYYY-MM-DD)")
-@click.option("--added-before", type=str, default=None, help="Only docs added before date (YYYY-MM-DD)")
+@click.option(
+    "--tag", type=str, default=None, help="Filter by tag name (default: Inbox,Todo from config)"
+)
+@click.option(
+    "--saved-view", type=int, default=None, help="Use a Paperless saved view ID as the source"
+)
+@click.option(
+    "--created-after", type=str, default=None, help="Only docs created after date (YYYY-MM-DD)"
+)
+@click.option(
+    "--created-before", type=str, default=None, help="Only docs created before date (YYYY-MM-DD)"
+)
+@click.option(
+    "--added-after", type=str, default=None, help="Only docs added after date (YYYY-MM-DD)"
+)
+@click.option(
+    "--added-before", type=str, default=None, help="Only docs added before date (YYYY-MM-DD)"
+)
 @click.option("--correspondent", type=str, default=None, help="Filter by correspondent name")
 @click.option("--document-type", type=str, default=None, help="Filter by document type name")
 @click.option("--dry-run", is_flag=True, help="Show what would be processed without calling Ollama")
-def run(force, limit, document_id, tag, saved_view, created_after, created_before,
-        added_after, added_before, correspondent, document_type, dry_run):
+def run(
+    force,
+    limit,
+    document_id,
+    tag,
+    saved_view,
+    created_after,
+    created_before,
+    added_after,
+    added_before,
+    correspondent,
+    document_type,
+    dry_run,
+):
     """Run the analysis pipeline.
 
     Examples:\b
@@ -43,20 +68,23 @@ def run(force, limit, document_id, tag, saved_view, created_after, created_befor
         paq run --dry-run --tag Inbox        # See what's in Inbox
     """
     from .pipeline import run_pipeline
-    asyncio.run(run_pipeline(
-        force=force,
-        limit=limit,
-        document_id=document_id,
-        tag_override=tag,
-        saved_view_id=saved_view,
-        created_after=created_after,
-        created_before=created_before,
-        added_after=added_after,
-        added_before=added_before,
-        correspondent=correspondent,
-        document_type=document_type,
-        dry_run=dry_run,
-    ))
+
+    asyncio.run(
+        run_pipeline(
+            force=force,
+            limit=limit,
+            document_id=document_id,
+            tag_override=tag,
+            saved_view_id=saved_view,
+            created_after=created_after,
+            created_before=created_before,
+            added_after=added_after,
+            added_before=added_before,
+            correspondent=correspondent,
+            document_type=document_type,
+            dry_run=dry_run,
+        )
+    )
 
 
 @cli.command()
@@ -83,7 +111,9 @@ def views():
     from rich.table import Table
 
     async def _views():
-        client = PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_api_token)
+        client = PaperlessClient(
+            base_url=settings.paperless_url, token=settings.paperless_api_token
+        )
         saved_views = await client.list_saved_views()
         if not saved_views:
             console.print("[yellow]No saved views found.[/yellow]")
@@ -115,7 +145,9 @@ def check():
     async def _check():
         console.print("[bold]Connectivity Check[/bold]\n")
 
-        client = PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_api_token)
+        client = PaperlessClient(
+            base_url=settings.paperless_url, token=settings.paperless_api_token
+        )
         try:
             result = await client.health_check()
             ok = result.get("status") == "ok"
@@ -150,17 +182,23 @@ def sync():
         enricher = PaperlessEnricher()
 
         # Get all actions that have been synced at least once
-        pending_actions = db.query(Action).filter(
-            Action.status == "pending",
-            Action.last_synced_status.isnot(None),
-        ).all()
+        pending_actions = (
+            db.query(Action)
+            .filter(
+                Action.status == "pending",
+                Action.last_synced_status.isnot(None),
+            )
+            .all()
+        )
 
         if not pending_actions:
             console.print("[dim]No synced actions to check.[/dim]")
             db.close()
             return
 
-        console.print(f"[dim]Checking {len(pending_actions)} actions for Paperless changes...[/dim]")
+        console.print(
+            f"[dim]Checking {len(pending_actions)} actions for Paperless changes...[/dim]"
+        )
         updated = 0
 
         # Group by document_id (multiple actions per doc share one Paperless field)
@@ -200,6 +238,7 @@ def sync():
 def init_db():
     """Initialize the SQLite database."""
     from .database import init_db as _init_db
+
     _init_db()
     console.print("[green]✓ Database initialized[/green]")
 

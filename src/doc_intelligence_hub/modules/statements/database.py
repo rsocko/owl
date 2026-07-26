@@ -1,4 +1,4 @@
-﻿"""SQLite persistence for statement-tracker (Phase 1.1).
+"""SQLite persistence for statement-tracker (Phase 1.1).
 
 Replaces JSON snapshots with a structured database for discovery results
 and recommendations. Uses stdlib sqlite3 to avoid new dependencies.
@@ -251,7 +251,9 @@ class Database:
             for row in rows
         ]
 
-        return DiscoveryResult(analyzed_documents=run_row["analyzed_documents"], providers=providers)
+        return DiscoveryResult(
+            analyzed_documents=run_row["analyzed_documents"], providers=providers
+        )
 
     # ----- Recommendations persistence -----
 
@@ -316,7 +318,9 @@ class Database:
             for row in rows
         ]
 
-        return RecommendationResult(as_of=date.fromisoformat(run_row["as_of"]), recommendations=recs)
+        return RecommendationResult(
+            as_of=date.fromisoformat(run_row["as_of"]), recommendations=recs
+        )
 
     # ----- History -----
 
@@ -401,7 +405,11 @@ class Database:
             "SELECT document_type_id, document_type_name, enabled FROM document_type_mapping"
         ).fetchall()
         return [
-            {"id": row["document_type_id"], "name": row["document_type_name"], "enabled": bool(row["enabled"])}
+            {
+                "id": row["document_type_id"],
+                "name": row["document_type_name"],
+                "enabled": bool(row["enabled"]),
+            }
             for row in rows
         ]
 
@@ -444,7 +452,9 @@ class Database:
     def get_similar_series(self, series_id: str) -> list[dict]:
         """Get other series from the same correspondent."""
         conn = self.connect()
-        row = conn.execute("SELECT correspondent_name FROM statement_series WHERE id = ?", (series_id,)).fetchone()
+        row = conn.execute(
+            "SELECT correspondent_name FROM statement_series WHERE id = ?", (series_id,)
+        ).fetchone()
         if not row:
             return []
         rows = conn.execute(

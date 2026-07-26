@@ -5,7 +5,13 @@ from datetime import date
 
 from rapidfuzz import fuzz
 
-from doc_intelligence_hub.modules.eob_matching.models import ExtractedBill, ExtractedEOB, MatchBreakdown, MatchConfidence, MatchResult
+from doc_intelligence_hub.modules.eob_matching.models import (
+    ExtractedBill,
+    ExtractedEOB,
+    MatchBreakdown,
+    MatchConfidence,
+    MatchResult,
+)
 
 _PROVIDER_REPLACEMENTS = {
     "medical center": "med ctr",
@@ -27,7 +33,9 @@ def match_documents(eobs: list[ExtractedEOB], bills: list[ExtractedBill]) -> lis
                 date=round(score_date_similarity(eob.date_of_service, bill.date_of_service), 2),
                 provider=round(score_provider_similarity(eob.provider_name, bill.provider_name), 2),
                 patient=round(score_patient_similarity(eob.patient_name, bill.patient_name), 2),
-                amount=round(score_amount_similarity(eob.total_patient_responsibility, _bill_amount(bill)), 2),
+                amount=round(
+                    score_amount_similarity(eob.total_patient_responsibility, _bill_amount(bill)), 2
+                ),
                 procedures=round(score_procedure_overlap(eob, bill), 2),
             )
             score = round(
@@ -80,7 +88,9 @@ def score_patient_similarity(eob_patient: str | None, bill_patient: str | None) 
     return _score_name_similarity(eob_patient, bill_patient, provider_mode=False)
 
 
-def score_amount_similarity(eob_patient_responsibility: float | None, bill_amount: float | None) -> float:
+def score_amount_similarity(
+    eob_patient_responsibility: float | None, bill_amount: float | None
+) -> float:
     if not eob_patient_responsibility or not bill_amount:
         return 0.0
 

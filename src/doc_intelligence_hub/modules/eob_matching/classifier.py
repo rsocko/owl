@@ -22,7 +22,12 @@ INSURANCE_COMPANIES = [
 ]
 
 _EOB_PATTERNS: list[tuple[str, int, re.Pattern[str] | None, str | None]] = [
-    ("explanation_of_benefits", 50, re.compile(r"\bexplanation of benefits\b", re.IGNORECASE), None),
+    (
+        "explanation_of_benefits",
+        50,
+        re.compile(r"\bexplanation of benefits\b", re.IGNORECASE),
+        None,
+    ),
     ("not_a_bill_disclaimer", 40, re.compile(r"\bthis is not a bill\b", re.IGNORECASE), None),
     ("insurance_company", 30, None, None),
     ("plan_pays", 20, re.compile(r"\b(?:amount your plan pays|plan pays)\b", re.IGNORECASE), None),
@@ -58,7 +63,9 @@ _THRESHOLD = 60
 
 def classify_document(text: str) -> ClassificationResult:
     if not text or not text.strip():
-        return ClassificationResult(type=DocumentType.UNKNOWN, confidence_score=0.0, indicators_matched=[])
+        return ClassificationResult(
+            type=DocumentType.UNKNOWN, confidence_score=0.0, indicators_matched=[]
+        )
 
     eob_score, eob_indicators = _score_eob(text)
     bill_score, bill_indicators = _score_bill(text)
@@ -77,7 +84,9 @@ def classify_document(text: str) -> ClassificationResult:
             indicators_matched=bill_indicators,
         )
 
-    indicators = eob_indicators + [indicator for indicator in bill_indicators if indicator not in eob_indicators]
+    indicators = eob_indicators + [
+        indicator for indicator in bill_indicators if indicator not in eob_indicators
+    ]
     return ClassificationResult(
         type=DocumentType.UNKNOWN,
         confidence_score=float(min(max(eob_score, bill_score), 100)),

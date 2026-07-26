@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
-import pytest
 
 from doc_intelligence_hub.modules.eob_matching.database import (
-    BillRecord,
-    EOBRecord,
     MatchRecord,
     MatchingRun,
     get_session as get_eob_session,
-    init_db as eob_init_db,
 )
 
 

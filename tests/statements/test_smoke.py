@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import math
 import os
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import dotenv
@@ -22,14 +22,18 @@ import pytest
 # Load .env early so module-level skip conditions can see the token
 dotenv.load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from doc_intelligence_hub.modules.statements.config import load_config
-from doc_intelligence_hub.modules.statements.models import DocumentRecord
-from doc_intelligence_hub.modules.statements.service import load_documents, run_connection_test, run_discovery, run_recommendations
+from doc_intelligence_hub.modules.statements.config import load_config  # noqa: E402
+from doc_intelligence_hub.modules.statements.service import (  # noqa: E402
+    load_documents,
+    run_connection_test,
+    run_discovery,
+)
 
 
 # ---------------------------------------------------------------------------
 # Realistic mock data: 5 providers, 60+ documents, noise, mixed frequencies
 # ---------------------------------------------------------------------------
+
 
 def _monthly_docs(
     correspondent_id: int,
@@ -48,24 +52,37 @@ def _monthly_docs(
     current = date(start.year, start.month, anchor_day)
     for i in range(count):
         month_names = [
-            "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December",
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
         ]
         title = title_template.format(month=month_names[current.month - 1], year=current.year)
-        docs.append({
-            "id": id_base + i,
-            "title": title,
-            "correspondent": correspondent_id,
-            "document_type": doc_type,
-            "created_date": current.isoformat(),
-            "added": f"{current.isoformat()}T08:00:00Z",
-            "tags": tags or [1],
-            "original_file_name": f"doc_{id_base + i}.pdf",
-        })
+        docs.append(
+            {
+                "id": id_base + i,
+                "title": title,
+                "correspondent": correspondent_id,
+                "document_type": doc_type,
+                "created_date": current.isoformat(),
+                "added": f"{current.isoformat()}T08:00:00Z",
+                "tags": tags or [1],
+                "original_file_name": f"doc_{id_base + i}.pdf",
+            }
+        )
         # Advance one month
         month = current.month % 12 + 1
         year = current.year + (1 if current.month == 12 else 0)
         import calendar
+
         last_day = calendar.monthrange(year, month)[1]
         current = date(year, month, min(anchor_day, last_day))
     return docs
@@ -90,19 +107,22 @@ def _quarterly_docs(
     while idx < count:
         month, q_label = quarters[q_idx]
         import calendar
+
         last_day = calendar.monthrange(year, month)[1]
         day = min(anchor_day, last_day)
         title = title_template.format(quarter=q_label, year=year)
-        docs.append({
-            "id": id_base + idx,
-            "title": title,
-            "correspondent": correspondent_id,
-            "document_type": "statement",
-            "created_date": date(year, month, day).isoformat(),
-            "added": f"{date(year, month, day).isoformat()}T08:00:00Z",
-            "tags": tags or [1],
-            "original_file_name": f"doc_{id_base + idx}.pdf",
-        })
+        docs.append(
+            {
+                "id": id_base + idx,
+                "title": title,
+                "correspondent": correspondent_id,
+                "document_type": "statement",
+                "created_date": date(year, month, day).isoformat(),
+                "added": f"{date(year, month, day).isoformat()}T08:00:00Z",
+                "tags": tags or [1],
+                "original_file_name": f"doc_{id_base + idx}.pdf",
+            }
+        )
         idx += 1
         q_idx += 1
         if q_idx >= 4:
@@ -127,39 +147,51 @@ def _annual_docs(
     for i in range(count):
         year = start_year + i
         title = title_template.format(year=year)
-        docs.append({
-            "id": id_base + i,
-            "title": title,
-            "correspondent": correspondent_id,
-            "document_type": "statement",
-            "created_date": date(year, month, day).isoformat(),
-            "added": f"{date(year, month, day).isoformat()}T08:00:00Z",
-            "tags": tags or [1],
-            "original_file_name": f"doc_{id_base + i}.pdf",
-        })
+        docs.append(
+            {
+                "id": id_base + i,
+                "title": title,
+                "correspondent": correspondent_id,
+                "document_type": "statement",
+                "created_date": date(year, month, day).isoformat(),
+                "added": f"{date(year, month, day).isoformat()}T08:00:00Z",
+                "tags": tags or [1],
+                "original_file_name": f"doc_{id_base + i}.pdf",
+            }
+        )
     return docs
 
 
 def _noise_docs(*, id_base: int, count: int = 10) -> list[dict]:
     """Generate non-statement noise documents."""
     titles = [
-        "Grocery Receipt", "Vacation Photos Index", "Meeting Notes",
-        "Tax Return Draft", "Appliance Manual", "Insurance Card",
-        "Pet Vaccination Record", "Recipe Collection", "Travel Itinerary",
-        "Gift Ideas", "Home Renovation Plan", "Car Maintenance Log",
+        "Grocery Receipt",
+        "Vacation Photos Index",
+        "Meeting Notes",
+        "Tax Return Draft",
+        "Appliance Manual",
+        "Insurance Card",
+        "Pet Vaccination Record",
+        "Recipe Collection",
+        "Travel Itinerary",
+        "Gift Ideas",
+        "Home Renovation Plan",
+        "Car Maintenance Log",
     ]
     docs = []
     for i in range(count):
-        docs.append({
-            "id": id_base + i,
-            "title": titles[i % len(titles)],
-            "correspondent": 99,
-            "document_type": "note",
-            "created_date": date(2025, 1 + (i % 12), 5).isoformat(),
-            "added": f"{date(2025, 1 + (i % 12), 5).isoformat()}T10:00:00Z",
-            "tags": [5],
-            "original_file_name": f"noise_{id_base + i}.pdf",
-        })
+        docs.append(
+            {
+                "id": id_base + i,
+                "title": titles[i % len(titles)],
+                "correspondent": 99,
+                "document_type": "note",
+                "created_date": date(2025, 1 + (i % 12), 5).isoformat(),
+                "added": f"{date(2025, 1 + (i % 12), 5).isoformat()}T10:00:00Z",
+                "tags": [5],
+                "original_file_name": f"noise_{id_base + i}.pdf",
+            }
+        )
     return docs
 
 
@@ -182,11 +214,50 @@ TAGS = {
 
 # Build the full document set
 _ALL_DOCS: list[dict] = []
-_ALL_DOCS.extend(_monthly_docs(10, "Chase Visa", "Chase Statement {month} {year}", date(2025, 1, 3), 15, 3, id_base=1000, tags=[1]))
-_ALL_DOCS.extend(_monthly_docs(20, "National Grid", "National Grid Bill {month} {year}", date(2025, 3, 15), 12, 15, id_base=2000, tags=[2], doc_type="bill"))
-_ALL_DOCS.extend(_quarterly_docs(30, "Vanguard Statement {quarter} {year}", 2024, 8, 1, id_base=3000, tags=[1]))
-_ALL_DOCS.extend(_annual_docs(40, "State Farm Policy Renewal {year}", 2021, 5, 3, 15, id_base=4000, tags=[4, 1]))
-_ALL_DOCS.extend(_monthly_docs(50, "City Water", "City Water Bill {month} {year}", date(2025, 6, 20), 6, 20, id_base=5000, tags=[2], doc_type="bill"))
+_ALL_DOCS.extend(
+    _monthly_docs(
+        10,
+        "Chase Visa",
+        "Chase Statement {month} {year}",
+        date(2025, 1, 3),
+        15,
+        3,
+        id_base=1000,
+        tags=[1],
+    )
+)
+_ALL_DOCS.extend(
+    _monthly_docs(
+        20,
+        "National Grid",
+        "National Grid Bill {month} {year}",
+        date(2025, 3, 15),
+        12,
+        15,
+        id_base=2000,
+        tags=[2],
+        doc_type="bill",
+    )
+)
+_ALL_DOCS.extend(
+    _quarterly_docs(30, "Vanguard Statement {quarter} {year}", 2024, 8, 1, id_base=3000, tags=[1])
+)
+_ALL_DOCS.extend(
+    _annual_docs(40, "State Farm Policy Renewal {year}", 2021, 5, 3, 15, id_base=4000, tags=[4, 1])
+)
+_ALL_DOCS.extend(
+    _monthly_docs(
+        50,
+        "City Water",
+        "City Water Bill {month} {year}",
+        date(2025, 6, 20),
+        6,
+        20,
+        id_base=5000,
+        tags=[2],
+        doc_type="bill",
+    )
+)
 _ALL_DOCS.extend(_noise_docs(id_base=9000, count=10))
 
 PAGE_SIZE = 25
@@ -210,20 +281,28 @@ def _build_mock_handler():
             end = start + page_size
             results = [{"id": cid, "name": name} for cid, name in items[start:end]]
             has_next = end < len(items)
-            return httpx.Response(200, json={
-                "count": len(items),
-                "results": results,
-                "next": f"http://test/api/correspondents/?page={page + 1}" if has_next else None,
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "count": len(items),
+                    "results": results,
+                    "next": f"http://test/api/correspondents/?page={page + 1}"
+                    if has_next
+                    else None,
+                },
+            )
 
         if path == "/api/tags":
             items = list(TAGS.items())
             results = [{"id": tid, "name": name} for tid, name in items]
-            return httpx.Response(200, json={
-                "count": len(items),
-                "results": results,
-                "next": None,
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "count": len(items),
+                    "results": results,
+                    "next": None,
+                },
+            )
 
         if path == "/api/documents":
             page = int(params.get("page", 1))
@@ -234,11 +313,14 @@ def _build_mock_handler():
             results = _ALL_DOCS[start:end]
             total_pages = math.ceil(total / page_size)
             has_next = page < total_pages
-            return httpx.Response(200, json={
-                "count": total,
-                "results": results,
-                "next": f"http://test/api/documents/?page={page + 1}" if has_next else None,
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "count": total,
+                    "results": results,
+                    "next": f"http://test/api/documents/?page={page + 1}" if has_next else None,
+                },
+            )
 
         return httpx.Response(404)
 
@@ -314,6 +396,7 @@ async def test_smoke_discovery_pipeline_finds_all_provider_types(tmp_path, monke
 
     documents = await load_documents(config)
     from doc_intelligence_hub.modules.statements.detector import discover_providers
+
     result = discover_providers(documents, config.analysis)
 
     provider_names = {p.provider_name for p in result.providers}
@@ -372,9 +455,8 @@ async def test_smoke_api_discovery_endpoint_with_mock(tmp_path, monkeypatch):
     monkeypatch.setenv("PAPERLESS_API_TOKEN", "test-token")
 
     # Patch snapshot path to tmp
-    original_load = load_config.__wrapped__ if hasattr(load_config, "__wrapped__") else None
-
     from doc_intelligence_hub.modules.statements import config as config_mod
+
     _original_load = config_mod.load_config
 
     def patched_load(path):
@@ -430,6 +512,7 @@ async def test_smoke_snapshot_written_on_discovery(tmp_path, monkeypatch):
     monkeypatch.setenv("PAPERLESS_API_TOKEN", "test-token")
 
     from doc_intelligence_hub.modules.statements import config as config_mod
+
     _original_load = config_mod.load_config
 
     snapshot_file = tmp_path / "test_snapshot.json"
@@ -443,6 +526,7 @@ async def test_smoke_snapshot_written_on_discovery(tmp_path, monkeypatch):
     monkeypatch.setattr("doc_intelligence_hub.modules.statements.service.load_config", patched_load)
 
     from doc_intelligence_hub.modules.statements.service import run_discovery
+
     result = await run_discovery("config/config.paperless.example.yaml")
 
     assert snapshot_file.exists()
@@ -467,9 +551,11 @@ async def test_live_paperless_connection():
     assert result["status"] == "ok"
     assert result["mode"] == "paperless"
     assert result["documents"] > 0
-    print(f"\n  Live Paperless: {result['documents']} documents, "
-          f"{result['correspondents']} correspondents, "
-          f"{result['tags']} tags")
+    print(
+        f"\n  Live Paperless: {result['documents']} documents, "
+        f"{result['correspondents']} correspondents, "
+        f"{result['tags']} tags"
+    )
 
 
 @pytest.mark.asyncio
@@ -477,6 +563,7 @@ async def test_live_paperless_connection():
 async def test_live_paperless_discovery(tmp_path):
     """Discover providers against a real Paperless-ngx instance."""
     from doc_intelligence_hub.modules.statements import config as config_mod
+
     _original_load = config_mod.load_config
 
     def patched_load(path):
@@ -485,6 +572,7 @@ async def test_live_paperless_discovery(tmp_path):
         return cfg
 
     import doc_intelligence_hub.modules.statements.service as svc_mod
+
     original_svc_load = svc_mod.load_config
     svc_mod.load_config = patched_load
     config_mod.load_config = patched_load
@@ -496,8 +584,12 @@ async def test_live_paperless_discovery(tmp_path):
         config_mod.load_config = _original_load
 
     assert result.analyzed_documents > 0
-    print(f"\n  Live discovery: {result.analyzed_documents} documents, "
-          f"{len(result.providers)} providers found")
+    print(
+        f"\n  Live discovery: {result.analyzed_documents} documents, "
+        f"{len(result.providers)} providers found"
+    )
     for p in result.providers:
-        print(f"    - {p.provider_name}: {p.pattern.frequency}, "
-              f"confidence={p.pattern.confidence}, docs={p.document_count}")
+        print(
+            f"    - {p.provider_name}: {p.pattern.frequency}, "
+            f"confidence={p.pattern.confidence}, docs={p.document_count}"
+        )

@@ -16,7 +16,6 @@ from doc_intelligence_hub.modules.eob_matching.database import (
 )
 from doc_intelligence_hub.modules.triage.database import (
     configure as triage_configure,
-    get_queue_stats,
     init_db as triage_init_db,
     list_queue_items,
 )
@@ -59,68 +58,96 @@ def _seed_eob_data(
 
         # Low confidence matches
         for i in range(low_confidence_count):
-            session.add(EOBRecord(document_id=doc_id, run_id=run.id, title=f"Low EOB {i}", provider_name="Provider A"))
-            session.add(MatchRecord(
-                run_id=run.id,
-                eob_document_id=doc_id,
-                bill_document_id=bill_id,
-                score=0.45 + i * 0.05,
-                confidence="LOW",
-                status="candidate",
-                breakdown_date=0.5,
-                breakdown_provider=0.3,
-                breakdown_patient=0.4,
-                breakdown_amount=0.6,
-                breakdown_procedures=0.2,
-            ))
+            session.add(
+                EOBRecord(
+                    document_id=doc_id,
+                    run_id=run.id,
+                    title=f"Low EOB {i}",
+                    provider_name="Provider A",
+                )
+            )
+            session.add(
+                MatchRecord(
+                    run_id=run.id,
+                    eob_document_id=doc_id,
+                    bill_document_id=bill_id,
+                    score=0.45 + i * 0.05,
+                    confidence="LOW",
+                    status="candidate",
+                    breakdown_date=0.5,
+                    breakdown_provider=0.3,
+                    breakdown_patient=0.4,
+                    breakdown_amount=0.6,
+                    breakdown_procedures=0.2,
+                )
+            )
             doc_id += 1
             bill_id += 1
 
         # High confidence matches
         for i in range(high_confidence_count):
-            session.add(EOBRecord(document_id=doc_id, run_id=run.id, title=f"High EOB {i}", provider_name="Provider B"))
-            session.add(MatchRecord(
-                run_id=run.id,
-                eob_document_id=doc_id,
-                bill_document_id=bill_id,
-                score=0.92,
-                confidence="HIGH",
-                status="confirmed",
-            ))
+            session.add(
+                EOBRecord(
+                    document_id=doc_id,
+                    run_id=run.id,
+                    title=f"High EOB {i}",
+                    provider_name="Provider B",
+                )
+            )
+            session.add(
+                MatchRecord(
+                    run_id=run.id,
+                    eob_document_id=doc_id,
+                    bill_document_id=bill_id,
+                    score=0.92,
+                    confidence="HIGH",
+                    status="confirmed",
+                )
+            )
             doc_id += 1
             bill_id += 1
 
         # Multi-candidate scenario: one EOB with two similar-score matches
         if multi_candidate_eob:
-            session.add(EOBRecord(document_id=doc_id, run_id=run.id, title="Multi EOB", provider_name="Provider C"))
-            session.add(MatchRecord(
-                run_id=run.id,
-                eob_document_id=doc_id,
-                bill_document_id=bill_id,
-                score=0.75,
-                confidence="MEDIUM",
-                status="candidate",
-            ))
-            session.add(MatchRecord(
-                run_id=run.id,
-                eob_document_id=doc_id,
-                bill_document_id=bill_id + 1,
-                score=0.72,
-                confidence="MEDIUM",
-                status="candidate",
-            ))
+            session.add(
+                EOBRecord(
+                    document_id=doc_id, run_id=run.id, title="Multi EOB", provider_name="Provider C"
+                )
+            )
+            session.add(
+                MatchRecord(
+                    run_id=run.id,
+                    eob_document_id=doc_id,
+                    bill_document_id=bill_id,
+                    score=0.75,
+                    confidence="MEDIUM",
+                    status="candidate",
+                )
+            )
+            session.add(
+                MatchRecord(
+                    run_id=run.id,
+                    eob_document_id=doc_id,
+                    bill_document_id=bill_id + 1,
+                    score=0.72,
+                    confidence="MEDIUM",
+                    status="candidate",
+                )
+            )
             doc_id += 1
             bill_id += 2
 
         # Orphan EOBs (no match at all)
         for i in range(orphan_eob_count):
-            session.add(EOBRecord(
-                document_id=doc_id,
-                run_id=run.id,
-                title=f"Orphan EOB {i}",
-                provider_name="Orphan Provider",
-                date_of_service="2026-01-15",
-            ))
+            session.add(
+                EOBRecord(
+                    document_id=doc_id,
+                    run_id=run.id,
+                    title=f"Orphan EOB {i}",
+                    provider_name="Orphan Provider",
+                    date_of_service="2026-01-15",
+                )
+            )
             doc_id += 1
 
         session.commit()

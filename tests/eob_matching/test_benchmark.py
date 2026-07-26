@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
-from datetime import date
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
