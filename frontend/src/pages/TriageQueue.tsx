@@ -145,7 +145,11 @@ export default function TriageQueue() {
   const [toast, setToast] = useState<ToastState>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [populating, setPopulating] = useState(false);
-  const undoTimerRef = useRef<number | null>(null);
+
+  // Bulk confirm modal & threshold
+  const [pendingBulkAction, setPendingBulkAction] = useState<{ action: string; ids: string[] } | null>(null);
+  const [thresholdPct, setThresholdPct] = useState(90);
+  const [pendingThreshold, setPendingThreshold] = useState(false);
 
   // ------------------------------------------------------------------
   // Data loading
@@ -304,20 +308,56 @@ export default function TriageQueue() {
   const handleBulkAction = async (action: 'confirm' | 'reject' | 'defer' | 'dismiss') => {
     const ids = Array.from(checkedIds);
     if (ids.length === 0) return;
+
+    // Destructive actions require confirmation
+    if (action === 'reject' || action === 'dismiss') {
+      setPendingBulkAction({ action, ids });
+      return;
+    }
+
+    await executeBulkAction(action, ids);
+  };
+
+  const executeBulkAction = async (action: string, ids: string[]) => {
     setBusyAction(`bulk-${action}`);
     try {
-      if (action === 'defer') {
-        await Promise.all(ids.map((id) => endpoints.triage.defer(id)));
-      } else if (action === 'dismiss') {
-        await Promise.all(ids.map((id) => endpoints.triage.dismiss(id)));
-      } else {
-        await Promise.all(ids.map((id) => endpoints.triage.resolve(id, { action })));
-      }
+      const result = await endpoints.triage.bulk({ action, item_ids: ids });
       setCheckedIds(new Set());
-      setToast({ message: `${ids.length} item${ids.length > 1 ? 's' : ''} ${action}ed.`, tone: 'success' });
+      setToast({
+        message: `${result.affected} item${result.affected !== 1 ? 's' : ''} ${action}ed.`,
+        tone: 'success',
+      });
       await loadData();
     } catch (err) {
       setToast({ message: err instanceof Error ? err.message : `Bulk ${action} failed.`, tone: 'error' });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const confirmPendingBulkAction = async () => {
+    if (!pendingBulkAction) return;
+    const { action, ids } = pendingBulkAction;
+    setPendingBulkAction(null);
+    await executeBulkAction(action, ids);
+  };
+
+  const handleBulkConfirmThreshold = async () => {
+    setPendingThreshold(true);
+  };
+
+  const executeBulkConfirmThreshold = async () => {
+    setPendingThreshold(false);
+    setBusyAction('bulk-threshold');
+    try {
+      const result = await endpoints.triage.bulkConfirmThreshold({ min_confidence: thresholdPct });
+      setToast({
+        message: `${result.affected} item${result.affected !== 1 ? 's' : ''} auto-confirmed (≥${thresholdPct}%).`,
+        tone: 'success',
+      });
+      await loadData();
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Threshold confirm failed.', tone: 'error' });
     } finally {
       setBusyAction(null);
     }
@@ -346,15 +386,24 @@ export default function TriageQueue() {
       const tag = target?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
 
+      // Escape closes modals first, then deselects
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (pendingBulkAction) { setPendingBulkAction(null); return; }
+        if (pendingThreshold) { setPendingThreshold(false); return; }
+        setSelectedId(null);
+        return;
+      }
+
+      // Suppress all other shortcuts while a modal is open
+      if (pendingBulkAction || pendingThreshold) return;
+
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         moveSelection(1);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         moveSelection(-1);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        setSelectedId(null);
       } else if (e.key.toLowerCase() === 'y' && selectedId) {
         e.preventDefault();
         void handleResolve(selectedId, 'confirm');
@@ -379,7 +428,7 @@ export default function TriageQueue() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [items, selectedId]);
+  }, [items, selectedId, pendingBulkAction, pendingThreshold]);
 
   // ------------------------------------------------------------------
   // Derived counts
@@ -445,6 +494,29 @@ export default function TriageQueue() {
                     ]}
                   />
                 </div>
+
+                {/* Auto-confirm threshold */}
+                {statusFilter === 'pending' && (
+                  <div className="triage-threshold-bar">
+                    <button
+                      className="triage-auto-confirm-btn"
+                      onClick={() => void handleBulkConfirmThreshold()}
+                      disabled={busyAction !== null}
+                      title={`Auto-confirm all EOB matches with confidence ≥ ${thresholdPct}%`}
+                    >
+                      ⚡ Auto-confirm ≥
+                    </button>
+                    <input
+                      type="number"
+                      className="triage-threshold-input"
+                      value={thresholdPct}
+                      onChange={(e) => setThresholdPct(Math.max(0, Math.min(100, Number(e.target.value))))}
+                      min={0}
+                      max={100}
+                    />
+                    <span className="triage-threshold-label">%</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -454,10 +526,17 @@ export default function TriageQueue() {
               </div>
             ) : (
               <>
-                {/* Bulk action bar */}
-                {checkedIds.size > 0 && (
+                {/* Bulk action bar — only for pending items (bulk ops target pending status) */}
+                {checkedIds.size > 0 && statusFilter === 'pending' && (
                   <div className="triage-bulk-bar">
-                    <span>{checkedIds.size} selected</span>
+                    <span>
+                      {checkedIds.size} selected
+                      {(() => {
+                        const visibleIds = new Set(items.map((i) => i.id));
+                        const hiddenCount = Array.from(checkedIds).filter((id) => !visibleIds.has(id)).length;
+                        return hiddenCount > 0 ? ` (${hiddenCount} hidden by filter)` : '';
+                      })()}
+                    </span>
                     <div className="btn-group">
                       <Button variant="success" size="sm" onClick={() => void handleBulkAction('confirm')} disabled={busyAction !== null}>
                         Confirm
@@ -480,14 +559,18 @@ export default function TriageQueue() {
 
                 {/* Select-all + populate */}
                 <div className="triage-list-toolbar">
-                  <label className="triage-select-all">
-                    <input
-                      type="checkbox"
-                      checked={items.length > 0 && items.every((i) => checkedIds.has(i.id))}
-                      onChange={selectAllVisible}
-                    />
-                    <span>Select visible</span>
-                  </label>
+                  {statusFilter === 'pending' ? (
+                    <label className="triage-select-all">
+                      <input
+                        type="checkbox"
+                        checked={items.length > 0 && items.every((i) => checkedIds.has(i.id))}
+                        onChange={selectAllVisible}
+                      />
+                      <span>Select visible</span>
+                    </label>
+                  ) : (
+                    <span />
+                  )}
                   <Button size="sm" onClick={() => void handlePopulate()} disabled={populating}>
                     {populating ? 'Scanning…' : '🔄 Populate'}
                   </Button>
@@ -508,16 +591,22 @@ export default function TriageQueue() {
                     items.map((item) => (
                       <article
                         key={item.id}
-                        className={selectedId === item.id ? 'triage-item selected' : 'triage-item'}
+                        className={[
+                          'triage-item',
+                          selectedId === item.id ? 'selected' : '',
+                          checkedIds.has(item.id) ? 'checked' : '',
+                        ].filter(Boolean).join(' ')}
                         onClick={() => setSelectedId(item.id)}
                       >
                         <div className="triage-item-top">
-                          <input
-                            type="checkbox"
-                            checked={checkedIds.has(item.id)}
-                            onChange={(e) => toggleCheck(item.id, e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey)}
-                            onClick={(e) => e.stopPropagation()}
-                          />
+                          {statusFilter === 'pending' && (
+                            <input
+                              type="checkbox"
+                              checked={checkedIds.has(item.id)}
+                              onChange={(e) => toggleCheck(item.id, e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          )}
                           <Badge tone={typeBadgeTone(item.item_type)}>{typeLabel(item.item_type)}</Badge>
                           {item.metadata && typeof item.metadata.score_pct === 'number' && (
                             <span className={`triage-score ${item.metadata.score_pct >= 85 ? 'high' : item.metadata.score_pct >= 70 ? 'medium' : 'low'}`}>
@@ -661,6 +750,57 @@ export default function TriageQueue() {
               />
             )}
           </section>
+        </div>
+      )}
+
+      {/* Confirmation modal for destructive bulk actions */}
+      {pendingBulkAction && (
+        <div className="triage-modal-overlay" onClick={() => setPendingBulkAction(null)}>
+          <div className="triage-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="triage-modal-title">
+              Confirm bulk {pendingBulkAction.action}
+            </div>
+            <p className="triage-modal-desc">
+              Are you sure you want to <strong>{pendingBulkAction.action}</strong>{' '}
+              {pendingBulkAction.ids.length} item{pendingBulkAction.ids.length !== 1 ? 's' : ''}?
+              This action cannot be easily undone in bulk.
+            </p>
+            <div className="triage-modal-actions">
+              <Button size="sm" onClick={() => setPendingBulkAction(null)}>Cancel</Button>
+              <Button
+                variant={pendingBulkAction.action === 'reject' ? 'danger' : 'ghost'}
+                size="sm"
+                onClick={() => void confirmPendingBulkAction()}
+              >
+                {pendingBulkAction.action === 'reject' ? 'Reject' : 'Dismiss'} {pendingBulkAction.ids.length} items
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation modal for threshold auto-confirm */}
+      {pendingThreshold && (
+        <div className="triage-modal-overlay" onClick={() => setPendingThreshold(false)}>
+          <div className="triage-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="triage-modal-title">
+              Auto-confirm matches ≥ {thresholdPct}%
+            </div>
+            <p className="triage-modal-desc">
+              This will confirm <strong>all pending EOB matches</strong> with a confidence score
+              of {thresholdPct}% or higher. This may affect many items.
+            </p>
+            <div className="triage-modal-actions">
+              <Button size="sm" onClick={() => setPendingThreshold(false)}>Cancel</Button>
+              <Button
+                variant="success"
+                size="sm"
+                onClick={() => void executeBulkConfirmThreshold()}
+              >
+                ⚡ Auto-confirm
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
