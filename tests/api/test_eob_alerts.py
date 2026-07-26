@@ -9,7 +9,7 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 
 import pytest
 
