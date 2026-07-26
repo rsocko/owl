@@ -23,7 +23,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-
 _DEFAULT_DB_URL = "sqlite:///data/analysis.db"
 _db_url: str = _DEFAULT_DB_URL
 
@@ -359,9 +358,9 @@ def get_insight_summary() -> dict[str, Any]:
         return {
             "total": total,
             "new": new_count,
-            "by_type": {t: c for t, c in type_rows},
-            "by_severity": {s: c for s, c in severity_rows},
-            "by_route": {r: c for r, c in route_rows},
+            "by_type": dict(type_rows),
+            "by_severity": dict(severity_rows),
+            "by_route": dict(route_rows),
         }
     finally:
         session.close()

@@ -49,7 +49,7 @@ def _validate_webhook_url(url: str) -> str | None:
     # Resolve hostname and check for private/loopback IPs
     try:
         addrs = socket.getaddrinfo(hostname, parsed.port or 443, proto=socket.IPPROTO_TCP)
-        for family, _, _, _, sockaddr in addrs:
+        for _family, _, _, _, sockaddr in addrs:
             ip = ipaddress.ip_address(sockaddr[0])
             if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved:
                 return f"Webhook URL resolves to private/loopback address ({ip})"

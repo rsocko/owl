@@ -329,7 +329,7 @@ def _build_diagnostic_entry(
 
 def _build_pattern(frequency: str, dates: list[date], grace_period_days: int) -> AnalysisPattern:
     days = [value.day for value in dates]
-    variance = int(round(statistics.pstdev(days))) if len(days) > 1 else 0
+    variance = round(statistics.pstdev(days)) if len(days) > 1 else 0
     interval_days = [(dates[index + 1] - dates[index]).days for index in range(len(dates) - 1)]
     interval_variance = statistics.pstdev(interval_days) if len(interval_days) > 1 else 0
     confidence = max(0.55, min(0.99, 1.0 - (interval_variance / 10)))

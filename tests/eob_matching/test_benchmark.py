@@ -17,7 +17,6 @@ from doc_intelligence_hub.modules.eob_matching.benchmark import (
     run_single_extraction,
 )
 
-
 # ---------------------------------------------------------------------------
 # Cost estimation tests
 # ---------------------------------------------------------------------------

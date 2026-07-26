@@ -99,14 +99,11 @@ export function SeriesTimeline({
 
   const months = useMemo(() => buildMonthRange(entries), [entries]);
 
-  if (entries.length === 0) {
-    return <div className="st-empty">{emptyLabel}</div>;
-  }
-
   const hasMultiAccounts = accounts.length > 1;
 
   // Group entries by account (or single group)
   const rowGroups: { label: string; color: string; docs: TimelineEntry[] }[] = useMemo(() => {
+    if (!entries.length) return [];
     if (!hasMultiAccounts) {
       return [{
         label: 'All documents',
@@ -136,6 +133,10 @@ export function SeriesTimeline({
     }
     return counts;
   }, [rowGroups]);
+
+  if (entries.length === 0) {
+    return <div className="st-empty">{emptyLabel}</div>;
+  }
 
   const renderDocMarker = (entry: TimelineEntry, color: string, groupLabel: string) => {
     const mk = docMonthKey(entry);

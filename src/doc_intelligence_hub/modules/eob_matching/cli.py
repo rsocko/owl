@@ -10,15 +10,15 @@ from pathlib import Path
 
 import click
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 
 from doc_intelligence_hub.core.paperless import PaperlessClient
 from doc_intelligence_hub.modules.eob_matching.classifier import classify_document
-from doc_intelligence_hub.modules.eob_matching.extractor import extract_eob, extract_bill
+from doc_intelligence_hub.modules.eob_matching.extractor import extract_bill, extract_eob
 from doc_intelligence_hub.modules.eob_matching.llm_extractor import (
-    extract_eob_llm,
     extract_bill_llm,
+    extract_eob_llm,
 )
 from doc_intelligence_hub.modules.eob_matching.matcher import match_documents
 from doc_intelligence_hub.modules.eob_matching.models import DocumentType, MatchConfidence
@@ -132,6 +132,8 @@ def run(
     if since_last_run:
         from doc_intelligence_hub.modules.eob_matching.database import (
             get_session as get_db_session,
+        )
+        from doc_intelligence_hub.modules.eob_matching.database import (
             last_successful_run,
         )
 
@@ -402,13 +404,16 @@ def dedup(ctx, dry_run):
     """
     _init_database(ctx.obj.get("db_url"))
 
+    from sqlalchemy import func
+
     from doc_intelligence_hub.modules.eob_matching.database import (
-        EOBRecord,
         BillRecord,
+        EOBRecord,
         MatchRecord,
+    )
+    from doc_intelligence_hub.modules.eob_matching.database import (
         get_session as get_db_session,
     )
-    from sqlalchemy import func
 
     db = get_db_session()
 
@@ -550,10 +555,10 @@ async def _setup_fields(url: str, token: str):
 def _show_status(last: int):
     """Display recent run history and match stats."""
     from doc_intelligence_hub.modules.eob_matching.database import (
+        confirmed_matches,
         get_session,
         latest_runs,
         pending_matches,
-        confirmed_matches,
     )
 
     db = get_session()
@@ -675,15 +680,17 @@ async def _run_pipeline(
         use_llm = bool(os.environ.get("LLM_BASE_URL"))
 
     from doc_intelligence_hub.modules.eob_matching.database import (
-        MatchingRun,
-        EOBRecord,
         BillRecord,
+        EOBRecord,
+        MatchingRun,
         MatchRecord,
-        get_session as get_db_session,
-        store_run,
-        store_eob,
         store_bill,
+        store_eob,
         store_match,
+        store_run,
+    )
+    from doc_intelligence_hub.modules.eob_matching.database import (
+        get_session as get_db_session,
     )
 
     client = PaperlessClient(base_url=paperless_url, token=paperless_token)
@@ -994,8 +1001,8 @@ async def _run_pipeline(
     high = sum(1 for m in stored_matches if m.confidence == MatchConfidence.HIGH)
     medium = sum(1 for m in stored_matches if m.confidence == MatchConfidence.MEDIUM)
     low = sum(1 for m in stored_matches if m.confidence == MatchConfidence.LOW)
-    unmatched_eobs = len(extracted_eobs) - len(set(m.eob_id for m in matches))
-    unmatched_bills = len(extracted_bills) - len(set(m.bill_id for m in matches))
+    unmatched_eobs = len(extracted_eobs) - len({m.eob_id for m in matches})
+    unmatched_bills = len(extracted_bills) - len({m.bill_id for m in matches})
 
     # Update run record
     run_record.documents_scanned = len(documents)

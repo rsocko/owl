@@ -5,6 +5,7 @@ Mirrors the pattern used by the EOB Matching module (SQLAlchemy ORM + init_db).
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -21,7 +22,6 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
-
 
 _DEFAULT_DB_URL = "sqlite:///data/triage.db"
 _db_url: str = _DEFAULT_DB_URL
@@ -829,7 +829,7 @@ def get_dashboard_stats() -> dict[str, Any]:
             .group_by(TriageQueueItem.status)
             .all()
         )
-        by_status = {s: c for s, c in status_rows}
+        by_status = dict(status_rows)
 
         # Correction events count (for accuracy calculation)
         total_corrections = (
@@ -878,10 +878,8 @@ def get_activity_feed(limit: int = 20) -> list[dict[str, Any]]:
         for e in events:
             payload = {}
             if e.payload_json:
-                try:
+                with contextlib.suppress(json.JSONDecodeError, TypeError):
                     payload = json.loads(e.payload_json)
-                except (json.JSONDecodeError, TypeError):
-                    pass
             result.append(
                 {
                     "id": e.id,
@@ -1003,10 +1001,8 @@ def list_correction_events(
         for e in events:
             payload = {}
             if e.payload_json:
-                try:
+                with contextlib.suppress(json.JSONDecodeError, TypeError):
                     payload = json.loads(e.payload_json)
-                except (json.JSONDecodeError, TypeError):
-                    pass
             result.append(
                 {
                     "id": e.id,
@@ -1043,10 +1039,8 @@ def undo_correction_event(event_id: str) -> dict[str, Any] | None:
         if event.undone:
             payload = {}
             if event.payload_json:
-                try:
+                with contextlib.suppress(json.JSONDecodeError, TypeError):
                     payload = json.loads(event.payload_json)
-                except (json.JSONDecodeError, TypeError):
-                    pass
             return {
                 "id": event.id,
                 "event_type": event.event_type,
@@ -1081,10 +1075,8 @@ def undo_correction_event(event_id: str) -> dict[str, Any] | None:
 
         payload = {}
         if event.payload_json:
-            try:
+            with contextlib.suppress(json.JSONDecodeError, TypeError):
                 payload = json.loads(event.payload_json)
-            except (json.JSONDecodeError, TypeError):
-                pass
 
         return {
             "id": event.id,
@@ -1132,10 +1124,8 @@ def get_notification_configs() -> list[dict[str, Any]]:
         for r in rows:
             config = {}
             if r.config_json:
-                try:
+                with contextlib.suppress(json.JSONDecodeError, TypeError):
                     config = json.loads(r.config_json)
-                except (json.JSONDecodeError, TypeError):
-                    pass
             result.append(
                 {
                     "id": r.id,
@@ -1178,10 +1168,8 @@ def upsert_notification_config(
 
         parsed_config = {}
         if row.config_json:
-            try:
+            with contextlib.suppress(json.JSONDecodeError, TypeError):
                 parsed_config = json.loads(row.config_json)
-            except (json.JSONDecodeError, TypeError):
-                pass
 
         return {
             "id": row.id,

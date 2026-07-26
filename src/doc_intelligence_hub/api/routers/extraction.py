@@ -151,7 +151,7 @@ async def backfill(body: BackfillRequest, request: Request) -> dict[str, Any]:
             logger.warning("Could not fetch document list for backfill: %s", exc)
             raise HTTPException(
                 status_code=503, detail="Could not fetch document list from Paperless"
-            )
+            ) from exc
 
     results: list[dict[str, Any]] = []
     extracted_count = 0

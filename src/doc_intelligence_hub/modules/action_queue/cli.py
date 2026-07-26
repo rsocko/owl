@@ -106,9 +106,11 @@ def setup():
 @cli.command()
 def views():
     """List saved views from Paperless-NGX (use their IDs with --saved-view)."""
-    from doc_intelligence_hub.core.paperless import PaperlessClient
-    from .config import settings
     from rich.table import Table
+
+    from doc_intelligence_hub.core.paperless import PaperlessClient
+
+    from .config import settings
 
     async def _views():
         client = PaperlessClient(
@@ -139,8 +141,9 @@ def views():
 def check():
     """Verify connectivity to Paperless-NGX and Ollama."""
     from doc_intelligence_hub.core.paperless import PaperlessClient
-    from .config import settings
+
     from .analyzer import OllamaAnalyzer
+    from .config import settings
 
     async def _check():
         console.print("[bold]Connectivity Check[/bold]\n")
@@ -172,9 +175,11 @@ def sync():
     this command detects the change and updates the internal database to match.
     Run this before viewing the dashboard to ensure it reflects manual Paperless edits.
     """
-    from .database import get_session, init_db as _init_db, Action
-    from .enricher import PaperlessEnricher
     from datetime import datetime
+
+    from .database import Action, get_session
+    from .database import init_db as _init_db
+    from .enricher import PaperlessEnricher
 
     async def _sync():
         _init_db()
@@ -202,7 +207,7 @@ def sync():
         updated = 0
 
         # Group by document_id (multiple actions per doc share one Paperless field)
-        doc_ids = set(a.document_id for a in pending_actions)
+        doc_ids = {a.document_id for a in pending_actions}
         for doc_id in doc_ids:
             paperless_status = await enricher.read_paperless_status(doc_id)
             if not paperless_status:
@@ -246,8 +251,10 @@ def init_db():
 @cli.command()
 def status():
     """Show current action queue status."""
-    from .database import get_session, Action, init_db as _init_db
     from rich.table import Table
+
+    from .database import Action, get_session
+    from .database import init_db as _init_db
 
     _init_db()
     db = get_session()

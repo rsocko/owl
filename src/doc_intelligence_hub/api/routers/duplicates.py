@@ -19,10 +19,10 @@ from doc_intelligence_hub.modules.triage.database import (
     list_duplicate_pairs,
 )
 from doc_intelligence_hub.modules.triage.duplicates import (
+    get_document_metadata,
     merge_documents,
     resolve_not_duplicate,
     scan_all_duplicates,
-    get_document_metadata,
 )
 
 router = APIRouter(prefix="/api/duplicates", tags=["duplicates"])
@@ -107,6 +107,6 @@ async def resolve_duplicate(pair_id: str, body: ResolveRequest) -> dict[str, Any
         else:
             result = merge_documents(pair_id, body.primary_doc_id, body.resolution)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return result

@@ -9,10 +9,16 @@ from doc_intelligence_hub.api.app import HubSettings, create_app
 from doc_intelligence_hub.modules.eob_matching.database import (
     BillRecord,
     EOBRecord,
-    MatchRecord,
     MatchingRun,
+    MatchRecord,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
     configure as eob_configure,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
     get_session as get_eob_session,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
     init_db as eob_init_db,
 )
 
@@ -278,8 +284,9 @@ class TestCheck:
     def test_write_flag_defaults_false(self, client):
         # The hub settings set write_to_paperless=False in the fixture
         # Verify the setting propagates correctly
-        from doc_intelligence_hub.api.routers.eob import _is_write_enabled
         from unittest.mock import MagicMock
+
+        from doc_intelligence_hub.api.routers.eob import _is_write_enabled
 
         mock_request = MagicMock()
         mock_request.app.state.hub_settings.write_to_paperless = False

@@ -12,8 +12,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from doc_intelligence_hub.api.app import HubSettings, create_app
-from doc_intelligence_hub.modules.action_queue.database import Action, init_db, get_session
 from doc_intelligence_hub.modules.action_queue.config import settings as aq_settings
+from doc_intelligence_hub.modules.action_queue.database import Action, get_session, init_db
 
 
 @pytest.fixture()

@@ -143,7 +143,7 @@ def _extract_services(text: str, *, eob: bool) -> list[ServiceLine]:
         description = _clean_value(description) or "Service"
 
         if eob:
-            billed, allowed, plan_pays, patient_resp = (amounts + [None, None, None, None])[:4]
+            billed, allowed, plan_pays, patient_resp = ([*amounts, None, None, None, None])[:4]
             services.append(
                 ServiceLine(
                     description=description,

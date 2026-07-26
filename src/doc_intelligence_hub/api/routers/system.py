@@ -9,8 +9,10 @@ from pydantic import BaseModel
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
 from doc_intelligence_hub.core.llm import (
     get_llm_settings,
-    health_check as llm_health_check,
     validate_model_availability,
+)
+from doc_intelligence_hub.core.llm import (
+    health_check as llm_health_check,
 )
 
 router = APIRouter(prefix="/api", tags=["system"])

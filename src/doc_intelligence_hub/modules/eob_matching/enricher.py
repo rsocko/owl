@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from doc_intelligence_hub.core.paperless import PaperlessClient
-
 
 # Custom field definitions for EOB matching
 CUSTOM_FIELD_DEFINITIONS = [
@@ -113,7 +110,7 @@ class EOBEnricher:
         bill_document_id: int,
         score: float,
         confidence: str,
-        patient_responsibility: Optional[float] = None,
+        patient_responsibility: float | None = None,
     ) -> None:
         """Write match relationship to both EOB and Bill documents in Paperless."""
         from datetime import date

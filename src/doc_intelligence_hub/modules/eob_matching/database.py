@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import UTC, datetime
-from typing import Optional
 
 from sqlalchemy import (
     Column,
@@ -20,7 +19,6 @@ from sqlalchemy import (
     create_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
-
 
 _DEFAULT_DB_URL = "sqlite:///data/eob_matching.db"
 _db_url: str = _DEFAULT_DB_URL
@@ -232,7 +230,8 @@ def _migrate_missing_columns(engine):
     SQLAlchemy's ``create_all`` only creates tables — it never alters them.
     We inspect the live schema and issue ALTER TABLE for anything missing.
     """
-    from sqlalchemy import inspect as sa_inspect, text
+    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy import text
 
     inspector = sa_inspect(engine)
 
@@ -310,7 +309,7 @@ def store_match(session: Session, record: MatchRecord) -> MatchRecord:
     return record
 
 
-def last_successful_run(session: Session) -> Optional[MatchingRun]:
+def last_successful_run(session: Session) -> MatchingRun | None:
     """Return the most recent MatchingRun that completed successfully (has finished_at)."""
     return (
         session.query(MatchingRun)

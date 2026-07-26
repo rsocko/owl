@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-
 from doc_intelligence_hub.modules.eob_matching.database import (
-    MatchRecord,
     MatchingRun,
+    MatchRecord,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
     get_session as get_eob_session,
 )
 
