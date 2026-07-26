@@ -598,3 +598,27 @@
     border-radius: var(--radius);
   }
 }
+
+/* ── Metadata correction link ── */
+.triage-metadata-link {
+  margin-top: 12px;
+  text-align: center;
+}
+
+.triage-metadata-link a {
+  display: inline-block;
+  padding: 8px 20px;
+  border-radius: 6px;
+  background: #eef6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.triage-metadata-link a:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
