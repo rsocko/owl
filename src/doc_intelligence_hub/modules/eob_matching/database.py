@@ -252,6 +252,16 @@ def store_match(session: Session, record: MatchRecord) -> MatchRecord:
     return record
 
 
+def last_successful_run(session: Session) -> Optional[MatchingRun]:
+    """Return the most recent MatchingRun that completed successfully (has finished_at)."""
+    return (
+        session.query(MatchingRun)
+        .filter(MatchingRun.finished_at.isnot(None))
+        .order_by(MatchingRun.finished_at.desc())
+        .first()
+    )
+
+
 def latest_runs(session: Session, limit: int = 10) -> list[MatchingRun]:
     return (
         session.query(MatchingRun)
