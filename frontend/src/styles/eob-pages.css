@@ -285,6 +285,76 @@
   background: var(--text-muted);
 }
 
+/* ── Alert cards (EOB dashboard) ── */
+.eob-alerts-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.eob-alert-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--warning);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+
+.eob-alert-card.danger {
+  border-left-color: var(--danger);
+}
+
+.eob-alert-card.info {
+  border-left-color: var(--accent);
+}
+
+.eob-alert-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.eob-alert-body {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin: 6px 0;
+}
+
+.eob-alert-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.eob-quick-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.eob-qs-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.eob-qs-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.eob-qs-count {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--accent);
+}
+
 /* Match history timeline */
 .eob-timeline {
   display: flex;
