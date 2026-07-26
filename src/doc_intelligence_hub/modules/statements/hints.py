@@ -1,4 +1,4 @@
-﻿"""Provider hints processing.
+"""Provider hints processing.
 
 Applies user-defined hints (split, merge, rename, ignore, define) to
 the automatically discovered provider list.
@@ -6,10 +6,13 @@ the automatically discovered provider list.
 
 from __future__ import annotations
 
-from datetime import date
 
 from doc_intelligence_hub.modules.statements.config import ProviderHint
-from doc_intelligence_hub.modules.statements.models import AnalysisPattern, DocumentRecord, ProviderCandidate
+from doc_intelligence_hub.modules.statements.models import (
+    AnalysisPattern,
+    DocumentRecord,
+    ProviderCandidate,
+)
 from doc_intelligence_hub.modules.statements.utils import normalize_title, slugify
 
 
@@ -37,22 +40,28 @@ def apply_hints(
     return result
 
 
-def _apply_ignore(providers: list[ProviderCandidate], hint: ProviderHint) -> list[ProviderCandidate]:
+def _apply_ignore(
+    providers: list[ProviderCandidate], hint: ProviderHint
+) -> list[ProviderCandidate]:
     """Remove providers matching the hint."""
     return [p for p in providers if not _matches_hint(p, hint)]
 
 
-def _apply_rename(providers: list[ProviderCandidate], hint: ProviderHint) -> list[ProviderCandidate]:
+def _apply_rename(
+    providers: list[ProviderCandidate], hint: ProviderHint
+) -> list[ProviderCandidate]:
     """Rename providers matching the hint."""
     if not hint.rename_to:
         return providers
     result = []
     for p in providers:
         if _matches_hint(p, hint):
-            p = p.model_copy(update={
-                "provider_name": hint.rename_to,
-                "provider_key": slugify(f"{hint.rename_to}-{p.normalized_title}"),
-            })
+            p = p.model_copy(
+                update={
+                    "provider_name": hint.rename_to,
+                    "provider_key": slugify(f"{hint.rename_to}-{p.normalized_title}"),
+                }
+            )
         result.append(p)
     return result
 
@@ -74,8 +83,10 @@ def _apply_split(
 
         # Find all documents that belong to this provider's correspondent
         provider_docs = [
-            d for d in documents
-            if d.correspondent_name and d.correspondent_name.lower() == (hint.correspondent or "").lower()
+            d
+            for d in documents
+            if d.correspondent_name
+            and d.correspondent_name.lower() == (hint.correspondent or "").lower()
         ]
 
         split_successful = False
@@ -163,7 +174,8 @@ def _apply_define(
 
     # Find matching documents
     match_docs = [
-        d for d in documents
+        d
+        for d in documents
         if d.correspondent_name and d.correspondent_name.lower() == hint.correspondent.lower()
     ]
 

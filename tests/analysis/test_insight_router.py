@@ -106,7 +106,12 @@ class TestRoutingEvaluation:
             routing=RuleRouting(
                 default=InsightRoute.INFORMATIONAL,
                 escalation=[
-                    EscalationCondition(condition="pct_change > 50", route=InsightRoute.ACTIONABLE, severity=InsightSeverity.WARNING, mc_alert=True),
+                    EscalationCondition(
+                        condition="pct_change > 50",
+                        route=InsightRoute.ACTIONABLE,
+                        severity=InsightSeverity.WARNING,
+                        mc_alert=True,
+                    ),
                 ],
             )
         )
@@ -122,8 +127,14 @@ class TestRoutingEvaluation:
             routing=RuleRouting(
                 default=InsightRoute.INFORMATIONAL,
                 escalation=[
-                    EscalationCondition(condition="pct_change > 50", severity=InsightSeverity.WARNING),
-                    EscalationCondition(condition="pct_change > 100", severity=InsightSeverity.CRITICAL, mc_alert=True),
+                    EscalationCondition(
+                        condition="pct_change > 50", severity=InsightSeverity.WARNING
+                    ),
+                    EscalationCondition(
+                        condition="pct_change > 100",
+                        severity=InsightSeverity.CRITICAL,
+                        mc_alert=True,
+                    ),
                 ],
             )
         )
@@ -138,7 +149,9 @@ class TestRoutingEvaluation:
             routing=RuleRouting(
                 default=InsightRoute.INFORMATIONAL,
                 escalation=[
-                    EscalationCondition(condition="pct_change > 50", severity=InsightSeverity.WARNING),
+                    EscalationCondition(
+                        condition="pct_change > 50", severity=InsightSeverity.WARNING
+                    ),
                 ],
             )
         )

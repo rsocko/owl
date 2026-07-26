@@ -48,7 +48,9 @@ class Insight(Base):
     rule_name = Column(String, nullable=False)
 
     # Classification
-    insight_type = Column(String, nullable=False)  # comparison, anomaly, trend, compliance, extraction
+    insight_type = Column(
+        String, nullable=False
+    )  # comparison, anomaly, trend, compliance, extraction
     route = Column(String, nullable=False)  # informational, actionable
     severity = Column(String, default="info")  # info, notice, warning, critical
 
@@ -60,7 +62,9 @@ class Insight(Base):
 
     # Context
     series_id = Column(String, nullable=True)
-    document_ids_json = Column("document_ids", Text, nullable=True)  # JSON array of Paperless doc IDs
+    document_ids_json = Column(
+        "document_ids", Text, nullable=True
+    )  # JSON array of Paperless doc IDs
     correspondent = Column(String, nullable=True)
 
     # Lifecycle
@@ -81,9 +85,7 @@ class InsightHistory(Base):
     """Historical metric data for charting trends."""
 
     __tablename__ = "insight_history"
-    __table_args__ = (
-        Index("idx_history_series", "series_id", "metric_name", "period"),
-    )
+    __table_args__ = (Index("idx_history_series", "series_id", "metric_name", "period"),)
 
     id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex[:12])
     rule_id = Column(String, nullable=False)
@@ -99,9 +101,7 @@ class RuleState(Base):
     """Persisted runtime state for rules — overrides, custom rules, run history."""
 
     __tablename__ = "rule_states"
-    __table_args__ = (
-        Index("idx_rule_states_source", "source"),
-    )
+    __table_args__ = (Index("idx_rule_states_source", "source"),)
 
     id = Column(String, primary_key=True)  # Same as rule_id
     enabled = Column(Integer, default=1)  # 1 = enabled, 0 = disabled
@@ -353,9 +353,7 @@ def get_insight_summary() -> dict[str, Any]:
             .all()
         )
         route_rows = (
-            base.with_entities(Insight.route, func.count(Insight.id))
-            .group_by(Insight.route)
-            .all()
+            base.with_entities(Insight.route, func.count(Insight.id)).group_by(Insight.route).all()
         )
 
         return {

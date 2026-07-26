@@ -23,7 +23,9 @@ class ActionQueuePaperlessClient:
     def __init__(self):
         self._client = _get_client()
 
-    async def get_documents_by_tags(self, tag_names: list[str], *, limit: Optional[int] = None) -> list[dict]:
+    async def get_documents_by_tags(
+        self, tag_names: list[str], *, limit: Optional[int] = None
+    ) -> list[dict]:
         """Fetch documents that have any of the specified tags.
 
         Resolves tag names to IDs (cached) and issues a single server-side
@@ -34,7 +36,9 @@ class ActionQueuePaperlessClient:
             return []
         return await self._client.list_documents_by_tag_ids(tag_ids, limit=limit)
 
-    async def get_documents_by_saved_view(self, view_id: int, *, limit: Optional[int] = None) -> list[dict]:
+    async def get_documents_by_saved_view(
+        self, view_id: int, *, limit: Optional[int] = None
+    ) -> list[dict]:
         """Fetch documents matching a Paperless saved view."""
         return await self._client.list_documents(saved_view=view_id, limit=limit)
 
@@ -98,4 +102,3 @@ class ActionQueuePaperlessClient:
 
 # Keep backward compatibility — the module-level PaperlessClient name
 PaperlessClient = ActionQueuePaperlessClient
-

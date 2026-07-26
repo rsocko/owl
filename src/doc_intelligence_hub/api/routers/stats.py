@@ -11,8 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Query, Request
 
-from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
-from doc_intelligence_hub.modules.action_queue.config import settings as aq_settings
+from doc_intelligence_hub.api.routers import get_loaded_statement_config
 from doc_intelligence_hub.modules.action_queue.database import (
     Action,
     ProcessingHistory,
@@ -108,9 +107,7 @@ def _statements_stats(request: Request) -> dict[str, Any]:
             recommendations = db.load_latest_recommendations()
             missing = 0
             if recommendations:
-                missing = sum(
-                    1 for r in recommendations.recommendations if r.status == "missing"
-                )
+                missing = sum(1 for r in recommendations.recommendations if r.status == "missing")
 
             return {"tracked": tracked, "missing": missing}
         finally:
@@ -134,9 +131,7 @@ def _eob_stats() -> dict[str, Any]:
             # Get EOB document IDs that have confirmed matches
             matched_eob_ids = [
                 r.eob_document_id
-                for r in db.query(MatchRecord.eob_document_id)
-                .filter_by(status="confirmed")
-                .all()
+                for r in db.query(MatchRecord.eob_document_id).filter_by(status="confirmed").all()
             ]
 
             # Sum patient responsibility for unmatched EOBs
@@ -149,8 +144,7 @@ def _eob_stats() -> dict[str, Any]:
                 )
 
             unresolved_amount = sum(
-                eob.total_patient_responsibility or 0.0
-                for eob in unresolved_query.all()
+                eob.total_patient_responsibility or 0.0 for eob in unresolved_query.all()
             )
 
             return {
@@ -244,12 +238,10 @@ def _module_status_eob(request: Request) -> dict[str, Any]:
         eob_init_db()
         db = get_eob_session()
         try:
-            last_run = (
-                db.query(MatchingRun)
-                .order_by(MatchingRun.started_at.desc())
-                .first()
+            last_run = db.query(MatchingRun).order_by(MatchingRun.started_at.desc()).first()
+            last_sync = (
+                last_run.finished_at.isoformat() if last_run and last_run.finished_at else None
             )
-            last_sync = last_run.finished_at.isoformat() if last_run and last_run.finished_at else None
 
             item_count = db.query(MatchRecord).filter_by(status="candidate").count()
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 
 class TestGetWeights:
     """Tests for GET /api/admin/weights."""

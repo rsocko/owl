@@ -221,7 +221,7 @@ def emit_eob_alerts(
         Number of alerts emitted.
     """
     count = 0
-    for eob in (unmatched_eobs or []):
+    for eob in unmatched_eobs or []:
         provider = eob.get("provider_name") or eob.get("provider") or "Unknown"
         doc_id = eob.get("document_id", "?")
         alert = emit_alert(
@@ -235,7 +235,7 @@ def emit_eob_alerts(
         if alert:
             count += 1
 
-    for match in (low_confidence_matches or []):
+    for match in low_confidence_matches or []:
         alert = emit_alert(
             alert_type="low_confidence_match",
             severity="low",
@@ -252,7 +252,7 @@ def emit_eob_alerts(
         if alert:
             count += 1
 
-    for match in (high_confidence_matches or []):
+    for match in high_confidence_matches or []:
         eob_id = match.get("eob_document_id", "?")
         bill_id = match.get("bill_document_id", "?")
         score = match.get("score", "?")
@@ -395,6 +395,7 @@ def emit_action_queue_alerts(actions: list[dict[str, Any]]) -> int:
         if due_date:
             try:
                 from datetime import date as date_type
+
                 if isinstance(due_date, str):
                     due = date_type.fromisoformat(due_date)
                 else:

@@ -54,44 +54,87 @@ def seeded_client(client, tmp_path):
         db.add(run)
         db.commit()
 
-        db.add(EOBRecord(
-            document_id=100, run_id=1, title="EOB from UHC",
-            classification_score=92.0, insurance_company="UnitedHealthcare",
-            patient_name="John Doe", provider_name="Dr. Smith",
-            date_of_service="2026-06-15", total_patient_responsibility=150.00,
-        ))
-        db.add(EOBRecord(
-            document_id=101, run_id=1, title="EOB from Aetna",
-            classification_score=88.0, insurance_company="Aetna",
-            patient_name="John Doe", provider_name="City Hospital",
-        ))
-        db.add(BillRecord(
-            document_id=200, run_id=1, title="Bill from Dr. Smith",
-            classification_score=85.0, provider_name="Dr. Smith",
-            patient_name="John Doe", balance_due=150.00,
-            date_of_service="2026-06-15",
-        ))
-        db.add(BillRecord(
-            document_id=201, run_id=1, title="Bill from City Hospital",
-            classification_score=80.0, provider_name="City Hospital",
-            patient_name="John Doe", balance_due=500.00,
-        ))
+        db.add(
+            EOBRecord(
+                document_id=100,
+                run_id=1,
+                title="EOB from UHC",
+                classification_score=92.0,
+                insurance_company="UnitedHealthcare",
+                patient_name="John Doe",
+                provider_name="Dr. Smith",
+                date_of_service="2026-06-15",
+                total_patient_responsibility=150.00,
+            )
+        )
+        db.add(
+            EOBRecord(
+                document_id=101,
+                run_id=1,
+                title="EOB from Aetna",
+                classification_score=88.0,
+                insurance_company="Aetna",
+                patient_name="John Doe",
+                provider_name="City Hospital",
+            )
+        )
+        db.add(
+            BillRecord(
+                document_id=200,
+                run_id=1,
+                title="Bill from Dr. Smith",
+                classification_score=85.0,
+                provider_name="Dr. Smith",
+                patient_name="John Doe",
+                balance_due=150.00,
+                date_of_service="2026-06-15",
+            )
+        )
+        db.add(
+            BillRecord(
+                document_id=201,
+                run_id=1,
+                title="Bill from City Hospital",
+                classification_score=80.0,
+                provider_name="City Hospital",
+                patient_name="John Doe",
+                balance_due=500.00,
+            )
+        )
         db.commit()
 
-        db.add(MatchRecord(
-            id=1, run_id=1, eob_document_id=100, bill_document_id=200,
-            score=92.5, confidence="HIGH",
-            breakdown_date=95.0, breakdown_provider=90.0,
-            breakdown_patient=100.0, breakdown_amount=100.0,
-            breakdown_procedures=50.0, status="candidate",
-        ))
-        db.add(MatchRecord(
-            id=2, run_id=1, eob_document_id=101, bill_document_id=201,
-            score=72.0, confidence="MEDIUM",
-            breakdown_date=60.0, breakdown_provider=80.0,
-            breakdown_patient=100.0, breakdown_amount=0.0,
-            breakdown_procedures=0.0, status="candidate",
-        ))
+        db.add(
+            MatchRecord(
+                id=1,
+                run_id=1,
+                eob_document_id=100,
+                bill_document_id=200,
+                score=92.5,
+                confidence="HIGH",
+                breakdown_date=95.0,
+                breakdown_provider=90.0,
+                breakdown_patient=100.0,
+                breakdown_amount=100.0,
+                breakdown_procedures=50.0,
+                status="candidate",
+            )
+        )
+        db.add(
+            MatchRecord(
+                id=2,
+                run_id=1,
+                eob_document_id=101,
+                bill_document_id=201,
+                score=72.0,
+                confidence="MEDIUM",
+                breakdown_date=60.0,
+                breakdown_provider=80.0,
+                breakdown_patient=100.0,
+                breakdown_amount=0.0,
+                breakdown_procedures=0.0,
+                status="candidate",
+            )
+        )
         db.commit()
     finally:
         db.close()

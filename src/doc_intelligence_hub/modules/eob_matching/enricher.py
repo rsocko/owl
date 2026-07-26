@@ -14,7 +14,9 @@ CUSTOM_FIELD_DEFINITIONS = [
         "data_type": "select",
         "extra_data": {
             "select_options": [
-                {"label": "matched"}, {"label": "unmatched"}, {"label": "review_needed"},
+                {"label": "matched"},
+                {"label": "unmatched"},
+                {"label": "review_needed"},
             ],
         },
     },
@@ -121,11 +123,20 @@ class EOBEnricher:
 
         # Tag the EOB document
         eob_fields = [
-            {"field": field_ids["EOB Match Status"], "value": self._resolve_select_value("EOB Match Status", "matched")},
+            {
+                "field": field_ids["EOB Match Status"],
+                "value": self._resolve_select_value("EOB Match Status", "matched"),
+            },
             {"field": field_ids["EOB Match Score"], "value": round(score, 1)},
-            {"field": field_ids["EOB Match Confidence"], "value": self._resolve_select_value("EOB Match Confidence", confidence)},
+            {
+                "field": field_ids["EOB Match Confidence"],
+                "value": self._resolve_select_value("EOB Match Confidence", confidence),
+            },
             {"field": field_ids["EOB Matched Document"], "value": bill_document_id},
-            {"field": field_ids["EOB Document Type"], "value": self._resolve_select_value("EOB Document Type", "EOB")},
+            {
+                "field": field_ids["EOB Document Type"],
+                "value": self._resolve_select_value("EOB Document Type", "EOB"),
+            },
             {"field": field_ids["EOB Analyzed"], "value": today},
         ]
         if patient_responsibility is not None:
@@ -136,11 +147,20 @@ class EOBEnricher:
 
         # Tag the Bill document
         bill_fields = [
-            {"field": field_ids["EOB Match Status"], "value": self._resolve_select_value("EOB Match Status", "matched")},
+            {
+                "field": field_ids["EOB Match Status"],
+                "value": self._resolve_select_value("EOB Match Status", "matched"),
+            },
             {"field": field_ids["EOB Match Score"], "value": round(score, 1)},
-            {"field": field_ids["EOB Match Confidence"], "value": self._resolve_select_value("EOB Match Confidence", confidence)},
+            {
+                "field": field_ids["EOB Match Confidence"],
+                "value": self._resolve_select_value("EOB Match Confidence", confidence),
+            },
             {"field": field_ids["EOB Matched Document"], "value": eob_document_id},
-            {"field": field_ids["EOB Document Type"], "value": self._resolve_select_value("EOB Document Type", "BILL")},
+            {
+                "field": field_ids["EOB Document Type"],
+                "value": self._resolve_select_value("EOB Document Type", "BILL"),
+            },
             {"field": field_ids["EOB Analyzed"], "value": today},
         ]
         await self.client.update_custom_fields(bill_document_id, bill_fields)
@@ -150,8 +170,17 @@ class EOBEnricher:
         from datetime import date
 
         field_ids = await self.get_field_ids()
-        await self.client.update_custom_fields(document_id, [
-            {"field": field_ids["EOB Match Status"], "value": self._resolve_select_value("EOB Match Status", "unmatched")},
-            {"field": field_ids["EOB Document Type"], "value": self._resolve_select_value("EOB Document Type", doc_type)},
-            {"field": field_ids["EOB Analyzed"], "value": date.today().isoformat()},
-        ])
+        await self.client.update_custom_fields(
+            document_id,
+            [
+                {
+                    "field": field_ids["EOB Match Status"],
+                    "value": self._resolve_select_value("EOB Match Status", "unmatched"),
+                },
+                {
+                    "field": field_ids["EOB Document Type"],
+                    "value": self._resolve_select_value("EOB Document Type", doc_type),
+                },
+                {"field": field_ids["EOB Analyzed"], "value": date.today().isoformat()},
+            ],
+        )

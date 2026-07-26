@@ -1,4 +1,4 @@
-﻿"""Shared test configuration — loads .env before tests run."""
+"""Shared test configuration — loads .env before tests run."""
 
 from pathlib import Path
 

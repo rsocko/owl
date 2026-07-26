@@ -19,7 +19,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 # Keywords used for smart-suggesting which document types are "statement-like"
-_SUGGEST_KEYWORDS = ("statement", "bill", "invoice", "eob", "explanation of benefits", "credit report")
+_SUGGEST_KEYWORDS = (
+    "statement",
+    "bill",
+    "invoice",
+    "eob",
+    "explanation of benefits",
+    "credit report",
+)
 
 
 def _is_suggested(name: str) -> bool:
@@ -70,12 +77,14 @@ async def list_document_types(request: Request) -> dict[str, Any]:
             enabled = saved_mapping.get(type_id, False)
         else:
             enabled = suggested
-        result.append({
-            "id": type_id,
-            "name": doc_type["name"],
-            "suggested": suggested,
-            "enabled": enabled,
-        })
+        result.append(
+            {
+                "id": type_id,
+                "name": doc_type["name"],
+                "suggested": suggested,
+                "enabled": enabled,
+            }
+        )
 
     result.sort(key=lambda t: t["name"].lower())
     return {"types": result, "has_saved_mapping": has_saved_mapping}
@@ -103,7 +112,9 @@ async def get_document_type_mapping(request: Request) -> dict[str, Any]:
 
 
 @router.put("/document-type-mapping")
-async def update_document_type_mapping(request: Request, body: DocumentTypeMappingUpdate) -> dict[str, Any]:
+async def update_document_type_mapping(
+    request: Request, body: DocumentTypeMappingUpdate
+) -> dict[str, Any]:
     """Save the document type mapping to the database.
 
     This mapping is used by the statement discovery pipeline to determine

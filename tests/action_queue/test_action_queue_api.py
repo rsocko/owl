@@ -1,7 +1,5 @@
 """Tests for the action queue API router — preview_url and serialization."""
 
-import os
-import tempfile
 from datetime import datetime, date
 
 import pytest
@@ -40,33 +38,37 @@ def seeded_client(client):
     """Client with pre-seeded action rows."""
     db = get_session()
     try:
-        db.add(Action(
-            id=1,
-            document_id=42,
-            document_title="Electric Bill Jan 2026",
-            action_type="PAY",
-            title="Pay electric bill",
-            summary="Monthly electric bill due",
-            due_date=date(2026, 2, 15),
-            amount=125.50,
-            urgency="HIGH",
-            confidence=85,
-            status="pending",
-            correspondent="Power Co",
-        ))
-        db.add(Action(
-            id=2,
-            document_id=99,
-            document_title="Insurance EOB",
-            action_type="FILE",
-            title="File insurance EOB",
-            summary="EOB for dental visit",
-            urgency="LOW",
-            confidence=70,
-            status="completed",
-            correspondent="Blue Shield",
-            completed_at=datetime(2026, 1, 20, 10, 0, 0),
-        ))
+        db.add(
+            Action(
+                id=1,
+                document_id=42,
+                document_title="Electric Bill Jan 2026",
+                action_type="PAY",
+                title="Pay electric bill",
+                summary="Monthly electric bill due",
+                due_date=date(2026, 2, 15),
+                amount=125.50,
+                urgency="HIGH",
+                confidence=85,
+                status="pending",
+                correspondent="Power Co",
+            )
+        )
+        db.add(
+            Action(
+                id=2,
+                document_id=99,
+                document_title="Insurance EOB",
+                action_type="FILE",
+                title="File insurance EOB",
+                summary="EOB for dental visit",
+                urgency="LOW",
+                confidence=70,
+                status="completed",
+                correspondent="Blue Shield",
+                completed_at=datetime(2026, 1, 20, 10, 0, 0),
+            )
+        )
         db.commit()
     finally:
         db.close()
@@ -110,10 +112,22 @@ class TestListActions:
         resp = seeded_client.get("/api/queue/actions?status=pending")
         action = resp.json()["actions"][0]
         expected_fields = {
-            "id", "document_id", "document_title", "action_type",
-            "title", "summary", "due_date", "amount", "urgency",
-            "confidence", "status", "correspondent", "ai_reasoning",
-            "preview_url", "created_at", "completed_at",
+            "id",
+            "document_id",
+            "document_title",
+            "action_type",
+            "title",
+            "summary",
+            "due_date",
+            "amount",
+            "urgency",
+            "confidence",
+            "status",
+            "correspondent",
+            "ai_reasoning",
+            "preview_url",
+            "created_at",
+            "completed_at",
         }
         assert set(action.keys()) == expected_fields
 
@@ -178,14 +192,16 @@ class TestPreviewUrlEdgeCases:
         init_db()
         db = get_session()
         try:
-            db.add(Action(
-                document_id=42,
-                document_title="Test Doc",
-                action_type="PAY",
-                title="Test",
-                urgency="LOW",
-                status="pending",
-            ))
+            db.add(
+                Action(
+                    document_id=42,
+                    document_title="Test Doc",
+                    action_type="PAY",
+                    title="Test",
+                    urgency="LOW",
+                    status="pending",
+                )
+            )
             db.commit()
         finally:
             db.close()

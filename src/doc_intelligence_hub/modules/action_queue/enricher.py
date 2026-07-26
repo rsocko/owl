@@ -1,7 +1,6 @@
 """Paperless custom field enricher — writes action metadata back to documents."""
 
 import logging
-from typing import Optional
 
 from doc_intelligence_hub.core.paperless import PaperlessClient
 from .config import settings
@@ -12,6 +11,7 @@ logger = logging.getLogger(__name__)
 def _make_paperless_client() -> PaperlessClient:
     return PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_api_token)
 
+
 # Custom field definitions to auto-create in Paperless
 CUSTOM_FIELD_DEFINITIONS = [
     {
@@ -19,9 +19,14 @@ CUSTOM_FIELD_DEFINITIONS = [
         "data_type": "select",
         "extra_data": {
             "select_options": [
-                {"label": "PAY"}, {"label": "RESPOND"}, {"label": "FILE"},
-                {"label": "REVIEW"}, {"label": "SHARE"}, {"label": "SCHEDULE"},
-                {"label": "SIGN"}, {"label": "ARCHIVE"},
+                {"label": "PAY"},
+                {"label": "RESPOND"},
+                {"label": "FILE"},
+                {"label": "REVIEW"},
+                {"label": "SHARE"},
+                {"label": "SCHEDULE"},
+                {"label": "SIGN"},
+                {"label": "ARCHIVE"},
             ]
         },
     },
@@ -38,8 +43,10 @@ CUSTOM_FIELD_DEFINITIONS = [
         "data_type": "select",
         "extra_data": {
             "select_options": [
-                {"label": "CRITICAL"}, {"label": "HIGH"},
-                {"label": "MEDIUM"}, {"label": "LOW"},
+                {"label": "CRITICAL"},
+                {"label": "HIGH"},
+                {"label": "MEDIUM"},
+                {"label": "LOW"},
             ]
         },
     },
@@ -48,7 +55,9 @@ CUSTOM_FIELD_DEFINITIONS = [
         "data_type": "select",
         "extra_data": {
             "select_options": [
-                {"label": "pending"}, {"label": "completed"}, {"label": "dismissed"},
+                {"label": "pending"},
+                {"label": "completed"},
+                {"label": "dismissed"},
             ]
         },
     },
@@ -131,7 +140,9 @@ class PaperlessEnricher:
             await self.ensure_custom_fields_exist()
         return self._field_id_cache
 
-    async def enrich_document(self, document_id: int, extraction: dict, action_count: int = 1) -> None:
+    async def enrich_document(
+        self, document_id: int, extraction: dict, action_count: int = 1
+    ) -> None:
         """Write extraction results to Paperless custom fields.
 
         Args:
@@ -143,6 +154,7 @@ class PaperlessEnricher:
             return  # Safety: writes disabled via config
 
         import asyncio
+
         await asyncio.sleep(settings.rate_limit_delay)  # Be nice to Paperless
 
         field_ids = await self.get_field_ids()
@@ -152,64 +164,82 @@ class PaperlessEnricher:
 
         # Action Type (select)
         if extraction.get("action_type"):
-            custom_fields.append({
-                "field": field_ids["Action Type"],
-                "value": self._resolve_select_value("Action Type", extraction["action_type"]),
-            })
+            custom_fields.append(
+                {
+                    "field": field_ids["Action Type"],
+                    "value": self._resolve_select_value("Action Type", extraction["action_type"]),
+                }
+            )
 
         # Due Date
         if extraction.get("due_date"):
-            custom_fields.append({
-                "field": field_ids["Action Due Date"],
-                "value": extraction["due_date"],
-            })
+            custom_fields.append(
+                {
+                    "field": field_ids["Action Due Date"],
+                    "value": extraction["due_date"],
+                }
+            )
 
         # Amount
         if extraction.get("amount") is not None:
-            custom_fields.append({
-                "field": field_ids["Action Amount"],
-                "value": extraction["amount"],
-            })
+            custom_fields.append(
+                {
+                    "field": field_ids["Action Amount"],
+                    "value": extraction["amount"],
+                }
+            )
 
         # Urgency (select)
         if extraction.get("urgency"):
-            custom_fields.append({
-                "field": field_ids["Action Urgency"],
-                "value": self._resolve_select_value("Action Urgency", extraction["urgency"]),
-            })
+            custom_fields.append(
+                {
+                    "field": field_ids["Action Urgency"],
+                    "value": self._resolve_select_value("Action Urgency", extraction["urgency"]),
+                }
+            )
 
         # Status (select — always starts as pending)
-        custom_fields.append({
-            "field": field_ids["Action Status"],
-            "value": self._resolve_select_value("Action Status", "pending"),
-        })
+        custom_fields.append(
+            {
+                "field": field_ids["Action Status"],
+                "value": self._resolve_select_value("Action Status", "pending"),
+            }
+        )
 
         # Summary (include action count hint if multiple)
         summary = extraction.get("summary", "")
         if action_count > 1:
             summary = f"[{action_count} actions] {summary}"
         if summary:
-            custom_fields.append({
-                "field": field_ids["Action Summary"],
-                "value": summary[:255],
-            })
+            custom_fields.append(
+                {
+                    "field": field_ids["Action Summary"],
+                    "value": summary[:255],
+                }
+            )
 
         # Analyzed date
-        custom_fields.append({
-            "field": field_ids["Action Analyzed"],
-            "value": date.today().isoformat(),
-        })
+        custom_fields.append(
+            {
+                "field": field_ids["Action Analyzed"],
+                "value": date.today().isoformat(),
+            }
+        )
 
         # Action Count
-        custom_fields.append({
-            "field": field_ids["Action Count"],
-            "value": action_count,
-        })
+        custom_fields.append(
+            {
+                "field": field_ids["Action Count"],
+                "value": action_count,
+            }
+        )
 
         if custom_fields:
             logger.info(
                 "Writing %d custom field(s) to Paperless document_id=%s: %s",
-                len(custom_fields), document_id, [f["field"] for f in custom_fields],
+                len(custom_fields),
+                document_id,
+                [f["field"] for f in custom_fields],
             )
             await self.client.update_custom_fields(document_id, custom_fields)
 
@@ -222,9 +252,15 @@ class PaperlessEnricher:
             return  # Safety: writes disabled via config
 
         field_ids = await self.get_field_ids()
-        await self.client.update_custom_fields(document_id, [
-            {"field": field_ids["Action Status"], "value": self._resolve_select_value("Action Status", status)}
-        ])
+        await self.client.update_custom_fields(
+            document_id,
+            [
+                {
+                    "field": field_ids["Action Status"],
+                    "value": self._resolve_select_value("Action Status", status),
+                }
+            ],
+        )
 
     async def read_paperless_status(self, document_id: int) -> str | None:
         """Read the current Action Status value from Paperless.

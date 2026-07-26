@@ -2,20 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
-import pytest
-
-from doc_intelligence_hub.modules.action_queue.database import (
-    Action,
-    get_session as get_aq_session,
-)
-from doc_intelligence_hub.modules.eob_matching.database import (
-    EOBRecord,
-    MatchRecord,
-    get_session as get_eob_session,
-)
-
 
 class TestMCListActions:
     """Tests for GET /api/action-queue/actions."""

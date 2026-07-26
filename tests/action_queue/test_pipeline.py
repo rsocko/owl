@@ -14,15 +14,17 @@ from doc_intelligence_hub.modules.action_queue.pipeline import Pipeline
 
 
 VALID_EXTRACTION = {
-    "actions": [{
-        "action_type": "PAY",
-        "title": "Pay bill",
-        "summary": "test action",
-        "due_date": None,
-        "amount": 50.0,
-        "urgency": "MEDIUM",
-        "confidence": 90,
-    }],
+    "actions": [
+        {
+            "action_type": "PAY",
+            "title": "Pay bill",
+            "summary": "test action",
+            "due_date": None,
+            "amount": 50.0,
+            "urgency": "MEDIUM",
+            "confidence": 90,
+        }
+    ],
     "document_assessment": {
         "primary_action_index": 0,
         "correspondent": "Test Co",
@@ -72,7 +74,9 @@ class TestAnalyzerTimeout:
 
         analyzer = analyzer_module.OllamaAnalyzer()
         start = time.monotonic()
-        result = await analyzer.analyze_document({"id": 1, "title": "Test Doc", "content": "some content"})
+        result = await analyzer.analyze_document(
+            {"id": 1, "title": "Test Doc", "content": "some content"}
+        )
         elapsed = time.monotonic() - start
 
         # Both the initial attempt and the retry should time out well before the 5s sleep,
@@ -110,7 +114,9 @@ class TestPipelineErrorIsolation:
         monkeypatch.setattr(pipeline.paperless, "list_documents", fake_list_documents)
         monkeypatch.setattr(pipeline.paperless, "get_document_content", fake_get_document_content)
         monkeypatch.setattr(pipeline.analyzer, "health_check", fake_health_check)
-        monkeypatch.setattr(pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION)
+        monkeypatch.setattr(
+            pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION
+        )
 
         stats = await pipeline.run(force=True, dry_run=False)
 
@@ -150,7 +156,9 @@ class TestPipelineOverallTimeout:
         monkeypatch.setattr(pipeline.paperless, "list_documents", fake_list_documents)
         monkeypatch.setattr(pipeline.paperless, "get_document_content", fake_get_document_content)
         monkeypatch.setattr(pipeline.analyzer, "health_check", fake_health_check)
-        monkeypatch.setattr(pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION)
+        monkeypatch.setattr(
+            pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION
+        )
 
         stats = await pipeline.run(force=True, dry_run=False)
 
@@ -189,7 +197,9 @@ class TestPipelineFetchLimit:
         monkeypatch.setattr(pipeline.paperless, "list_documents", fake_list_documents)
         monkeypatch.setattr(pipeline.paperless, "get_document_content", fake_get_document_content)
         monkeypatch.setattr(pipeline.analyzer, "health_check", fake_health_check)
-        monkeypatch.setattr(pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION)
+        monkeypatch.setattr(
+            pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION
+        )
 
         await pipeline.run(force=True, dry_run=False, limit=5)
 
@@ -223,7 +233,9 @@ class TestPipelineFetchLimit:
         monkeypatch.setattr(pipeline.paperless, "list_documents", fake_list_documents)
         monkeypatch.setattr(pipeline.paperless, "get_document_content", fake_get_document_content)
         monkeypatch.setattr(pipeline.analyzer, "health_check", fake_health_check)
-        monkeypatch.setattr(pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION)
+        monkeypatch.setattr(
+            pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION
+        )
 
         await pipeline.run(force=True, dry_run=False)
 
@@ -260,7 +272,9 @@ class TestPipelineFetchLimit:
         monkeypatch.setattr(pipeline.paperless, "list_documents", fake_list_documents)
         monkeypatch.setattr(pipeline.paperless, "get_document_content", fake_get_document_content)
         monkeypatch.setattr(pipeline.analyzer, "health_check", fake_health_check)
-        monkeypatch.setattr(pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION)
+        monkeypatch.setattr(
+            pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION
+        )
 
         await pipeline.run(force=False, dry_run=False, limit=5)
 

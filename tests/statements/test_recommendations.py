@@ -62,7 +62,9 @@ def test_build_recommendations_ignores_stale_historical_providers() -> None:
         last_seen=date(2026, 3, 15),
     )
 
-    result = build_recommendations([stale_provider, active_provider], date(2026, 5, 12), max_inactive_cycles=6)
+    result = build_recommendations(
+        [stale_provider, active_provider], date(2026, 5, 12), max_inactive_cycles=6
+    )
 
     provider_names = {item.provider_name for item in result.recommendations}
     assert "Current Bill" in provider_names

@@ -18,7 +18,11 @@ from doc_intelligence_hub.modules.eob_matching.extractor import (
     parse_amount,
     parse_date,
 )
-from doc_intelligence_hub.modules.eob_matching.models import ExtractedBill, ExtractedEOB, ServiceLine
+from doc_intelligence_hub.modules.eob_matching.models import (
+    ExtractedBill,
+    ExtractedEOB,
+    ServiceLine,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,14 +107,16 @@ async def extract_eob_llm(text: str, document_id: str, *, model: str | None = No
 
     services = []
     for svc in data.get("services") or []:
-        services.append(ServiceLine(
-            description=svc.get("description", "Service"),
-            cpt_code=svc.get("cpt_code"),
-            billed_amount=_safe_float(svc.get("billed_amount")),
-            allowed_amount=_safe_float(svc.get("allowed_amount")),
-            plan_pays=_safe_float(svc.get("plan_pays")),
-            patient_responsibility=_safe_float(svc.get("patient_responsibility")),
-        ))
+        services.append(
+            ServiceLine(
+                description=svc.get("description", "Service"),
+                cpt_code=svc.get("cpt_code"),
+                billed_amount=_safe_float(svc.get("billed_amount")),
+                allowed_amount=_safe_float(svc.get("allowed_amount")),
+                plan_pays=_safe_float(svc.get("plan_pays")),
+                patient_responsibility=_safe_float(svc.get("patient_responsibility")),
+            )
+        )
 
     eob = ExtractedEOB(
         insurance_company=data.get("insurance_company"),
@@ -133,7 +139,8 @@ async def extract_eob_llm(text: str, document_id: str, *, model: str | None = No
     if rejection_reason:
         logger.warning(
             "LLM extraction rejected for EOB %s: %s — falling back to regex",
-            document_id, rejection_reason,
+            document_id,
+            rejection_reason,
         )
         return regex_extract_eob(text, document_id)
 
@@ -144,7 +151,9 @@ async def extract_eob_llm(text: str, document_id: str, *, model: str | None = No
     return eob
 
 
-async def extract_bill_llm(text: str, document_id: str, *, model: str | None = None) -> ExtractedBill:
+async def extract_bill_llm(
+    text: str, document_id: str, *, model: str | None = None
+) -> ExtractedBill:
     """Extract bill fields using LLM. Falls back to regex on failure or low quality."""
     prompt = _BILL_PROMPT.format(text=_truncate(text))
     data = await chat_json(prompt, system=_BILL_SYSTEM, model=model, max_tokens=1536)
@@ -155,11 +164,13 @@ async def extract_bill_llm(text: str, document_id: str, *, model: str | None = N
 
     services = []
     for svc in data.get("services") or []:
-        services.append(ServiceLine(
-            description=svc.get("description", "Service"),
-            cpt_code=svc.get("cpt_code"),
-            amount=_safe_float(svc.get("amount")),
-        ))
+        services.append(
+            ServiceLine(
+                description=svc.get("description", "Service"),
+                cpt_code=svc.get("cpt_code"),
+                amount=_safe_float(svc.get("amount")),
+            )
+        )
 
     bill = ExtractedBill(
         provider_name=_safe_provider_name(data.get("provider_name")),
@@ -180,7 +191,8 @@ async def extract_bill_llm(text: str, document_id: str, *, model: str | None = N
     if rejection_reason:
         logger.warning(
             "LLM extraction rejected for bill %s: %s — falling back to regex",
-            document_id, rejection_reason,
+            document_id,
+            rejection_reason,
         )
         return regex_extract_bill(text, document_id)
 

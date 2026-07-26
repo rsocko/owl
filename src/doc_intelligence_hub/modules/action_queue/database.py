@@ -1,7 +1,6 @@
 """Database models and connection management."""
 
-from datetime import datetime, date
-from typing import Optional
+from datetime import datetime
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, Date, DateTime, Text, JSON
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -102,6 +101,4 @@ def _migrate_missing_columns(engine):
             existing = {c["name"] for c in inspector.get_columns(table)}
             for col_name, col_ddl in columns:
                 if col_name not in existing:
-                    conn.execute(text(
-                        f"ALTER TABLE {table} ADD COLUMN {col_name} {col_ddl}"
-                    ))
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_ddl}"))

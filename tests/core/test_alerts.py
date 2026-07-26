@@ -140,24 +140,18 @@ class TestEmitStatementAlerts:
 
 class TestEmitEobAlerts:
     def test_unmatched_eob(self):
-        count = emit_eob_alerts(
-            unmatched_eobs=[{"provider_name": "Aetna", "document_id": 42}]
-        )
+        count = emit_eob_alerts(unmatched_eobs=[{"provider_name": "Aetna", "document_id": 42}])
         assert count == 1
 
     def test_low_confidence_match(self):
         count = emit_eob_alerts(
-            low_confidence_matches=[
-                {"eob_document_id": 1, "bill_document_id": 2, "score": 45}
-            ]
+            low_confidence_matches=[{"eob_document_id": 1, "bill_document_id": 2, "score": 45}]
         )
         assert count == 1
 
     def test_high_confidence_match(self):
         count = emit_eob_alerts(
-            high_confidence_matches=[
-                {"eob_document_id": 1, "bill_document_id": 2, "score": 95}
-            ]
+            high_confidence_matches=[{"eob_document_id": 1, "bill_document_id": 2, "score": 95}]
         )
         assert count == 1
 
@@ -181,7 +175,14 @@ class TestCheckEobDueDates:
 
     def test_paid_bill_skipped(self):
         yesterday = (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
-        bills = [{"document_id": 3, "provider_name": "X", "due_date": yesterday, "payment_status": "paid"}]
+        bills = [
+            {
+                "document_id": 3,
+                "provider_name": "X",
+                "due_date": yesterday,
+                "payment_status": "paid",
+            }
+        ]
         count = check_eob_due_dates(bills)
         assert count == 0
 
@@ -205,7 +206,13 @@ class TestEmitActionQueueAlerts:
     def test_overdue_critical_action(self):
         yesterday = (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
         actions = [
-            {"id": 3, "title": "Pay bill", "urgency": "CRITICAL", "status": "pending", "due_date": yesterday}
+            {
+                "id": 3,
+                "title": "Pay bill",
+                "urgency": "CRITICAL",
+                "status": "pending",
+                "due_date": yesterday,
+            }
         ]
         count = emit_action_queue_alerts(actions)
         assert count == 1

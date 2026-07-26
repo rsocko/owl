@@ -8,7 +8,6 @@ from datetime import datetime, date
 from typing import Any, Optional
 
 from rich.console import Console
-from rich.table import Table
 
 from .config import settings
 from .database import get_session, init_db, Action, ProcessingHistory
@@ -111,7 +110,11 @@ class Pipeline:
         _set_progress(current_step="fetching_documents")
         logger.info(
             "Pipeline run starting: limit=%s dry_run=%s force=%s read_only=%s document_id=%s",
-            limit, dry_run, force, not settings.write_to_paperless, document_id,
+            limit,
+            dry_run,
+            force,
+            not settings.write_to_paperless,
+            document_id,
         )
 
         # Build a correspondent ID→name cache
@@ -135,7 +138,9 @@ class Pipeline:
                     f"[yellow]⚠[/yellow] Custom fields check failed: {e}\n"
                     "[yellow]  Pipeline will continue — actions stored locally but not written to Paperless[/yellow]\n"
                 )
-                logger.warning("Custom fields check failed: %s — writes to Paperless disabled for this run", e)
+                logger.warning(
+                    "Custom fields check failed: %s — writes to Paperless disabled for this run", e
+                )
                 self._enrichment_available = False
 
         # Step 2: Fetch documents based on provided filters.
@@ -174,19 +179,27 @@ class Pipeline:
             )
             logger.error(
                 "Document fetch exceeded fetch timeout (%.0fs) — aborting run after %.2fs",
-                settings.pipeline_fetch_timeout_seconds, fetch_duration,
+                settings.pipeline_fetch_timeout_seconds,
+                fetch_duration,
             )
-            _set_progress(current_step="complete", progress="0/0 documents processed (fetch timed out)")
+            _set_progress(
+                current_step="complete", progress="0/0 documents processed (fetch timed out)"
+            )
             return {
-                "processed": 0, "skipped": 0, "failed": 0,
-                "fetch_timed_out": True, "duration_seconds": round(time.monotonic() - run_start, 2),
+                "processed": 0,
+                "skipped": 0,
+                "failed": 0,
+                "fetch_timed_out": True,
+                "duration_seconds": round(time.monotonic() - run_start, 2),
             }
 
         fetch_duration = time.monotonic() - fetch_start
         console.print(f"[green]✓[/green] Found {len(documents)} documents")
         logger.info(
             "Document fetch: found %d documents matching filters (fetch_limit=%s, duration=%.2fs)",
-            len(documents), fetch_limit, fetch_duration,
+            len(documents),
+            fetch_limit,
+            fetch_duration,
         )
 
         console.print()
@@ -216,7 +229,8 @@ class Pipeline:
             console.print(f"[dim]  {skipped_count} already processed, {len(documents)} new[/dim]")
             logger.info(
                 "Document filter: %d already processed (skipped), %d new to analyze",
-                skipped_count, len(documents),
+                skipped_count,
+                len(documents),
             )
 
         # Apply limit AFTER filtering (limit means "analyze up to N new docs")
@@ -228,12 +242,18 @@ class Pipeline:
         if not documents:
             console.print("[yellow]No new documents to process.[/yellow]")
             _set_progress(current_step="complete", progress="0/0 documents processed")
-            return {"processed": 0, "skipped": skipped_count if not force else 0, "failed": 0, "no_action": 0}
+            return {
+                "processed": 0,
+                "skipped": skipped_count if not force else 0,
+                "failed": 0,
+                "no_action": 0,
+            }
 
         # Dry-run: just list what would be processed
         if dry_run:
             console.print("[bold yellow]DRY RUN — no analysis will be performed[/bold yellow]\n")
             from rich.table import Table
+
             table = Table(show_header=True)
             table.add_column("ID", style="dim")
             table.add_column("Title")
@@ -248,19 +268,33 @@ class Pipeline:
                 )
             console.print(table)
             console.print(f"\n[dim]{len(documents)} documents would be processed.[/dim]")
-            logger.info("Dry run: %d documents would be processed (no analysis performed)", len(documents))
-            _set_progress(current_step="complete", progress=f"0/{len(documents)} documents processed (dry run)")
+            logger.info(
+                "Dry run: %d documents would be processed (no analysis performed)", len(documents)
+            )
+            _set_progress(
+                current_step="complete",
+                progress=f"0/{len(documents)} documents processed (dry run)",
+            )
             return {"processed": 0, "skipped": 0, "failed": 0, "would_process": len(documents)}
 
         # Step 3: Process each document
         init_db()
         db = get_session()
-        stats: dict[str, Any] = {"processed": 0, "skipped": 0, "failed": 0, "no_action": 0, "errors": [], "timed_out": False}
+        stats: dict[str, Any] = {
+            "processed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "no_action": 0,
+            "errors": [],
+            "timed_out": False,
+        }
         max_duration = settings.pipeline_max_duration_seconds
         total_docs = len(documents)
 
         _set_progress(current_step="analyzing", progress=f"0/{total_docs} documents processed")
-        logger.info("Beginning analysis of %d documents (pipeline timeout=%.0fs)", total_docs, max_duration)
+        logger.info(
+            "Beginning analysis of %d documents (pipeline timeout=%.0fs)", total_docs, max_duration
+        )
 
         for index, doc in enumerate(documents):
             doc_id = doc["id"]
@@ -274,7 +308,11 @@ class Pipeline:
                 logger.warning(
                     "Pipeline max duration exceeded (%.0fs > %.0fs limit) — stopping with %d/%d "
                     "documents processed, %d document(s) skipped due to timeout",
-                    elapsed, max_duration, index, total_docs, remaining,
+                    elapsed,
+                    max_duration,
+                    index,
+                    total_docs,
+                    remaining,
                 )
                 stats["timed_out"] = True
                 stats["skipped"] += remaining
@@ -288,7 +326,13 @@ class Pipeline:
 
             try:
                 console.print(f"  [dim]Analyzing:[/dim] {doc_title[:60]}...")
-                logger.info("Processing document: doc_id=%s title=%r (%d/%d)", doc_id, doc_title_short, index + 1, total_docs)
+                logger.info(
+                    "Processing document: doc_id=%s title=%r (%d/%d)",
+                    doc_id,
+                    doc_title_short,
+                    index + 1,
+                    total_docs,
+                )
 
                 # Fetch full content if not already present
                 if "content" not in doc or not doc["content"]:
@@ -300,10 +344,15 @@ class Pipeline:
 
                 # Check if content is too short/empty to analyze
                 if text_metrics["content_length"] < 20:
-                    console.print(f"  [yellow]⚠[/yellow] No/minimal text content — marking unreadable")
+                    console.print(
+                        "  [yellow]⚠[/yellow] No/minimal text content — marking unreadable"
+                    )
                     logger.info("doc_id=%s: minimal/no text content — marking unreadable", doc_id)
                     self._record_history(
-                        db, doc_id, success=True, disposition="unreadable",
+                        db,
+                        doc_id,
+                        success=True,
+                        disposition="unreadable",
                         text_metrics=text_metrics,
                     )
                     stats["no_action"] += 1
@@ -313,32 +362,53 @@ class Pipeline:
                 if self._ollama_available is None:
                     self._ollama_available = await self.analyzer.health_check()
                     if not self._ollama_available:
-                        console.print("[yellow]⚠ Ollama unavailable — using rule-based fallback[/yellow]\n")
-                        logger.warning("LLM gateway unavailable — using rule-based fallback for all documents")
+                        console.print(
+                            "[yellow]⚠ Ollama unavailable — using rule-based fallback[/yellow]\n"
+                        )
+                        logger.warning(
+                            "LLM gateway unavailable — using rule-based fallback for all documents"
+                        )
 
                 extraction = None
                 if self._ollama_available:
-                    logger.info("doc_id=%s: entering LLM analysis step (model=%s)", doc_id, self.analyzer.model)
+                    logger.info(
+                        "doc_id=%s: entering LLM analysis step (model=%s)",
+                        doc_id,
+                        self.analyzer.model,
+                    )
                     extraction = await self.analyzer.analyze_document(doc)
                     if not extraction:
                         # Ollama returned nothing — try fallback for this doc
-                        logger.warning("doc_id=%s: LLM analysis failed — falling back to rule-based analyzer", doc_id)
+                        logger.warning(
+                            "doc_id=%s: LLM analysis failed — falling back to rule-based analyzer",
+                            doc_id,
+                        )
                         extraction = self.fallback_analyzer.analyze_document(doc)
                 else:
                     extraction = self.fallback_analyzer.analyze_document(doc)
 
                 if not extraction:
                     console.print(f"  [red]✗[/red] Analysis failed for document {doc_id}")
-                    logger.error("doc_id=%s: analysis failed (LLM and fallback both returned no result)", doc_id)
+                    logger.error(
+                        "doc_id=%s: analysis failed (LLM and fallback both returned no result)",
+                        doc_id,
+                    )
                     self._record_history(
-                        db, doc_id, success=False, error="Ollama returned no result",
-                        disposition="low_confidence", text_metrics=text_metrics,
+                        db,
+                        doc_id,
+                        success=False,
+                        error="Ollama returned no result",
+                        disposition="low_confidence",
+                        text_metrics=text_metrics,
                     )
                     stats["failed"] += 1
-                    stats["errors"].append({
-                        "document_id": doc_id, "title": doc_title_short,
-                        "error": "Analysis failed — LLM and fallback both returned no result",
-                    })
+                    stats["errors"].append(
+                        {
+                            "document_id": doc_id,
+                            "title": doc_title_short,
+                            "error": "Analysis failed — LLM and fallback both returned no result",
+                        }
+                    )
                     continue
 
                 assessment = extraction.get("document_assessment", {})
@@ -348,10 +418,13 @@ class Pipeline:
 
                 # Handle unreadable text
                 if text_quality == "unreadable":
-                    console.print(f"  [yellow]⚠[/yellow] Text quality: unreadable")
+                    console.print("  [yellow]⚠[/yellow] Text quality: unreadable")
                     logger.info("doc_id=%s: text quality unreadable", doc_id)
                     self._record_history(
-                        db, doc_id, success=True, disposition="unreadable",
+                        db,
+                        doc_id,
+                        success=True,
+                        disposition="unreadable",
                         text_metrics=text_metrics,
                     )
                     stats["no_action"] += 1
@@ -359,10 +432,17 @@ class Pipeline:
 
                 # Handle "no action needed" documents
                 if not assessment.get("requires_action", True) or not actions:
-                    console.print(f"  [dim]  ○ No action needed[/dim] (confidence: {overall_confidence}%)")
-                    logger.info("doc_id=%s: no action needed (confidence=%s%%)", doc_id, overall_confidence)
+                    console.print(
+                        f"  [dim]  ○ No action needed[/dim] (confidence: {overall_confidence}%)"
+                    )
+                    logger.info(
+                        "doc_id=%s: no action needed (confidence=%s%%)", doc_id, overall_confidence
+                    )
                     self._record_history(
-                        db, doc_id, success=True, disposition="no_action_needed",
+                        db,
+                        doc_id,
+                        success=True,
+                        disposition="no_action_needed",
                         text_metrics=text_metrics,
                     )
                     stats["no_action"] += 1
@@ -375,10 +455,15 @@ class Pipeline:
                     )
                     logger.info(
                         "doc_id=%s: confidence %s%% below threshold %s%% — recording but not enriching",
-                        doc_id, overall_confidence, settings.confidence_threshold,
+                        doc_id,
+                        overall_confidence,
+                        settings.confidence_threshold,
                     )
                     self._record_history(
-                        db, doc_id, success=True, disposition="low_confidence",
+                        db,
+                        doc_id,
+                        success=True,
+                        disposition="low_confidence",
                         error=f"Below threshold: {overall_confidence}%",
                         text_metrics=text_metrics,
                     )
@@ -390,7 +475,10 @@ class Pipeline:
                 stored_actions = []
                 for i, action_data in enumerate(actions):
                     action = self._store_action(
-                        db, doc, action_data, assessment,
+                        db,
+                        doc,
+                        action_data,
+                        assessment,
                         is_primary=(i == primary_idx),
                     )
                     stored_actions.append(action)
@@ -401,27 +489,40 @@ class Pipeline:
                     enrichment_data = {**primary_action, **assessment}
                     logger.info(
                         "doc_id=%s: enriching Paperless — action_type=%s urgency=%s fields=%s",
-                        doc_id, primary_action.get("action_type"), primary_action.get("urgency"),
+                        doc_id,
+                        primary_action.get("action_type"),
+                        primary_action.get("urgency"),
                         list(enrichment_data.keys()),
                     )
                     try:
-                        await self.enricher.enrich_document(doc_id, enrichment_data, action_count=len(actions))
+                        await self.enricher.enrich_document(
+                            doc_id, enrichment_data, action_count=len(actions)
+                        )
                         logger.info("doc_id=%s: enrichment succeeded", doc_id)
                         # Track what we wrote so bidirectional sync knows our last state
                         for a in stored_actions:
                             a.last_synced_status = "pending"
                     except Exception as e:
                         console.print(f"  [yellow]⚠[/yellow] Stored but enrichment failed: {e}")
-                        logger.warning("doc_id=%s: stored locally but enrichment to Paperless failed: %s", doc_id, e)
+                        logger.warning(
+                            "doc_id=%s: stored locally but enrichment to Paperless failed: %s",
+                            doc_id,
+                            e,
+                        )
 
                 action_summary = f"{primary_action['action_type']} — {primary_action['title'][:50]}"
                 if len(actions) > 1:
-                    action_summary += f" (+{len(actions)-1} more)"
-                console.print(f"  [green]✓[/green] {action_summary} (confidence: {overall_confidence}%)")
+                    action_summary += f" (+{len(actions) - 1} more)"
+                console.print(
+                    f"  [green]✓[/green] {action_summary} (confidence: {overall_confidence}%)"
+                )
                 logger.info("doc_id=%s: processed successfully — %s", doc_id, action_summary)
 
                 self._record_history(
-                    db, doc_id, success=True, disposition="action_created",
+                    db,
+                    doc_id,
+                    success=True,
+                    disposition="action_created",
                     text_metrics=text_metrics,
                 )
                 stats["processed"] += 1
@@ -431,22 +532,32 @@ class Pipeline:
                 console.print(f"  [red]✗[/red] Unexpected error processing document {doc_id}: {e}")
                 logger.error(
                     "doc_id=%s title=%r: unexpected error during processing — continuing to next document",
-                    doc_id, doc_title_short, exc_info=True,
+                    doc_id,
+                    doc_title_short,
+                    exc_info=True,
                 )
                 stats["failed"] += 1
-                stats["errors"].append({
-                    "document_id": doc_id, "title": doc_title_short, "error": str(e),
-                })
+                stats["errors"].append(
+                    {
+                        "document_id": doc_id,
+                        "title": doc_title_short,
+                        "error": str(e),
+                    }
+                )
                 continue
 
         db.commit()
         db.close()
 
         total_duration = time.monotonic() - run_start
-        _set_progress(current_step="complete", progress=f"{stats['processed']}/{total_docs} documents processed", current_document=None)
+        _set_progress(
+            current_step="complete",
+            progress=f"{stats['processed']}/{total_docs} documents processed",
+            current_document=None,
+        )
 
         # Summary
-        console.print(f"\n[bold green]Done![/bold green]")
+        console.print("\n[bold green]Done![/bold green]")
         console.print(
             f"  Processed: {stats['processed']} | "
             f"No action: {stats['no_action']} | "
@@ -455,8 +566,12 @@ class Pipeline:
         )
         logger.info(
             "Pipeline run complete: processed=%d no_action=%d skipped=%d failed=%d timed_out=%s duration=%.2fs",
-            stats["processed"], stats["no_action"], stats["skipped"], stats["failed"],
-            stats["timed_out"], total_duration,
+            stats["processed"],
+            stats["no_action"],
+            stats["skipped"],
+            stats["failed"],
+            stats["timed_out"],
+            total_duration,
         )
         stats["duration_seconds"] = round(total_duration, 2)
         return stats
@@ -488,7 +603,9 @@ class Pipeline:
             console.print(f"[dim]Fetching documents from saved view #{saved_view_id}...[/dim]")
             return await self.paperless.list_documents(saved_view=saved_view_id, limit=fetch_limit)
 
-        if any([created_after, created_before, added_after, added_before, correspondent, document_type]):
+        if any(
+            [created_after, created_before, added_after, added_before, correspondent, document_type]
+        ):
             # Use flexible query with date/correspondent/type filters
             tags = [tag_override] if tag_override else None
             console.print("[dim]Fetching documents with custom filters...[/dim]")
@@ -508,7 +625,9 @@ class Pipeline:
         console.print(f"[dim]Fetching documents tagged: {tags}[/dim]")
         return await self.paperless.list_documents(tags=tags, limit=fetch_limit)
 
-    def _store_action(self, db, document: dict, action_data: dict, assessment: dict, is_primary: bool = True) -> Action:
+    def _store_action(
+        self, db, document: dict, action_data: dict, assessment: dict, is_primary: bool = True
+    ) -> Action:
         """Store or update an action in the internal database.
 
         Deduplication strategy:
@@ -530,16 +649,16 @@ class Pipeline:
 
         # Strategy 1: exact match on document_id + title
         existing = (
-            db.query(Action)
-            .filter_by(document_id=doc_id, title=action_data["title"])
-            .first()
+            db.query(Action).filter_by(document_id=doc_id, title=action_data["title"]).first()
         )
 
         # Strategy 2: match on document_id + action_type for pending actions
         if not existing:
             existing = (
                 db.query(Action)
-                .filter_by(document_id=doc_id, action_type=action_data["action_type"], status="pending")
+                .filter_by(
+                    document_id=doc_id, action_type=action_data["action_type"], status="pending"
+                )
                 .first()
             )
 
@@ -574,10 +693,15 @@ class Pipeline:
             db.add(action)
             return action
 
-    def _record_history(self, db, document_id: int, success: bool,
-                        disposition: str = "action_created",
-                        error: str = None,
-                        text_metrics: dict = None):
+    def _record_history(
+        self,
+        db,
+        document_id: int,
+        success: bool,
+        disposition: str = "action_created",
+        error: str = None,
+        text_metrics: dict = None,
+    ):
         """Record processing attempt in history table."""
         metrics = text_metrics or {}
         existing = db.query(ProcessingHistory).filter_by(document_id=document_id).first()
@@ -650,6 +774,7 @@ class Pipeline:
             return None
         try:
             from dateutil.parser import parse
+
             return parse(date_str).date()
         except (ValueError, TypeError):
             return None

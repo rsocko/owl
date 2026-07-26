@@ -8,8 +8,16 @@ from doc_intelligence_hub.modules.statements.config import AppConfig, load_confi
 from doc_intelligence_hub.modules.statements.database import Database
 from doc_intelligence_hub.modules.statements.detector import debug_discovery, discover_providers
 from doc_intelligence_hub.modules.statements.hints import apply_hints
-from doc_intelligence_hub.modules.statements.models import DiscoveryDiagnosticResult, DiscoveryResult, RecommendationResult
-from doc_intelligence_hub.modules.statements.paperless import fetch_paperless_documents, load_fixture_documents, test_paperless_connection
+from doc_intelligence_hub.modules.statements.models import (
+    DiscoveryDiagnosticResult,
+    DiscoveryResult,
+    RecommendationResult,
+)
+from doc_intelligence_hub.modules.statements.paperless import (
+    fetch_paperless_documents,
+    load_fixture_documents,
+    test_paperless_connection,
+)
 from doc_intelligence_hub.modules.statements.recommendations import build_recommendations
 
 
@@ -114,7 +122,7 @@ def validate_source_config(config: AppConfig) -> None:
         if not token:
             raise ValueError(
                 f"Environment variable {config.source.api_token_env} is required for paperless mode. "
-                f"In PowerShell run: $env:{config.source.api_token_env} = \"your-token-here\""
+                f'In PowerShell run: $env:{config.source.api_token_env} = "your-token-here"'
             )
         return
 

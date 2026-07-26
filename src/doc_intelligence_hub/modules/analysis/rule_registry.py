@@ -53,7 +53,11 @@ def load_rules(rules_path: str | Path | None = None) -> dict[str, RuleConfig]:
     # 3. Apply DB overrides (enable/disable, param tweaks, custom rules)
     _apply_db_overrides()
 
-    logger.info("Rule registry loaded: %d rules (%d enabled).", len(_rules), sum(1 for r in _rules.values() if r.enabled))
+    logger.info(
+        "Rule registry loaded: %d rules (%d enabled).",
+        len(_rules),
+        sum(1 for r in _rules.values() if r.enabled),
+    )
     return dict(_rules)
 
 
@@ -138,7 +142,9 @@ def delete_custom_rule(rule_id: str) -> bool:
     return True
 
 
-def get_rules_for_trigger(trigger_type: TriggerType, *, document_type: str | None = None) -> list[RuleConfig]:
+def get_rules_for_trigger(
+    trigger_type: TriggerType, *, document_type: str | None = None
+) -> list[RuleConfig]:
     """Get enabled rules matching a trigger type and optional document type filter."""
     matching = []
     for rule in _rules.values():
@@ -178,14 +184,34 @@ def _load_builtin_defaults() -> None:
             "description": "Compare statement amount to rolling 3-month average for the same series",
             "tier": "basic",
             "trigger": {"type": "document_added", "filter": {"document_type": "statement"}},
-            "context": ["current_document", "series_history: 6", {"extracted_fields": ["total_amount", "statement_period"]}],
+            "context": [
+                "current_document",
+                "series_history: 6",
+                {"extracted_fields": ["total_amount", "statement_period"]},
+            ],
             "analyzer": "builtin:spend_comparison",
             "params": {"comparison_window": 3},
-            "routing": {"default": "informational", "escalation": [
-                {"condition": "pct_change > 50", "route": "actionable", "severity": "warning", "mc_alert": True},
-                {"condition": "pct_change > 100", "route": "actionable", "severity": "critical", "mc_alert": True},
-            ]},
-            "display": {"card_type": "comparison", "highlight_fields": ["total_amount", "pct_change"]},
+            "routing": {
+                "default": "informational",
+                "escalation": [
+                    {
+                        "condition": "pct_change > 50",
+                        "route": "actionable",
+                        "severity": "warning",
+                        "mc_alert": True,
+                    },
+                    {
+                        "condition": "pct_change > 100",
+                        "route": "actionable",
+                        "severity": "critical",
+                        "mc_alert": True,
+                    },
+                ],
+            },
+            "display": {
+                "card_type": "comparison",
+                "highlight_fields": ["total_amount", "pct_change"],
+            },
         },
         "eob-match-review": {
             "name": "EOB Match Confidence",
@@ -216,9 +242,17 @@ def _load_builtin_defaults() -> None:
             "context": ["series_history: 3"],
             "analyzer": "builtin:missing_statement",
             "params": {"grace_days": 7},
-            "routing": {"default": "actionable", "escalation": [
-                {"condition": "days_late > 30", "route": "actionable", "severity": "critical", "mc_alert": True},
-            ]},
+            "routing": {
+                "default": "actionable",
+                "escalation": [
+                    {
+                        "condition": "days_late > 30",
+                        "route": "actionable",
+                        "severity": "critical",
+                        "mc_alert": True,
+                    },
+                ],
+            },
             "display": {"card_type": "alert"},
         },
         "statement-received": {
@@ -239,10 +273,23 @@ def _load_builtin_defaults() -> None:
             "context": ["current_document", "series_history: 6"],
             "analyzer": "builtin:spend_spike",
             "params": {"spike_threshold_pct": 30},
-            "routing": {"default": "informational", "escalation": [
-                {"condition": "pct_change > 50", "route": "actionable", "severity": "warning", "mc_alert": True},
-                {"condition": "pct_change > 100", "route": "actionable", "severity": "critical", "mc_alert": True},
-            ]},
+            "routing": {
+                "default": "informational",
+                "escalation": [
+                    {
+                        "condition": "pct_change > 50",
+                        "route": "actionable",
+                        "severity": "warning",
+                        "mc_alert": True,
+                    },
+                    {
+                        "condition": "pct_change > 100",
+                        "route": "actionable",
+                        "severity": "critical",
+                        "mc_alert": True,
+                    },
+                ],
+            },
             "display": {"card_type": "alert", "highlight_fields": ["pct_change", "current_amount"]},
         },
         "document-classification": {
@@ -252,7 +299,18 @@ def _load_builtin_defaults() -> None:
             "trigger": {"type": "document_added"},
             "context": ["current_document"],
             "analyzer": "llm:classify",
-            "params": {"categories": ["statement", "bill", "eob", "receipt", "letter", "notice", "contract", "other"]},
+            "params": {
+                "categories": [
+                    "statement",
+                    "bill",
+                    "eob",
+                    "receipt",
+                    "letter",
+                    "notice",
+                    "contract",
+                    "other",
+                ]
+            },
             "routing": {"default": "informational"},
             "display": {"card_type": "summary"},
         },
