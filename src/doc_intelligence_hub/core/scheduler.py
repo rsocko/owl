@@ -59,6 +59,13 @@ DEFAULT_SCHEDULES: dict[str, dict[str, Any]] = {
         },
         "enabled": True,
     },
+    "eob_due_date_check": {
+        "cron": "0 8 * * *",
+        "endpoint": "/api/eob/check-due-dates",
+        "method": "POST",
+        "body": {"due_soon_days": 7},
+        "enabled": True,
+    },
 }
 
 
