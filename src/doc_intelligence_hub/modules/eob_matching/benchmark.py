@@ -6,13 +6,12 @@ Tests local Ollama models vs Azure OpenAI models via Bifrost gateway.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from doc_intelligence_hub.core.llm import chat_json, get_llm_client, get_llm_settings
+from doc_intelligence_hub.core.llm import chat_json
 from doc_intelligence_hub.core.paperless import PaperlessClient
 from doc_intelligence_hub.modules.eob_matching.llm_extractor import (
     _EOB_PROMPT,
@@ -150,14 +149,16 @@ async def run_single_extraction(
         for svc in data.get("services") or []:
             if not isinstance(svc, dict):
                 continue
-            services.append(ServiceLine(
-                description=svc.get("description") or "Service",
-                cpt_code=svc.get("cpt_code"),
-                billed_amount=_safe_float(svc.get("billed_amount")),
-                allowed_amount=_safe_float(svc.get("allowed_amount")),
-                plan_pays=_safe_float(svc.get("plan_pays")),
-                patient_responsibility=_safe_float(svc.get("patient_responsibility")),
-            ))
+            services.append(
+                ServiceLine(
+                    description=svc.get("description") or "Service",
+                    cpt_code=svc.get("cpt_code"),
+                    billed_amount=_safe_float(svc.get("billed_amount")),
+                    allowed_amount=_safe_float(svc.get("allowed_amount")),
+                    plan_pays=_safe_float(svc.get("plan_pays")),
+                    patient_responsibility=_safe_float(svc.get("patient_responsibility")),
+                )
+            )
 
         eob = ExtractedEOB(
             insurance_company=data.get("insurance_company"),
@@ -229,7 +230,11 @@ async def run_benchmark(
             results.append(result)
             logger.info(
                 "Benchmark %s × doc %s: %.1fs, success=%s, confidence=%.2f",
-                model, doc["id"], result.elapsed_seconds, result.success, result.confidence,
+                model,
+                doc["id"],
+                result.elapsed_seconds,
+                result.success,
+                result.confidence,
             )
 
         # Aggregate
@@ -237,9 +242,7 @@ async def run_benchmark(
         successes = [r for r in results if r.success]
         avg_time = total_time / len(results) if results else 0
         success_rate = len(successes) / len(results) if results else 0
-        avg_confidence = (
-            sum(r.confidence for r in successes) / len(successes) if successes else 0
-        )
+        avg_confidence = sum(r.confidence for r in successes) / len(successes) if successes else 0
 
         # Cost estimate for Azure models
         cost = _estimate_cost(model, len(documents))
@@ -247,17 +250,19 @@ async def run_benchmark(
         # Sample fields from first successful extraction
         sample_fields = successes[0].extracted_fields if successes else {}
 
-        summaries.append(ModelBenchmarkSummary(
-            model=model,
-            documents_tested=len(documents),
-            avg_time_seconds=round(avg_time, 2),
-            success_rate=round(success_rate, 4),
-            avg_confidence=round(avg_confidence, 3),
-            total_time_seconds=round(total_time, 2),
-            estimated_cost_usd=cost,
-            sample_fields=sample_fields,
-            results=results,
-        ))
+        summaries.append(
+            ModelBenchmarkSummary(
+                model=model,
+                documents_tested=len(documents),
+                avg_time_seconds=round(avg_time, 2),
+                success_rate=round(success_rate, 4),
+                avg_confidence=round(avg_confidence, 3),
+                total_time_seconds=round(total_time, 2),
+                estimated_cost_usd=cost,
+                sample_fields=sample_fields,
+                results=results,
+            )
+        )
 
     return summaries
 
@@ -309,28 +314,30 @@ def benchmark_to_json(summaries: list[ModelBenchmarkSummary]) -> list[dict[str, 
     """Convert benchmark summaries to JSON-serializable dicts."""
     output = []
     for s in summaries:
-        output.append({
-            "model": s.model,
-            "documents_tested": s.documents_tested,
-            "avg_time_seconds": s.avg_time_seconds,
-            "success_rate": s.success_rate,
-            "avg_confidence": s.avg_confidence,
-            "total_time_seconds": s.total_time_seconds,
-            "estimated_cost_usd": s.estimated_cost_usd,
-            "sample_fields": s.sample_fields,
-            "results": [
-                {
-                    "document_id": r.document_id,
-                    "success": r.success,
-                    "elapsed_seconds": round(r.elapsed_seconds, 2),
-                    "confidence": r.confidence,
-                    "validation_error": r.validation_error,
-                    "error": r.error,
-                    "extracted_fields": r.extracted_fields,
-                }
-                for r in s.results
-            ],
-        })
+        output.append(
+            {
+                "model": s.model,
+                "documents_tested": s.documents_tested,
+                "avg_time_seconds": s.avg_time_seconds,
+                "success_rate": s.success_rate,
+                "avg_confidence": s.avg_confidence,
+                "total_time_seconds": s.total_time_seconds,
+                "estimated_cost_usd": s.estimated_cost_usd,
+                "sample_fields": s.sample_fields,
+                "results": [
+                    {
+                        "document_id": r.document_id,
+                        "success": r.success,
+                        "elapsed_seconds": round(r.elapsed_seconds, 2),
+                        "confidence": r.confidence,
+                        "validation_error": r.validation_error,
+                        "error": r.error,
+                        "extracted_fields": r.extracted_fields,
+                    }
+                    for r in s.results
+                ],
+            }
+        )
     return output
 
 
@@ -346,6 +353,7 @@ def _safe_float(value: Any) -> float | None:
         return round(float(value), 2)
     if isinstance(value, str):
         from doc_intelligence_hub.modules.eob_matching.extractor import parse_amount
+
         return parse_amount(value)
     return None
 
@@ -355,6 +363,7 @@ def _safe_date(value: Any):
         return None
     if isinstance(value, str):
         from doc_intelligence_hub.modules.eob_matching.extractor import parse_date
+
         return parse_date(value)
     return None
 

@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from datetime import date
 
-from doc_intelligence_hub.modules.eob_matching.extractor import extract_bill, extract_eob, parse_amount, parse_date
+from doc_intelligence_hub.modules.eob_matching.extractor import (
+    extract_bill,
+    extract_eob,
+    parse_amount,
+    parse_date,
+)
 
 
 def test_extracts_eob_fields() -> None:

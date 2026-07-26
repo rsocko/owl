@@ -21,37 +21,61 @@ logger = logging.getLogger(__name__)
 # Common account number patterns — each captures the meaningful identifier portion.
 # Ordered from most specific to least specific to reduce false positives.
 ACCOUNT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("account_last4", re.compile(
-        r"(?:account|acct)[\s.]*(?:#|number|no\.?|num\.?)[\s.:]*[*Xx.]+(\d{4})",
-        re.IGNORECASE,
-    )),
-    ("account_number_full", re.compile(
-        r"(?:account|acct)[\s.]*(?:#|number|no\.?|num\.?)[\s.:]*([A-Z0-9][\w-]{2,18}[A-Z0-9])",
-        re.IGNORECASE,
-    )),
-    ("ending_in", re.compile(
-        r"(?:ending|last\s*4)\s+(?:in\s+)?(\d{4})",
-        re.IGNORECASE,
-    )),
-    ("card_number", re.compile(
-        r"card\s+(?:#|number)[\s.:]*[*Xx.]+(\d{4})",
-        re.IGNORECASE,
-    )),
-    ("masked_number", re.compile(
-        r"[*Xx]{4,}\s*(\d{4})",
-    )),
-    ("member_id", re.compile(
-        r"member\s*(?:id|#|number)[\s.:]*([A-Z0-9]{6,15})",
-        re.IGNORECASE,
-    )),
-    ("policy_number", re.compile(
-        r"policy\s*(?:#|number|no\.?)[\s.:]*([A-Z0-9]{4,15})",
-        re.IGNORECASE,
-    )),
-    ("claim_number", re.compile(
-        r"claim\s*(?:#|number|no\.?)[\s.:]*([A-Z0-9-]{4,20})",
-        re.IGNORECASE,
-    )),
+    (
+        "account_last4",
+        re.compile(
+            r"(?:account|acct)[\s.]*(?:#|number|no\.?|num\.?)[\s.:]*[*Xx.]+(\d{4})",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "account_number_full",
+        re.compile(
+            r"(?:account|acct)[\s.]*(?:#|number|no\.?|num\.?)[\s.:]*([A-Z0-9][\w-]{2,18}[A-Z0-9])",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "ending_in",
+        re.compile(
+            r"(?:ending|last\s*4)\s+(?:in\s+)?(\d{4})",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "card_number",
+        re.compile(
+            r"card\s+(?:#|number)[\s.:]*[*Xx.]+(\d{4})",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "masked_number",
+        re.compile(
+            r"[*Xx]{4,}\s*(\d{4})",
+        ),
+    ),
+    (
+        "member_id",
+        re.compile(
+            r"member\s*(?:id|#|number)[\s.:]*([A-Z0-9]{6,15})",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "policy_number",
+        re.compile(
+            r"policy\s*(?:#|number|no\.?)[\s.:]*([A-Z0-9]{4,15})",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "claim_number",
+        re.compile(
+            r"claim\s*(?:#|number|no\.?)[\s.:]*([A-Z0-9-]{4,20})",
+            re.IGNORECASE,
+        ),
+    ),
 ]
 
 
@@ -86,12 +110,14 @@ def extract_account_numbers(text: str) -> list[dict[str, str]]:
             normalized = re.sub(r"\s+", "", raw_value).upper()
             if normalized and normalized not in seen_values:
                 seen_values.add(normalized)
-                matches.append({
-                    "pattern": pattern_name,
-                    "value": raw_value,
-                    "normalized": normalized,
-                    "raw_match": m.group(0).strip(),
-                })
+                matches.append(
+                    {
+                        "pattern": pattern_name,
+                        "value": raw_value,
+                        "normalized": normalized,
+                        "raw_match": m.group(0).strip(),
+                    }
+                )
 
     return matches
 
@@ -194,7 +220,9 @@ async def write_account_to_paperless(
             f"/api/documents/{document_id}/",
             {"custom_fields": [{"field": "di_account_id", "value": account_identifier}]},
         )
-        logger.info("Wrote account_identifier '%s' to Paperless doc %d", account_identifier, document_id)
+        logger.info(
+            "Wrote account_identifier '%s' to Paperless doc %d", account_identifier, document_id
+        )
         return True
     except Exception as exc:
         logger.error("Failed to write account to Paperless doc %d: %s", document_id, exc)

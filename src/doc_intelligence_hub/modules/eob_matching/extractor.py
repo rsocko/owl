@@ -6,10 +6,16 @@ from datetime import date
 from dateutil import parser
 
 from doc_intelligence_hub.modules.eob_matching.classifier import INSURANCE_COMPANIES
-from doc_intelligence_hub.modules.eob_matching.models import ExtractedBill, ExtractedEOB, ServiceLine
+from doc_intelligence_hub.modules.eob_matching.models import (
+    ExtractedBill,
+    ExtractedEOB,
+    ServiceLine,
+)
 
 _AMOUNT_CAPTURE = r"\$?\s*([\d,]+(?:\.\d{2})?)"
-_DATE_CAPTURE = r"([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})"
+_DATE_CAPTURE = (
+    r"([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})"
+)
 _LINE_AMOUNT_PATTERN = re.compile(r"\$\s*[\d,]+(?:\.\d{2})?|\b\d[\d,]*\.\d{2}\b")
 
 
@@ -20,11 +26,17 @@ def extract_eob(text: str, document_id: str) -> ExtractedEOB:
         patient_name=_extract_labeled_value(text, ["patient name", "patient"]),
         claim_number=_extract_labeled_value(text, ["claim number", "claim #"]),
         date_of_service=_extract_labeled_date(text, ["date of service", "service date", "dos"]),
-        provider_name=_extract_labeled_value(text, ["provider name", "provider", "facility", "rendering provider"]),
+        provider_name=_extract_labeled_value(
+            text, ["provider name", "provider", "facility", "rendering provider"]
+        ),
         services=_extract_services(text, eob=True),
-        total_billed=_extract_labeled_amount(text, ["total billed", "amount billed", "billed amount"]),
+        total_billed=_extract_labeled_amount(
+            text, ["total billed", "amount billed", "billed amount"]
+        ),
         total_allowed=_extract_labeled_amount(text, ["total allowed", "allowed amount"]),
-        total_plan_pays=_extract_labeled_amount(text, ["amount your plan pays", "plan pays", "total plan pays"]),
+        total_plan_pays=_extract_labeled_amount(
+            text, ["amount your plan pays", "plan pays", "total plan pays"]
+        ),
         total_patient_responsibility=_extract_labeled_amount(
             text,
             ["patient responsibility", "your responsibility", "member responsibility", "you owe"],
@@ -37,11 +49,15 @@ def extract_bill(text: str, document_id: str) -> ExtractedBill:
     return ExtractedBill(
         provider_name=_extract_labeled_value(text, ["provider", "provider name", "from"]),
         patient_name=_extract_labeled_value(text, ["patient name", "patient", "bill to"]),
-        invoice_number=_extract_labeled_value(text, ["invoice number", "invoice #", "account number"]),
+        invoice_number=_extract_labeled_value(
+            text, ["invoice number", "invoice #", "account number"]
+        ),
         date_of_service=_extract_labeled_date(text, ["date of service", "service date", "dos"]),
         due_date=_extract_labeled_date(text, ["due date", "payment due"]),
         services=_extract_services(text, eob=False),
-        total_amount=_extract_labeled_amount(text, ["total amount", "total charges", "invoice total"]),
+        total_amount=_extract_labeled_amount(
+            text, ["total amount", "total charges", "invoice total"]
+        ),
         balance_due=_extract_labeled_amount(text, ["balance due", "amount due", "current balance"]),
         payment_status=_extract_payment_status(text),
         document_id=document_id,
@@ -141,7 +157,9 @@ def _extract_services(text: str, *, eob: bool) -> list[ServiceLine]:
             continue
 
         amount = amounts[-1] if amounts else None
-        services.append(ServiceLine(description=description, cpt_code=code_match.group(1), amount=amount))
+        services.append(
+            ServiceLine(description=description, cpt_code=code_match.group(1), amount=amount)
+        )
 
     return services
 

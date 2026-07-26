@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
-import pytest
 
 from doc_intelligence_hub.modules.eob_matching.database import (
-    EOBRecord,
     MatchRecord,
     MatchingRun,
     get_session as get_eob_session,
-    init_db as eob_init_db,
 )
 
 
@@ -228,3 +223,76 @@ class TestMatchDetail:
     def test_match_detail_not_found(self, client):
         resp = client.get("/api/eob/matches/99999/detail")
         assert resp.status_code == 404
+
+
+class TestGetMatchIncludesDetails:
+    """Tests for GET /api/eob/matches/{match_id} returning eob_details/bill_details."""
+
+    def test_get_match_includes_eob_and_bill_details(self, client, seed_eob):
+        """The single-match endpoint should return eob_details and bill_details
+        with actual dollar amounts needed for amount validation cards."""
+        matches = client.get("/api/eob/matches").json()
+        # Use the match that links eob_doc=100 → bill_doc=200
+        match = next(m for m in matches["matches"] if m["eob_document_id"] == 100)
+
+        resp = client.get(f"/api/eob/matches/{match['id']}")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        # eob_details should be populated with amounts
+        assert data["eob_details"] is not None
+        assert data["eob_details"]["provider_name"] == "UnitedHealth"
+        assert data["eob_details"]["total_patient_responsibility"] == 150.00
+
+        # bill_details should be populated with amounts
+        assert data["bill_details"] is not None
+        assert data["bill_details"]["provider_name"] == "Dr. Smith"
+        assert data["bill_details"]["balance_due"] == 150.00
+        assert data["bill_details"]["total_amount"] == 150.00
+        assert data["bill_details"]["invoice_number"] == "INV-001"
+
+    def test_get_match_details_second_match(self, client, seed_eob):
+        """Verify amount data for the second match (eob_doc=101 → bill_doc=201)."""
+        matches = client.get("/api/eob/matches").json()
+        match = next(m for m in matches["matches"] if m["eob_document_id"] == 101)
+
+        resp = client.get(f"/api/eob/matches/{match['id']}")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert data["eob_details"] is not None
+        assert data["eob_details"]["total_patient_responsibility"] == 75.50
+        assert data["bill_details"] is not None
+        assert data["bill_details"]["balance_due"] == 75.50
+
+    def test_get_match_not_found_returns_404(self, client):
+        resp = client.get("/api/eob/matches/99999")
+        assert resp.status_code == 404
+
+    def test_get_match_with_missing_eob_record(self, client, seed_eob):
+        """When the EOB record doesn't exist, eob_details should be null."""
+        db = get_eob_session()
+        try:
+            run = db.query(MatchingRun).first()
+            orphan = MatchRecord(
+                run_id=run.id,
+                eob_document_id=9999,  # no EOBRecord for this
+                bill_document_id=200,
+                score=0.50,
+                confidence="LOW",
+                status="candidate",
+            )
+            db.add(orphan)
+            db.commit()
+            db.refresh(orphan)
+            orphan_id = orphan.id
+        finally:
+            db.close()
+
+        resp = client.get(f"/api/eob/matches/{orphan_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["eob_details"] is None
+        # bill_details should still be populated
+        assert data["bill_details"] is not None
+        assert data["bill_details"]["balance_due"] == 150.00

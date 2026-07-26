@@ -8,14 +8,18 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, Response
-from fastapi.staticfiles import StaticFiles
 from starlette.responses import StreamingResponse
 
 from doc_intelligence_hub.modules.statements.config import load_config, resolve_api_token
 from doc_intelligence_hub.modules.statements.database import Database
 from doc_intelligence_hub.modules.statements.detector import discover_providers
 from doc_intelligence_hub.modules.statements.recommendations import build_recommendations
-from doc_intelligence_hub.modules.statements.service import load_documents, run_discovery, run_recommendations, validate_source_config
+from doc_intelligence_hub.modules.statements.service import (
+    load_documents,
+    run_discovery,
+    run_recommendations,
+    validate_source_config,
+)
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -124,7 +128,9 @@ def create_app(config_path: str) -> FastAPI:
         config = load_config(config_path)
         token = resolve_api_token(config)
         url = f"{config.source.paperless_url}/api/documents/{doc_id}/preview/"
-        async with httpx.AsyncClient(verify=config.source.verify_ssl, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            verify=config.source.verify_ssl, follow_redirects=True
+        ) as client:
             resp = await client.get(url, headers={"Authorization": f"Token {token}"}, timeout=30)
             if resp.status_code == 200:
                 return Response(
@@ -142,7 +148,11 @@ async def _discovery_event_generator(config_path: str):
     from doc_intelligence_hub.modules.statements.config import load_config
     from doc_intelligence_hub.modules.statements.hints import apply_hints
     from doc_intelligence_hub.modules.statements.models import DiscoveryResult
-    from doc_intelligence_hub.modules.statements.service import _inject_document_type_mapping, _save_to_database, _write_snapshot
+    from doc_intelligence_hub.modules.statements.service import (
+        _inject_document_type_mapping,
+        _save_to_database,
+        _write_snapshot,
+    )
 
     config = load_config(config_path)
     _inject_document_type_mapping(config)
@@ -186,7 +196,10 @@ async def _recommendations_event_generator(config_path: str, as_of: date):
     """Generate SSE events for recommendations with progress updates."""
     from doc_intelligence_hub.modules.statements.config import load_config
     from doc_intelligence_hub.modules.statements.hints import apply_hints
-    from doc_intelligence_hub.modules.statements.service import _inject_document_type_mapping, _save_recommendations_to_database, _save_to_database, _write_snapshot
+    from doc_intelligence_hub.modules.statements.service import (
+        _inject_document_type_mapping,
+        _save_recommendations_to_database,
+    )
 
     config = load_config(config_path)
     _inject_document_type_mapping(config)

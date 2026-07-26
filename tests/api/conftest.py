@@ -6,20 +6,22 @@ without any network access.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from doc_intelligence_hub.api.app import HubSettings, create_app
-from doc_intelligence_hub.core.alerts import Alert, configure as alerts_configure, get_session as get_alerts_session, init_db as alerts_init_db
+from doc_intelligence_hub.core.alerts import (
+    Alert,
+    configure as alerts_configure,
+    get_session as get_alerts_session,
+    init_db as alerts_init_db,
+)
 from doc_intelligence_hub.modules.action_queue.config import settings as aq_settings
 from doc_intelligence_hub.modules.action_queue.database import (
     Action,
-    ProcessingHistory,
     get_session as get_aq_session,
     init_db as aq_init_db,
 )
@@ -41,6 +43,7 @@ from doc_intelligence_hub.modules.triage.database import (
 # ---------------------------------------------------------------------------
 # Mock Paperless client
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_paperless() -> AsyncMock:
     """Build a mock PaperlessClient that returns realistic stub data."""
@@ -76,6 +79,7 @@ def _make_mock_paperless() -> AsyncMock:
 # Core fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def mock_paperless():
     """Provide a mock PaperlessClient and patch make_paperless_client everywhere it's imported."""
@@ -101,7 +105,9 @@ def mock_paperless():
 def mock_llm():
     """Patch LLM-related calls to avoid real network access."""
     mock_settings = MagicMock(base_url="http://llm.test/v1", model="gpt-4o-mini")
-    mock_validate = AsyncMock(return_value={"available": True, "model": "gpt-4o-mini", "models": ["gpt-4o-mini"]})
+    mock_validate = AsyncMock(
+        return_value={"available": True, "model": "gpt-4o-mini", "models": ["gpt-4o-mini"]}
+    )
     mock_health = AsyncMock(return_value={"status": "ok"})
 
     # Patch at source and at every module that imports these functions
@@ -112,7 +118,9 @@ def mock_llm():
         # Also patch where imported into router modules
         patch("doc_intelligence_hub.api.routers.system.llm_health_check", mock_health),
         patch("doc_intelligence_hub.api.routers.system.validate_model_availability", mock_validate),
-        patch("doc_intelligence_hub.api.routers.system.get_llm_settings", return_value=mock_settings),
+        patch(
+            "doc_intelligence_hub.api.routers.system.get_llm_settings", return_value=mock_settings
+        ),
     ]
     for p in patches:
         p.start()
@@ -173,6 +181,7 @@ def client(app, mock_paperless) -> TestClient:
 # ---------------------------------------------------------------------------
 # Seeding helpers
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def seed_actions():
@@ -239,59 +248,71 @@ def seed_eob():
         db.commit()
         db.refresh(run)
 
-        db.add(EOBRecord(
-            document_id=100,
-            run_id=run.id,
-            title="EOB from UHC",
-            provider_name="UnitedHealth",
-            total_patient_responsibility=150.00,
-        ))
-        db.add(EOBRecord(
-            document_id=101,
-            run_id=run.id,
-            title="EOB from Aetna",
-            provider_name="Aetna",
-            total_patient_responsibility=75.50,
-        ))
-        db.add(BillRecord(
-            document_id=200,
-            run_id=run.id,
-            title="Bill from Dr. Smith",
-            provider_name="Dr. Smith",
-            patient_name="Jane Doe",
-            date_of_service="2026-06-15",
-            total_amount=150.00,
-            balance_due=150.00,
-            invoice_number="INV-001",
-        ))
-        db.add(BillRecord(
-            document_id=201,
-            run_id=run.id,
-            title="Bill from City Hospital",
-            provider_name="City Hospital",
-            patient_name="Jane Doe",
-            date_of_service="2026-06-20",
-            total_amount=75.50,
-            balance_due=75.50,
-            invoice_number="INV-002",
-        ))
-        db.add(MatchRecord(
-            run_id=run.id,
-            eob_document_id=100,
-            bill_document_id=200,
-            score=0.92,
-            confidence="HIGH",
-            status="confirmed",
-            confirmed_at=datetime(2026, 7, 20, 11, 0, 0, tzinfo=UTC),
-        ))
-        db.add(MatchRecord(
-            run_id=run.id,
-            eob_document_id=101,
-            bill_document_id=201,
-            score=0.65,
-            confidence="MEDIUM",
-            status="candidate",
-        ))
+        db.add(
+            EOBRecord(
+                document_id=100,
+                run_id=run.id,
+                title="EOB from UHC",
+                provider_name="UnitedHealth",
+                total_patient_responsibility=150.00,
+            )
+        )
+        db.add(
+            EOBRecord(
+                document_id=101,
+                run_id=run.id,
+                title="EOB from Aetna",
+                provider_name="Aetna",
+                total_patient_responsibility=75.50,
+            )
+        )
+        db.add(
+            BillRecord(
+                document_id=200,
+                run_id=run.id,
+                title="Bill from Dr. Smith",
+                provider_name="Dr. Smith",
+                patient_name="Jane Doe",
+                date_of_service="2026-06-15",
+                total_amount=150.00,
+                balance_due=150.00,
+                invoice_number="INV-001",
+            )
+        )
+        db.add(
+            BillRecord(
+                document_id=201,
+                run_id=run.id,
+                title="Bill from City Hospital",
+                provider_name="City Hospital",
+                patient_name="Jane Doe",
+                date_of_service="2026-06-20",
+                total_amount=75.50,
+                balance_due=75.50,
+                invoice_number="INV-002",
+            )
+        )
+        db.add(
+            MatchRecord(
+                run_id=run.id,
+                eob_document_id=100,
+                bill_document_id=200,
+                score=0.92,
+                confidence="HIGH",
+                status="confirmed",
+                confirmed_at=datetime(2026, 7, 20, 11, 0, 0, tzinfo=UTC),
+            )
+        )
+        db.add(
+            MatchRecord(
+                run_id=run.id,
+                eob_document_id=101,
+                bill_document_id=201,
+                score=0.65,
+                confidence="MEDIUM",
+                status="candidate",
+            )
+        )
         db.commit()
     finally:
         db.close()

@@ -33,9 +33,7 @@ BOILERPLATE_PATTERNS = [
     r"not a bill",
 ]
 
-_BOILERPLATE_RE = re.compile(
-    "|".join(BOILERPLATE_PATTERNS), re.IGNORECASE
-)
+_BOILERPLATE_RE = re.compile("|".join(BOILERPLATE_PATTERNS), re.IGNORECASE)
 
 
 class PurgeResult(NamedTuple):
@@ -105,9 +103,7 @@ def purge_stale_eobs(db: Session, *, dry_run: bool = False) -> PurgeResult:
 
     # Find matches that reference these EOB document_ids
     orphaned_matches = (
-        db.query(MatchRecord)
-        .filter(MatchRecord.eob_document_id.in_(document_ids))
-        .all()
+        db.query(MatchRecord).filter(MatchRecord.eob_document_id.in_(document_ids)).all()
     )
     orphaned_count = len(orphaned_matches)
 

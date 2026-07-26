@@ -131,6 +131,16 @@ export const endpoints = {
     resolve: (id: string) => api.patch(`/api/insights/alerts/${id}/resolve`, undefined),
     cleanup: () => api.post('/api/insights/alerts/cleanup'),
   },
+  insights: {
+    list: (params?: string) => api.get(`/api/insights${params ? `?${params}` : ''}`),
+    get: (id: string) => api.get(`/api/insights/${id}`),
+    acknowledge: (id: string) => api.post(`/api/insights/${id}/acknowledge`),
+    archive: (id: string) => api.post(`/api/insights/${id}/archive`),
+    bulk: (body: { action: 'acknowledge' | 'archive'; ids: string[] }) =>
+      api.post('/api/insights/bulk', body),
+    summary: () => api.get('/api/insights/summary'),
+    history: (seriesId: string) => api.get(`/api/insights/history/${seriesId}`),
+  },
   admin: {
     weights: {
       get: () => api.get('/api/admin/weights'),

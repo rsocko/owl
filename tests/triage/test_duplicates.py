@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from doc_intelligence_hub.modules.triage.duplicates import (
     DUPLICATE_THRESHOLD,
@@ -23,16 +22,29 @@ class TestWeightsConfig:
         assert abs(total - 1.0) < 1e-9, f"Weights sum to {total}, expected 1.0"
 
     def test_all_signals_have_weight(self):
-        expected = {"invoice_number", "amount", "date_of_service", "provider", "title", "content_hash"}
+        expected = {
+            "invoice_number",
+            "amount",
+            "date_of_service",
+            "provider",
+            "title",
+            "content_hash",
+        }
         assert set(WEIGHTS.keys()) == expected
 
 
 class TestScoreInvoiceNumber:
     def test_exact_match(self):
-        assert _score_invoice_number({"invoice_number": "INV-001"}, {"invoice_number": "INV-001"}) == 1.0
+        assert (
+            _score_invoice_number({"invoice_number": "INV-001"}, {"invoice_number": "INV-001"})
+            == 1.0
+        )
 
     def test_case_insensitive(self):
-        assert _score_invoice_number({"invoice_number": "inv-001"}, {"invoice_number": "INV-001"}) == 1.0
+        assert (
+            _score_invoice_number({"invoice_number": "inv-001"}, {"invoice_number": "INV-001"})
+            == 1.0
+        )
 
     def test_missing_both(self):
         assert _score_invoice_number({}, {}) == 0.0
@@ -72,9 +84,12 @@ class TestScoreAmount:
 
 class TestScoreDateOfService:
     def test_exact_match(self):
-        assert _score_date_of_service(
-            {"date_of_service": "2026-01-15"}, {"date_of_service": "2026-01-15"}
-        ) == 1.0
+        assert (
+            _score_date_of_service(
+                {"date_of_service": "2026-01-15"}, {"date_of_service": "2026-01-15"}
+            )
+            == 1.0
+        )
 
     def test_one_day_apart(self):
         score = _score_date_of_service(

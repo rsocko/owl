@@ -4,25 +4,19 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from doc_intelligence_hub.core.retention import (
     CleanupResult,
     ModuleCleanupResult,
     RetentionConfig,
-    StorageStats,
     _human_bytes,
-    cleanup_old_alerts,
     cleanup_old_discovery_runs,
-    cleanup_processing_history,
     get_storage_stats,
     load_retention_config,
-    run_cleanup,
     vacuum_databases,
 )
 
@@ -41,10 +35,7 @@ class TestRetentionConfig:
     def test_load_from_yaml(self, tmp_path: Path):
         config_file = tmp_path / "retention.yaml"
         config_file.write_text(
-            "retention:\n"
-            "  processing_history_days: 60\n"
-            "  alerts_days: 14\n"
-            "  actions_days: 180\n"
+            "retention:\n  processing_history_days: 60\n  alerts_days: 14\n  actions_days: 180\n"
         )
         cfg = load_retention_config(config_file)
         assert cfg.processing_history_days == 60
@@ -244,8 +235,12 @@ class TestInfiniteRetention:
         db_path.parent.mkdir(parents=True)
         # Create DB with old data
         conn = sqlite3.connect(str(db_path))
-        conn.execute("CREATE TABLE discovery_runs (id INTEGER PRIMARY KEY, run_at TEXT, analyzed_documents INTEGER, provider_count INTEGER)")
-        conn.execute("CREATE TABLE recommendation_runs (id INTEGER PRIMARY KEY, run_at TEXT, as_of TEXT, recommendation_count INTEGER)")
+        conn.execute(
+            "CREATE TABLE discovery_runs (id INTEGER PRIMARY KEY, run_at TEXT, analyzed_documents INTEGER, provider_count INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE recommendation_runs (id INTEGER PRIMARY KEY, run_at TEXT, as_of TEXT, recommendation_count INTEGER)"
+        )
         old_date = (datetime.now(UTC) - timedelta(days=400)).strftime("%Y-%m-%d %H:%M:%S")
         conn.execute("INSERT INTO discovery_runs VALUES (1, ?, 10, 2)", (old_date,))
         conn.commit()
@@ -263,11 +258,7 @@ class TestInfiniteRetention:
 
     def test_config_with_zero_values(self, tmp_path: Path):
         config_file = tmp_path / "retention.yaml"
-        config_file.write_text(
-            "retention:\n"
-            "  processing_history_days: 0\n"
-            "  alerts_days: 0\n"
-        )
+        config_file.write_text("retention:\n  processing_history_days: 0\n  alerts_days: 0\n")
         cfg = load_retention_config(config_file)
         assert cfg.processing_history_days == 0
         assert cfg.alerts_days == 0

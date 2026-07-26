@@ -2,16 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
-import pytest
-
-from doc_intelligence_hub.modules.action_queue.database import (
-    Action,
-    get_session as get_aq_session,
-    init_db as aq_init_db,
-)
-
 
 class TestQueueCheck:
     """Tests for GET /api/queue/check."""

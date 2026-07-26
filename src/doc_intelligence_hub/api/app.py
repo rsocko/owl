@@ -15,7 +15,24 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from doc_intelligence_hub.api.routers import action_queue, admin, alerts, dashboard, document_types, duplicates, eob, extraction, mc_connector, metadata, statements, stats, system, triage
+from doc_intelligence_hub.api.routers import (
+    action_queue,
+    admin,
+    alerts,
+    analysis,
+    dashboard,
+    document_types,
+    duplicates,
+    eob,
+    extraction,
+    insights,
+    mc_connector,
+    metadata,
+    statements,
+    stats,
+    system,
+    triage,
+)
 from doc_intelligence_hub.core.llm import get_llm_settings, validate_model_availability
 from doc_intelligence_hub.core.logging_config import configure_logging
 from doc_intelligence_hub.core.scheduler import HubScheduler
@@ -70,7 +87,11 @@ def _load_statement_tracker_config(path: str) -> Any | None:
 def _register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(HTTPException)
     async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
-        detail = exc.detail if isinstance(exc.detail, dict) else {"code": "http_error", "message": str(exc.detail)}
+        detail = (
+            exc.detail
+            if isinstance(exc.detail, dict)
+            else {"code": "http_error", "message": str(exc.detail)}
+        )
         return JSONResponse(status_code=exc.status_code, content={"error": detail})
 
     @app.exception_handler(RequestValidationError)
@@ -133,7 +154,10 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
 
         # Initialize alerts database
         try:
-            from doc_intelligence_hub.core.alerts import cleanup_old_alerts, init_db as alerts_init_db
+            from doc_intelligence_hub.core.alerts import (
+                cleanup_old_alerts,
+                init_db as alerts_init_db,
+            )
 
             alerts_init_db()
             resolved = cleanup_old_alerts(days=30)
@@ -149,6 +173,17 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
             logger.info("Triage queue DB initialized.")
         except Exception as exc:
             logger.warning("Could not initialize triage DB: %s", exc)
+
+        # Initialize analysis engine database and rule registry
+        try:
+            from doc_intelligence_hub.modules.analysis.database import init_db as analysis_init_db
+            from doc_intelligence_hub.modules.analysis.rule_registry import load_rules
+
+            analysis_init_db()
+            rules = load_rules()
+            logger.info("Analysis engine initialized: %d rules loaded.", len(rules))
+        except Exception as exc:
+            logger.warning("Could not initialize analysis engine: %s", exc)
 
         # Start the built-in job scheduler
         scheduler: HubScheduler = app.state.scheduler
@@ -172,23 +207,60 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
         summary="Unified API for statements, EOB matching, and action queue workflows.",
         version="0.2.0",
         openapi_tags=[
-            {"name": "system", "description": "Service health, connectivity, and shared Paperless metadata."},
-            {"name": "statement-tracker", "description": "Statement discovery, recommendations, and provider overrides."},
-            {"name": "eob-matching", "description": "EOB classification, extraction, matching, and Paperless linking."},
-            {"name": "action-queue", "description": "Action Queue connectivity, dry-runs, and pipeline status."},
+            {
+                "name": "system",
+                "description": "Service health, connectivity, and shared Paperless metadata.",
+            },
+            {
+                "name": "statement-tracker",
+                "description": "Statement discovery, recommendations, and provider overrides.",
+            },
+            {
+                "name": "eob-matching",
+                "description": "EOB classification, extraction, matching, and Paperless linking.",
+            },
+            {
+                "name": "action-queue",
+                "description": "Action Queue connectivity, dry-runs, and pipeline status.",
+            },
             {"name": "alerts", "description": "Unified alerts feed across all DI modules."},
-            {"name": "admin", "description": "Admin configuration: scoring weights, schedules, and debugging."},
-            {"name": "triage", "description": "Triage queue for human review of automated decisions."},
-            {"name": "extraction", "description": "Account number and entity extraction pipelines."},
-            {"name": "stats", "description": "Aggregate statistics across all DI modules for MC integration."},
+            {
+                "name": "admin",
+                "description": "Admin configuration: scoring weights, schedules, and debugging.",
+            },
+            {
+                "name": "triage",
+                "description": "Triage queue for human review of automated decisions.",
+            },
+            {
+                "name": "analysis",
+                "description": "Analysis engine — configurable rules, execution, and management.",
+            },
+            {
+                "name": "insights",
+                "description": "Browsable insights produced by the analysis engine.",
+            },
+            {
+                "name": "extraction",
+                "description": "Account number and entity extraction pipelines.",
+            },
+            {
+                "name": "stats",
+                "description": "Aggregate statistics across all DI modules for MC integration.",
+            },
         ],
         lifespan=lifespan,
     )
 
     app.state.hub_settings = settings
     app.state.statement_tracker_config = settings.statement_tracker_config
-    app.state.statement_tracker_config_loaded = _load_statement_tracker_config(settings.statement_tracker_config)
-    app.state.last_queue_status = {"status": "idle", "message": "Action queue has not been run yet."}
+    app.state.statement_tracker_config_loaded = _load_statement_tracker_config(
+        settings.statement_tracker_config
+    )
+    app.state.last_queue_status = {
+        "status": "idle",
+        "message": "Action queue has not been run yet.",
+    }
     app.state.last_eob_results = None
     app.state.eob_weights = None
     app.state.admin_schedules = None
@@ -220,6 +292,8 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(dashboard.router)
     app.include_router(duplicates.router)
     app.include_router(metadata.router)
+    app.include_router(analysis.router)
+    app.include_router(insights.router)
     app.include_router(extraction.router)
 
     @app.get("/", include_in_schema=False)
@@ -236,14 +310,20 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     async def favicon() -> FileResponse | JSONResponse:
         favicon_path = _HUB_STATIC_DIR / "favicon.svg"
         if not favicon_path.exists():
-            return JSONResponse(status_code=404, content={"error": {"code": "not_found", "message": "favicon.svg not found"}})
+            return JSONResponse(
+                status_code=404,
+                content={"error": {"code": "not_found", "message": "favicon.svg not found"}},
+            )
         return FileResponse(favicon_path)
 
     @app.get("/icons.svg", include_in_schema=False, response_model=None)
     async def icons() -> FileResponse | JSONResponse:
         icons_path = _HUB_STATIC_DIR / "icons.svg"
         if not icons_path.exists():
-            return JSONResponse(status_code=404, content={"error": {"code": "not_found", "message": "icons.svg not found"}})
+            return JSONResponse(
+                status_code=404,
+                content={"error": {"code": "not_found", "message": "icons.svg not found"}},
+            )
         return FileResponse(icons_path)
 
     # Admin dashboard — redirect to main hub UI (admin features merged into Settings)
@@ -254,7 +334,11 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
         return RedirectResponse(url="/#/settings", status_code=301)
 
     # Legacy statement tracker dashboard at /statements/
-    app.mount("/statements", StaticFiles(directory=str(_STATEMENTS_STATIC_DIR), html=True), name="statements-static")
+    app.mount(
+        "/statements",
+        StaticFiles(directory=str(_STATEMENTS_STATIC_DIR), html=True),
+        name="statements-static",
+    )
 
     @app.get("/health", tags=["system"])
     async def health(request: Request) -> dict[str, Any]:
