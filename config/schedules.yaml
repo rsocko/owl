@@ -48,6 +48,18 @@ eob_matching:
     enabled: true
     timeout: 300
 
+  benchmark:
+    description: "Benchmark LLM models for EOB extraction quality and detect regressions"
+    cron: "0 6 * * 1"          # Weekly on Monday at 6:00 AM
+    endpoint: "/api/eob/benchmark"
+    method: POST
+    body:
+      models: ["phi3:mini", "gpt-4o-mini", "gpt-4o"]
+      limit: 5
+      trigger: "scheduled"
+    enabled: true
+    timeout: 600
+
 action_queue:
   run:
     description: "Triage inbox documents and create action items"

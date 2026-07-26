@@ -451,6 +451,135 @@ def emit_action_queue_alerts(actions: list[dict[str, Any]]) -> int:
     return count
 
 
+def emit_benchmark_alerts(
+    *,
+    current_results: list[dict[str, Any]],
+    previous_results: list[dict[str, Any]] | None = None,
+    success_rate_drop_threshold: float = 0.10,
+    confidence_drop_threshold: float = 0.10,
+    min_success_rate: float = 0.50,
+    min_confidence: float = 0.40,
+) -> int:
+    """Emit alerts from benchmark results, detecting regressions and low performance.
+
+    Args:
+        current_results: List of model result dicts with keys:
+            model, success_rate, avg_confidence, documents_tested.
+        previous_results: Optional list of prior run's model results for comparison.
+        success_rate_drop_threshold: Alert if success_rate drops by this amount (0.10 = 10pp).
+        confidence_drop_threshold: Alert if avg_confidence drops by this amount.
+        min_success_rate: Alert if any model's success_rate is below this.
+        min_confidence: Alert if any model's avg_confidence is below this.
+
+    Returns:
+        Number of alerts emitted.
+    """
+    count = 0
+    prev_by_model = {}
+    if previous_results:
+        prev_by_model = {r.get("model"): r for r in previous_results}
+
+    for result in current_results:
+        model = result.get("model", "unknown")
+        success_rate = result.get("success_rate", 0.0)
+        avg_confidence = result.get("avg_confidence", 0.0)
+        docs_tested = result.get("documents_tested", 0)
+
+        # Absolute threshold alerts
+        if success_rate < min_success_rate and docs_tested > 0:
+            alert = emit_alert(
+                alert_type="benchmark_low_success_rate",
+                severity="high",
+                module="eob",
+                title=f"Low benchmark success rate: {model}",
+                description=(
+                    f"Model {model} achieved only {success_rate:.0%} success rate "
+                    f"across {docs_tested} documents (threshold: {min_success_rate:.0%})."
+                ),
+                metadata={
+                    "model": model,
+                    "success_rate": success_rate,
+                    "threshold": min_success_rate,
+                    "documents_tested": docs_tested,
+                },
+            )
+            if alert:
+                count += 1
+
+        if avg_confidence < min_confidence and success_rate > 0:
+            alert = emit_alert(
+                alert_type="benchmark_low_confidence",
+                severity="medium",
+                module="eob",
+                title=f"Low benchmark confidence: {model}",
+                description=(
+                    f"Model {model} averaged {avg_confidence:.3f} confidence "
+                    f"(threshold: {min_confidence:.2f})."
+                ),
+                metadata={
+                    "model": model,
+                    "avg_confidence": avg_confidence,
+                    "threshold": min_confidence,
+                },
+            )
+            if alert:
+                count += 1
+
+        # Regression alerts (comparison with previous run)
+        prev = prev_by_model.get(model)
+        if prev is None:
+            continue
+
+        prev_success = prev.get("success_rate", 0.0)
+        prev_confidence = prev.get("avg_confidence", 0.0)
+
+        success_drop = prev_success - success_rate
+        if success_drop >= success_rate_drop_threshold and prev_success > 0:
+            alert = emit_alert(
+                alert_type="benchmark_regression_success_rate",
+                severity="high",
+                module="eob",
+                title=f"Benchmark regression: {model} success rate dropped",
+                description=(
+                    f"Model {model} success rate dropped from {prev_success:.0%} "
+                    f"to {success_rate:.0%} (Δ {success_drop:.0%})."
+                ),
+                metadata={
+                    "model": model,
+                    "previous_success_rate": prev_success,
+                    "current_success_rate": success_rate,
+                    "drop": round(success_drop, 4),
+                },
+                deduplicate=False,
+            )
+            if alert:
+                count += 1
+
+        confidence_drop = prev_confidence - avg_confidence
+        if confidence_drop >= confidence_drop_threshold and prev_confidence > 0:
+            alert = emit_alert(
+                alert_type="benchmark_regression_confidence",
+                severity="medium",
+                module="eob",
+                title=f"Benchmark regression: {model} confidence dropped",
+                description=(
+                    f"Model {model} avg confidence dropped from {prev_confidence:.3f} "
+                    f"to {avg_confidence:.3f} (Δ {confidence_drop:.3f})."
+                ),
+                metadata={
+                    "model": model,
+                    "previous_confidence": prev_confidence,
+                    "current_confidence": avg_confidence,
+                    "drop": round(confidence_drop, 4),
+                },
+                deduplicate=False,
+            )
+            if alert:
+                count += 1
+
+    return count
+
+
 # ------------------------------------------------------------------
 # Cleanup / retention
 # ------------------------------------------------------------------
