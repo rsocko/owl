@@ -12,6 +12,7 @@ import {
   Toast,
 } from '../components/ui';
 import EobMatchDetail from '../components/EobMatchDetail';
+import OrphanDetail from '../components/triage/OrphanDetail';
 import { endpoints } from '../lib/api';
 import '../styles/triage-queue.css';
 
@@ -552,6 +553,21 @@ export default function TriageQueue() {
                   }}
                   onSkip={() => {
                     // Advance to next item in the list
+                    const currentIndex = items.findIndex((i) => i.id === selectedItem.id);
+                    const nextItem = items[currentIndex + 1] ?? items[0];
+                    if (nextItem && nextItem.id !== selectedItem.id) {
+                      setSelectedId(nextItem.id);
+                    }
+                  }}
+                />
+              ) : selectedItem.item_type === 'orphan_document' ? (
+                /* Orphan Document — rich detail component (#831) */
+                <OrphanDetail
+                  triageItem={selectedItem}
+                  onResolved={() => {
+                    void loadData();
+                  }}
+                  onSkip={() => {
                     const currentIndex = items.findIndex((i) => i.id === selectedItem.id);
                     const nextItem = items[currentIndex + 1] ?? items[0];
                     if (nextItem && nextItem.id !== selectedItem.id) {

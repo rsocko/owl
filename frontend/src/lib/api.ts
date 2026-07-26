@@ -144,5 +144,12 @@ export const endpoints = {
     undo: (id: string) => api.post(`/api/triage/queue/${id}/undo`),
     stats: () => api.get('/api/triage/stats'),
     populate: () => api.post('/api/triage/queue/populate'),
+    orphans: {
+      findMatch: (id: string) => api.post(`/api/triage/orphans/${id}/find-match`),
+      defer: (id: string) => api.post(`/api/triage/orphans/${id}/defer`),
+      selfPay: (id: string) => api.post(`/api/triage/orphans/${id}/self-pay`),
+      alreadyPaid: (id: string) => api.post(`/api/triage/orphans/${id}/already-paid`),
+      notMedical: (id: string) => api.post(`/api/triage/orphans/${id}/not-medical`),
+    },
   },
 };
