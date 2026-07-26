@@ -1,8 +1,13 @@
 ---
-title: "Advanced Features Design"
-sidebar_label: Advanced Features
-sidebar_position: 6
+title: "Advanced Features Design (Archived)"
+sidebar_label: AQ Advanced Features
+sidebar_position: 4
+draft: true
 ---
+
+:::note
+This document is archived for historical reference. It may not reflect current implementation. These advanced features (n8n orchestration, intent detection ML, etc.) have not been implemented — the module uses a simpler Ollama-based approach.
+:::
 
 # Advanced Features Design: Action Queue Module
 
