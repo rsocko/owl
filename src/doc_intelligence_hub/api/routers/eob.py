@@ -135,6 +135,31 @@ def _serialize_eob_details(eob: EOBRecord | None) -> dict[str, Any] | None:
     }
 
 
+def _serialize_eob_full(eob: EOBRecord | None) -> dict[str, Any] | None:
+    """Full EOB record serialization for detail endpoints."""
+    if eob is None:
+        return None
+    return {
+        "id": eob.id,
+        "document_id": eob.document_id,
+        "run_id": eob.run_id,
+        "title": eob.title,
+        "classification_score": eob.classification_score,
+        "insurance_company": eob.insurance_company,
+        "policy_number": eob.policy_number,
+        "patient_name": eob.patient_name,
+        "claim_number": eob.claim_number,
+        "date_of_service": eob.date_of_service,
+        "provider_name": eob.provider_name,
+        "total_billed": eob.total_billed,
+        "total_allowed": eob.total_allowed,
+        "total_plan_pays": eob.total_plan_pays,
+        "total_patient_responsibility": eob.total_patient_responsibility,
+        "services_json": eob.services_json,
+        "created_at": eob.created_at.isoformat() if eob.created_at else None,
+    }
+
+
 def _serialize_bill_details(bill: BillRecord | None) -> dict[str, Any] | None:
     if bill is None:
         return None
@@ -145,6 +170,29 @@ def _serialize_bill_details(bill: BillRecord | None) -> dict[str, Any] | None:
         "total_amount": bill.total_amount,
         "balance_due": bill.balance_due,
         "invoice_number": bill.invoice_number,
+    }
+
+
+def _serialize_bill_full(bill: BillRecord | None) -> dict[str, Any] | None:
+    """Full Bill record serialization for detail endpoints."""
+    if bill is None:
+        return None
+    return {
+        "id": bill.id,
+        "document_id": bill.document_id,
+        "run_id": bill.run_id,
+        "title": bill.title,
+        "classification_score": bill.classification_score,
+        "provider_name": bill.provider_name,
+        "patient_name": bill.patient_name,
+        "invoice_number": bill.invoice_number,
+        "date_of_service": bill.date_of_service,
+        "due_date": bill.due_date,
+        "total_amount": bill.total_amount,
+        "balance_due": bill.balance_due,
+        "payment_status": bill.payment_status,
+        "services_json": bill.services_json,
+        "created_at": bill.created_at.isoformat() if bill.created_at else None,
     }
 
 
@@ -652,7 +700,19 @@ async def update_match(
         db.commit()
 
         paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
-        return _serialize_match(match, paperless_url)
+        eob = (
+            db.query(EOBRecord)
+            .filter_by(document_id=match.eob_document_id)
+            .order_by(EOBRecord.id.desc())
+            .first()
+        )
+        bill = (
+            db.query(BillRecord)
+            .filter_by(document_id=match.bill_document_id)
+            .order_by(BillRecord.id.desc())
+            .first()
+        )
+        return _serialize_match(match, paperless_url, eob=eob, bill=bill)
     finally:
         db.close()
 
@@ -711,42 +771,10 @@ async def get_record_detail(document_id: int) -> dict[str, Any]:
         result: dict[str, Any] = {"document_id": document_id}
         if eob:
             result["type"] = "eob"
-            result["eob"] = {
-                "id": eob.id,
-                "run_id": eob.run_id,
-                "title": eob.title,
-                "classification_score": eob.classification_score,
-                "insurance_company": eob.insurance_company,
-                "policy_number": eob.policy_number,
-                "patient_name": eob.patient_name,
-                "claim_number": eob.claim_number,
-                "date_of_service": eob.date_of_service,
-                "provider_name": eob.provider_name,
-                "total_billed": eob.total_billed,
-                "total_allowed": eob.total_allowed,
-                "total_plan_pays": eob.total_plan_pays,
-                "total_patient_responsibility": eob.total_patient_responsibility,
-                "services_json": eob.services_json,
-                "created_at": eob.created_at.isoformat() if eob.created_at else None,
-            }
+            result["eob"] = _serialize_eob_full(eob)
         if bill:
             result["type"] = "bill" if not eob else "both"
-            result["bill"] = {
-                "id": bill.id,
-                "run_id": bill.run_id,
-                "title": bill.title,
-                "classification_score": bill.classification_score,
-                "provider_name": bill.provider_name,
-                "patient_name": bill.patient_name,
-                "invoice_number": bill.invoice_number,
-                "date_of_service": bill.date_of_service,
-                "due_date": bill.due_date,
-                "total_amount": bill.total_amount,
-                "balance_due": bill.balance_due,
-                "payment_status": bill.payment_status,
-                "services_json": bill.services_json,
-                "created_at": bill.created_at.isoformat() if bill.created_at else None,
-            }
+            result["bill"] = _serialize_bill_full(bill)
         return result
     finally:
         db.close()
@@ -784,42 +812,8 @@ async def get_match_detail(request: Request, match_id: int) -> dict[str, Any]:
         paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
         return {
             "match": _serialize_match(match, paperless_url, eob=eob, bill=bill),
-            "eob_record": {
-                "id": eob.id,
-                "document_id": eob.document_id,
-                "run_id": eob.run_id,
-                "title": eob.title,
-                "classification_score": eob.classification_score,
-                "insurance_company": eob.insurance_company,
-                "policy_number": eob.policy_number,
-                "patient_name": eob.patient_name,
-                "claim_number": eob.claim_number,
-                "date_of_service": eob.date_of_service,
-                "provider_name": eob.provider_name,
-                "total_billed": eob.total_billed,
-                "total_allowed": eob.total_allowed,
-                "total_plan_pays": eob.total_plan_pays,
-                "total_patient_responsibility": eob.total_patient_responsibility,
-                "services_json": eob.services_json,
-                "created_at": eob.created_at.isoformat() if eob.created_at else None,
-            } if eob else None,
-            "bill_record": {
-                "id": bill.id,
-                "document_id": bill.document_id,
-                "run_id": bill.run_id,
-                "title": bill.title,
-                "classification_score": bill.classification_score,
-                "provider_name": bill.provider_name,
-                "patient_name": bill.patient_name,
-                "invoice_number": bill.invoice_number,
-                "date_of_service": bill.date_of_service,
-                "due_date": bill.due_date,
-                "total_amount": bill.total_amount,
-                "balance_due": bill.balance_due,
-                "payment_status": bill.payment_status,
-                "services_json": bill.services_json,
-                "created_at": bill.created_at.isoformat() if bill.created_at else None,
-            } if bill else None,
+            "eob_record": _serialize_eob_full(eob),
+            "bill_record": _serialize_bill_full(bill),
         }
     finally:
         db.close()
