@@ -62,8 +62,14 @@ export function SplitSeriesFlow({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const selectedDocs = documents.filter(d => selectedDocIds.has(d.document_id));
-  const remainingDocs = documents.filter(d => !selectedDocIds.has(d.document_id));
+  const selectedDocs = useMemo(() =>
+    documents.filter(d => selectedDocIds.has(d.document_id)),
+    [documents, selectedDocIds],
+  );
+  const remainingDocs = useMemo(() =>
+    documents.filter(d => !selectedDocIds.has(d.document_id)),
+    [documents, selectedDocIds],
+  );
 
   // Auto-suggest name from common account hint
   const selectedAccounts = new Set(selectedDocs.map(d => d.account_hint).filter(Boolean));
