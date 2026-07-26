@@ -21,7 +21,7 @@
 #
 # Statement Discovery    — Daily 9:00 AM  — POST /api/statements/discovery/run
 # Statement Gap Check    — Daily 9:30 AM  — POST /api/statements/recommendations/run?as_of=TODAY
-# EOB Matching           — Weekly Sun 10 AM — POST /api/eob/run
+# EOB Matching           — Daily 10:00 AM — POST /api/eob/run (incremental via since_last_run)
 # Action Queue           — Daily 8 AM & 2 PM — POST /api/queue/run
 #
 # ===================================================================
@@ -76,3 +76,49 @@
 #
 #   crontab -e
 #   # Paste entries from config/crontab.example
+#
+# ===================================================================
+# Docker-native scheduling (Dockhand / supercronic)
+# ===================================================================
+#
+# For Dockhand stacks or environments where host cron is impractical,
+# use the eob-scheduler sidecar container. It runs supercronic
+# (a lightweight cron replacement for containers) with a bundled
+# crontab that triggers `eob-match run --since-last-run` daily.
+#
+# Start the scheduler:
+#   docker compose --profile scheduled up -d eob-scheduler
+#
+# The schedule is defined in config/crontab.eob-scheduler and can
+# be customized by editing the file and rebuilding the image.
+#
+# ===================================================================
+# Incremental mode (--since-last-run)
+# ===================================================================
+#
+# The --since-last-run flag (CLI) and since_last_run field (API)
+# query the last successful pipeline run's finished_at timestamp
+# and use it as a created_after date filter. This makes daily runs
+# efficient: only newly-added documents are processed.
+#
+# CLI: eob-match run --since-last-run --limit 200
+# API: POST /api/eob/run {"since_last_run": true, "limit": 200}
+#
+# If no prior successful run exists, all documents are processed.
+# The flag is mutually exclusive with --created-after / created_after.
+#
+# ===================================================================
+# Failure monitoring
+# ===================================================================
+#
+# When the EOB matching pipeline fails (CLI or API), an alert is
+# emitted via the unified alerts system (core/alerts.py):
+#
+#   alert_type: eob_run_failed
+#   severity: high
+#   module: eob
+#
+# These alerts are visible in:
+#   - GET /api/insights/alerts
+#   - The Mission Control connector
+#   - The admin dashboard's alerts panel

@@ -11,7 +11,12 @@ import {
   Tabs,
   Toast,
 } from '../components/ui';
+import EobMatchDetail from '../components/EobMatchDetail';
+import OrphanDetail from '../components/triage/OrphanDetail';
+import DocumentPreview from '../components/DocumentPreview';
 import { endpoints } from '../lib/api';
+import { StatementGroupingDetail } from '../components/triage/StatementGroupingDetail';
+import DuplicateDetail from './DuplicateDetail';
 import '../styles/triage-queue.css';
 
 // ------------------------------------------------------------------
@@ -48,7 +53,7 @@ interface StatsResponse {
   pending: number;
 }
 
-type ItemTypeFilter = 'all' | 'eob_match_review' | 'grouping_anomaly' | 'orphan_document';
+type ItemTypeFilter = 'all' | 'eob_match_review' | 'grouping_anomaly' | 'orphan_document' | 'duplicate_document';
 type StatusFilter = 'pending' | 'deferred' | 'resolved';
 type ToastState = { message: string; tone?: 'success' | 'error'; undoId?: string } | null;
 
@@ -75,6 +80,7 @@ function typeLabel(itemType: string): string {
     case 'eob_match_review': return 'EOB';
     case 'grouping_anomaly': return 'GROUPING';
     case 'orphan_document': return 'ORPHAN';
+    case 'duplicate_document': return 'DUPLICATE';
     default: return itemType.toUpperCase();
   }
 }
@@ -84,6 +90,7 @@ function typeBadgeTone(itemType: string) {
     case 'eob_match_review': return 'info' as const;
     case 'grouping_anomaly': return 'warning' as const;
     case 'orphan_document': return 'danger' as const;
+    case 'duplicate_document': return 'warning' as const;
     default: return 'muted' as const;
   }
 }
@@ -114,6 +121,12 @@ function itemTitle(item: TriageItem): string {
   }
   if (item.item_type === 'grouping_anomaly') {
     return `Grouping: ${meta.series_name || item.target_id}`;
+  }
+  if (item.item_type === 'duplicate_document') {
+    const docA = meta.doc_a_id ?? '?';
+    const docB = meta.doc_b_id ?? '?';
+    const scorePct = typeof meta.score_pct === 'number' ? `${meta.score_pct}%` : '';
+    return `Duplicate: #${docA} ↔ #${docB}${scorePct ? ` (${scorePct})` : ''}`;
   }
   return `${typeLabel(item.item_type)}: ${item.target_id}`;
 }
@@ -386,6 +399,9 @@ export default function TriageQueue() {
       const tag = target?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
 
+      // When an EOB match review item is selected, EobMatchDetail owns Y/N/S/R
+      const eobDetailActive = selectedItem?.item_type === 'eob_match_review';
+
       // Escape closes modals first, then deselects
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -404,13 +420,13 @@ export default function TriageQueue() {
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         moveSelection(-1);
-      } else if (e.key.toLowerCase() === 'y' && selectedId) {
+      } else if (e.key.toLowerCase() === 'y' && selectedId && !eobDetailActive) {
         e.preventDefault();
         void handleResolve(selectedId, 'confirm');
-      } else if (e.key.toLowerCase() === 'n' && selectedId) {
+      } else if (e.key.toLowerCase() === 'n' && selectedId && !eobDetailActive) {
         e.preventDefault();
         void handleResolve(selectedId, 'reject');
-      } else if (e.key.toLowerCase() === 's' && selectedId) {
+      } else if (e.key.toLowerCase() === 's' && selectedId && !eobDetailActive) {
         e.preventDefault();
         // Skip — move to next
         moveSelection(1);
@@ -428,7 +444,7 @@ export default function TriageQueue() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [items, selectedId, pendingBulkAction, pendingThreshold]);
+  }, [items, selectedId, selectedItem, pendingBulkAction, pendingThreshold]);
 
   // ------------------------------------------------------------------
   // Derived counts
@@ -479,6 +495,7 @@ export default function TriageQueue() {
                     { key: 'eob_match_review', label: `EOB (${typeCounts.eob_match_review ?? 0})` },
                     { key: 'grouping_anomaly', label: `Groups (${typeCounts.grouping_anomaly ?? 0})` },
                     { key: 'orphan_document', label: `Orphans (${typeCounts.orphan_document ?? 0})` },
+                    { key: 'duplicate_document', label: `Dupes (${typeCounts.duplicate_document ?? 0})` },
                   ]}
                 />
 
@@ -631,7 +648,40 @@ export default function TriageQueue() {
           {/* ── Detail panel (right) ── */}
           <section className="triage-detail-panel">
             {selectedItem ? (
-              <>
+              selectedItem.item_type === 'eob_match_review' ? (
+                /* EOB Match Review — rich detail component (#834) */
+                <EobMatchDetail
+                  matchId={Number(selectedItem.target_id)}
+                  triageItemId={selectedItem.id}
+                  onResolved={() => {
+                    void loadData();
+                  }}
+                  onSkip={() => {
+                    // Advance to next item in the list
+                    const currentIndex = items.findIndex((i) => i.id === selectedItem.id);
+                    const nextItem = items[currentIndex + 1] ?? items[0];
+                    if (nextItem && nextItem.id !== selectedItem.id) {
+                      setSelectedId(nextItem.id);
+                    }
+                  }}
+                />
+              ) : selectedItem.item_type === 'orphan_document' ? (
+                /* Orphan Document — rich detail component (#831) */
+                <OrphanDetail
+                  triageItem={selectedItem}
+                  onResolved={() => {
+                    void loadData();
+                  }}
+                  onSkip={() => {
+                    const currentIndex = items.findIndex((i) => i.id === selectedItem.id);
+                    const nextItem = items[currentIndex + 1] ?? items[0];
+                    if (nextItem && nextItem.id !== selectedItem.id) {
+                      setSelectedId(nextItem.id);
+                    }
+                  }}
+                />
+              ) : (
+                <>
                 <div className="triage-detail-header">
                   <div>
                     <div className="triage-detail-title">{itemTitle(selectedItem)}</div>
@@ -678,14 +728,15 @@ export default function TriageQueue() {
                   </div>
                 </div>
 
-                {/* Reason banner */}
-                {selectedItem.reason && (
+                {/* Reason banner — skip for types with dedicated detail components */}
+                {selectedItem.reason && !['grouping_anomaly', 'duplicate_document'].includes(selectedItem.item_type) && (
                   <div className="triage-reason-banner">
                     <strong>Flagged for review:</strong> {selectedItem.reason}
                   </div>
                 )}
 
-                {/* Item info card */}
+                {/* Item info card — skip for types with dedicated detail components */}
+                {!['grouping_anomaly', 'duplicate_document'].includes(selectedItem.item_type) && (
                 <Card title="Item details">
                   <div className="triage-detail-info">
                     <div className="triage-detail-row">
@@ -722,17 +773,49 @@ export default function TriageQueue() {
                     )}
                   </div>
                 </Card>
+                )}
 
-                {/* Metadata dump — placeholder for specific detail views (#834, #829, #830, #831) */}
-                <Card title="Item metadata">
-                  <div className="triage-metadata-dump">
-                    {selectedItem.metadata ? (
-                      <pre>{JSON.stringify(selectedItem.metadata, null, 2)}</pre>
-                    ) : (
-                      <div className="text-muted">No additional metadata available for this item.</div>
-                    )}
-                  </div>
-                </Card>
+                {/* Document preview — show when target is a document */}
+                {selectedItem.target_type === 'document' && selectedItem.target_id && !Number.isNaN(Number(selectedItem.target_id)) && (
+                  <Card title="Document preview">
+                    <DocumentPreview
+                      documentId={Number(selectedItem.target_id)}
+                    />
+                  </Card>
+                )}
+
+                {/* Type-specific detail views */}
+                {selectedItem.item_type === 'grouping_anomaly' ? (
+                  <StatementGroupingDetail
+                    seriesId={selectedItem.target_id}
+                    triageItemId={selectedItem.id}
+                    reason={selectedItem.reason}
+                    onResolved={(action) => {
+                      setToast({ message: `Series ${action} completed.`, tone: 'success' });
+                      void loadData();
+                      // Auto-advance to next item
+                      const currentIdx = items.findIndex(i => i.id === selectedItem.id);
+                      const next = items[currentIdx + 1] || items[currentIdx - 1];
+                      setSelectedId(next?.id ?? null);
+                    }}
+                  />
+                ) : selectedItem.item_type === 'duplicate_document' && selectedItem.metadata?.duplicate_pair_id ? (
+                  <DuplicateDetail
+                    pairId={selectedItem.metadata.duplicate_pair_id as string}
+                    onResolved={() => void loadData()}
+                  />
+                ) : (
+                  /* Metadata dump — placeholder for remaining detail views */
+                  <Card title="Item metadata">
+                    <div className="triage-metadata-dump">
+                      {selectedItem.metadata ? (
+                        <pre>{JSON.stringify(selectedItem.metadata, null, 2)}</pre>
+                      ) : (
+                        <div className="text-muted">No additional metadata available for this item.</div>
+                      )}
+                    </div>
+                  </Card>
+                )}
 
                 {/* Metadata correction link — when target is a document */}
                 {(selectedItem.target_type === 'document' || selectedItem.metadata?.document_id) && (
@@ -743,6 +826,7 @@ export default function TriageQueue() {
                   </div>
                 )}
               </>
+              )
             ) : (
               <EmptyState
                 title="No triage item selected"

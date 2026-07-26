@@ -1,0 +1,332 @@
+/* ── Document Preview Component ── */
+
+.doc-preview-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.doc-preview-body {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.doc-preview-thumb {
+  flex-shrink: 0;
+  width: 120px;
+  height: 156px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease;
+}
+
+.doc-preview-thumb:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.doc-preview-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.doc-preview-thumb-placeholder {
+  font-size: 2.5rem;
+  opacity: 0.4;
+}
+
+.doc-preview-thumb-loading {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: doc-preview-spin 0.8s linear infinite;
+}
+
+@keyframes doc-preview-spin {
+  to { transform: rotate(360deg); }
+}
+
+.doc-preview-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.doc-preview-filename {
+  font-weight: 600;
+  font-size: 0.92rem;
+  word-break: break-word;
+}
+
+.doc-preview-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.doc-preview-info span {
+  white-space: nowrap;
+}
+
+.doc-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.doc-preview-actions a,
+.doc-preview-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.doc-preview-actions a:hover,
+.doc-preview-actions button:hover {
+  background: var(--bg-secondary);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.doc-preview-actions .doc-action-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.doc-preview-actions .doc-action-primary:hover {
+  opacity: 0.9;
+  color: #fff;
+}
+
+/* ── Compact variant (for inline use in tables/lists) ── */
+
+.doc-preview-compact {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.doc-preview-compact-thumb {
+  flex-shrink: 0;
+  width: 48px;
+  height: 62px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease;
+}
+
+.doc-preview-compact-thumb:hover {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.doc-preview-compact-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.doc-preview-compact-thumb-placeholder {
+  font-size: 1.2rem;
+  opacity: 0.4;
+}
+
+.doc-preview-compact-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.doc-preview-compact-filename {
+  font-size: 0.82rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-preview-compact-links {
+  display: flex;
+  gap: 8px;
+  font-size: 0.74rem;
+}
+
+.doc-preview-compact-links a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.doc-preview-compact-links a:hover {
+  text-decoration: underline;
+}
+
+/* ── Document Viewer Modal ── */
+
+.doc-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: doc-viewer-fade-in 0.15s ease;
+}
+
+@keyframes doc-viewer-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.doc-viewer-container {
+  background: var(--bg-primary);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
+  display: flex;
+  flex-direction: column;
+  width: 90vw;
+  max-width: 960px;
+  height: 85vh;
+  max-height: 85vh;
+  overflow: hidden;
+}
+
+.doc-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+
+.doc-viewer-title {
+  font-weight: 700;
+  font-size: 0.92rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.doc-viewer-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.doc-viewer-header-actions a,
+.doc-viewer-header-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.doc-viewer-header-actions a:hover,
+.doc-viewer-header-actions button:hover {
+  background: var(--bg-secondary);
+}
+
+.doc-viewer-close-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.doc-viewer-close-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.doc-viewer-iframe {
+  flex: 1;
+  border: none;
+  width: 100%;
+}
+
+.doc-viewer-fallback {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.doc-viewer-fallback-icon {
+  font-size: 3rem;
+  opacity: 0.5;
+}
+
+/* ── Error / loading states ── */
+
+.doc-preview-error {
+  color: var(--danger);
+  font-size: 0.82rem;
+  padding: 8px 0;
+}
+
+.doc-preview-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
