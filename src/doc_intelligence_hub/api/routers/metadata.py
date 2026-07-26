@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.api.routers import make_paperless_client
@@ -38,6 +38,9 @@ FIELD_TO_PAPERLESS: dict[str, str] = {
     "account_identifier": "di_account_id",
     "document_classification": "di_doc_type",
 }
+
+
+VALID_FIELD_NAMES = set(FIELD_TO_PAPERLESS.keys())
 
 
 # ------------------------------------------------------------------
@@ -68,14 +71,14 @@ class ConfirmFieldRequest(BaseModel):
 
 @router.get("/corrections")
 async def list_corrections(
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     correction_type: str | None = None,
     field_name: str | None = None,
 ) -> dict[str, Any]:
     """List recent corrections for training data export."""
     corrections = list_recent_corrections(
-        limit=min(limit, 500),
+        limit=limit,
         offset=offset,
         correction_type=correction_type,
         field_name=field_name,
@@ -112,7 +115,6 @@ async def get_document_metadata(doc_id: int, request: Request) -> dict[str, Any]
         paperless_values[fname] = val
 
     # Map to DI fields
-    paperless_to_di = {v: k for k, v in FIELD_TO_PAPERLESS.items()}
     extracted_fields: list[dict[str, Any]] = []
     for di_field, paperless_field in FIELD_TO_PAPERLESS.items():
         value = paperless_values.get(paperless_field)
@@ -144,9 +146,19 @@ async def get_document_metadata(doc_id: int, request: Request) -> dict[str, Any]
     }
 
 
+def _validate_field_name(field_name: str) -> None:
+    """Ensure field_name is a known extraction field."""
+    if field_name not in VALID_FIELD_NAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown field name '{field_name}'. Valid fields: {sorted(VALID_FIELD_NAMES)}",
+        )
+
+
 @router.post("/{doc_id}/correct")
 async def correct_field(doc_id: int, body: CorrectFieldRequest) -> dict[str, Any]:
     """Submit a field correction."""
+    _validate_field_name(body.field_name)
     correction = create_extraction_correction(
         document_id=doc_id,
         field_name=body.field_name,
@@ -163,6 +175,7 @@ async def correct_field(doc_id: int, body: CorrectFieldRequest) -> dict[str, Any
 @router.post("/{doc_id}/confirm")
 async def confirm_field(doc_id: int, body: ConfirmFieldRequest) -> dict[str, Any]:
     """Confirm a field extraction is correct (positive training example)."""
+    _validate_field_name(body.field_name)
     correction = create_extraction_correction(
         document_id=doc_id,
         field_name=body.field_name,
@@ -186,11 +199,11 @@ async def writeback_to_paperless(doc_id: int, request: Request) -> dict[str, Any
     if not corrections:
         raise HTTPException(status_code=400, detail="No corrections found for this document.")
 
-    # Get latest value per field
+    # Get latest value per field (allow empty string as a valid correction)
     latest_per_field: dict[str, str] = {}
     for c in corrections:
         fn = c["field_name"]
-        if fn not in latest_per_field and c.get("corrected_value"):
+        if fn not in latest_per_field and c.get("corrected_value") is not None:
             latest_per_field[fn] = c["corrected_value"]
 
     if not latest_per_field:
