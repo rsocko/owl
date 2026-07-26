@@ -14,6 +14,7 @@ import {
   StatCard,
   StatGrid,
   Tabs,
+  Toast,
   confidenceTone,
 } from '../components/ui';
 import { endpoints } from '../lib/api';
@@ -114,6 +115,8 @@ export default function EobUnmatched() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [suggestedMatches, setSuggestedMatches] = useState<SuggestedMatch[]>([]);
+  const [toast, setToast] = useState<{ message: string; tone?: 'success' | 'error' } | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
@@ -229,6 +232,31 @@ export default function EobUnmatched() {
       setSelectedIds(new Set());
     } else {
       setSelectedIds(new Set(filteredItems.map((item) => item.id)));
+    }
+  };
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), 3200);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
+  const bulkUpdate = async (action: 'mark_orphan' | 'mark_paid') => {
+    if (selectedIds.size === 0) {
+      setToast({ message: 'Select at least one document to use bulk actions.', tone: 'error' });
+      return;
+    }
+    setBusyKey(`bulk-${action}`);
+    try {
+      await endpoints.eob.bulkUpdate({ ids: Array.from(selectedIds), action });
+      setSelectedIds(new Set());
+      await loadItems();
+      const label = action === 'mark_orphan' ? 'orphan' : 'paid';
+      setToast({ message: `${selectedIds.size} document${selectedIds.size === 1 ? '' : 's'} marked as ${label}.` });
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Bulk update failed.', tone: 'error' });
+    } finally {
+      setBusyKey(null);
     }
   };
 
@@ -431,17 +459,25 @@ export default function EobUnmatched() {
                 ]}
               />
               {/* Bulk action bar */}
-              <div className="eob-bulk-bar">
-                <div className="eob-bulk-bar-left">
-                  <input type="checkbox" checked={selectedIds.size === filteredItems.length && filteredItems.length > 0} onChange={toggleSelectAll} />
-                  <span>{selectedIds.size ? `${selectedIds.size} selected` : 'Select all'}</span>
+              {selectedIds.size > 0 && (
+                <div className="eob-bulk-bar eob-bulk-bar--floating">
+                  <div className="eob-bulk-bar-left">
+                    <input type="checkbox" checked={selectedIds.size === filteredItems.length && filteredItems.length > 0} onChange={toggleSelectAll} />
+                    <span>{selectedIds.size} selected</span>
+                  </div>
+                  <div className="eob-bulk-bar-right">
+                    <Button size="sm" variant="ghost" disabled={busyKey !== null} onClick={() => void bulkUpdate('mark_orphan')}>
+                      Mark as Orphan
+                    </Button>
+                    <Button size="sm" variant="ghost" disabled={busyKey !== null} onClick={() => void bulkUpdate('mark_paid')}>
+                      Mark as Paid
+                    </Button>
+                    <Button size="sm" onClick={() => setSelectedIds(new Set())} disabled={busyKey !== null}>
+                      Clear
+                    </Button>
+                  </div>
                 </div>
-                <div className="eob-bulk-bar-right">
-                  <Button size="sm" variant="ghost" disabled={selectedIds.size === 0}>
-                    Mark as Orphan
-                  </Button>
-                </div>
-              </div>
+              )}
             </>
           ) : (
             <EmptyState
@@ -515,6 +551,8 @@ export default function EobUnmatched() {
           </div>
         </Card>
       </div>
+
+      {toast && <Toast message={toast.message} tone={toast.tone} />}
     </>
   );
 }

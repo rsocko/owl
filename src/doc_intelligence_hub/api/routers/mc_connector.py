@@ -171,6 +171,7 @@ async def mc_unmatched_eobs(request: Request) -> list[dict[str, Any]]:
             for eob in eobs:
                 if eob.document_id in confirmed_eob_ids:
                     continue
+                eob_status = getattr(eob, "status", None) or "unmatched"
                 results.append({
                     "id": str(eob.id),
                     "provider": eob.provider_name or "Unknown",
@@ -179,6 +180,9 @@ async def mc_unmatched_eobs(request: Request) -> list[dict[str, Any]]:
                     "patient_responsibility": eob.total_patient_responsibility or 0.0,
                     "document_url": f"{base_url}/documents/{eob.document_id}/details" if base_url and eob.document_id else None,
                     "created_at": eob.created_at.isoformat() if hasattr(eob, "created_at") and eob.created_at else None,
+                    "doc_type": "eob",
+                    "orphaned": eob_status == "orphan",
+                    "status": eob_status,
                 })
 
             return results
