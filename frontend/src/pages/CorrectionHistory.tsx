@@ -10,6 +10,7 @@ import {
   Toast,
 } from '../components/ui';
 import { endpoints } from '../lib/api';
+import { getToastDuration } from '../lib/toast';
 import '../styles/dashboard-view.css';  // shared tab bar styles
 import '../styles/correction-history.css';
 
@@ -165,8 +166,10 @@ export default function CorrectionHistory() {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const id = window.setTimeout(() => setToast(null), 4000);
-    return () => window.clearTimeout(id);
+    const duration = getToastDuration(toast.tone);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), duration);
+    return () => window.clearTimeout(timeout);
   }, [toast]);
 
   const handleUndo = useCallback(async (eventId: string) => {
@@ -262,7 +265,7 @@ export default function CorrectionHistory() {
         </div>
       )}
 
-      {toast ? <Toast message={toast.message} tone={toast.tone} /> : null}
+      {toast ? <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} /> : null}
     </>
   );
 }

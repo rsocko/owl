@@ -16,6 +16,7 @@ import {
 } from '../components/ui';
 import { useStreamingAction } from '../hooks/useStreamingAction';
 import { endpoints } from '../lib/api';
+import { getToastDuration } from '../lib/toast';
 import '../styles/overview-dashboard.css';
 
 type Tone = 'ok' | 'warn' | 'err' | 'info' | 'muted' | 'success' | 'warning' | 'danger';
@@ -242,8 +243,10 @@ export default function OverviewDashboard() {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timeoutId = window.setTimeout(() => setToast(null), 4000);
-    return () => window.clearTimeout(timeoutId);
+    const duration = getToastDuration(toast.tone);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), duration);
+    return () => window.clearTimeout(timeout);
   }, [toast]);
 
   const statementsModule = dashboard?.status.modules?.statements;
@@ -521,7 +524,7 @@ export default function OverviewDashboard() {
         </>
       ) : null}
 
-      {toast ? <Toast message={toast.message} tone={toast.tone} /> : null}
+      {toast ? <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} /> : null}
     </>
   );
 }

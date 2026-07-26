@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { api, endpoints } from '../lib/api';
 import { Badge, Button, Card, ErrorState, PageHeader, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
+import { getToastDuration } from '../lib/toast';
 import { CronScheduleEditor } from '../components/CronScheduleEditor';
 
 type ToastState = {
@@ -180,7 +181,9 @@ export default function Settings() {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timeout = window.setTimeout(() => setToast(null), 3200);
+    const duration = getToastDuration(toast.tone);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), duration);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
@@ -391,7 +394,7 @@ export default function Settings() {
         }
       />
 
-      {toast && <Toast message={toast.message} tone={toast.tone} />}
+      {toast && <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />}
 
       {loading ? (
         <><SkeletonLoader variant="stat-grid" /><div className="section"><SkeletonLoader variant="cards" /></div></>
@@ -778,4 +781,3 @@ export default function Settings() {
     </>
   );
 }
-

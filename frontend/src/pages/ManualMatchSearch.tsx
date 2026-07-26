@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Badge,
+  Breadcrumb,
   Button,
   Card,
   EmptyState,
@@ -12,6 +13,7 @@ import {
 } from '../components/ui';
 import DocumentPreview from '../components/DocumentPreview';
 import { endpoints } from '../lib/api';
+import { getToastDuration } from '../lib/toast';
 import '../styles/manual-match-search.css';
 
 interface MatchBreakdown {
@@ -138,7 +140,9 @@ export default function ManualMatchSearch() {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timeout = window.setTimeout(() => setToast(null), 3200);
+    const duration = getToastDuration(toast.tone);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), duration);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
@@ -213,6 +217,12 @@ export default function ManualMatchSearch() {
 
   return (
     <>
+      <Breadcrumb
+        items={[
+          { label: 'Triage', to: '/triage' },
+          { label: 'Manual Match Search' },
+        ]}
+      />
       <PageHeader
         title="Manual Match Search"
         desc="Search the current candidate match set and manually confirm the best EOB ↔ claim pairing when the triage queue needs extra review."
@@ -435,7 +445,7 @@ export default function ManualMatchSearch() {
         </div>
       )}
 
-      {toast && <Toast message={toast.message} tone={toast.tone} />}
+      {toast && <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />}
     </>
   );
 }
