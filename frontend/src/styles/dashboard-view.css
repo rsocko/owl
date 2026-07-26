@@ -1,5 +1,33 @@
 /* Dashboard View — stats grid, queue breakdown, match chart, activity feed */
 
+/* Tab bar shared between Dashboard and Correction History */
+.dv-view-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 2px solid var(--border, #e0e0e0);
+  padding-bottom: 0;
+}
+
+.dv-view-tab {
+  padding: 8px 16px;
+  text-decoration: none;
+  color: var(--text-secondary, #666);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  font-weight: 500;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.dv-view-tab:hover {
+  color: var(--text-primary, #333);
+}
+
+.dv-view-tab.active {
+  color: var(--primary, #0366d6);
+  border-bottom-color: var(--primary, #0366d6);
+}
+
 .dv-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -688,37 +688,52 @@ def get_activity_feed(limit: int = 20) -> list[dict[str, Any]]:
 
 
 def get_match_rate_trend(months: int = 6) -> list[dict[str, Any]]:
-    """Calculate match rate trend by month from correction events."""
-    import json
+    """Calculate match rate trend by month from correction events.
+
+    Uses a single query with in-Python bucketing to avoid N+1 query overhead.
+    """
     from datetime import timedelta
 
     session = get_session()
     try:
         now = datetime.now(UTC)
-        trend = []
-        for i in range(months - 1, -1, -1):
-            month_start = now - timedelta(days=30 * (i + 1))
-            month_end = now - timedelta(days=30 * i)
+        earliest = now - timedelta(days=30 * months)
 
-            total = session.query(CorrectionEvent).filter(
-                CorrectionEvent.created_at >= month_start,
-                CorrectionEvent.created_at < month_end,
+        # Single query: fetch all relevant events in the time window
+        events = (
+            session.query(CorrectionEvent.event_type, CorrectionEvent.created_at)
+            .filter(
+                CorrectionEvent.created_at >= earliest,
                 CorrectionEvent.event_type.in_([
                     "triage_confirm", "triage_reject",
                     "triage_bulk_confirm_threshold",
                 ]),
                 CorrectionEvent.undone == 0,
-            ).count()
+            )
+            .all()
+        )
 
-            confirmed = session.query(CorrectionEvent).filter(
-                CorrectionEvent.created_at >= month_start,
-                CorrectionEvent.created_at < month_end,
-                CorrectionEvent.event_type.in_([
-                    "triage_confirm", "triage_bulk_confirm_threshold",
-                ]),
-                CorrectionEvent.undone == 0,
-            ).count()
+        # Build month buckets
+        confirm_types = {"triage_confirm", "triage_bulk_confirm_threshold"}
+        buckets: dict[int, dict[str, int]] = {}
+        for i in range(months):
+            buckets[i] = {"total": 0, "confirmed": 0}
 
+        for event_type, created_at in events:
+            if created_at is None:
+                continue
+            days_ago = (now - created_at).days
+            bucket_idx = months - 1 - (days_ago // 30)
+            if 0 <= bucket_idx < months:
+                buckets[bucket_idx]["total"] += 1
+                if event_type in confirm_types:
+                    buckets[bucket_idx]["confirmed"] += 1
+
+        trend = []
+        for i in range(months):
+            month_start = now - timedelta(days=30 * (months - i))
+            total = buckets[i]["total"]
+            confirmed = buckets[i]["confirmed"]
             rate = round((confirmed / total * 100) if total > 0 else 0)
             trend.append({
                 "month": month_start.strftime("%b"),
@@ -753,7 +768,11 @@ def list_correction_events(
         if not include_undone:
             query = query.filter(CorrectionEvent.undone == 0)
         if event_type:
-            query = query.filter(CorrectionEvent.event_type == event_type)
+            # Match related event types (e.g. triage_confirm also matches bulk_confirm_threshold)
+            if event_type == "triage_confirm":
+                query = query.filter(CorrectionEvent.event_type.in_(["triage_confirm", "triage_bulk_confirm_threshold"]))
+            else:
+                query = query.filter(CorrectionEvent.event_type == event_type)
         if target_type:
             query = query.filter(CorrectionEvent.target_type == target_type)
         query = query.order_by(CorrectionEvent.created_at.desc())
@@ -786,7 +805,7 @@ def list_correction_events(
 
 
 def undo_correction_event(event_id: str) -> dict[str, Any] | None:
-    """Mark a correction event as undone. Returns the updated event or None."""
+    """Mark a correction event as undone and revert the corresponding queue item to pending."""
     import json
 
     session = get_session()
@@ -795,8 +814,44 @@ def undo_correction_event(event_id: str) -> dict[str, Any] | None:
         if not event:
             return None
 
+        # Guard: already undone
+        if event.undone:
+            payload = {}
+            if event.payload_json:
+                try:
+                    payload = json.loads(event.payload_json)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            return {
+                "id": event.id,
+                "event_type": event.event_type,
+                "target_type": event.target_type,
+                "target_id": event.target_id,
+                "payload": payload,
+                "undone": True,
+                "undone_at": event.undone_at.isoformat() if event.undone_at else None,
+                "created_at": event.created_at.isoformat() if event.created_at else None,
+                "already_undone": True,
+            }
+
         event.undone = 1
         event.undone_at = datetime.now(UTC)
+
+        # Revert the corresponding triage queue item back to pending
+        queue_item = (
+            session.query(TriageQueueItem)
+            .filter(
+                TriageQueueItem.target_type == event.target_type,
+                TriageQueueItem.target_id == event.target_id,
+                TriageQueueItem.status.in_(["resolved", "dismissed"]),
+            )
+            .first()
+        )
+        if queue_item:
+            queue_item.status = "pending"
+            queue_item.resolved_at = None
+            queue_item.resolved_action = None
+
         session.commit()
 
         payload = {}
@@ -815,6 +870,7 @@ def undo_correction_event(event_id: str) -> dict[str, Any] | None:
             "undone": True,
             "undone_at": event.undone_at.isoformat() if event.undone_at else None,
             "created_at": event.created_at.isoformat() if event.created_at else None,
+            "queue_item_reverted": queue_item is not None,
         }
     finally:
         session.close()

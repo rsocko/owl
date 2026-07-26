@@ -21,12 +21,12 @@ logger = logging.getLogger(__name__)
 # Common account number patterns — each captures the meaningful identifier portion.
 # Ordered from most specific to least specific to reduce false positives.
 ACCOUNT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("account_number_full", re.compile(
-        r"(?:account|acct)[\s.]*(?:#|number|no\.?|num\.?)[\s.:]*(\w[\w\s-]{2,20}\w)",
+    ("account_last4", re.compile(
+        r"(?:account|acct)[\s.]*(?:#|number|no\.?|num\.?)[\s.:]*[*Xx.]+(\d{4})",
         re.IGNORECASE,
     )),
-    ("account_last4", re.compile(
-        r"(?:account|acct)[\s.]*(?:#|number|no\.?)[\s.:]*[*Xx.]+(\d{4})",
+    ("account_number_full", re.compile(
+        r"(?:account|acct)[\s.]*(?:#|number|no\.?|num\.?)[\s.:]*([A-Z0-9][\w-]{2,18}[A-Z0-9])",
         re.IGNORECASE,
     )),
     ("ending_in", re.compile(
@@ -172,7 +172,7 @@ async def _call_sync_or_async(fn: object, *args: object) -> object:
     if inspect.iscoroutinefunction(fn):
         return await fn(*args)
     else:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, fn, *args)
 
 

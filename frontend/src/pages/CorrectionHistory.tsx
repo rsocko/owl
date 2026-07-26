@@ -11,6 +11,7 @@ import {
   Toast,
 } from '../components/ui';
 import { endpoints } from '../lib/api';
+import '../styles/dashboard-view.css';  // shared tab bar styles
 import '../styles/correction-history.css';
 
 // ------------------------------------------------------------------
@@ -79,11 +80,12 @@ const FILTER_OPTIONS = [
 
 function filterToEventTypes(filter: string): string | undefined {
   switch (filter) {
-    case 'match': return 'triage_confirm';
-    case 'metadata': return 'triage_dismissed'; // metadata corrections
+    case 'match': return 'triage_confirm';  // includes confirm + bulk_confirm
+    case 'metadata': return 'triage_metadata_correction';
     case 'merge': return 'triage_manual_link';
     case 'orphan': return 'triage_defer';
-    default: return undefined;
+    case 'series': return 'triage_series_split';
+    default: return undefined;  // 'all' — no filter
   }
 }
 
@@ -187,12 +189,15 @@ export default function CorrectionHistory() {
         title="Correction History"
         desc="Chronological record of all triage corrections, with before/after diffs and Paperless sync status."
         actions={
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Link to="/dashboard-view"><Button>📊 Dashboard</Button></Link>
-            <Button onClick={() => void loadCorrections(filter)} disabled={loading}>Refresh</Button>
-          </div>
+          <Button onClick={() => void loadCorrections(filter)} disabled={loading}>Refresh</Button>
         }
       />
+
+      {/* View switcher (matching mockup tab bar) */}
+      <div className="dv-view-tabs">
+        <Link to="/dashboard-view" className="dv-view-tab">📊 Dashboard</Link>
+        <Link to="/corrections" className="dv-view-tab active">📜 Correction History</Link>
+      </div>
 
       <div className="ch-integration-note">
         <strong>📋 Dual History Sources:</strong> Corrections are tracked in both the DI{' '}
