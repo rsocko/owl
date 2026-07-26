@@ -87,6 +87,7 @@ ignore = [
   "TRY003",    # long exception messages — acceptable in this codebase
   "S110",      # try-except-pass — used intentionally for optional features
   "PLR0913",   # too many arguments — common in data-heavy functions
+  "PLR0917",   # too many positional arguments — same rationale as PLR0913
   "PLR2004",   # magic values — too noisy for data processing code
   "PLC0415",   # import-outside-top-level — lazy/deferred imports are intentional (FastAPI, optional deps)
   "PLW0603",   # global-statement — established pattern in this codebase
