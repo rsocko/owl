@@ -1,7 +1,7 @@
 ---
 title: "OCR Ollama Integration"
 sidebar_label: OCR + Ollama
-sidebar_position: 10
+sidebar_position: 4
 ---
 
 # OCR Ollama Integration — Prompt Templates & Implementation

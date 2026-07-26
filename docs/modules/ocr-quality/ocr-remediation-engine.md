@@ -1,7 +1,7 @@
 ---
 title: "OCR Remediation Engine"
 sidebar_label: OCR Remediation
-sidebar_position: 11
+sidebar_position: 5
 ---
 
 # OCR Remediation Engine — Design & Implementation Specification

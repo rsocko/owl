@@ -2,7 +2,12 @@
 title: "Statement Tracking Summary"
 sidebar_label: Summary
 sidebar_position: 2
+status: active
 ---
+
+:::info Design Document
+This is a design document for a planned module. Implementation has not yet started.
+:::
 
 # Statement Tracking System - Implementation Summary
 
