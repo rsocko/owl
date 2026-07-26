@@ -18,6 +18,25 @@ import {
 import { endpoints } from '../lib/api';
 import '../styles/eob-pages.css';
 
+interface AlertItem {
+  id: number | string;
+  alert_type?: string | null;
+  severity?: string | null;
+  module?: string | null;
+  title?: string | null;
+  description?: string | null;
+  action_url?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at?: string | null;
+  acknowledged_at?: string | null;
+  resolved_at?: string | null;
+}
+
+interface AlertsResponse {
+  alerts?: AlertItem[];
+  total?: number;
+}
+
 interface EobRun {
   id: number;
   started_at?: string | null;
@@ -169,6 +188,8 @@ export default function EobDashboard() {
   const [matches, setMatches] = useState<EobMatch[]>([]);
   const [unmatched, setUnmatched] = useState<EobUnmatchedItem[]>([]);
   const [check, setCheck] = useState<EobCheckResponse | null>(null);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [alertBusyId, setAlertBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -180,18 +201,20 @@ export default function EobDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [resultsRes, runsRes, matchesRes, unmatchedRes, checkRes] = await Promise.all([
+      const [resultsRes, runsRes, matchesRes, unmatchedRes, checkRes, alertsRes] = await Promise.all([
         endpoints.eob.results() as Promise<EobResultsResponse>,
         endpoints.eob.runs() as Promise<EobRunsResponse>,
         endpoints.eob.matches('limit=8') as Promise<EobMatchesResponse>,
         endpoints.eob.unmatched() as Promise<EobUnmatchedItem[]>,
         endpoints.eob.check() as Promise<EobCheckResponse>,
+        endpoints.alerts.list('module=eob&resolved=false&limit=5') as Promise<AlertsResponse>,
       ]);
       setResults(resultsRes);
       setRuns(runsRes.runs ?? []);
       setMatches(matchesRes.matches ?? []);
       setUnmatched(Array.isArray(unmatchedRes) ? unmatchedRes : []);
       setCheck(checkRes);
+      setAlerts(Array.isArray(alertsRes.alerts) ? alertsRes.alerts : []);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load EOB dashboard.';
       setError(message);
@@ -269,6 +292,68 @@ export default function EobDashboard() {
       setIsClassifying(false);
     }
   }, [loadDashboard]);
+
+  const handleAlertResolve = useCallback(
+    async (alertId: number | string) => {
+      const key = `resolve:${alertId}`;
+      setAlertBusyId(key);
+      try {
+        await endpoints.alerts.resolve(String(alertId));
+        setToast({ message: 'Alert resolved.', tone: 'success' });
+        await loadDashboard();
+      } catch (err) {
+        setToast({ message: err instanceof Error ? err.message : 'Failed to resolve alert.', tone: 'error' });
+      } finally {
+        setAlertBusyId(null);
+      }
+    },
+    [loadDashboard],
+  );
+
+  const handleAlertAcknowledge = useCallback(
+    async (alertId: number | string) => {
+      const key = `ack:${alertId}`;
+      setAlertBusyId(key);
+      try {
+        await endpoints.alerts.acknowledge(String(alertId));
+        setToast({ message: 'Alert acknowledged.', tone: 'success' });
+        await loadDashboard();
+      } catch (err) {
+        setToast({ message: err instanceof Error ? err.message : 'Failed to acknowledge alert.', tone: 'error' });
+      } finally {
+        setAlertBusyId(null);
+      }
+    },
+    [loadDashboard],
+  );
+
+  const alertTone = useCallback((severity?: string | null): 'danger' | 'warning' | 'info' => {
+    switch ((severity ?? '').toLowerCase()) {
+      case 'critical':
+      case 'high':
+        return 'danger';
+      case 'info':
+        return 'info';
+      default:
+        return 'warning';
+    }
+  }, []);
+
+  const alertIcon = useCallback((severity?: string | null) => {
+    switch ((severity ?? '').toLowerCase()) {
+      case 'critical':
+      case 'high':
+        return '🔴';
+      default:
+        return '⚠️';
+    }
+  }, []);
+
+  // Derive unmatched bills count from matches without a confirmed bill
+  const unmatchedBillsCount = useMemo(
+    () => matches.filter((m) => (m.status || 'candidate').toLowerCase() !== 'confirmed').length,
+    [matches],
+  );
 
   if (loading) {
     return (
@@ -350,6 +435,65 @@ export default function EobDashboard() {
             desc={lastRun?.finished_at ? `Finished ${formatDateTime(lastRun.finished_at)}` : 'Run the pipeline to refresh matches'}
           />
         </StatGrid>
+
+        {/* Inline Alerts */}
+        <section>
+          <div className="eob-alert-section-title" style={{ fontSize: '0.92rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            ⚠️ Alerts &amp; Action Items
+            {alerts.length > 0 && <Badge tone="warning">{alerts.length}</Badge>}
+          </div>
+          {alerts.length > 0 ? (
+            <div className="eob-alerts-section">
+              {alerts.map((alert) => {
+                const tone = alertTone(alert.severity);
+                const icon = alertIcon(alert.severity);
+                const matchId = alert.metadata?.match_id as string | number | undefined;
+                return (
+                  <div key={String(alert.id)} className={`eob-alert-card ${tone === 'danger' ? 'danger' : tone === 'info' ? 'info' : ''}`}>
+                    <div className="eob-alert-header">
+                      {icon} {alert.title ?? 'Untitled alert'}
+                    </div>
+                    {alert.description && <div className="eob-alert-body">{alert.description}</div>}
+                    <div className="eob-alert-actions">
+                      {matchId && (
+                        <Button size="sm" variant="primary" onClick={() => navigate(`/eob/matches/${matchId}`)}>
+                          Review Match →
+                        </Button>
+                      )}
+                      {(alert.alert_type ?? '').toLowerCase().includes('overdue') && (
+                        <Button
+                          size="sm"
+                          variant="success"
+                          onClick={() => void handleAlertResolve(alert.id)}
+                          disabled={alertBusyId !== null}
+                        >
+                          {alertBusyId === `resolve:${alert.id}` ? 'Saving…' : '✓ Mark as Paid'}
+                        </Button>
+                      )}
+                      {!alert.acknowledged_at && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void handleAlertAcknowledge(alert.id)}
+                          disabled={alertBusyId !== null}
+                        >
+                          {alertBusyId === `ack:${alert.id}` ? 'Saving…' : 'Dismiss'}
+                        </Button>
+                      )}
+                      {alert.action_url && !matchId && (
+                        <Button size="sm" variant="ghost" onClick={() => navigate(alert.action_url!)}>
+                          View Details →
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="eob-alerts-empty">✅ No active EOB alerts — everything looks good.</div>
+          )}
+        </section>
 
         <Card
           title="Recent runs"
@@ -538,6 +682,24 @@ export default function EobDashboard() {
             <EmptyState title="No unmatched EOBs" desc="Every extracted EOB currently has at least one confirmed match." />
           )}
         </Card>
+
+        {/* Quick Stats Footer */}
+        <div className="eob-quick-stats">
+          <div className="eob-qs-card">
+            <div>
+              <div className="eob-qs-label">Unmatched EOBs</div>
+              <div className="eob-qs-count">{unmatched.length}</div>
+            </div>
+            <span className="eob-qs-link" onClick={() => navigate('/eob/unmatched')}>View →</span>
+          </div>
+          <div className="eob-qs-card">
+            <div>
+              <div className="eob-qs-label">Pending Bills</div>
+              <div className="eob-qs-count">{unmatchedBillsCount}</div>
+            </div>
+            <span className="eob-qs-link" onClick={() => navigate('/eob/unmatched')}>View →</span>
+          </div>
+        </div>
       </div>
 
       {toast ? <Toast message={toast.message} tone={toast.tone} /> : null}
