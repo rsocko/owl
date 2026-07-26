@@ -10,6 +10,7 @@ import {
   SkeletonLoader,
   Toast,
 } from '../components/ui';
+import DocumentPreview from '../components/DocumentPreview';
 import { endpoints } from '../lib/api';
 import '../styles/manual-match-search.css';
 
@@ -251,6 +252,24 @@ export default function ManualMatchSearch() {
                     <div className="manual-factor-row"><span>Patient signal</span><strong>{valueToPercent(selectedMatch.breakdown?.patient)}%</strong></div>
                     <div className="manual-factor-row"><span>Amount signal</span><strong>{valueToPercent(selectedMatch.breakdown?.amount)}%</strong></div>
                     <div className="manual-factor-row"><span>Created</span><strong>{formatDateTime(selectedMatch.created_at)}</strong></div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
+                    {selectedMatch.eob_document_id && (
+                      <DocumentPreview
+                        documentId={selectedMatch.eob_document_id}
+                        paperlessUrl={selectedMatch.eob_preview_url}
+                        variant="compact"
+                        label="EOB"
+                      />
+                    )}
+                    {selectedMatch.bill_document_id && (
+                      <DocumentPreview
+                        documentId={selectedMatch.bill_document_id}
+                        paperlessUrl={selectedMatch.bill_preview_url}
+                        variant="compact"
+                        label="Bill"
+                      />
+                    )}
                   </div>
                 </div>
               </Card>
