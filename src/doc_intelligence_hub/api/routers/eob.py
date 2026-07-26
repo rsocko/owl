@@ -121,7 +121,39 @@ def _serialize_run(run: MatchingRun) -> dict[str, Any]:
     }
 
 
-def _serialize_match(m: MatchRecord, paperless_url: str = "") -> dict[str, Any]:
+def _serialize_eob_details(eob: EOBRecord | None) -> dict[str, Any] | None:
+    if eob is None:
+        return None
+    return {
+        "provider_name": eob.provider_name,
+        "patient_name": eob.patient_name,
+        "insurance_company": eob.insurance_company,
+        "date_of_service": eob.date_of_service,
+        "total_billed": eob.total_billed,
+        "total_patient_responsibility": eob.total_patient_responsibility,
+        "claim_number": eob.claim_number,
+    }
+
+
+def _serialize_bill_details(bill: BillRecord | None) -> dict[str, Any] | None:
+    if bill is None:
+        return None
+    return {
+        "provider_name": bill.provider_name,
+        "patient_name": bill.patient_name,
+        "date_of_service": bill.date_of_service,
+        "total_amount": bill.total_amount,
+        "balance_due": bill.balance_due,
+        "invoice_number": bill.invoice_number,
+    }
+
+
+def _serialize_match(
+    m: MatchRecord,
+    paperless_url: str = "",
+    eob: EOBRecord | None = None,
+    bill: BillRecord | None = None,
+) -> dict[str, Any]:
     base_url = paperless_url.rstrip("/") if paperless_url else ""
     return {
         "id": m.id,
@@ -144,7 +176,36 @@ def _serialize_match(m: MatchRecord, paperless_url: str = "") -> dict[str, Any]:
         "created_at": m.created_at.isoformat() if m.created_at else None,
         "confirmed_at": m.confirmed_at.isoformat() if m.confirmed_at else None,
         "notes": m.notes,
+        "eob_details": _serialize_eob_details(eob),
+        "bill_details": _serialize_bill_details(bill),
     }
+
+
+def _batch_load_records(
+    db,
+    match_records: list[MatchRecord],
+    run_id: int | None = None,
+) -> tuple[dict[int, EOBRecord], dict[int, BillRecord]]:
+    """Batch-load EOB and Bill records for a list of matches."""
+    eob_doc_ids = {m.eob_document_id for m in match_records}
+    bill_doc_ids = {m.bill_document_id for m in match_records}
+
+    eob_query = db.query(EOBRecord).filter(EOBRecord.document_id.in_(eob_doc_ids))
+    bill_query = db.query(BillRecord).filter(BillRecord.document_id.in_(bill_doc_ids))
+    if run_id is not None:
+        eob_query = eob_query.filter_by(run_id=run_id)
+        bill_query = bill_query.filter_by(run_id=run_id)
+
+    # Keep only the latest record per document_id
+    eob_map: dict[int, EOBRecord] = {}
+    for eob in eob_query.order_by(EOBRecord.id.asc()).all():
+        eob_map[eob.document_id] = eob
+
+    bill_map: dict[int, BillRecord] = {}
+    for bill in bill_query.order_by(BillRecord.id.asc()).all():
+        bill_map[bill.document_id] = bill
+
+    return eob_map, bill_map
 
 
 # ------------------------------------------------------------------
@@ -455,10 +516,20 @@ async def get_last_results(request: Request) -> dict[str, Any]:
             .all()
         )
 
+        eob_map, bill_map = _batch_load_records(db, match_records, run_id=run.id)
+
         return {
             "status": "ok",
             "run": _serialize_run(run),
-            "matches": [_serialize_match(m, paperless_url) for m in match_records],
+            "matches": [
+                _serialize_match(
+                    m,
+                    paperless_url,
+                    eob=eob_map.get(m.eob_document_id),
+                    bill=bill_map.get(m.bill_document_id),
+                )
+                for m in match_records
+            ],
         }
     finally:
         db.close()
@@ -508,8 +579,19 @@ async def list_matches(
         matches = query.offset(offset).limit(limit).all()
 
         paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
+
+        eob_map, bill_map = _batch_load_records(db, matches, run_id=run_id)
+
         return {
-            "matches": [_serialize_match(m, paperless_url) for m in matches],
+            "matches": [
+                _serialize_match(
+                    m,
+                    paperless_url,
+                    eob=eob_map.get(m.eob_document_id),
+                    bill=bill_map.get(m.bill_document_id),
+                )
+                for m in matches
+            ],
             "total": total,
             "limit": limit,
             "offset": offset,
@@ -594,6 +676,150 @@ async def match_history(match_id: int) -> dict[str, Any]:
                 }
                 for e in events
             ],
+        }
+    finally:
+        db.close()
+
+
+@router.get("/records/{document_id}")
+async def get_record_detail(document_id: int) -> dict[str, Any]:
+    """Return the full extraction details for a specific document (EOB or Bill).
+
+    Looks up in both eob_records and bill_records by document_id and returns
+    the most recent record (latest run_id).
+    """
+    from fastapi import HTTPException
+
+    init_db()
+    db = get_db_session()
+    try:
+        eob = (
+            db.query(EOBRecord)
+            .filter_by(document_id=document_id)
+            .order_by(EOBRecord.id.desc())
+            .first()
+        )
+        bill = (
+            db.query(BillRecord)
+            .filter_by(document_id=document_id)
+            .order_by(BillRecord.id.desc())
+            .first()
+        )
+        if not eob and not bill:
+            raise HTTPException(status_code=404, detail=f"No records found for document {document_id}")
+
+        result: dict[str, Any] = {"document_id": document_id}
+        if eob:
+            result["type"] = "eob"
+            result["eob"] = {
+                "id": eob.id,
+                "run_id": eob.run_id,
+                "title": eob.title,
+                "classification_score": eob.classification_score,
+                "insurance_company": eob.insurance_company,
+                "policy_number": eob.policy_number,
+                "patient_name": eob.patient_name,
+                "claim_number": eob.claim_number,
+                "date_of_service": eob.date_of_service,
+                "provider_name": eob.provider_name,
+                "total_billed": eob.total_billed,
+                "total_allowed": eob.total_allowed,
+                "total_plan_pays": eob.total_plan_pays,
+                "total_patient_responsibility": eob.total_patient_responsibility,
+                "services_json": eob.services_json,
+                "created_at": eob.created_at.isoformat() if eob.created_at else None,
+            }
+        if bill:
+            result["type"] = "bill" if not eob else "both"
+            result["bill"] = {
+                "id": bill.id,
+                "run_id": bill.run_id,
+                "title": bill.title,
+                "classification_score": bill.classification_score,
+                "provider_name": bill.provider_name,
+                "patient_name": bill.patient_name,
+                "invoice_number": bill.invoice_number,
+                "date_of_service": bill.date_of_service,
+                "due_date": bill.due_date,
+                "total_amount": bill.total_amount,
+                "balance_due": bill.balance_due,
+                "payment_status": bill.payment_status,
+                "services_json": bill.services_json,
+                "created_at": bill.created_at.isoformat() if bill.created_at else None,
+            }
+        return result
+    finally:
+        db.close()
+
+
+@router.get("/matches/{match_id}/detail")
+async def get_match_detail(request: Request, match_id: int) -> dict[str, Any]:
+    """Return both sides of a match with their full extracted fields.
+
+    Given a match_id, loads the MatchRecord, then loads the corresponding
+    EOBRecord and BillRecord, and returns everything together.
+    """
+    from fastapi import HTTPException
+
+    init_db()
+    db = get_db_session()
+    try:
+        match = db.query(MatchRecord).filter_by(id=match_id).first()
+        if not match:
+            raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
+
+        eob = (
+            db.query(EOBRecord)
+            .filter_by(document_id=match.eob_document_id)
+            .order_by(EOBRecord.id.desc())
+            .first()
+        )
+        bill = (
+            db.query(BillRecord)
+            .filter_by(document_id=match.bill_document_id)
+            .order_by(BillRecord.id.desc())
+            .first()
+        )
+
+        paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
+        return {
+            "match": _serialize_match(match, paperless_url, eob=eob, bill=bill),
+            "eob_record": {
+                "id": eob.id,
+                "document_id": eob.document_id,
+                "run_id": eob.run_id,
+                "title": eob.title,
+                "classification_score": eob.classification_score,
+                "insurance_company": eob.insurance_company,
+                "policy_number": eob.policy_number,
+                "patient_name": eob.patient_name,
+                "claim_number": eob.claim_number,
+                "date_of_service": eob.date_of_service,
+                "provider_name": eob.provider_name,
+                "total_billed": eob.total_billed,
+                "total_allowed": eob.total_allowed,
+                "total_plan_pays": eob.total_plan_pays,
+                "total_patient_responsibility": eob.total_patient_responsibility,
+                "services_json": eob.services_json,
+                "created_at": eob.created_at.isoformat() if eob.created_at else None,
+            } if eob else None,
+            "bill_record": {
+                "id": bill.id,
+                "document_id": bill.document_id,
+                "run_id": bill.run_id,
+                "title": bill.title,
+                "classification_score": bill.classification_score,
+                "provider_name": bill.provider_name,
+                "patient_name": bill.patient_name,
+                "invoice_number": bill.invoice_number,
+                "date_of_service": bill.date_of_service,
+                "due_date": bill.due_date,
+                "total_amount": bill.total_amount,
+                "balance_due": bill.balance_due,
+                "payment_status": bill.payment_status,
+                "services_json": bill.services_json,
+                "created_at": bill.created_at.isoformat() if bill.created_at else None,
+            } if bill else None,
         }
     finally:
         db.close()
