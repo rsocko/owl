@@ -37,7 +37,7 @@ CUSTOM_FIELD_DEFINITIONS = [
     },
     {
         "name": "Action Amount",
-        "data_type": "decimal",
+        "data_type": "float",
     },
     {
         "name": "Action Urgency",
@@ -103,13 +103,22 @@ class PaperlessEnricher:
                 if field_def.get("data_type") == "select":
                     self._cache_select_options(name, existing_by_name[name])
             else:
-                created = await self.client.create_custom_field(field_def)
-                field_map[name] = created["id"]
-                print(f"  Created custom field: {name} (id={created['id']})")
-                logger.info("Created Paperless custom field: %s (id=%s)", name, created["id"])
-                # Cache select option IDs for newly created fields
-                if field_def.get("data_type") == "select":
-                    self._cache_select_options(name, created)
+                try:
+                    created = await self.client.create_custom_field(field_def)
+                    field_map[name] = created["id"]
+                    print(f"  Created custom field: {name} (id={created['id']})")
+                    logger.info("Created Paperless custom field: %s (id=%s)", name, created["id"])
+                    # Cache select option IDs for newly created fields
+                    if field_def.get("data_type") == "select":
+                        self._cache_select_options(name, created)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to create custom field %r (data_type=%s): %s",
+                        name,
+                        field_def.get("data_type"),
+                        e,
+                    )
+                    # Continue creating other fields — partial enrichment is better than none
 
         self._field_id_cache = field_map
         return field_map
@@ -125,6 +134,13 @@ class PaperlessEnricher:
                 opt_id = opt.get("id")
                 if label and opt_id is not None:
                     option_map[label] = opt_id
+        if options and not option_map:
+            logger.debug(
+                "Select field %r has %d options but none have IDs yet — "
+                "will fall back to label-based values",
+                field_name,
+                len(options),
+            )
         self._select_option_cache[field_name] = option_map
 
     def _resolve_select_value(self, field_name: str, label: str) -> int | str:
@@ -154,88 +170,59 @@ class PaperlessEnricher:
         if not settings.write_to_paperless:
             return  # Safety: writes disabled via config
 
-        import asyncio
-
-        await asyncio.sleep(settings.rate_limit_delay)  # Be nice to Paperless
-
         field_ids = await self.get_field_ids()
         from datetime import date
 
         custom_fields = []
 
+        def _add_field(name: str, value) -> None:
+            """Append a field entry if the field ID exists in Paperless."""
+            fid = field_ids.get(name)
+            if fid is not None:
+                custom_fields.append({"field": fid, "value": value})
+
         # Action Type (select)
         if extraction.get("action_type"):
-            custom_fields.append(
-                {
-                    "field": field_ids["Action Type"],
-                    "value": self._resolve_select_value("Action Type", extraction["action_type"]),
-                }
+            _add_field(
+                "Action Type",
+                self._resolve_select_value("Action Type", extraction["action_type"]),
             )
 
         # Due Date
         if extraction.get("due_date"):
-            custom_fields.append(
-                {
-                    "field": field_ids["Action Due Date"],
-                    "value": extraction["due_date"],
-                }
-            )
+            _add_field("Action Due Date", extraction["due_date"])
 
         # Amount
         if extraction.get("amount") is not None:
-            custom_fields.append(
-                {
-                    "field": field_ids["Action Amount"],
-                    "value": extraction["amount"],
-                }
-            )
+            _add_field("Action Amount", extraction["amount"])
 
         # Urgency (select)
         if extraction.get("urgency"):
-            custom_fields.append(
-                {
-                    "field": field_ids["Action Urgency"],
-                    "value": self._resolve_select_value("Action Urgency", extraction["urgency"]),
-                }
+            _add_field(
+                "Action Urgency",
+                self._resolve_select_value("Action Urgency", extraction["urgency"]),
             )
 
         # Status (select — always starts as pending)
-        custom_fields.append(
-            {
-                "field": field_ids["Action Status"],
-                "value": self._resolve_select_value("Action Status", "pending"),
-            }
-        )
+        _add_field("Action Status", self._resolve_select_value("Action Status", "pending"))
 
         # Summary (include action count hint if multiple)
         summary = extraction.get("summary", "")
         if action_count > 1:
             summary = f"[{action_count} actions] {summary}"
         if summary:
-            custom_fields.append(
-                {
-                    "field": field_ids["Action Summary"],
-                    "value": summary[:255],
-                }
-            )
+            _add_field("Action Summary", summary[:255])
 
         # Analyzed date
-        custom_fields.append(
-            {
-                "field": field_ids["Action Analyzed"],
-                "value": date.today().isoformat(),
-            }
-        )
+        _add_field("Action Analyzed", date.today().isoformat())
 
         # Action Count
-        custom_fields.append(
-            {
-                "field": field_ids["Action Count"],
-                "value": action_count,
-            }
-        )
+        _add_field("Action Count", action_count)
 
         if custom_fields:
+            import asyncio
+
+            await asyncio.sleep(settings.rate_limit_delay)  # Rate-limit Paperless writes
             logger.info(
                 "Writing %d custom field(s) to Paperless document_id=%s: %s",
                 len(custom_fields),
@@ -253,11 +240,16 @@ class PaperlessEnricher:
             return  # Safety: writes disabled via config
 
         field_ids = await self.get_field_ids()
+        status_field_id = field_ids.get("Action Status")
+        if not status_field_id:
+            logger.warning("Cannot sync status — 'Action Status' field not found in Paperless")
+            return
+
         await self.client.update_custom_fields(
             document_id,
             [
                 {
-                    "field": field_ids["Action Status"],
+                    "field": status_field_id,
                     "value": self._resolve_select_value("Action Status", status),
                 }
             ],

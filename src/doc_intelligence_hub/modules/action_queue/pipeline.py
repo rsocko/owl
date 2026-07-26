@@ -286,6 +286,7 @@ class Pipeline:
             "skipped": 0,
             "failed": 0,
             "no_action": 0,
+            "enrichment_failed": 0,
             "errors": [],
             "timed_out": False,
         }
@@ -510,6 +511,7 @@ class Pipeline:
                             doc_id,
                             e,
                         )
+                        stats["enrichment_failed"] += 1
 
                 action_summary = f"{primary_action['action_type']} — {primary_action['title'][:50]}"
                 if len(actions) > 1:
