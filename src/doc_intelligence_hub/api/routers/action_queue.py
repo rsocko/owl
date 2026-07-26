@@ -27,6 +27,17 @@ class ActionUpdateRequest(BaseModel):
     dry_run: bool = True
 
 
+class BulkActionRequest(BaseModel):
+    action: str = Field(
+        ..., pattern=r"^(complete|dismiss|reopen)$",
+        description="Bulk action: 'complete', 'dismiss', or 'reopen'",
+    )
+    action_ids: list[int] = Field(
+        ..., min_length=1, max_length=200,
+        description="List of action IDs to update (max 200)",
+    )
+
+
 def _sync_action_queue_settings(request: Request) -> None:
     hub_settings = request.app.state.hub_settings
     statement_config = get_loaded_statement_config(request)
@@ -240,5 +251,49 @@ async def update_action(
             action.completed_at = None
         db.commit()
         return _serialize_action(action)
+    finally:
+        db.close()
+
+
+# Bulk action mapping: request action → DB status
+_BULK_ACTION_STATUS: dict[str, str] = {
+    "complete": "completed",
+    "dismiss": "dismissed",
+    "reopen": "pending",
+}
+
+
+@router.post("/actions/bulk")
+async def bulk_action(
+    request: Request, body: BulkActionRequest
+) -> dict[str, Any]:
+    """Apply an action to multiple action queue items at once."""
+    from fastapi import HTTPException
+
+    _sync_action_queue_settings(request)
+    target_status = _BULK_ACTION_STATUS.get(body.action)
+    if not target_status:
+        raise HTTPException(status_code=400, detail=f"Unknown action: {body.action}")
+
+    init_db()
+    db = get_session()
+    try:
+        actions = db.query(Action).filter(Action.id.in_(body.action_ids)).all()
+        if not actions:
+            raise HTTPException(status_code=404, detail="No matching actions found")
+
+        affected = 0
+        for action in actions:
+            if action.status == target_status:
+                continue
+            action.status = target_status
+            if target_status == "completed":
+                action.completed_at = datetime.utcnow()
+            elif target_status == "pending":
+                action.completed_at = None
+            affected += 1
+
+        db.commit()
+        return {"affected": affected, "action": body.action}
     finally:
         db.close()

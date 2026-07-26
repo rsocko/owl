@@ -145,3 +145,80 @@ class TestUpdateAction:
             json={"status": "invalid_status", "dry_run": True},
         )
         assert resp.status_code == 422
+
+
+class TestBulkAction:
+    """Tests for POST /api/queue/actions/bulk."""
+
+    def test_bulk_complete(self, client, seed_actions):
+        actions = client.get("/api/queue/actions?status=pending").json()
+        ids = [a["id"] for a in actions["actions"]]
+        assert len(ids) == 2
+
+        resp = client.post(
+            "/api/queue/actions/bulk",
+            json={"action": "complete", "action_ids": ids},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["affected"] == 2
+        assert data["action"] == "complete"
+
+        # Verify all are now completed
+        check = client.get("/api/queue/actions?status=pending").json()
+        assert check["total"] == 0
+
+    def test_bulk_dismiss(self, client, seed_actions):
+        actions = client.get("/api/queue/actions?status=pending").json()
+        ids = [a["id"] for a in actions["actions"]]
+
+        resp = client.post(
+            "/api/queue/actions/bulk",
+            json={"action": "dismiss", "action_ids": ids},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["affected"] == 2
+
+    def test_bulk_reopen(self, client, seed_actions):
+        actions = client.get("/api/queue/actions?status=completed").json()
+        ids = [a["id"] for a in actions["actions"]]
+
+        resp = client.post(
+            "/api/queue/actions/bulk",
+            json={"action": "reopen", "action_ids": ids},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["affected"] == 1
+
+    def test_bulk_skips_already_in_target_status(self, client, seed_actions):
+        """Items already in the target status should not be counted as affected."""
+        actions = client.get("/api/queue/actions?status=completed").json()
+        completed_id = actions["actions"][0]["id"]
+
+        resp = client.post(
+            "/api/queue/actions/bulk",
+            json={"action": "complete", "action_ids": [completed_id]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["affected"] == 0
+
+    def test_bulk_invalid_action(self, client, seed_actions):
+        resp = client.post(
+            "/api/queue/actions/bulk",
+            json={"action": "invalid", "action_ids": [1]},
+        )
+        assert resp.status_code == 422
+
+    def test_bulk_empty_ids(self, client):
+        resp = client.post(
+            "/api/queue/actions/bulk",
+            json={"action": "complete", "action_ids": []},
+        )
+        assert resp.status_code == 422
+
+    def test_bulk_nonexistent_ids(self, client):
+        resp = client.post(
+            "/api/queue/actions/bulk",
+            json={"action": "complete", "action_ids": [99999]},
+        )
+        assert resp.status_code == 404
