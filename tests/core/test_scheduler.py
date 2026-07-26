@@ -56,27 +56,31 @@ class TestHubScheduler:
 
     def test_configure_custom_schedules(self):
         sched = HubScheduler()
-        sched.configure({
-            "my_job": {
-                "cron": "0 12 * * *",
-                "endpoint": "/api/test",
-                "method": "POST",
-                "enabled": True,
+        sched.configure(
+            {
+                "my_job": {
+                    "cron": "0 12 * * *",
+                    "endpoint": "/api/test",
+                    "method": "POST",
+                    "enabled": True,
+                }
             }
-        })
+        )
         schedules = sched.get_schedules()
         assert "my_job" in schedules
         assert "statement_discovery" not in schedules
 
     def test_disabled_job_not_scheduled(self):
         sched = HubScheduler()
-        sched.configure({
-            "disabled_job": {
-                "cron": "0 0 * * *",
-                "endpoint": "/api/noop",
-                "enabled": False,
+        sched.configure(
+            {
+                "disabled_job": {
+                    "cron": "0 0 * * *",
+                    "endpoint": "/api/noop",
+                    "enabled": False,
+                }
             }
-        })
+        )
         schedules = sched.get_schedules()
         assert "disabled_job" in schedules
         # Job should not have a next_run since it's disabled
@@ -92,13 +96,15 @@ class TestHubScheduler:
     def test_invalid_cron_handled_gracefully(self):
         sched = HubScheduler()
         # Should not raise — logs an error and skips
-        sched.configure({
-            "bad_cron": {
-                "cron": "not a cron",
-                "endpoint": "/api/test",
-                "enabled": True,
+        sched.configure(
+            {
+                "bad_cron": {
+                    "cron": "not a cron",
+                    "endpoint": "/api/test",
+                    "enabled": True,
+                }
             }
-        })
+        )
         schedules = sched.get_schedules()
         assert "bad_cron" in schedules
 

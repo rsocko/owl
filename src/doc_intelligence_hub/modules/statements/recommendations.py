@@ -3,7 +3,11 @@ from __future__ import annotations
 import calendar
 from datetime import date, timedelta
 
-from doc_intelligence_hub.modules.statements.models import ProviderCandidate, Recommendation, RecommendationResult
+from doc_intelligence_hub.modules.statements.models import (
+    ProviderCandidate,
+    Recommendation,
+    RecommendationResult,
+)
 from doc_intelligence_hub.modules.statements.utils import add_months, last_business_day, month_end
 
 
@@ -17,7 +21,9 @@ def build_recommendations(
     for provider in providers:
         if not _is_provider_active(provider, as_of, max_inactive_cycles):
             continue
-        recommendations.extend(_provider_recommendations(provider, as_of, max_recommendations_per_provider))
+        recommendations.extend(
+            _provider_recommendations(provider, as_of, max_recommendations_per_provider)
+        )
 
     recommendations.sort(key=lambda item: (item.priority, item.expected_date), reverse=True)
     return RecommendationResult(as_of=as_of, recommendations=recommendations)
@@ -30,7 +36,9 @@ def _is_provider_active(provider: ProviderCandidate, as_of: date, max_inactive_c
     cursor = provider.last_seen
     for _ in range(max_inactive_cycles):
         cursor = _next_expected_date(cursor, provider)
-    latest_allowed_date = cursor + timedelta(days=provider.pattern.grace_period_days + provider.pattern.variance_days)
+    latest_allowed_date = cursor + timedelta(
+        days=provider.pattern.grace_period_days + provider.pattern.variance_days
+    )
     return as_of <= latest_allowed_date
 
 
@@ -46,7 +54,9 @@ def _provider_recommendations(
 
     for expected_date in expected_dates:
         earliest_date = expected_date - timedelta(days=1)
-        latest_date = expected_date + timedelta(days=provider.pattern.grace_period_days + provider.pattern.variance_days)
+        latest_date = expected_date + timedelta(
+            days=provider.pattern.grace_period_days + provider.pattern.variance_days
+        )
         if as_of <= latest_date:
             status = "missing"
             priority = min(8, 5 + max(0, (as_of - expected_date).days))
@@ -85,7 +95,11 @@ def _next_expected_date(last_date: date, provider: ProviderCandidate) -> date:
     elif frequency == "quarterly":
         base = add_months(last_date, 3)
     else:
-        base = date(last_date.year + 1, last_date.month, min(last_date.day, calendar.monthrange(last_date.year + 1, last_date.month)[1]))
+        base = date(
+            last_date.year + 1,
+            last_date.month,
+            min(last_date.day, calendar.monthrange(last_date.year + 1, last_date.month)[1]),
+        )
 
     if provider.pattern.pattern_type == "last_day":
         return month_end(base)

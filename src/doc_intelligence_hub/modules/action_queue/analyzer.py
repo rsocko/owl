@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from typing import Optional
 
-from doc_intelligence_hub.core.llm import chat_json, get_llm_settings, health_check as llm_health_check
+from doc_intelligence_hub.core.llm import (
+    chat_json,
+    get_llm_settings,
+    health_check as llm_health_check,
+)
 
 from .config import settings
 
@@ -112,7 +115,9 @@ class OllamaAnalyzer:
         doc_id = document.get("id")
         prompt = ANALYSIS_PROMPT.format(
             title=document.get("title", "Unknown"),
-            correspondent=document.get("correspondent_name", document.get("correspondent", "Unknown")),
+            correspondent=document.get(
+                "correspondent_name", document.get("correspondent", "Unknown")
+            ),
             tags=", ".join(str(t) for t in document.get("tag_names", document.get("tags", []))),
             created=document.get("created", "Unknown"),
             content=self._truncate_content(document.get("content", "")),
@@ -122,7 +127,10 @@ class OllamaAnalyzer:
         timeout = settings.llm_timeout_seconds
         logger.info(
             "LLM call starting: doc_id=%s model=%s est_prompt_tokens=%d timeout=%.0fs",
-            doc_id, self.model, est_prompt_tokens, timeout,
+            doc_id,
+            self.model,
+            est_prompt_tokens,
+            timeout,
         )
 
         data = await self._call_with_timeout(prompt, doc_id, timeout)
@@ -130,7 +138,8 @@ class OllamaAnalyzer:
             retry_timeout = max(1.0, timeout / 2)
             logger.warning(
                 "LLM call failed/timed out for doc_id=%s — retrying once with %.0fs timeout",
-                doc_id, retry_timeout,
+                doc_id,
+                retry_timeout,
             )
             data = await self._call_with_timeout(prompt, doc_id, retry_timeout)
 
@@ -162,13 +171,20 @@ class OllamaAnalyzer:
         except asyncio.TimeoutError:
             elapsed = time.monotonic() - start
             logger.warning(
-                "LLM call for doc_id=%s timed out after %.2fs (limit %.0fs)", doc_id, elapsed, timeout
+                "LLM call for doc_id=%s timed out after %.2fs (limit %.0fs)",
+                doc_id,
+                elapsed,
+                timeout,
             )
             return None
         except Exception as e:
             elapsed = time.monotonic() - start
             logger.error(
-                "LLM call for doc_id=%s raised an exception after %.2fs: %s", doc_id, elapsed, e, exc_info=True
+                "LLM call for doc_id=%s raised an exception after %.2fs: %s",
+                doc_id,
+                elapsed,
+                e,
+                exc_info=True,
             )
             return None
 
@@ -228,15 +244,17 @@ class OllamaAnalyzer:
             urgency = "MEDIUM"
 
         return {
-            "actions": [{
-                "action_type": action_type,
-                "title": data.get("title", "Unknown action"),
-                "summary": data.get("summary"),
-                "due_date": data.get("due_date"),
-                "amount": data.get("amount"),
-                "urgency": urgency,
-                "confidence": data.get("confidence", 50),
-            }],
+            "actions": [
+                {
+                    "action_type": action_type,
+                    "title": data.get("title", "Unknown action"),
+                    "summary": data.get("summary"),
+                    "due_date": data.get("due_date"),
+                    "amount": data.get("amount"),
+                    "urgency": urgency,
+                    "confidence": data.get("confidence", 50),
+                }
+            ],
             "document_assessment": {
                 "primary_action_index": 0,
                 "correspondent": data.get("correspondent"),
@@ -259,4 +277,3 @@ class OllamaAnalyzer:
         """Verify LLM gateway is running and responsive."""
         result = await llm_health_check()
         return result.get("status") == "ok"
-

@@ -38,12 +38,18 @@ router = APIRouter(prefix="/api/extraction", tags=["extraction"])
 
 class ExtractRequest(BaseModel):
     document_id: int = Field(..., description="Paperless document ID to extract from")
-    write_to_paperless: bool = Field(default=False, description="Write result to Paperless custom field")
+    write_to_paperless: bool = Field(
+        default=False, description="Write result to Paperless custom field"
+    )
 
 
 class BackfillRequest(BaseModel):
-    document_ids: list[int] | None = Field(default=None, description="Specific document IDs (or all if omitted)")
-    write_to_paperless: bool = Field(default=False, description="Write results to Paperless custom fields")
+    document_ids: list[int] | None = Field(
+        default=None, description="Specific document IDs (or all if omitted)"
+    )
+    write_to_paperless: bool = Field(
+        default=False, description="Write results to Paperless custom fields"
+    )
     limit: int = Field(default=100, ge=1, le=1000, description="Max documents to process")
 
 
@@ -61,8 +67,7 @@ async def list_patterns() -> dict[str, Any]:
     """List supported account number extraction patterns."""
     return {
         "patterns": [
-            {"name": name, "pattern": pattern.pattern}
-            for name, pattern in ACCOUNT_PATTERNS
+            {"name": name, "pattern": pattern.pattern} for name, pattern in ACCOUNT_PATTERNS
         ],
         "count": len(ACCOUNT_PATTERNS),
     }
@@ -136,19 +141,23 @@ async def backfill(body: BackfillRequest, request: Request) -> dict[str, Any]:
                     data = await get_fn(f"/api/documents/?page_size={body.limit}&ordering=-id")
                 else:
                     loop = asyncio.get_running_loop()
-                    data = await loop.run_in_executor(None, get_fn, f"/api/documents/?page_size={body.limit}&ordering=-id")
+                    data = await loop.run_in_executor(
+                        None, get_fn, f"/api/documents/?page_size={body.limit}&ordering=-id"
+                    )
 
                 if isinstance(data, dict) and "results" in data:
-                    doc_ids = [d["id"] for d in data["results"][:body.limit]]
+                    doc_ids = [d["id"] for d in data["results"][: body.limit]]
         except Exception as exc:
             logger.warning("Could not fetch document list for backfill: %s", exc)
-            raise HTTPException(status_code=503, detail="Could not fetch document list from Paperless")
+            raise HTTPException(
+                status_code=503, detail="Could not fetch document list from Paperless"
+            )
 
     results: list[dict[str, Any]] = []
     extracted_count = 0
     written_count = 0
 
-    for doc_id in doc_ids[:body.limit]:
+    for doc_id in doc_ids[: body.limit]:
         try:
             result = await extract_from_document(doc_id, client)
             best = pick_best_account_identifier(result.pattern_matches) if result.success else None
@@ -169,24 +178,28 @@ async def backfill(body: BackfillRequest, request: Request) -> dict[str, Any]:
             if result.success and result.account_numbers:
                 extracted_count += 1
 
-            results.append({
-                "document_id": doc_id,
-                "success": result.success,
-                "account_numbers": result.account_numbers if result.success else [],
-                "best_identifier": best,
-                "written": written,
-                "error": result.error,
-            })
+            results.append(
+                {
+                    "document_id": doc_id,
+                    "success": result.success,
+                    "account_numbers": result.account_numbers if result.success else [],
+                    "best_identifier": best,
+                    "written": written,
+                    "error": result.error,
+                }
+            )
         except Exception as exc:
             logger.warning("Extraction failed for doc %d during backfill: %s", doc_id, exc)
-            results.append({
-                "document_id": doc_id,
-                "success": False,
-                "account_numbers": [],
-                "best_identifier": None,
-                "written": False,
-                "error": "Extraction failed for this document",
-            })
+            results.append(
+                {
+                    "document_id": doc_id,
+                    "success": False,
+                    "account_numbers": [],
+                    "best_identifier": None,
+                    "written": False,
+                    "error": "Extraction failed for this document",
+                }
+            )
 
     return {
         "processed": len(results),

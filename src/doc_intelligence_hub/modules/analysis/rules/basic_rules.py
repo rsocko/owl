@@ -29,23 +29,30 @@ class MonthlySpendComparison(AnalysisRule):
         history = context.series_history
 
         if not doc:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No current document")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No current document"
+            )
 
         # Extract the current amount
         current_amount = _get_amount(doc)
         if current_amount is None:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No amount field found")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No amount field found"
+            )
 
         # Calculate rolling average from history (excluding current doc)
         window = self.get_param("comparison_window", 3)
         current_id = doc.get("id")
         history_amounts = [
-            _get_amount(h) for h in history
+            _get_amount(h)
+            for h in history
             if _get_amount(h) is not None and h.get("id") != current_id
         ]
 
         if len(history_amounts) < 2:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="Insufficient history for comparison")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="Insufficient history for comparison"
+            )
 
         avg_amounts = history_amounts[:window]
         avg = sum(avg_amounts) / len(avg_amounts) if avg_amounts else 0
@@ -54,7 +61,11 @@ class MonthlySpendComparison(AnalysisRule):
         direction = "above" if pct_change > 0 else "below"
 
         correspondent = doc.get("correspondent", {})
-        corr_name = correspondent.get("name", "") if isinstance(correspondent, dict) else str(correspondent or "")
+        corr_name = (
+            correspondent.get("name", "")
+            if isinstance(correspondent, dict)
+            else str(correspondent or "")
+        )
         period = _extract_period(doc)
         series_id = context.series_info.get("id") if context.series_info else None
 
@@ -78,7 +89,11 @@ class MonthlySpendComparison(AnalysisRule):
                 "average": f"${avg:,.2f}",
             },
             suggested_severity=InsightSeverity.INFO,
-            metric_values={"pct_change": abs(pct_change), "current_amount": current_amount, "average_amount": avg},
+            metric_values={
+                "pct_change": abs(pct_change),
+                "current_amount": current_amount,
+                "average_amount": avg,
+            },
             series_id=series_id,
             document_ids=[doc["id"]] if "id" in doc else [],
             correspondent=corr_name or None,
@@ -95,19 +110,25 @@ class EobMatchReview(AnalysisRule):
         matches = context.related_matches
 
         if not doc:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No current document")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No current document"
+            )
 
         threshold = self.get_param("confidence_threshold", 75)
 
         if not matches:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No matches found for document")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No matches found for document"
+            )
 
         # Find the best match
         best_match = max(matches, key=lambda m: m.get("score", 0))
         score = best_match.get("score", 0)
 
         if score >= threshold:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="Match confidence above threshold")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="Match confidence above threshold"
+            )
 
         severity = InsightSeverity.WARNING if score < 50 else InsightSeverity.NOTICE
 
@@ -138,7 +159,9 @@ class SeriesAnomaly(AnalysisRule):
         series_info = context.series_info
 
         if not doc:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No current document")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No current document"
+            )
 
         if not series_info:
             # Document not assigned to any series — that's an anomaly
@@ -192,7 +215,9 @@ class SeriesAnomaly(AnalysisRule):
                             document_ids=[doc["id"]] if "id" in doc else [],
                         )
 
-        return RuleExecutionResult(rule_id=self.config.id, success=False, error="No anomaly detected")
+        return RuleExecutionResult(
+            rule_id=self.config.id, success=False, error="No anomaly detected"
+        )
 
 
 @register_rule("missing-statement")
@@ -203,13 +228,17 @@ class MissingStatement(AnalysisRule):
         series_info = context.series_info
 
         if not series_info:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No series info")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No series info"
+            )
 
         recurrence = series_info.get("recurrence", "monthly")
         last_seen = series_info.get("last_seen") or series_info.get("last_document_date")
 
         if not last_seen:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No last seen date")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No last seen date"
+            )
 
         try:
             if isinstance(last_seen, str):
@@ -217,7 +246,9 @@ class MissingStatement(AnalysisRule):
             else:
                 last_date = last_seen
         except (ValueError, TypeError):
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="Invalid last seen date")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="Invalid last seen date"
+            )
 
         # Calculate expected interval
         interval_days = {"weekly": 7, "biweekly": 14, "monthly": 30, "quarterly": 90, "yearly": 365}
@@ -228,7 +259,9 @@ class MissingStatement(AnalysisRule):
         days_since = (now - last_date).days
 
         if days_since <= expected_days + grace_days:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="Statement not yet overdue")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="Statement not yet overdue"
+            )
 
         days_late = days_since - expected_days
         series_name = series_info.get("name", series_info.get("provider_name", "Unknown"))
@@ -272,10 +305,16 @@ class StatementReceived(AnalysisRule):
         series_info = context.series_info
 
         if not doc:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No current document")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No current document"
+            )
 
         correspondent = doc.get("correspondent", {})
-        corr_name = correspondent.get("name", "") if isinstance(correspondent, dict) else str(correspondent or "")
+        corr_name = (
+            correspondent.get("name", "")
+            if isinstance(correspondent, dict)
+            else str(correspondent or "")
+        )
         period = _extract_period(doc)
 
         # Check if it's within expected timing
@@ -328,33 +367,48 @@ class SpendSpike(AnalysisRule):
         history = context.series_history
 
         if not doc:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No current document")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No current document"
+            )
 
         current_amount = _get_amount(doc)
         if current_amount is None:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No amount field found")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No amount field found"
+            )
 
         current_id = doc.get("id")
         history_amounts = [
-            _get_amount(h) for h in history
+            _get_amount(h)
+            for h in history
             if _get_amount(h) is not None and h.get("id") != current_id
         ]
         if not history_amounts:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No history for comparison")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No history for comparison"
+            )
 
         avg = sum(history_amounts) / len(history_amounts)
         spike_threshold = self.get_param("spike_threshold_pct", 30)
 
         if avg == 0:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="Average is zero")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="Average is zero"
+            )
 
         pct_change = (current_amount - avg) / avg * 100
 
         if pct_change < spike_threshold:
-            return RuleExecutionResult(rule_id=self.config.id, success=False, error="No spike detected")
+            return RuleExecutionResult(
+                rule_id=self.config.id, success=False, error="No spike detected"
+            )
 
         correspondent = doc.get("correspondent", {})
-        corr_name = correspondent.get("name", "") if isinstance(correspondent, dict) else str(correspondent or "")
+        corr_name = (
+            correspondent.get("name", "")
+            if isinstance(correspondent, dict)
+            else str(correspondent or "")
+        )
 
         severity = InsightSeverity.CRITICAL if pct_change > 100 else InsightSeverity.WARNING
 

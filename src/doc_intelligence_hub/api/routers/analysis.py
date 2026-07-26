@@ -64,7 +64,9 @@ async def execute_scheduled(schedule_type: str) -> dict[str, Any]:
         monthly → schedule (monthly cron rules)
     """
     if schedule_type not in ("daily", "weekly", "monthly"):
-        raise HTTPException(status_code=400, detail="schedule_type must be 'daily', 'weekly', or 'monthly'")
+        raise HTTPException(
+            status_code=400, detail="schedule_type must be 'daily', 'weekly', or 'monthly'"
+        )
     result = await execute_scheduled_batch(TriggerType.SCHEDULE)
     result["schedule_type"] = schedule_type
     return result
@@ -142,7 +144,10 @@ async def delete_rule(rule_id: str) -> dict[str, Any]:
     """Delete a custom rule (built-in rules cannot be deleted)."""
     deleted = delete_custom_rule(rule_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail=f"Custom rule '{rule_id}' not found (only custom rules can be deleted)")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Custom rule '{rule_id}' not found (only custom rules can be deleted)",
+        )
     return {"deleted": True, "rule_id": rule_id}
 
 

@@ -1,4 +1,4 @@
-﻿"""Tests for provider hints processing."""
+"""Tests for provider hints processing."""
 
 from __future__ import annotations
 
@@ -6,7 +6,11 @@ from datetime import date
 
 from doc_intelligence_hub.modules.statements.config import ProviderHint, ProviderHintGroup
 from doc_intelligence_hub.modules.statements.hints import apply_hints
-from doc_intelligence_hub.modules.statements.models import AnalysisPattern, DocumentRecord, ProviderCandidate
+from doc_intelligence_hub.modules.statements.models import (
+    AnalysisPattern,
+    DocumentRecord,
+    ProviderCandidate,
+)
 
 
 def _make_provider(name: str, key: str = "", frequency: str = "monthly") -> ProviderCandidate:
@@ -35,22 +39,26 @@ def _eversource_docs() -> list[DocumentRecord]:
     """Simulate 2 Eversource accounts (Natick + Cape)."""
     docs = []
     for i, month in enumerate(range(1, 7)):
-        docs.append(DocumentRecord(
-            id=100 + i,
-            title=f"Eversource Bill Natick {date(2025, month, 10).strftime('%B %Y')}",
-            correspondent_id=20,
-            correspondent_name="Eversource",
-            created=date(2025, month, 10),
-            tags=["bill"],
-        ))
-        docs.append(DocumentRecord(
-            id=200 + i,
-            title=f"Eversource Bill Cape {date(2025, month, 12).strftime('%B %Y')}",
-            correspondent_id=20,
-            correspondent_name="Eversource",
-            created=date(2025, month, 12),
-            tags=["bill"],
-        ))
+        docs.append(
+            DocumentRecord(
+                id=100 + i,
+                title=f"Eversource Bill Natick {date(2025, month, 10).strftime('%B %Y')}",
+                correspondent_id=20,
+                correspondent_name="Eversource",
+                created=date(2025, month, 10),
+                tags=["bill"],
+            )
+        )
+        docs.append(
+            DocumentRecord(
+                id=200 + i,
+                title=f"Eversource Bill Cape {date(2025, month, 12).strftime('%B %Y')}",
+                correspondent_id=20,
+                correspondent_name="Eversource",
+                created=date(2025, month, 12),
+                tags=["bill"],
+            )
+        )
     return docs
 
 
@@ -229,6 +237,7 @@ provider_hints:
     (tmp_path / "tests" / "fixtures").mkdir(parents=True)
     import shutil
     import pathlib
+
     fixture_src = pathlib.Path(__file__).parent / "fixtures" / "paperless_documents.json"
     shutil.copy(fixture_src, tmp_path / "tests" / "fixtures" / "paperless_documents.json")
 

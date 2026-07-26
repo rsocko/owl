@@ -6,13 +6,13 @@ import pytest
 
 from doc_intelligence_hub.modules.triage.database import (
     create_queue_item,
-    get_session as get_triage_session,
 )
 
 
 # ---------------------------------------------------------------------------
 # Seeding helper
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def seed_triage():
@@ -249,7 +249,7 @@ class TestTriagePopulate:
     def test_populate_idempotent(self, client, seed_eob):
         """Running populate twice should not create duplicates."""
         resp1 = client.post("/api/triage/queue/populate")
-        count1 = resp1.json()["items_created"]
+        _count1 = resp1.json()["items_created"]
         resp2 = client.post("/api/triage/queue/populate")
         count2 = resp2.json()["items_created"]
         assert count2 == 0  # No new items on second run

@@ -57,7 +57,10 @@ async def update_weights(request: Request, body: WeightsUpdate) -> dict[str, Any
 
         raise HTTPException(
             status_code=422,
-            detail={"code": "invalid_weights", "message": f"Weights must sum to ~1.0, got {total:.2f}"},
+            detail={
+                "code": "invalid_weights",
+                "message": f"Weights must sum to ~1.0, got {total:.2f}",
+            },
         )
     request.app.state.eob_weights = weights
     return {"status": "ok", "weights": weights, "sum": round(total, 2)}
@@ -132,7 +135,9 @@ async def update_schedules(request: Request, body: SchedulesUpdate) -> dict[str,
 
 
 class CleanupRequest(BaseModel):
-    dry_run: bool = Field(default=True, description="Preview what would be deleted without actually deleting.")
+    dry_run: bool = Field(
+        default=True, description="Preview what would be deleted without actually deleting."
+    )
 
 
 class RetentionPolicyResponse(BaseModel):
@@ -153,14 +158,17 @@ class RetentionPolicyUpdate(BaseModel):
 
 def _get_effective_retention(request: Request):
     """Return the effective RetentionConfig, merging runtime overrides."""
-    from doc_intelligence_hub.core.retention import RetentionConfig, load_retention_config
+    from doc_intelligence_hub.core.retention import load_retention_config
 
     cfg = load_retention_config()
     overrides = getattr(request.app.state, "retention_overrides", None)
     if overrides:
         for key in (
-            "processing_history_days", "alerts_days", "actions_days",
-            "matches_days", "discovery_runs_days",
+            "processing_history_days",
+            "alerts_days",
+            "actions_days",
+            "matches_days",
+            "discovery_runs_days",
         ):
             if key in overrides:
                 setattr(cfg, key, overrides[key])

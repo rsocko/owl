@@ -25,7 +25,6 @@ from typing import Any
 
 from doc_intelligence_hub.modules.triage.database import (
     CorrectionEvent,
-    DocumentDuplicate,
     TriageQueueItem,
     create_duplicate_pair,
     create_queue_item,
@@ -131,8 +130,26 @@ def _score_date_of_service(meta_a: dict, meta_b: dict) -> float:
 
 def _score_provider(meta_a: dict, meta_b: dict) -> float:
     """Score based on provider name match."""
-    prov_a = str(meta_a.get("provider") or meta_a.get("provider_name") or meta_a.get("correspondent") or "").strip().lower()
-    prov_b = str(meta_b.get("provider") or meta_b.get("provider_name") or meta_b.get("correspondent") or "").strip().lower()
+    prov_a = (
+        str(
+            meta_a.get("provider")
+            or meta_a.get("provider_name")
+            or meta_a.get("correspondent")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
+    prov_b = (
+        str(
+            meta_b.get("provider")
+            or meta_b.get("provider_name")
+            or meta_b.get("correspondent")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
     if not prov_a or not prov_b:
         return 0.0
     if prov_a == prov_b:
@@ -230,8 +247,10 @@ def get_document_metadata(doc_id: int) -> dict | None:
                 return {
                     "document_id": doc_id,
                     "title": getattr(bill, "title", None) or f"Bill #{doc_id}",
-                    "provider": getattr(bill, "provider_name", None) or getattr(bill, "correspondent", None),
-                    "provider_name": getattr(bill, "provider_name", None) or getattr(bill, "correspondent", None),
+                    "provider": getattr(bill, "provider_name", None)
+                    or getattr(bill, "correspondent", None),
+                    "provider_name": getattr(bill, "provider_name", None)
+                    or getattr(bill, "correspondent", None),
                     "amount": getattr(bill, "amount", None) or getattr(bill, "total_amount", None),
                     "date_of_service": getattr(bill, "date_of_service", None),
                     "invoice_number": getattr(bill, "invoice_number", None),
@@ -284,12 +303,14 @@ def detect_duplicates(doc_id: int) -> list[dict[str, Any]]:
 
         overall, breakdown = score_documents(meta_a, meta_b)
         if overall >= DUPLICATE_THRESHOLD:
-            results.append({
-                "doc_id": other_id,
-                "similarity_score": overall,
-                "breakdown": breakdown,
-                "metadata": meta_b,
-            })
+            results.append(
+                {
+                    "doc_id": other_id,
+                    "similarity_score": overall,
+                    "breakdown": breakdown,
+                    "metadata": meta_b,
+                }
+            )
 
     results.sort(key=lambda r: r["similarity_score"], reverse=True)
     return results
@@ -339,7 +360,7 @@ def scan_all_duplicates() -> dict[str, Any]:
         if not meta_a:
             continue
 
-        for doc_b_id in all_doc_ids[i + 1:]:
+        for doc_b_id in all_doc_ids[i + 1 :]:
             meta_b = meta_cache.get(doc_b_id)
             if not meta_b:
                 continue
@@ -396,7 +417,9 @@ def scan_all_duplicates() -> dict[str, Any]:
 
     logger.info(
         "Duplicate scan complete: %d pairs found, %d created, %d triage items",
-        pairs_found, pairs_created, triage_created,
+        pairs_found,
+        pairs_created,
+        triage_created,
     )
     return {
         "pairs_found": pairs_found,
@@ -435,7 +458,9 @@ def merge_documents(
         raise ValueError(f"Duplicate pair {pair_id} not found")
 
     # Determine which doc is archived
-    archived_doc_id = resolved["doc_b_id"] if resolved["doc_a_id"] == primary_doc_id else resolved["doc_a_id"]
+    archived_doc_id = (
+        resolved["doc_b_id"] if resolved["doc_a_id"] == primary_doc_id else resolved["doc_a_id"]
+    )
 
     # Tag the archived document in Paperless
     _tag_archived_in_paperless(archived_doc_id, primary_doc_id)
@@ -502,7 +527,9 @@ def _tag_archived_in_paperless(archived_doc_id: int, primary_doc_id: int) -> Non
             token = resolve_api_token(config)
 
         if not base_url or not token:
-            logger.warning("Paperless not configured, skipping tag write for doc %d", archived_doc_id)
+            logger.warning(
+                "Paperless not configured, skipping tag write for doc %d", archived_doc_id
+            )
             return
 
         tag_name = f"duplicate-of:{primary_doc_id}"
@@ -568,7 +595,9 @@ def _transfer_eob_links(from_doc_id: int, to_doc_id: int) -> None:
             )
             for match in eob_matches:
                 match.eob_document_id = to_doc_id
-                logger.info("Transferred EOB match %s from doc %d to %d", match.id, from_doc_id, to_doc_id)
+                logger.info(
+                    "Transferred EOB match %s from doc %d to %d", match.id, from_doc_id, to_doc_id
+                )
 
             # Update matches where the archived doc is referenced as bill
             bill_matches = (
@@ -578,7 +607,9 @@ def _transfer_eob_links(from_doc_id: int, to_doc_id: int) -> None:
             )
             for match in bill_matches:
                 match.bill_document_id = to_doc_id
-                logger.info("Transferred bill match %s from doc %d to %d", match.id, from_doc_id, to_doc_id)
+                logger.info(
+                    "Transferred bill match %s from doc %d to %d", match.id, from_doc_id, to_doc_id
+                )
 
             if eob_matches or bill_matches:
                 eob_session.commit()
