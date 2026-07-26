@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from sqlalchemy import text as sa_text
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +30,7 @@ _DEFAULT_CONFIG_PATH = _PROJECT_ROOT / "config" / "retention.yaml"
 # ------------------------------------------------------------------
 # Configuration
 # ------------------------------------------------------------------
+
 
 @dataclass
 class RetentionConfig:
@@ -91,6 +91,7 @@ def load_retention_config(config_path: Path | None = None) -> RetentionConfig:
 # Cleanup result
 # ------------------------------------------------------------------
 
+
 @dataclass
 class ModuleCleanupResult:
     """Cleanup outcome for a single module."""
@@ -143,6 +144,7 @@ class CleanupResult:
 # Per-module cleanup functions
 # ------------------------------------------------------------------
 
+
 def cleanup_processing_history(days: int = 90, *, dry_run: bool = False) -> ModuleCleanupResult:
     """Delete processing_history records older than *days* from the Action Queue DB."""
     result = ModuleCleanupResult(module="processing_history")
@@ -184,6 +186,7 @@ def cleanup_old_alerts(days: int = 30, *, dry_run: bool = False) -> ModuleCleanu
         return result
 
     from doc_intelligence_hub.core.alerts import Alert, get_session, init_db
+
     cutoff = datetime.now(UTC) - timedelta(days=days)
 
     init_db()
@@ -220,6 +223,7 @@ def archive_old_actions(days: int = 365, *, dry_run: bool = False) -> ModuleClea
         return result
 
     from doc_intelligence_hub.modules.action_queue.database import Action, get_session
+
     cutoff = datetime.utcnow() - timedelta(days=days)
 
     session = get_session()
@@ -267,11 +271,7 @@ def archive_old_matches(days: int = 365, *, dry_run: bool = False) -> ModuleClea
     session = get_session()
     try:
         # Find old run IDs
-        old_runs = (
-            session.query(MatchingRun)
-            .filter(MatchingRun.started_at < cutoff)
-            .all()
-        )
+        old_runs = session.query(MatchingRun).filter(MatchingRun.started_at < cutoff).all()
         old_run_ids = [r.id for r in old_runs]
 
         if not old_run_ids:
@@ -302,12 +302,21 @@ def archive_old_matches(days: int = 365, *, dry_run: bool = False) -> ModuleClea
             session.commit()
             logger.info(
                 "Deleted %d EOB matching records (%d runs, %d matches, %d EOBs, %d bills) older than %d days",
-                total, len(old_run_ids), match_count, eob_count, bill_count, days,
+                total,
+                len(old_run_ids),
+                match_count,
+                eob_count,
+                bill_count,
+                days,
             )
         elif dry_run:
             logger.info(
                 "[DRY RUN] Would delete %d EOB records (%d runs, %d matches, %d EOBs, %d bills)",
-                total, len(old_run_ids), match_count, eob_count, bill_count,
+                total,
+                len(old_run_ids),
+                match_count,
+                eob_count,
+                bill_count,
             )
     except Exception as exc:
         session.rollback()
@@ -362,12 +371,15 @@ def cleanup_old_discovery_runs(days: int = 365, *, dry_run: bool = False) -> Mod
             conn.commit()
             logger.info(
                 "Deleted %d discovery runs and %d recommendation runs older than %d days",
-                discovery_count, rec_count, days,
+                discovery_count,
+                rec_count,
+                days,
             )
         elif dry_run:
             logger.info(
                 "[DRY RUN] Would delete %d discovery runs, %d recommendation runs",
-                discovery_count, rec_count,
+                discovery_count,
+                rec_count,
             )
     except Exception as exc:
         result.errors.append(str(exc))
@@ -381,6 +393,7 @@ def cleanup_old_discovery_runs(days: int = 365, *, dry_run: bool = False) -> Mod
 # ------------------------------------------------------------------
 # VACUUM helper
 # ------------------------------------------------------------------
+
 
 def _get_db_size(path: Path) -> int:
     """Return file size in bytes, or 0 if the file does not exist."""
@@ -439,6 +452,7 @@ def _human_bytes(n: int) -> str:
 # ------------------------------------------------------------------
 # Orchestrator
 # ------------------------------------------------------------------
+
 
 def run_cleanup(
     *,
@@ -581,10 +595,15 @@ def get_storage_stats() -> StorageStats:
 
         if not db_path.exists():
             for table_name, label, module in table_defs:
-                stats.tables.append(TableStats(
-                    database=db_file, table=table_name,
-                    label=label, module=module, row_count=0,
-                ))
+                stats.tables.append(
+                    TableStats(
+                        database=db_file,
+                        table=table_name,
+                        label=label,
+                        module=module,
+                        row_count=0,
+                    )
+                )
             continue
 
         try:
@@ -595,10 +614,15 @@ def get_storage_stats() -> StorageStats:
                     count = row[0] if row else 0
                 except Exception:
                     count = 0
-                stats.tables.append(TableStats(
-                    database=db_file, table=table_name,
-                    label=label, module=module, row_count=count,
-                ))
+                stats.tables.append(
+                    TableStats(
+                        database=db_file,
+                        table=table_name,
+                        label=label,
+                        module=module,
+                        row_count=count,
+                    )
+                )
             conn.close()
         except Exception:
             logger.exception("Could not read stats from %s", db_file)

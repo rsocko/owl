@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-import pytest
 
 from doc_intelligence_hub.core.alerts import (
     Alert,
@@ -57,8 +56,18 @@ class TestEmitEobAlertsHighConfidence:
     def test_multiple_high_confidence_matches(self, app):
         count = emit_eob_alerts(
             high_confidence_matches=[
-                {"eob_document_id": 100, "bill_document_id": 200, "score": 95.0, "confidence": "HIGH"},
-                {"eob_document_id": 101, "bill_document_id": 201, "score": 88.0, "confidence": "HIGH"},
+                {
+                    "eob_document_id": 100,
+                    "bill_document_id": 200,
+                    "score": 95.0,
+                    "confidence": "HIGH",
+                },
+                {
+                    "eob_document_id": 101,
+                    "bill_document_id": 201,
+                    "score": 88.0,
+                    "confidence": "HIGH",
+                },
             ],
         )
         assert count == 2
@@ -76,10 +85,20 @@ class TestEmitEobAlertsHighConfidence:
         count = emit_eob_alerts(
             unmatched_eobs=[{"document_id": 300, "provider_name": "Aetna"}],
             low_confidence_matches=[
-                {"eob_document_id": 102, "bill_document_id": 202, "score": 55.0, "confidence": "LOW"},
+                {
+                    "eob_document_id": 102,
+                    "bill_document_id": 202,
+                    "score": 55.0,
+                    "confidence": "LOW",
+                },
             ],
             high_confidence_matches=[
-                {"eob_document_id": 100, "bill_document_id": 200, "score": 95.0, "confidence": "HIGH"},
+                {
+                    "eob_document_id": 100,
+                    "bill_document_id": 200,
+                    "score": 95.0,
+                    "confidence": "HIGH",
+                },
             ],
         )
         assert count == 3
@@ -90,15 +109,17 @@ class TestCheckEobDueDates:
 
     def test_overdue_bill_emits_high_alert(self, app):
         yesterday = (date.today() - timedelta(days=5)).isoformat()
-        count = check_eob_due_dates([
-            {
-                "document_id": 200,
-                "provider_name": "Dr. Smith",
-                "due_date": yesterday,
-                "payment_status": None,
-                "balance_due": 150.00,
-            },
-        ])
+        count = check_eob_due_dates(
+            [
+                {
+                    "document_id": 200,
+                    "provider_name": "Dr. Smith",
+                    "due_date": yesterday,
+                    "payment_status": None,
+                    "balance_due": 150.00,
+                },
+            ]
+        )
         assert count == 1
 
         db = get_alerts_session()
@@ -114,15 +135,17 @@ class TestCheckEobDueDates:
 
     def test_due_soon_bill_emits_medium_alert(self, app):
         soon = (date.today() + timedelta(days=5)).isoformat()
-        count = check_eob_due_dates([
-            {
-                "document_id": 201,
-                "provider_name": "City Hospital",
-                "due_date": soon,
-                "payment_status": None,
-                "balance_due": 75.50,
-            },
-        ])
+        count = check_eob_due_dates(
+            [
+                {
+                    "document_id": 201,
+                    "provider_name": "City Hospital",
+                    "due_date": soon,
+                    "payment_status": None,
+                    "balance_due": 75.50,
+                },
+            ]
+        )
         assert count == 1
 
         db = get_alerts_session()
@@ -137,54 +160,62 @@ class TestCheckEobDueDates:
 
     def test_paid_bill_skipped(self, app):
         yesterday = (date.today() - timedelta(days=1)).isoformat()
-        count = check_eob_due_dates([
-            {
-                "document_id": 202,
-                "provider_name": "Pharmacy",
-                "due_date": yesterday,
-                "payment_status": "paid",
-                "balance_due": 0,
-            },
-        ])
+        count = check_eob_due_dates(
+            [
+                {
+                    "document_id": 202,
+                    "provider_name": "Pharmacy",
+                    "due_date": yesterday,
+                    "payment_status": "paid",
+                    "balance_due": 0,
+                },
+            ]
+        )
         assert count == 0
 
     def test_bill_due_far_future_no_alert(self, app):
         far_future = (date.today() + timedelta(days=30)).isoformat()
-        count = check_eob_due_dates([
-            {
-                "document_id": 203,
-                "provider_name": "Lab Corp",
-                "due_date": far_future,
-                "payment_status": None,
-                "balance_due": 200.00,
-            },
-        ])
+        count = check_eob_due_dates(
+            [
+                {
+                    "document_id": 203,
+                    "provider_name": "Lab Corp",
+                    "due_date": far_future,
+                    "payment_status": None,
+                    "balance_due": 200.00,
+                },
+            ]
+        )
         assert count == 0
 
     def test_bill_no_due_date_skipped(self, app):
-        count = check_eob_due_dates([
-            {
-                "document_id": 204,
-                "provider_name": "Clinic",
-                "due_date": None,
-                "payment_status": None,
-                "balance_due": 50.00,
-            },
-        ])
+        count = check_eob_due_dates(
+            [
+                {
+                    "document_id": 204,
+                    "provider_name": "Clinic",
+                    "due_date": None,
+                    "payment_status": None,
+                    "balance_due": 50.00,
+                },
+            ]
+        )
         assert count == 0
 
     def test_custom_due_soon_days(self, app):
         future_14 = (date.today() + timedelta(days=14)).isoformat()
         # With default 7 days, this should NOT trigger
-        count_default = check_eob_due_dates([
-            {
-                "document_id": 205,
-                "provider_name": "Specialist",
-                "due_date": future_14,
-                "payment_status": None,
-                "balance_due": 300.00,
-            },
-        ])
+        count_default = check_eob_due_dates(
+            [
+                {
+                    "document_id": 205,
+                    "provider_name": "Specialist",
+                    "due_date": future_14,
+                    "payment_status": None,
+                    "balance_due": 300.00,
+                },
+            ]
+        )
         assert count_default == 0
 
         # With 15 days threshold, it SHOULD trigger
@@ -233,14 +264,16 @@ class TestCheckDueDatesEndpoint:
         db = get_eob_session()
         try:
             yesterday = (date.today() - timedelta(days=2)).isoformat()
-            db.add(BillRecord(
-                document_id=300,
-                title="Overdue bill",
-                provider_name="Test Provider",
-                due_date=yesterday,
-                payment_status=None,
-                balance_due=250.00,
-            ))
+            db.add(
+                BillRecord(
+                    document_id=300,
+                    title="Overdue bill",
+                    provider_name="Test Provider",
+                    due_date=yesterday,
+                    payment_status=None,
+                    balance_due=250.00,
+                )
+            )
             db.commit()
         finally:
             db.close()
@@ -255,14 +288,16 @@ class TestCheckDueDatesEndpoint:
         db = get_eob_session()
         try:
             yesterday = (date.today() - timedelta(days=1)).isoformat()
-            db.add(BillRecord(
-                document_id=301,
-                title="Paid bill",
-                provider_name="Paid Provider",
-                due_date=yesterday,
-                payment_status="paid",
-                balance_due=0,
-            ))
+            db.add(
+                BillRecord(
+                    document_id=301,
+                    title="Paid bill",
+                    provider_name="Paid Provider",
+                    due_date=yesterday,
+                    payment_status="paid",
+                    balance_due=0,
+                )
+            )
             db.commit()
         finally:
             db.close()

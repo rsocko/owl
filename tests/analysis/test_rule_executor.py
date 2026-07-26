@@ -19,14 +19,14 @@ from doc_intelligence_hub.modules.analysis.models import (
 )
 from doc_intelligence_hub.modules.analysis.rule_executor import (
     _execute_rule_with_context,
-    _run_single_rule,
     execute_rule,
-    execute_scheduled_batch,
     execute_trigger,
 )
 
 
-def _make_rule(rule_id: str = "test-rule", enabled: bool = True, trigger_type: str = "manual") -> RuleConfig:
+def _make_rule(
+    rule_id: str = "test-rule", enabled: bool = True, trigger_type: str = "manual"
+) -> RuleConfig:
     return RuleConfig(
         id=rule_id,
         name="Test Rule",
@@ -74,7 +74,9 @@ class TestExecuteRule:
     @patch("doc_intelligence_hub.modules.analysis.rule_executor.get_rule_class")
     @patch("doc_intelligence_hub.modules.analysis.rule_executor.get_rule")
     @patch("doc_intelligence_hub.modules.analysis.rule_executor.db")
-    async def test_successful_execution(self, mock_db, mock_get_rule, mock_cls, mock_build, mock_route):
+    async def test_successful_execution(
+        self, mock_db, mock_get_rule, mock_cls, mock_build, mock_route
+    ):
         rule = _make_rule()
         mock_get_rule.return_value = rule
         mock_build.return_value = ContextData()
@@ -127,7 +129,9 @@ class TestExecuteTrigger:
     @patch("doc_intelligence_hub.modules.analysis.rule_executor.get_rule_class")
     @patch("doc_intelligence_hub.modules.analysis.rule_executor.get_rules_for_trigger")
     @patch("doc_intelligence_hub.modules.analysis.rule_executor.db")
-    async def test_multiple_rules_executed(self, mock_db, mock_get_rules, mock_cls, mock_build, mock_route):
+    async def test_multiple_rules_executed(
+        self, mock_db, mock_get_rules, mock_cls, mock_build, mock_route
+    ):
         rules = [_make_rule("rule-1"), _make_rule("rule-2")]
         mock_get_rules.return_value = rules
         mock_build.return_value = ContextData()
@@ -147,7 +151,9 @@ class TestExecuteTrigger:
     @patch("doc_intelligence_hub.modules.analysis.rule_executor.get_rule_class")
     @patch("doc_intelligence_hub.modules.analysis.rule_executor.get_rules_for_trigger")
     @patch("doc_intelligence_hub.modules.analysis.rule_executor.db")
-    async def test_one_rule_fails_others_continue(self, mock_db, mock_get_rules, mock_cls, mock_build, mock_route):
+    async def test_one_rule_fails_others_continue(
+        self, mock_db, mock_get_rules, mock_cls, mock_build, mock_route
+    ):
         rules = [_make_rule("rule-1"), _make_rule("rule-2")]
         mock_get_rules.return_value = rules
         mock_build.return_value = ContextData()

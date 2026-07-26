@@ -34,11 +34,17 @@ router = APIRouter(prefix="/api/insights", tags=["insights"])
 @router.get("", response_model=InsightListResponse)
 async def list_insights(
     route: str | None = Query(None, description="Filter by route: informational, actionable"),
-    status: str | None = Query(None, description="Filter by status: new, viewed, acknowledged, archived"),
+    status: str | None = Query(
+        None, description="Filter by status: new, viewed, acknowledged, archived"
+    ),
     rule_id: str | None = Query(None, description="Filter by rule ID"),
     series_id: str | None = Query(None, description="Filter by series ID"),
-    severity: str | None = Query(None, description="Filter by severity: info, notice, warning, critical"),
-    insight_type: str | None = Query(None, description="Filter by type: comparison, anomaly, trend, compliance, extraction"),
+    severity: str | None = Query(
+        None, description="Filter by severity: info, notice, warning, critical"
+    ),
+    insight_type: str | None = Query(
+        None, description="Filter by type: comparison, anomaly, trend, compliance, extraction"
+    ),
     correspondent: str | None = Query(None, description="Filter by correspondent/provider name"),
     since: str | None = Query(None, description="Filter by created_at >= ISO timestamp"),
     until: str | None = Query(None, description="Filter by created_at <= ISO timestamp"),

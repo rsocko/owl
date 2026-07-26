@@ -44,9 +44,30 @@ class TestInsightCRUD:
         assert fetched["status"] == "new"
 
     def test_list_insights_with_filters(self):
-        db.create_insight(rule_id="r1", rule_name="R1", insight_type="comparison", route="informational", title="Info 1", severity="info")
-        db.create_insight(rule_id="r2", rule_name="R2", insight_type="anomaly", route="actionable", title="Action 1", severity="warning")
-        db.create_insight(rule_id="r1", rule_name="R1", insight_type="comparison", route="informational", title="Info 2", severity="info")
+        db.create_insight(
+            rule_id="r1",
+            rule_name="R1",
+            insight_type="comparison",
+            route="informational",
+            title="Info 1",
+            severity="info",
+        )
+        db.create_insight(
+            rule_id="r2",
+            rule_name="R2",
+            insight_type="anomaly",
+            route="actionable",
+            title="Action 1",
+            severity="warning",
+        )
+        db.create_insight(
+            rule_id="r1",
+            rule_name="R1",
+            insight_type="comparison",
+            route="informational",
+            title="Info 2",
+            severity="info",
+        )
 
         # All (non-superseded)
         items, total = db.list_insights()
@@ -66,21 +87,35 @@ class TestInsightCRUD:
         assert total == 1
 
     def test_update_insight_status(self):
-        insight = db.create_insight(rule_id="r1", rule_name="R1", insight_type="trend", route="informational", title="Test")
+        insight = db.create_insight(
+            rule_id="r1", rule_name="R1", insight_type="trend", route="informational", title="Test"
+        )
 
         updated = db.update_insight_status(insight["id"], "acknowledged")
         assert updated["status"] == "acknowledged"
         assert updated["acknowledged_at"] is not None
 
     def test_bulk_update_status(self):
-        i1 = db.create_insight(rule_id="r1", rule_name="R1", insight_type="trend", route="informational", title="T1")
-        i2 = db.create_insight(rule_id="r1", rule_name="R1", insight_type="trend", route="informational", title="T2")
+        i1 = db.create_insight(
+            rule_id="r1", rule_name="R1", insight_type="trend", route="informational", title="T1"
+        )
+        i2 = db.create_insight(
+            rule_id="r1", rule_name="R1", insight_type="trend", route="informational", title="T2"
+        )
 
         count = db.bulk_update_insight_status([i1["id"], i2["id"]], "archived")
         assert count == 2
 
     def test_supersede_insight(self):
-        i1 = db.create_insight(rule_id="r1", rule_name="R1", insight_type="comparison", route="informational", title="Old", period="Jun 2024", series_id="s1")
+        i1 = db.create_insight(
+            rule_id="r1",
+            rule_name="R1",
+            insight_type="comparison",
+            route="informational",
+            title="Old",
+            period="Jun 2024",
+            series_id="s1",
+        )
 
         superseded_id = db.supersede_insight("r1", "s1", "Jun 2024")
         assert superseded_id == i1["id"]
@@ -94,8 +129,22 @@ class TestInsightCRUD:
         assert total == 0
 
     def test_get_insight_summary(self):
-        db.create_insight(rule_id="r1", rule_name="R1", insight_type="comparison", route="informational", title="I1", severity="info")
-        db.create_insight(rule_id="r2", rule_name="R2", insight_type="anomaly", route="actionable", title="I2", severity="warning")
+        db.create_insight(
+            rule_id="r1",
+            rule_name="R1",
+            insight_type="comparison",
+            route="informational",
+            title="I1",
+            severity="info",
+        )
+        db.create_insight(
+            rule_id="r2",
+            rule_name="R2",
+            insight_type="anomaly",
+            route="actionable",
+            title="I2",
+            severity="warning",
+        )
 
         summary = db.get_insight_summary()
         assert summary["total"] == 2
@@ -107,9 +156,27 @@ class TestInsightCRUD:
 
 class TestInsightHistory:
     def test_create_and_get_history(self):
-        db.create_history_entry(rule_id="r1", series_id="s1", period="Jan 2024", metric_name="total_amount", metric_value=1500.0)
-        db.create_history_entry(rule_id="r1", series_id="s1", period="Feb 2024", metric_name="total_amount", metric_value=1600.0)
-        db.create_history_entry(rule_id="r1", series_id="s1", period="Jan 2024", metric_name="pct_change", metric_value=5.0)
+        db.create_history_entry(
+            rule_id="r1",
+            series_id="s1",
+            period="Jan 2024",
+            metric_name="total_amount",
+            metric_value=1500.0,
+        )
+        db.create_history_entry(
+            rule_id="r1",
+            series_id="s1",
+            period="Feb 2024",
+            metric_name="total_amount",
+            metric_value=1600.0,
+        )
+        db.create_history_entry(
+            rule_id="r1",
+            series_id="s1",
+            period="Jan 2024",
+            metric_name="pct_change",
+            metric_value=5.0,
+        )
 
         entries = db.get_history_for_series("s1")
         assert len(entries) == 3
@@ -132,13 +199,19 @@ class TestRuleState:
     def test_history_dedup_on_rerun(self):
         """Test that rerunning a rule updates existing history entries instead of duplicating."""
         db.create_history_entry(
-            rule_id="spend", series_id="s1", period="Jun 2024",
-            metric_name="pct_change", metric_value=15.0,
+            rule_id="spend",
+            series_id="s1",
+            period="Jun 2024",
+            metric_name="pct_change",
+            metric_value=15.0,
         )
         # Second run with updated value for same key
         db.create_history_entry(
-            rule_id="spend", series_id="s1", period="Jun 2024",
-            metric_name="pct_change", metric_value=18.0,
+            rule_id="spend",
+            series_id="s1",
+            period="Jun 2024",
+            metric_name="pct_change",
+            metric_value=18.0,
         )
         entries = db.get_history_for_series("s1", metric_name="pct_change")
         assert len(entries) == 1  # Should NOT be 2

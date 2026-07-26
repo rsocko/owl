@@ -10,9 +10,8 @@ Auto-flagging rules:
 
 from __future__ import annotations
 
-import json
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from doc_intelligence_hub.modules.triage.database import (
@@ -36,7 +35,14 @@ def populate_queue() -> dict[str, Any]:
 
     Returns a summary of items created.
     """
-    stats = {"eob_low_confidence": 0, "eob_multi_candidate": 0, "orphan_documents": 0, "orphan_reflagged": 0, "duplicate_documents": 0, "skipped_existing": 0}
+    stats = {
+        "eob_low_confidence": 0,
+        "eob_multi_candidate": 0,
+        "orphan_documents": 0,
+        "orphan_reflagged": 0,
+        "duplicate_documents": 0,
+        "skipped_existing": 0,
+    }
 
     try:
         stats["eob_low_confidence"] = _flag_low_confidence_matches()
@@ -63,8 +69,18 @@ def populate_queue() -> dict[str, Any]:
     except Exception as exc:
         logger.warning("Could not flag duplicate documents: %s", exc)
 
-    total = stats["eob_low_confidence"] + stats["eob_multi_candidate"] + stats["orphan_documents"] + stats.get("duplicate_documents", 0)
-    logger.info("Queue population complete: %d items created, %d re-flagged (%s)", total, stats["orphan_reflagged"], stats)
+    total = (
+        stats["eob_low_confidence"]
+        + stats["eob_multi_candidate"]
+        + stats["orphan_documents"]
+        + stats.get("duplicate_documents", 0)
+    )
+    logger.info(
+        "Queue population complete: %d items created, %d re-flagged (%s)",
+        total,
+        stats["orphan_reflagged"],
+        stats,
+    )
     return {"items_created": total, "items_reflagged": stats["orphan_reflagged"], "details": stats}
 
 

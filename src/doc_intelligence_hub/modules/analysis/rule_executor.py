@@ -24,7 +24,9 @@ from doc_intelligence_hub.modules.analysis.rules.base import get_rule_class
 logger = logging.getLogger(__name__)
 
 
-async def execute_rule(rule_id: str, *, document_id: int | None = None, dry_run: bool = False) -> dict[str, Any]:
+async def execute_rule(
+    rule_id: str, *, document_id: int | None = None, dry_run: bool = False
+) -> dict[str, Any]:
     """Execute a single rule manually.
 
     Args:

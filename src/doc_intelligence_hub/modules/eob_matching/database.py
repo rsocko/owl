@@ -74,9 +74,7 @@ class EOBRecord(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     last_processed_at = Column(DateTime, nullable=True)
 
-    __table_args__ = (
-        UniqueConstraint("document_id", "run_id", name="uq_eob_doc_run"),
-    )
+    __table_args__ = (UniqueConstraint("document_id", "run_id", name="uq_eob_doc_run"),)
 
 
 class BillRecord(Base):
@@ -101,9 +99,7 @@ class BillRecord(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     last_processed_at = Column(DateTime, nullable=True)
 
-    __table_args__ = (
-        UniqueConstraint("document_id", "run_id", name="uq_bill_doc_run"),
-    )
+    __table_args__ = (UniqueConstraint("document_id", "run_id", name="uq_bill_doc_run"),)
 
 
 class MatchRecord(Base):
@@ -161,7 +157,9 @@ class MatchEvent(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     match_id = Column(Integer, nullable=False, index=True)
-    event_type = Column(String, nullable=False)  # auto_matched, flagged, reviewed, confirmed, rejected, reset
+    event_type = Column(
+        String, nullable=False
+    )  # auto_matched, flagged, reviewed, confirmed, rejected, reset
     actor = Column(String, nullable=False, default="system")  # "system" or "user"
     detail = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
@@ -198,9 +196,7 @@ class BenchmarkModelResult(Base):
     results_json = Column(Text, nullable=True)  # JSON array of per-document results
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
-    __table_args__ = (
-        UniqueConstraint("run_id", "model", name="uq_benchmark_run_model"),
-    )
+    __table_args__ = (UniqueConstraint("run_id", "model", name="uq_benchmark_run_model"),)
 
 
 # ------------------------------------------------------------------
@@ -270,9 +266,7 @@ def _migrate_missing_columns(engine):
             existing = {c["name"] for c in inspector.get_columns(table)}
             for col_name, col_ddl in columns:
                 if col_name not in existing:
-                    conn.execute(text(
-                        f"ALTER TABLE {table} ADD COLUMN {col_name} {col_ddl}"
-                    ))
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_ddl}"))
 
 
 def configure(database_url: str) -> None:
@@ -327,12 +321,7 @@ def last_successful_run(session: Session) -> Optional[MatchingRun]:
 
 
 def latest_runs(session: Session, limit: int = 10) -> list[MatchingRun]:
-    return (
-        session.query(MatchingRun)
-        .order_by(MatchingRun.started_at.desc())
-        .limit(limit)
-        .all()
-    )
+    return session.query(MatchingRun).order_by(MatchingRun.started_at.desc()).limit(limit).all()
 
 
 def pending_matches(session: Session) -> list[MatchRecord]:
@@ -402,12 +391,7 @@ def store_benchmark_result(session: Session, result: BenchmarkModelResult) -> Be
 
 def latest_benchmark_runs(session: Session, limit: int = 20) -> list[BenchmarkRun]:
     """Return recent benchmark runs, newest first."""
-    return (
-        session.query(BenchmarkRun)
-        .order_by(BenchmarkRun.started_at.desc())
-        .limit(limit)
-        .all()
-    )
+    return session.query(BenchmarkRun).order_by(BenchmarkRun.started_at.desc()).limit(limit).all()
 
 
 def get_benchmark_run(session: Session, run_id: int) -> BenchmarkRun | None:
@@ -426,7 +410,9 @@ def get_benchmark_results(session: Session, run_id: int) -> list[BenchmarkModelR
 
 
 def get_benchmark_model_history(
-    session: Session, model: str, limit: int = 20,
+    session: Session,
+    model: str,
+    limit: int = 20,
 ) -> list[BenchmarkModelResult]:
     """Return recent benchmark results for a specific model, newest first."""
     return (
@@ -440,7 +426,8 @@ def get_benchmark_model_history(
 
 
 def get_previous_benchmark_results(
-    session: Session, current_run_id: int,
+    session: Session,
+    current_run_id: int,
 ) -> list[BenchmarkModelResult]:
     """Return model results from the benchmark run immediately before *current_run_id*."""
     current = session.query(BenchmarkRun).filter_by(id=current_run_id).first()
@@ -547,11 +534,7 @@ def get_payments_for_match(session: Session, match_id: int) -> list[PaymentRecor
 
 def payment_summary(session: Session) -> dict:
     """Aggregate payment stats across all confirmed matches."""
-    confirmed = (
-        session.query(MatchRecord)
-        .filter_by(status="confirmed")
-        .all()
-    )
+    confirmed = session.query(MatchRecord).filter_by(status="confirmed").all()
     if not confirmed:
         return {
             "total_billed": 0.0,

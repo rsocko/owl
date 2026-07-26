@@ -2,12 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
-import pytest
-
-from doc_intelligence_hub.core.alerts import Alert, get_session as get_alerts_session
-
 
 class TestListAlerts:
     """Tests for GET /api/insights/alerts."""

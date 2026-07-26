@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from doc_intelligence_hub.modules.analysis.models import ContextData, InsightType, RuleConfig, RuleTier, RuleTrigger, TriggerType
+from doc_intelligence_hub.modules.analysis.models import (
+    ContextData,
+    InsightType,
+    RuleConfig,
+    RuleTier,
+    RuleTrigger,
+    TriggerType,
+)
 from doc_intelligence_hub.modules.analysis.rules.basic_rules import (
     EobMatchReview,
     MissingStatement,
@@ -134,7 +141,11 @@ class TestStatementReceived:
         rule = StatementReceived(config)
 
         ctx = ContextData(
-            current_document={"id": 100, "correspondent": {"name": "Comcast"}, "created": "2024-06-15T00:00:00"},
+            current_document={
+                "id": 100,
+                "correspondent": {"name": "Comcast"},
+                "created": "2024-06-15T00:00:00",
+            },
         )
 
         result = await rule.execute(ctx)

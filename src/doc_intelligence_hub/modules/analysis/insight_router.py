@@ -246,8 +246,11 @@ def _resolve_superseded_downstream(superseded_id: str) -> None:
         if triage_id:
             try:
                 from doc_intelligence_hub.modules.triage.database import resolve_queue_item
+
                 resolve_queue_item(triage_id, resolution="superseded")
-                logger.debug("Resolved triage item %s for superseded insight %s", triage_id, superseded_id)
+                logger.debug(
+                    "Resolved triage item %s for superseded insight %s", triage_id, superseded_id
+                )
             except Exception as exc:
                 logger.warning("Could not resolve triage item %s: %s", triage_id, exc)
 
@@ -256,8 +259,11 @@ def _resolve_superseded_downstream(superseded_id: str) -> None:
         if mc_alert_id:
             try:
                 from doc_intelligence_hub.core.alerts import dismiss_alert
+
                 dismiss_alert(mc_alert_id)
-                logger.debug("Dismissed MC alert %s for superseded insight %s", mc_alert_id, superseded_id)
+                logger.debug(
+                    "Dismissed MC alert %s for superseded insight %s", mc_alert_id, superseded_id
+                )
             except Exception as exc:
                 logger.warning("Could not dismiss MC alert %s: %s", mc_alert_id, exc)
 

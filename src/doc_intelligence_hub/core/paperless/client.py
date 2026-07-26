@@ -156,7 +156,10 @@ class PaperlessClient:
         return {
             "status": "ok",
             "count": len(results),
-            "fields": [{"id": f.get("id"), "name": f.get("name"), "data_type": f.get("data_type")} for f in results],
+            "fields": [
+                {"id": f.get("id"), "name": f.get("name"), "data_type": f.get("data_type")}
+                for f in results
+            ],
         }
 
     # ------------------------------------------------------------------
@@ -249,7 +252,10 @@ class PaperlessClient:
         # after page 1 is guaranteed to succeed and we never walk into a
         # second page — even when thousands of documents share these tags.
         effective_page_size = min(page_size, limit) if limit is not None else page_size
-        params = {"tags__id__in": ",".join(str(t) for t in tag_ids), "page_size": effective_page_size}
+        params = {
+            "tags__id__in": ",".join(str(t) for t in tag_ids),
+            "page_size": effective_page_size,
+        }
         return await self._paginate(client, "/api/documents/", params, limit=limit)
 
     async def get_document(self, document_id: int) -> dict:
@@ -354,9 +360,9 @@ class PaperlessClient:
             resp2 = await client.get("/api/custom_fields/?page=1&page_size=100")
             if resp2.status_code == 500:
                 raise RuntimeError(
-                    f"Paperless /api/custom_fields/ returns 500. "
-                    f"This is likely a Paperless-side issue (DB migration or corrupt field). "
-                    f"Check Paperless container logs: docker logs paperless-ngx"
+                    "Paperless /api/custom_fields/ returns 500. "
+                    "This is likely a Paperless-side issue (DB migration or corrupt field). "
+                    "Check Paperless container logs: docker logs paperless-ngx"
                 )
             resp = resp2
         resp.raise_for_status()
@@ -401,7 +407,9 @@ class PaperlessClient:
         """
         client = self._get_client()
         if on_progress:
-            await on_progress("metadata", "Loading correspondents, tags, and document types...", 0, 0)
+            await on_progress(
+                "metadata", "Loading correspondents, tags, and document types...", 0, 0
+            )
 
         correspondents: dict[int, str] = {}
         page = 1
@@ -463,7 +471,12 @@ class PaperlessClient:
             logger.info(
                 "Paperless fetch complete: endpoint=%s docs=%d pages=%d duration=%.2fs "
                 "limit=%s stopped_early=%s",
-                endpoint, len(results), pages_fetched, time.monotonic() - start, limit, stopped_early,
+                endpoint,
+                len(results),
+                pages_fetched,
+                time.monotonic() - start,
+                limit,
+                stopped_early,
             )
 
         resp = await client.get(endpoint, params={**params, "page": page})
@@ -487,7 +500,9 @@ class PaperlessClient:
             data = resp.json()
             results.extend(data.get("results", []))
             if on_progress:
-                await on_progress("fetching", "Fetching documents...", min(len(results), total), total)
+                await on_progress(
+                    "fetching", "Fetching documents...", min(len(results), total), total
+                )
             # Stop early if we've gathered enough results
             if limit is not None and len(results) >= limit:
                 _log_perf(page, stopped_early=True)
@@ -521,7 +536,9 @@ class PaperlessClient:
             self._tag_name_to_id_cache = {tag["name"]: tag["id"] for tag in tags}
         return self._tag_name_to_id_cache
 
-    async def _resolve_correspondent_id(self, client: httpx.AsyncClient, name: str) -> Optional[int]:
+    async def _resolve_correspondent_id(
+        self, client: httpx.AsyncClient, name: str
+    ) -> Optional[int]:
         """Resolve correspondent name to ID."""
         resp = await client.get("/api/correspondents/", params={"name__icontains": name})
         resp.raise_for_status()
@@ -529,7 +546,9 @@ class PaperlessClient:
         results = data["results"] if isinstance(data, dict) and "results" in data else data
         return results[0]["id"] if results else None
 
-    async def _resolve_document_type_id(self, client: httpx.AsyncClient, name: str) -> Optional[int]:
+    async def _resolve_document_type_id(
+        self, client: httpx.AsyncClient, name: str
+    ) -> Optional[int]:
         """Resolve document type name to ID."""
         resp = await client.get("/api/document_types/", params={"name__icontains": name})
         resp.raise_for_status()
@@ -545,6 +564,7 @@ ProgressCallback = Callable[[str, str, int, int], Coroutine[Any, Any, None]]
 # ------------------------------------------------------------------
 # Fixture loading (for tests and offline development)
 # ------------------------------------------------------------------
+
 
 def load_fixture(fixture_path: str) -> list[dict]:
     """Load documents from a JSON fixture file."""

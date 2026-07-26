@@ -47,7 +47,9 @@ async def fetch_paperless_documents(
     raw_documents = await client.list_documents(on_progress=on_progress)
 
     if on_progress:
-        await on_progress("processing", "Processing documents...", len(raw_documents), len(raw_documents))
+        await on_progress(
+            "processing", "Processing documents...", len(raw_documents), len(raw_documents)
+        )
 
     return [
         DocumentRecord(
@@ -55,7 +57,9 @@ async def fetch_paperless_documents(
             title=item.get("title") or "Untitled",
             correspondent_id=item.get("correspondent"),
             correspondent_name=correspondents.get(item.get("correspondent"), "Unknown"),
-            document_type=document_types.get(item.get("document_type")) if item.get("document_type") is not None else None,
+            document_type=document_types.get(item.get("document_type"))
+            if item.get("document_type") is not None
+            else None,
             created=item["created_date"] if item.get("created_date") else item["created"],
             added=item.get("added"),
             tags=[tags.get(tag_id, str(tag_id)) for tag_id in item.get("tags", [])],
@@ -63,4 +67,3 @@ async def fetch_paperless_documents(
         )
         for item in raw_documents
     ]
-

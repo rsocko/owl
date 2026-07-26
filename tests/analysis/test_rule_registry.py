@@ -81,14 +81,16 @@ class TestRuleRegistry:
         assert rule.params["comparison_window"] == 6
 
     def test_create_custom_rule(self):
-        rule = create_custom_rule({
-            "id": "my-custom-rule",
-            "name": "My Custom Rule",
-            "description": "A custom test rule",
-            "tier": "basic",
-            "trigger": {"type": "manual"},
-            "params": {"threshold": 42},
-        })
+        rule = create_custom_rule(
+            {
+                "id": "my-custom-rule",
+                "name": "My Custom Rule",
+                "description": "A custom test rule",
+                "tier": "basic",
+                "trigger": {"type": "manual"},
+                "params": {"threshold": 42},
+            }
+        )
 
         assert rule.id == "my-custom-rule"
         assert rule.source == "custom"
@@ -98,11 +100,13 @@ class TestRuleRegistry:
         assert fetched is not None
 
     def test_delete_custom_rule(self):
-        create_custom_rule({
-            "id": "deletable-rule",
-            "name": "Deletable",
-            "trigger": {"type": "manual"},
-        })
+        create_custom_rule(
+            {
+                "id": "deletable-rule",
+                "name": "Deletable",
+                "trigger": {"type": "manual"},
+            }
+        )
 
         assert delete_custom_rule("deletable-rule") is True
         assert get_rule("deletable-rule") is None

@@ -43,10 +43,16 @@ def _serialize_alert(a: Alert) -> dict[str, Any]:
 
 @router.get("/alerts")
 async def list_alerts(
-    module: str | None = Query(default=None, description="Filter by module: statements, eob, action_queue"),
-    severity: str | None = Query(default=None, description="Filter by severity: critical, high, medium, low, info"),
+    module: str | None = Query(
+        default=None, description="Filter by module: statements, eob, action_queue"
+    ),
+    severity: str | None = Query(
+        default=None, description="Filter by severity: critical, high, medium, low, info"
+    ),
     acknowledged: bool | None = Query(default=None, description="Filter by acknowledged state"),
-    resolved: bool | None = Query(default=False, description="Include resolved alerts (default: False)"),
+    resolved: bool | None = Query(
+        default=False, description="Include resolved alerts (default: False)"
+    ),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:

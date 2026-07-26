@@ -14,7 +14,11 @@ from doc_intelligence_hub.modules.eob_matching.llm_extractor import (
     validate_bill_extraction,
     validate_eob_extraction,
 )
-from doc_intelligence_hub.modules.eob_matching.models import ExtractedBill, ExtractedEOB, ServiceLine
+from doc_intelligence_hub.modules.eob_matching.models import (
+    ExtractedBill,
+    ExtractedEOB,
+    ServiceLine,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +214,10 @@ class TestExtractEOBLLMFallback:
             new_callable=AsyncMock,
             return_value=bad_llm_response,
         ):
-            result = await extract_eob_llm("Provider Name: City Med\nDate of Service: 01/15/2024\nPatient Responsibility: $36.00", "eob-test")
+            result = await extract_eob_llm(
+                "Provider Name: City Med\nDate of Service: 01/15/2024\nPatient Responsibility: $36.00",
+                "eob-test",
+            )
             # Should fall back to regex extractor (which extracts from text)
             assert result.document_id == "eob-test"
 
@@ -273,5 +280,7 @@ class TestExtractBillLLMFallback:
             new_callable=AsyncMock,
             return_value=bad_response,
         ):
-            result = await extract_bill_llm("Provider: Clinic\nTotal Amount: $250.00\nDate of Service: 01/15/2024", "bill-test")
+            result = await extract_bill_llm(
+                "Provider: Clinic\nTotal Amount: $250.00\nDate of Service: 01/15/2024", "bill-test"
+            )
             assert result.document_id == "bill-test"

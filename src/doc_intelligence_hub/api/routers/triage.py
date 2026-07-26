@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -55,22 +55,32 @@ _ORPHAN_DEFER_DAYS = 30
 
 
 class ResolveRequest(BaseModel):
-    action: str = Field(..., description="Resolution action (e.g. 'confirm', 'reject', 'manual_link')")
+    action: str = Field(
+        ..., description="Resolution action (e.g. 'confirm', 'reject', 'manual_link')"
+    )
     payload: dict[str, Any] | None = Field(default=None, description="Action-specific details")
 
 
 class DeferRequest(BaseModel):
-    until: str | None = Field(default=None, description="ISO timestamp to defer until (default: 7 days from now)")
+    until: str | None = Field(
+        default=None, description="ISO timestamp to defer until (default: 7 days from now)"
+    )
 
 
 class BulkActionRequest(BaseModel):
     action: str = Field(..., description="Bulk action: 'confirm', 'reject', 'defer', or 'dismiss'")
-    item_ids: list[str] = Field(..., max_length=200, description="List of triage queue item IDs (max 200)")
-    payload: dict[str, Any] | None = Field(default=None, description="Action-specific details (e.g. defer until)")
+    item_ids: list[str] = Field(
+        ..., max_length=200, description="List of triage queue item IDs (max 200)"
+    )
+    payload: dict[str, Any] | None = Field(
+        default=None, description="Action-specific details (e.g. defer until)"
+    )
 
 
 class BulkConfirmThresholdRequest(BaseModel):
-    min_confidence: int = Field(default=90, ge=0, le=100, description="Minimum confidence percentage")
+    min_confidence: int = Field(
+        default=90, ge=0, le=100, description="Minimum confidence percentage"
+    )
 
 
 # ------------------------------------------------------------------
@@ -88,11 +98,20 @@ async def list_queue(
 ) -> dict[str, Any]:
     """List triage queue items with optional filters."""
     if type and type not in _VALID_ITEM_TYPES:
-        raise HTTPException(status_code=400, detail=f"Invalid type '{type}'. Must be one of: {', '.join(sorted(_VALID_ITEM_TYPES))}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid type '{type}'. Must be one of: {', '.join(sorted(_VALID_ITEM_TYPES))}",
+        )
     if status and status not in _VALID_STATUSES:
-        raise HTTPException(status_code=400, detail=f"Invalid status '{status}'. Must be one of: {', '.join(sorted(_VALID_STATUSES))}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status '{status}'. Must be one of: {', '.join(sorted(_VALID_STATUSES))}",
+        )
     if sort not in _VALID_SORTS:
-        raise HTTPException(status_code=400, detail=f"Invalid sort '{sort}'. Must be one of: {', '.join(sorted(_VALID_SORTS))}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid sort '{sort}'. Must be one of: {', '.join(sorted(_VALID_SORTS))}",
+        )
 
     items = list_queue_items(
         item_type=type,
@@ -209,7 +228,10 @@ def _get_orphan_item(item_id: str) -> dict[str, Any]:
     if not item:
         raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
     if item["item_type"] != "orphan_document":
-        raise HTTPException(status_code=400, detail=f"Item {item_id} is not an orphan_document (got {item['item_type']})")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Item {item_id} is not an orphan_document (got {item['item_type']})",
+        )
     return item
 
 
@@ -248,7 +270,9 @@ async def orphan_defer(item_id: str) -> dict[str, Any]:
             event_type="orphan_defer",
             target_type="document",
             target_id=result["target_id"],
-            payload_json=json.dumps({"reason": "waiting_for_match", "deferred_days": _ORPHAN_DEFER_DAYS}),
+            payload_json=json.dumps(
+                {"reason": "waiting_for_match", "deferred_days": _ORPHAN_DEFER_DAYS}
+            ),
         )
         session.add(event)
         session.commit()
@@ -262,10 +286,14 @@ async def orphan_defer(item_id: str) -> dict[str, Any]:
 async def orphan_self_pay(item_id: str) -> dict[str, Any]:
     """Mark an orphan as self-pay / no bill expected."""
     _get_orphan_item(item_id)
-    result = resolve_queue_item(item_id, "self_pay", {
-        "reason": "Self-pay or no bill expected",
-        "paperless_tags": ["no-bill-expected", "self-pay"],
-    })
+    result = resolve_queue_item(
+        item_id,
+        "self_pay",
+        {
+            "reason": "Self-pay or no bill expected",
+            "paperless_tags": ["no-bill-expected", "self-pay"],
+        },
+    )
     if not result:
         raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
     return {**result, "paperless_tags": ["no-bill-expected", "self-pay"]}
@@ -275,10 +303,14 @@ async def orphan_self_pay(item_id: str) -> dict[str, Any]:
 async def orphan_already_paid(item_id: str) -> dict[str, Any]:
     """Mark an orphan as already paid without requiring a bill document."""
     _get_orphan_item(item_id)
-    result = resolve_queue_item(item_id, "already_paid", {
-        "reason": "Payment confirmed without bill document",
-        "paperless_tags": ["already-paid"],
-    })
+    result = resolve_queue_item(
+        item_id,
+        "already_paid",
+        {
+            "reason": "Payment confirmed without bill document",
+            "paperless_tags": ["already-paid"],
+        },
+    )
     if not result:
         raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
     return {**result, "paperless_tags": ["already-paid"]}
@@ -288,10 +320,14 @@ async def orphan_already_paid(item_id: str) -> dict[str, Any]:
 async def orphan_not_medical(item_id: str) -> dict[str, Any]:
     """Mark an orphan as misclassified (not a medical document)."""
     _get_orphan_item(item_id)
-    result = resolve_queue_item(item_id, "not_medical", {
-        "reason": "Document misclassified — not a medical document",
-        "paperless_tags": ["not-medical", "misclassified"],
-    })
+    result = resolve_queue_item(
+        item_id,
+        "not_medical",
+        {
+            "reason": "Document misclassified — not a medical document",
+            "paperless_tags": ["not-medical", "misclassified"],
+        },
+    )
     if not result:
         raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
     return {**result, "paperless_tags": ["not-medical", "misclassified"]}

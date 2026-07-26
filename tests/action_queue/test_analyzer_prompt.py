@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer, ANALYSIS_PROMPT
+from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer
 
 
 class TestPromptBuildingWithIntegerTags:
@@ -24,7 +24,9 @@ class TestPromptBuildingWithIntegerTags:
             "content": "Amount due: $50",
             "tags": [3, 7, 12],  # Paperless returns tag IDs as ints
         }
-        with patch("doc_intelligence_hub.modules.action_queue.analyzer.chat_json", new_callable=AsyncMock) as mock_chat:
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.analyzer.chat_json", new_callable=AsyncMock
+        ) as mock_chat:
             mock_chat.return_value = {
                 "actions": [],
                 "document_assessment": {"requires_action": False},
@@ -46,7 +48,9 @@ class TestPromptBuildingWithIntegerTags:
             "tag_names": ["bills", "utilities"],
             "tags": [3, 7],
         }
-        with patch("doc_intelligence_hub.modules.action_queue.analyzer.chat_json", new_callable=AsyncMock) as mock_chat:
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.analyzer.chat_json", new_callable=AsyncMock
+        ) as mock_chat:
             mock_chat.return_value = {
                 "actions": [],
                 "document_assessment": {"requires_action": False},
@@ -64,7 +68,9 @@ class TestPromptBuildingWithIntegerTags:
             "content": "Thank you for your payment",
             "tags": [],
         }
-        with patch("doc_intelligence_hub.modules.action_queue.analyzer.chat_json", new_callable=AsyncMock) as mock_chat:
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.analyzer.chat_json", new_callable=AsyncMock
+        ) as mock_chat:
             mock_chat.return_value = {
                 "actions": [],
                 "document_assessment": {"requires_action": False},
@@ -80,7 +86,9 @@ class TestPromptBuildingWithIntegerTags:
             "content": "Some content",
             "tags": [1, "manual-tag", 99],
         }
-        with patch("doc_intelligence_hub.modules.action_queue.analyzer.chat_json", new_callable=AsyncMock) as mock_chat:
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.analyzer.chat_json", new_callable=AsyncMock
+        ) as mock_chat:
             mock_chat.return_value = {
                 "actions": [],
                 "document_assessment": {"requires_action": False},
