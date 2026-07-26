@@ -12,6 +12,8 @@ from typing import Any
 from sqlalchemy import (
     Column,
     DateTime,
+    Float,
+    Index,
     Integer,
     String,
     Text,
@@ -59,6 +61,28 @@ class CorrectionEvent(Base):
     target_type = Column(String, nullable=False)
     target_id = Column(String, nullable=False)
     payload_json = Column("payload", Text, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    created_by = Column(String, default="user")
+
+
+class ExtractionCorrection(Base):
+    """Tracks field-level corrections and confirmations for extracted document metadata."""
+
+    __tablename__ = "extraction_corrections"
+    __table_args__ = (
+        Index("idx_corrections_field", "field_name", "correction_type"),
+        Index("idx_corrections_document", "document_id"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex[:12])
+    document_id = Column(Integer, nullable=False)
+    field_name = Column(String, nullable=False)
+    original_value = Column(Text, nullable=True)
+    corrected_value = Column(Text, nullable=True)
+    confidence = Column(Float, nullable=True)  # original extraction confidence 0-100
+    correction_type = Column(String, nullable=False)  # 'confirmed', 'corrected', 'added'
+    source_region_json = Column("source_region", Text, nullable=True)  # bounding box / OCR region JSON
+    notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     created_by = Column(String, default="user")
 
@@ -443,3 +467,106 @@ def _item_to_dict(item: TriageQueueItem) -> dict[str, Any]:
         "resolved_action": item.resolved_action,
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }
+
+
+def _correction_to_dict(c: ExtractionCorrection) -> dict[str, Any]:
+    """Convert an ExtractionCorrection to a plain dict for JSON serialization."""
+    import json
+
+    source_region = None
+    if c.source_region_json:
+        try:
+            source_region = json.loads(c.source_region_json)
+        except (json.JSONDecodeError, TypeError):
+            source_region = c.source_region_json
+
+    return {
+        "id": c.id,
+        "document_id": c.document_id,
+        "field_name": c.field_name,
+        "original_value": c.original_value,
+        "corrected_value": c.corrected_value,
+        "confidence": c.confidence,
+        "correction_type": c.correction_type,
+        "source_region": source_region,
+        "notes": c.notes,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+        "created_by": c.created_by,
+    }
+
+
+# ------------------------------------------------------------------
+# Extraction Correction CRUD
+# ------------------------------------------------------------------
+
+
+def create_extraction_correction(
+    *,
+    document_id: int,
+    field_name: str,
+    original_value: str | None = None,
+    corrected_value: str | None = None,
+    confidence: float | None = None,
+    correction_type: str,
+    source_region: dict | None = None,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """Create an extraction correction record."""
+    import json
+
+    session = get_session()
+    try:
+        correction = ExtractionCorrection(
+            document_id=document_id,
+            field_name=field_name,
+            original_value=original_value,
+            corrected_value=corrected_value,
+            confidence=confidence,
+            correction_type=correction_type,
+            source_region_json=json.dumps(source_region) if source_region else None,
+            notes=notes,
+        )
+        session.add(correction)
+        session.commit()
+        session.refresh(correction)
+        return _correction_to_dict(correction)
+    finally:
+        session.close()
+
+
+def get_corrections_for_document(document_id: int) -> list[dict[str, Any]]:
+    """Get all extraction corrections for a document, newest first."""
+    session = get_session()
+    try:
+        rows = (
+            session.query(ExtractionCorrection)
+            .filter(ExtractionCorrection.document_id == document_id)
+            .order_by(ExtractionCorrection.created_at.desc())
+            .all()
+        )
+        return [_correction_to_dict(c) for c in rows]
+    finally:
+        session.close()
+
+
+def list_recent_corrections(
+    *,
+    limit: int = 100,
+    offset: int = 0,
+    correction_type: str | None = None,
+    field_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """List recent extraction corrections for training data export."""
+    session = get_session()
+    try:
+        query = session.query(ExtractionCorrection)
+        if correction_type:
+            query = query.filter(ExtractionCorrection.correction_type == correction_type)
+        if field_name:
+            query = query.filter(ExtractionCorrection.field_name == field_name)
+        query = query.order_by(ExtractionCorrection.created_at.desc())
+        rows = query.offset(offset).limit(limit).all()
+        return [_correction_to_dict(c) for c in rows]
+    finally:
+        session.close()
+
