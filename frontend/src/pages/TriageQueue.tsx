@@ -11,6 +11,7 @@ import {
   Tabs,
   Toast,
 } from '../components/ui';
+import EobMatchDetail from '../components/EobMatchDetail';
 import { endpoints } from '../lib/api';
 import '../styles/triage-queue.css';
 
@@ -541,7 +542,25 @@ export default function TriageQueue() {
           {/* ── Detail panel (right) ── */}
           <section className="triage-detail-panel">
             {selectedItem ? (
-              <>
+              selectedItem.item_type === 'eob_match_review' ? (
+                /* EOB Match Review — rich detail component (#834) */
+                <EobMatchDetail
+                  matchId={Number(selectedItem.target_id)}
+                  triageItemId={selectedItem.id}
+                  onResolved={() => {
+                    void loadData();
+                  }}
+                  onSkip={() => {
+                    // Advance to next item in the list
+                    const currentIndex = items.findIndex((i) => i.id === selectedItem.id);
+                    const nextItem = items[currentIndex + 1] ?? items[0];
+                    if (nextItem && nextItem.id !== selectedItem.id) {
+                      setSelectedId(nextItem.id);
+                    }
+                  }}
+                />
+              ) : (
+                <>
                 <div className="triage-detail-header">
                   <div>
                     <div className="triage-detail-title">{itemTitle(selectedItem)}</div>
@@ -644,6 +663,7 @@ export default function TriageQueue() {
                   </div>
                 </Card>
               </>
+              )
             ) : (
               <EmptyState
                 title="No triage item selected"

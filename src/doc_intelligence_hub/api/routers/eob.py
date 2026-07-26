@@ -59,6 +59,23 @@ class MatchUpdateRequest(BaseModel):
     notes: str | None = Field(default=None, description="Optional reviewer notes for this match decision")
 
 
+class MatchConfirmRequest(BaseModel):
+    notes: str | None = Field(default=None, description="Optional reviewer notes")
+    triage_item_id: str | None = Field(default=None, description="If provided, also resolve this triage queue item")
+
+
+class MatchRejectRequest(BaseModel):
+    reason: str | None = Field(default=None, description="Rejection reason")
+    reassign_to: int | None = Field(default=None, description="Alternative match ID to reassign to")
+    triage_item_id: str | None = Field(default=None, description="If provided, also resolve this triage queue item")
+
+
+class ManualMatchRequest(BaseModel):
+    eob_doc_id: int = Field(..., description="EOB document ID")
+    bill_doc_id: int = Field(..., description="Bill document ID")
+    notes: str | None = Field(default=None, description="Optional notes")
+
+
 # ------------------------------------------------------------------
 # Internal helpers
 # ------------------------------------------------------------------
@@ -144,6 +161,9 @@ def _serialize_match(m: MatchRecord, paperless_url: str = "") -> dict[str, Any]:
         "created_at": m.created_at.isoformat() if m.created_at else None,
         "confirmed_at": m.confirmed_at.isoformat() if m.confirmed_at else None,
         "notes": m.notes,
+        "user_status": m.user_status or "unreviewed",
+        "reviewed_at": m.reviewed_at.isoformat() if m.reviewed_at else None,
+        "user_notes": m.user_notes,
     }
 
 
@@ -648,6 +668,183 @@ async def purge_stale_records(body: PurgeStaleRequest | None = None) -> dict[str
                 "orphaned_matches_removed": result.orphaned_matches_removed,
                 "document_ids": result.document_ids,
             }
+    finally:
+        db.close()
+
+
+# ------------------------------------------------------------------
+# EOB Match Correction endpoints (triage-aware confirm/reject/manual)
+# ------------------------------------------------------------------
+
+
+def _resolve_triage_item(triage_item_id: str, action: str, match_id: int) -> None:
+    """Resolve a triage queue item and create a correction event."""
+    try:
+        from doc_intelligence_hub.modules.triage.database import resolve_queue_item
+
+        resolve_queue_item(triage_item_id, action, {"match_id": match_id})
+    except Exception:
+        pass  # Non-fatal: triage integration is best-effort
+
+
+@router.post("/matches/{match_id}/confirm")
+async def confirm_match(
+    request: Request,
+    match_id: int,
+    body: MatchConfirmRequest | None = None,
+) -> dict[str, Any]:
+    """Confirm a match — updates status, creates correction event, optionally resolves triage item."""
+    init_db()
+    db = get_db_session()
+    try:
+        match = db.query(MatchRecord).filter_by(id=match_id).first()
+        if not match:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
+
+        match.status = "confirmed"
+        match.user_status = "confirmed"
+        match.confirmed_at = datetime.now(UTC)
+        match.reviewed_at = datetime.now(UTC)
+        if body and body.notes:
+            match.notes = body.notes
+            match.user_notes = body.notes
+
+        db.add(MatchEvent(
+            match_id=match_id,
+            event_type="confirmed",
+            actor="user",
+            detail=f"Match confirmed by reviewer{(': ' + body.notes) if body and body.notes else ''}",
+        ))
+
+        # Write to Paperless if enabled
+        if _is_write_enabled(request) and not match.linked_in_paperless:
+            try:
+                client = make_paperless_client(request, timeout=30.0)
+                enricher = EOBEnricher(client)
+                await enricher.link_match(
+                    eob_document_id=match.eob_document_id,
+                    bill_document_id=match.bill_document_id,
+                    score=match.score,
+                    confidence=match.confidence,
+                )
+                match.linked_in_paperless = 1
+            except Exception:
+                pass  # Non-fatal
+
+        db.commit()
+
+        # Create correction event and resolve triage item
+        if body and body.triage_item_id:
+            _resolve_triage_item(body.triage_item_id, "confirm", match_id)
+
+        paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
+        return {
+            "status": "ok",
+            "match": _serialize_match(match, paperless_url),
+        }
+    finally:
+        db.close()
+
+
+@router.post("/matches/{match_id}/reject")
+async def reject_match(
+    request: Request,
+    match_id: int,
+    body: MatchRejectRequest | None = None,
+) -> dict[str, Any]:
+    """Reject a match — updates status, creates correction event, optionally resolves triage item."""
+    init_db()
+    db = get_db_session()
+    try:
+        match = db.query(MatchRecord).filter_by(id=match_id).first()
+        if not match:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
+
+        match.status = "rejected"
+        match.user_status = "rejected"
+        match.reviewed_at = datetime.now(UTC)
+        detail_parts = ["Match rejected by reviewer"]
+        if body and body.reason:
+            match.notes = body.reason
+            match.user_notes = body.reason
+            detail_parts.append(f"Reason: {body.reason}")
+        if body and body.reassign_to:
+            detail_parts.append(f"Reassigned to match #{body.reassign_to}")
+
+        db.add(MatchEvent(
+            match_id=match_id,
+            event_type="rejected",
+            actor="user",
+            detail=". ".join(detail_parts),
+        ))
+        db.commit()
+
+        # Resolve triage item
+        if body and body.triage_item_id:
+            _resolve_triage_item(body.triage_item_id, "reject", match_id)
+
+        paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
+        return {
+            "status": "ok",
+            "match": _serialize_match(match, paperless_url),
+        }
+    finally:
+        db.close()
+
+
+@router.post("/matches/manual")
+async def create_manual_match(body: ManualMatchRequest) -> dict[str, Any]:
+    """Create a manual EOB↔Bill match — placeholder for future implementation (#877)."""
+    from fastapi import HTTPException
+
+    raise HTTPException(
+        status_code=501,
+        detail="Manual match creation is not yet implemented. See #877.",
+    )
+
+
+@router.get("/candidates/{doc_id}")
+async def get_candidates(
+    request: Request,
+    doc_id: int,
+    type: str | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Find alternative match candidates for a document.
+
+    Returns other matches that share the same EOB or Bill document ID,
+    useful for re-linking when the current match is rejected.
+    """
+    init_db()
+    db = get_db_session()
+    try:
+        # Find matches that share the same EOB or Bill document
+        query = db.query(MatchRecord).filter(
+            (MatchRecord.eob_document_id == doc_id) | (MatchRecord.bill_document_id == doc_id)
+        )
+        if type == "eob":
+            query = db.query(MatchRecord).filter(MatchRecord.eob_document_id == doc_id)
+        elif type == "bill":
+            query = db.query(MatchRecord).filter(MatchRecord.bill_document_id == doc_id)
+
+        candidates = (
+            query
+            .filter(MatchRecord.score > 50)
+            .order_by(MatchRecord.score.desc())
+            .limit(limit)
+            .all()
+        )
+
+        paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
+        return {
+            "doc_id": doc_id,
+            "candidates": [_serialize_match(m, paperless_url) for m in candidates],
+            "count": len(candidates),
+        }
     finally:
         db.close()
 
