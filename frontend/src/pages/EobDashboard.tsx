@@ -190,6 +190,7 @@ export default function EobDashboard() {
   const [check, setCheck] = useState<EobCheckResponse | null>(null);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [alertBusyId, setAlertBusyId] = useState<string | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -215,6 +216,8 @@ export default function EobDashboard() {
       setUnmatched(Array.isArray(unmatchedRes) ? unmatchedRes : []);
       setCheck(checkRes);
       setAlerts(Array.isArray(alertsRes.alerts) ? alertsRes.alerts : []);
+      const latestRun = runsRes.runs?.[0] ?? resultsRes?.run;
+      setLastSyncedAt(latestRun?.finished_at ?? latestRun?.started_at ?? null);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load EOB dashboard.';
       setError(message);
@@ -247,6 +250,14 @@ export default function EobDashboard() {
     if (!validScores.length) return null;
     return validScores.reduce((sum, score) => sum + score, 0) / validScores.length;
   }, [matches]);
+
+  const totalDue = useMemo(() => {
+    if (!unmatched.length) return 0;
+    return unmatched.reduce((sum, item) => {
+      const amount = item.patient_responsibility ?? item.amount ?? 0;
+      return sum + (typeof amount === 'number' ? amount : 0);
+    }, 0);
+  }, [unmatched]);
 
   const handleRun = useCallback(async () => {
     setIsRunning(true);
@@ -355,6 +366,7 @@ export default function EobDashboard() {
     [matches],
   );
 
+
   if (loading) {
     return (
       <>
@@ -386,10 +398,16 @@ export default function EobDashboard() {
             <Badge tone={check?.read_only ? 'warning' : 'success'}>
               {check?.read_only ? 'Read-only mode' : 'Paperless writeback enabled'}
             </Badge>
+            {lastSyncedAt && (
+              <span className="eob-table-secondary">Last synced: {formatDateTime(lastSyncedAt)}</span>
+            )}
           </div>
         }
         actions={
           <div className="btn-group">
+            <Button variant="ghost" onClick={() => void loadDashboard()}>
+              🔄 Sync
+            </Button>
             <Button variant="ghost" onClick={() => navigate('/eob/unmatched')}>
               Unmatched queue
               <Badge tone={unmatched.length ? 'warning' : 'muted'}>{unmatched.length}</Badge>
@@ -428,6 +446,18 @@ export default function EobDashboard() {
             title="Average confidence"
             metric={formatPercent(avgConfidence)}
             desc="Average score across recent candidate matches"
+          />
+          <StatCard
+            title="Total due"
+            metric={formatCurrency(totalDue || null) === '—' ? '$0' : formatCurrency(totalDue)}
+            desc={`Across ${unmatched.length} unmatched bill${unmatched.length === 1 ? '' : 's'}`}
+            status={{ label: totalDue > 0 ? 'Outstanding' : 'Clear', tone: totalDue > 0 ? 'warning' : 'success' }}
+          />
+          <StatCard
+            title="Alerts"
+            metric={alerts.length}
+            desc="Unacknowledged EOB alerts needing attention"
+            status={{ label: alerts.length ? 'Needs attention' : 'Clear', tone: alerts.length ? 'danger' : 'success' }}
           />
           <StatCard
             title="Last run"
