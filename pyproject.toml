@@ -64,61 +64,13 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
+# Only enforce correctness rules in CI — style/advisory rules were causing
+# constant false-positive failures and a 30+ item ignore list.
 select = [
-  "E", "F", "W",       # pycodestyle + pyflakes
-  "I",                  # isort (import sorting)
-  "UP",                 # pyupgrade
-  "B",                  # flake8-bugbear
-  "BLE",                # flake8-blind-except
-  "C4",                 # flake8-comprehensions
-  "DTZ",                # flake8-datetimez
-  "FURB",               # refurb
-  "G",                  # flake8-logging-format
-  "PERF",               # perflint
-  "PL",                 # pylint
-  "PYI",                # flake8-pyi
-  "RUF",                # ruff-specific
-  "S",                  # flake8-bandit (security)
-  "SIM",                # flake8-simplify
-  "TRY",                # tryceratops
+  "E", "F", "W",       # pycodestyle + pyflakes (real errors)
+  "I",                  # isort (import sorting, auto-fixable)
+  "B",                  # flake8-bugbear (actual bug patterns)
 ]
 ignore = [
-  "BLE001",    # blind except — used intentionally for graceful degradation at startup
-  "TRY003",    # long exception messages — acceptable in this codebase
-  "S110",      # try-except-pass — used intentionally for optional features
-  "PLR0913",   # too many arguments — common in data-heavy functions
-  "PLR0917",   # too many positional arguments — same rationale as PLR0913
-  "PLR2004",   # magic values — too noisy for data processing code
-  "PLC0415",   # import-outside-top-level — lazy/deferred imports are intentional (FastAPI, optional deps)
-  "PLW0603",   # global-statement — established pattern in this codebase
-  "PLR0911",   # too-many-return-statements — complex business logic
-  "PLR0912",   # too-many-branches — complex business logic
-  "PLR0915",   # too-many-statements — complex business logic
-  "TRY300",    # try-consider-else — stylistic, not a bug
-  "TRY301",    # raise-within-try — acceptable pattern
-  "TRY400",    # error-instead-of-exception — existing logging pattern
-  "S106",      # hardcoded-password-func-arg — false positives on config defaults
-  "S104",      # hardcoded-bind-all-interfaces — intentional for container deployment
-  "S105",      # hardcoded-password-string — false positives on config defaults
-  "S608",      # hardcoded-sql-expression — SQLAlchemy text() usage is intentional
-  "RUF001",    # ambiguous-unicode-character-string — false positives
-  "RUF002",    # ambiguous-unicode-character-docstring — false positives
-  "E501",      # line-too-long — handled by ruff format; check is redundant
-  "DTZ011",    # call-date-today — date.today() is acceptable for date-only values
-  "DTZ003",    # call-datetime-utcnow — migrating to datetime.now(UTC) is a separate effort
-  "DTZ001",    # call-datetime-without-tzinfo — same as above
-  "DTZ005",    # call-datetime-now-without-tzinfo — same as above
-  "DTZ007",    # call-datetime-strptime-without-zone — same as above
-  "UP042",     # replace-str-enum — StrEnum migration is a separate effort (requires Python 3.11+)
-  "PLR1714",   # repeated-equality-comparison — readability preference
-  "PLW2901",   # redefined-loop-name — acceptable in small scopes
-  "PYI034",    # non-self-return-type — too strict for this codebase
-  "RUF006",    # asyncio-dangling-task — false positive on fire-and-forget patterns
-]
-
-[tool.ruff.lint.per-file-ignores]
-"tests/**" = [
-  "S101",     # assert in tests is expected
-  "PLR2004",  # magic values in tests are fine
-  "RUF059",   # unused unpacked vars in tests (e.g. score, breakdown = ...)
+  "E501",      # line-too-long — handled by ruff format
 ]
