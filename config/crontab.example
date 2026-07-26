@@ -22,6 +22,9 @@ HUB_URL=http://localhost:8071
 # EOB Matching pipeline — weekly on Sunday at 10:00 AM
 0 10 * * 0  ***REMOVED*** -sf -X POST "$HUB_URL/api/eob/run" -H 'Content-Type: application/json' -d '{"limit":200,"tags":["medical"]}' -o /dev/null && echo "[$(date)] EOB matching OK" >> /var/log/doc-intelligence-cron.log
 
+# EOB Benchmark — weekly on Monday at 6:00 AM
+0 6 * * 1   ***REMOVED*** -sf -X POST "$HUB_URL/api/eob/benchmark" -H 'Content-Type: application/json' -d '{"models":["phi3:mini","gpt-4o-mini","gpt-4o"],"limit":5,"trigger":"scheduled"}' -o /dev/null && echo "[$(date)] EOB benchmark OK" >> /var/log/doc-intelligence-cron.log
+
 # --- Action Queue ---
 
 # Action Queue processing — daily at 8:00 AM and 2:00 PM

@@ -48,6 +48,17 @@ DEFAULT_SCHEDULES: dict[str, dict[str, Any]] = {
         "limit": 200,
         "enabled": True,
     },
+    "eob_benchmark": {
+        "cron": "0 6 * * 1",
+        "endpoint": "/api/eob/benchmark",
+        "method": "POST",
+        "body": {
+            "models": ["phi3:mini", "gpt-4o-mini", "gpt-4o"],
+            "limit": 5,
+            "trigger": "scheduled",
+        },
+        "enabled": True,
+    },
 }
 
 

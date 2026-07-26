@@ -145,6 +145,42 @@ class MatchEvent(Base):
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
 
 
+class BenchmarkRun(Base):
+    """Record of each benchmark execution (manual or scheduled)."""
+
+    __tablename__ = "benchmark_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    started_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
+    finished_at = Column(DateTime, nullable=True)
+    documents_tested = Column(Integer, default=0)
+    models_tested = Column(Integer, default=0)
+    trigger = Column(String, default="manual")  # manual, scheduled
+    status = Column(String, default="running")  # running, completed, failed
+
+
+class BenchmarkModelResult(Base):
+    """Per-model results from a single benchmark run."""
+
+    __tablename__ = "benchmark_model_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, nullable=False, index=True)
+    model = Column(String, nullable=False)
+    documents_tested = Column(Integer, default=0)
+    avg_time_seconds = Column(Float, default=0.0)
+    success_rate = Column(Float, default=0.0)
+    avg_confidence = Column(Float, default=0.0)
+    total_time_seconds = Column(Float, default=0.0)
+    estimated_cost_usd = Column(Float, nullable=True)
+    results_json = Column(Text, nullable=True)  # JSON array of per-document results
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "model", name="uq_benchmark_run_model"),
+    )
+
+
 # ------------------------------------------------------------------
 # Engine / session helpers
 # ------------------------------------------------------------------
@@ -302,3 +338,83 @@ def get_match_events(session: Session, match_id: int) -> list[MatchEvent]:
         .order_by(MatchEvent.created_at.asc())
         .all()
     )
+
+
+# ------------------------------------------------------------------
+# Benchmark persistence helpers
+# ------------------------------------------------------------------
+
+
+def store_benchmark_run(session: Session, run: BenchmarkRun) -> BenchmarkRun:
+    """Persist a BenchmarkRun and return it with populated id."""
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+    return run
+
+
+def store_benchmark_result(session: Session, result: BenchmarkModelResult) -> BenchmarkModelResult:
+    """Persist a BenchmarkModelResult and return it with populated id."""
+    session.add(result)
+    session.commit()
+    session.refresh(result)
+    return result
+
+
+def latest_benchmark_runs(session: Session, limit: int = 20) -> list[BenchmarkRun]:
+    """Return recent benchmark runs, newest first."""
+    return (
+        session.query(BenchmarkRun)
+        .order_by(BenchmarkRun.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def get_benchmark_run(session: Session, run_id: int) -> BenchmarkRun | None:
+    """Return a single benchmark run by id."""
+    return session.query(BenchmarkRun).filter_by(id=run_id).first()
+
+
+def get_benchmark_results(session: Session, run_id: int) -> list[BenchmarkModelResult]:
+    """Return all model results for a benchmark run."""
+    return (
+        session.query(BenchmarkModelResult)
+        .filter_by(run_id=run_id)
+        .order_by(BenchmarkModelResult.success_rate.desc())
+        .all()
+    )
+
+
+def get_benchmark_model_history(
+    session: Session, model: str, limit: int = 20,
+) -> list[BenchmarkModelResult]:
+    """Return recent benchmark results for a specific model, newest first."""
+    return (
+        session.query(BenchmarkModelResult)
+        .filter_by(model=model)
+        .join(BenchmarkRun, BenchmarkRun.id == BenchmarkModelResult.run_id)
+        .order_by(BenchmarkRun.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def get_previous_benchmark_results(
+    session: Session, current_run_id: int,
+) -> list[BenchmarkModelResult]:
+    """Return model results from the benchmark run immediately before *current_run_id*."""
+    current = session.query(BenchmarkRun).filter_by(id=current_run_id).first()
+    if current is None:
+        return []
+    previous = (
+        session.query(BenchmarkRun)
+        .filter(BenchmarkRun.id != current_run_id)
+        .filter(BenchmarkRun.started_at < current.started_at)
+        .filter(BenchmarkRun.status == "completed")
+        .order_by(BenchmarkRun.started_at.desc())
+        .first()
+    )
+    if previous is None:
+        return []
+    return get_benchmark_results(session, previous.id)
