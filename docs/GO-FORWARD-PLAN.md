@@ -1,6 +1,6 @@
 # Doc Intelligence — Gap Analysis, Duplicate Check & Go-Forward Plan
 
-*Date: 2026-07-25*
+*Date: 2026-07-25 · Updated: 2026-07-26*
 
 This document captures the results of a comprehensive audit comparing all 14 UI mockups, 30+ design docs, the full frontend/backend implementation, and ~55 open GitHub issues for the Document Intelligence Hub. It identifies gaps, duplicates, and provides a phased go-forward plan.
 
@@ -68,7 +68,7 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 | **#870** Insights page — trends/charts | **#828** Analysis Engine & Insights | #870 is the UI; #828 is engine + UI. Insights UI is in both. | Keep both — #828 is backend engine, #870 is frontend. Add cross-references. |
 | **#834** EOB Match Review UI (design) | **#882, #878, #871, #874, #873** (doc-hub-ui) | #834 is the epic; the 5 issues are specific feature gaps | Keep all — #834 is the parent epic. Add "Part of #834" to each sub-issue. |
 | **#832** Unified Triage Queue UI | **#868** Bulk actions in Triage Queue | #868 is a specific feature within #832 | Keep both — #868 is a sub-task of #832. |
-| **#831** Orphan Management UI | **#826** Triage view of docs with nothing to do | #826 is a vague idea that #831 fully encompasses | Close #826 — #831 covers the "what to do with docs that have no action" use case |
+| **#831** Orphan Management UI | **#826** Triage view of docs with nothing to do | #826 is a vague idea that #831 fully encompasses | ✅ #826 closed |
 | **#160** Paperless-Enhanced OCR (umbrella) | **#736-#740** OCR sub-issues | #160 is the original idea; #736-740 are the decomposed tasks | Keep all — #160 is the umbrella. Already cross-referenced. |
 
 ### 🟢 NOT DUPLICATES (appear similar but distinct)
@@ -81,11 +81,11 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 
 ### Recommended Cleanup Actions
 1. ~~**Close #833** → reference #869 (Rules Config duplicate)~~ ✅ Done
-2. **Close #826** → reference #831 (Orphan management covers this)
+2. ~~**Close #826** → reference #831 (Orphan management covers this)~~ ✅ Done
 3. **Add parent/child references** to #834 for issues #882, #878, #871, #874, #873
 4. **Cross-reference #870 ↔ #828** (frontend vs backend)
 5. **Cross-reference #832 ↔ #868** (parent ↔ sub-task)
-6. **Close remaining implemented issues** — #877, #872, #831, #830, #829, #834, #902 have merged PRs but are still open on GitHub
+6. ~~**Close remaining implemented issues** — #877, #872, #831, #830, #829, #834, #902~~ ✅ All closed on GitHub
 
 ---
 
@@ -98,12 +98,12 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 | 887 | Fix Statement Discovery | ✅ Done |
 | 844 | EOB: Add --use-llm flag to CLI | ✅ Done |
 | 845 | EOB: Cross-run document deduplication | ✅ Done |
-| 846 | EOB: Set up scheduled execution (cron/Dockhand) | Open |
-| 849 | EOB: Automated benchmark scheduling | Open |
-| 850 | EOB: Payment tracking integration | Open |
-| 851 | EOB: Notification/alerting for new matches | Open |
+| 846 | EOB: Set up scheduled execution (cron/Dockhand) | ✅ Done (PR #937) |
+| 849 | EOB: Automated benchmark scheduling | ✅ Done (PR #943) |
+| 850 | EOB: Payment tracking integration | ✅ Done (PR #938) |
+| 851 | EOB: Notification/alerting for new matches | ✅ Done (PR #945) |
 | 852 | EOB: Include extraction details in API results | ✅ Done |
-| 843 | EOB: Insurance coverage analysis | Open |
+| 843 | EOB: Insurance coverage analysis | ✅ Done |
 
 ### Doc Hub UI — Quick Wins
 | # | Title | Status |
@@ -117,14 +117,14 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 ### Doc Hub UI — Medium Effort
 | # | Title | Status |
 |---|-------|--------|
-| 882 | Amount validation pass/fail cards | Open |
+| 882 | Amount validation pass/fail cards | ✅ Done |
 | 884 | Unmatched view filters + suggested matches | ✅ Done |
 | 883 | Loading skeletons matching card shapes | ✅ Done |
 | 877 | Manual Match Search as modal overlay | ✅ Done (PR #932) |
 | 874 | Alternative matches display | ✅ Done |
 | 872 | Document preview links + Paperless integration | ✅ Done (PR #930) |
-| 870 | Insights page — trend charts + sparklines | Open |
-| 869 | Rules Config — full rule editor | Open |
+| 870 | Insights page — trend charts + sparklines | ✅ Done (PR #951) |
+| 869 | Rules Config — full rule editor | ✅ Done (PR #936) |
 | 868 | Bulk actions in Triage Queue | ✅ Done |
 | 903 | Unmatched view bulk actions | ✅ Done |
 | 902 | Statement series timeline + split/merge | ✅ Done (PR #929) |
@@ -135,12 +135,12 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 |---|-------|--------|
 | 832 | Unified Triage Queue UI | ✅ Done |
 | 834 | EOB ↔ Bill Match Review UI | ✅ Done (PR #927) |
-| 835 | Dashboard, Correction History + Account # | Open |
+| 835 | Dashboard, Correction History + Account # | ✅ Done |
 | 831 | Orphan Document Management UI | ✅ Done (PR #933) |
 | 830 | Duplicate Detection & Merge UI | ✅ Done (PR #925) |
 | 829 | Statement Grouping Correction UI | ✅ Done (PR #928) |
 | 827 | Metadata Correction & Writeback UI | ✅ Done |
-| 828 | Analysis Engine & Insights System | Open |
+| 828 | Analysis Engine & Insights System | ✅ Done (PR #947) |
 | 833 | Rules Configuration UI | **DUPLICATE — closed** |
 
 ### Design / UX
@@ -209,7 +209,7 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 
 ---
 
-### Phase 2: EOB Matching Completion (Weeks 3-5) 🏥 ✅ NEARLY COMPLETE
+### Phase 2: EOB Matching Completion (Weeks 3-5) 🏥 ✅ COMPLETE
 **Goal:** Complete the EOB matching loop end-to-end.
 
 | Priority | Issue | Description                                |      |
@@ -224,7 +224,7 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 | P2       | #844  | Add --use-llm flag to CLI                  | done |
 | P2       | #845  | Cross-run document deduplication           | done |
 
-**Exit Criteria:** EOB matching dashboard is fully functional with rich match review, unmatched management, and deduplication.
+**Exit Criteria:** ✅ All met — EOB matching dashboard is fully functional with rich match review, unmatched management, and deduplication.
 
 ---
 
@@ -269,17 +269,19 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 ### Phase 5: Infrastructure & Integration (Weeks 10-12) 🔗
 **Goal:** Harden infrastructure and integrate with ecosystem.
 
-| Priority | Issue | Description |
-|----------|-------|-------------|
-| P5 | #836 | Migrate DocIntel to its own repo |
-| P5 | #815 | Coordinate pipeline with Tagvico |
-| P5 | #795 | Use Bifrost virtual key (hardening — LLM auth already working) |
-| P5 | #816 | Evaluate Copilot SDK as AI provider |
-| P5 | #865 | DocType/Tag review |
-| P5 | #843 | Insurance coverage analysis |
-| P5 | #905 | Sidebar navigation layout |
-| P5 | #810 | First-run / onboarding experience |
-| P5 | #805 | Mobile/responsive experience |
+| Priority | Issue | Description | Status |
+|----------|-------|-------------|--------|
+| P5 | #836 | Migrate DocIntel to its own repo | Open |
+| P5 | #815 | Coordinate pipeline with Tagvico | Open |
+| P5 | #795 | Use Bifrost virtual key (hardening — LLM auth already working) | Open |
+| P5 | #816 | Evaluate Copilot SDK as AI provider | Open |
+| P5 | #865 | DocType/Tag review | Open |
+| P5 | #843 | Insurance coverage analysis | ✅ Done |
+| P5 | #935 | EOB coverage endpoint: migrate to SQL aggregation for scale | Open |
+| P5 | #905 | Sidebar navigation layout | Open |
+| P5 | #810 | First-run / onboarding experience | Open |
+| P5 | #805 | Mobile/responsive experience | Open |
+| P5 | #847 | Historical trending + run history dashboard | Open |
 
 **Exit Criteria:** DI Hub is standalone, integrated with Tagvico, and has a polished UX.
 
@@ -315,15 +317,41 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 
 | Category | Count |
 |----------|-------|
-| Total DI-related issues tracked | ~55 (including 5 new) |
-| Issues completed (closed or PR merged) | ~30 |
-| Likely duplicates closed | 1 of 2 (#833 closed; #826 still open) |
+| Total DI-related issues tracked | ~57 (including 5 new + #935, #847) |
+| Issues completed (closed on GitHub) | ~42 |
+| Issues still open | ~15 |
+| Likely duplicates closed | 2 of 2 (#833, #826 both closed) |
 | Issues needing cross-references | ~8 pairs |
 | Phases of work | 7 (0-6 + future) |
 | **Phase 0** | ✅ Complete |
 | **Phase 1** | ✅ Complete (except #876 deferred) |
-| **Phase 2** | ✅ Nearly complete (8/9 done; #882 remaining) |
-| **Phase 3** | ✅ Complete (all 10 done) |
-| **Phase 4** | Not started |
-| **Phase 5-7** | Not started |
-| Critical path blockers | ~~#887 (bug), #839 (live validation)~~ Both resolved |
+| **Phase 2** | ✅ Complete (all 9/9 done) |
+| **Phase 3** | ✅ Complete (all 10/10 done) |
+| **Phase 4** | ✅ Complete (all 8/8 done) |
+| **Phase 5** | 🔜 Next up — 1 done (#843), 9 open |
+| **Phase 6** | Not started (6 open) |
+| **Phase 7** | Not started (3 open) |
+| Critical path blockers | None — Phases 0-4 all clear |
+
+### Outstanding Open Issues (by phase)
+
+**Phase 5 — Infrastructure & Integration:**
+- #836 — Migrate DocIntel to its own repo
+- #815 — Coordinate pipeline with Tagvico
+- #795 — Use Bifrost virtual key for LLM auth
+- #816 — Evaluate Copilot SDK as AI provider
+- #865 — DocType/Tag review
+- #935 — EOB coverage endpoint: migrate to SQL aggregation
+- #905 — Sidebar navigation layout evaluation
+- #810 — First-run / onboarding experience
+- #805 — Mobile/responsive experience
+- #847 — Historical trending + run history dashboard
+
+**Phase 6 — OCR Pipeline (optional):**
+- #160, #736, #737, #738, #739, #740
+
+**Phase 7 — Cross-Platform Integration (future):**
+- #768, #765, #780
+
+**Deferred:** #876 (keyboard shortcuts)
+**Cleanup:** All duplicate issues closed ✅
