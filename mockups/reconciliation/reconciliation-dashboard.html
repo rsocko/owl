@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Intelligence — Reconciliation Dashboard</title>
+  <style>
+    :root {
+      --bg: #f5f6fa;
+      --card: #ffffff;
+      --border: #e0e3ea;
+      --text: #1a1d2e;
+      --muted: #6b7280;
+      --accent: #3498db;
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+      --purple: #8b5cf6;
+      --orange: #f97316;
+      --teal: #14b8a6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    .topnav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: 48px; gap: 24px; }
+    .topnav-brand { font-weight: 800; font-size: 15px; color: var(--accent); }
+    .topnav-links { display: flex; gap: 4px; }
+    .topnav-link { padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--muted); text-decoration: none; }
+    .topnav-link.active { color: var(--accent); background: #eef6ff; }
+    .topnav-link .badge { position: relative; top: -6px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; }
+
+    .page { max-width: 1200px; margin: 0 auto; padding: 20px 24px; }
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .page-title { font-size: 20px; font-weight: 800; }
+    .page-subtitle { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+    .btn { border: none; border-radius: 7px; padding: 9px 16px; font-size: 12px; cursor: pointer; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+
+    /* ── Recipe Cards ── */
+    .recipes-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px; }
+    .recipe-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; transition: box-shadow 0.15s; cursor: pointer; }
+    .recipe-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+    .recipe-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .recipe-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+    .recipe-icon.receipt { background: #d1fae5; }
+    .recipe-icon.order { background: #e0e7ff; }
+    .recipe-icon.eob { background: #fce7f3; }
+    .recipe-icon.insurance { background: #fef3c7; }
+    .recipe-icon.contract { background: #f3e8ff; }
+    .recipe-icon.bank { background: #e0f2fe; }
+    .recipe-card-title { font-weight: 700; font-size: 14px; }
+    .recipe-card-subtitle { font-size: 11px; color: var(--muted); }
+    .recipe-stats { display: flex; gap: 12px; margin-top: 10px; }
+    .recipe-stat { text-align: center; flex: 1; }
+    .recipe-stat-value { font-size: 20px; font-weight: 800; }
+    .recipe-stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+    .recipe-stat-value.success { color: var(--success); }
+    .recipe-stat-value.warning { color: var(--warning); }
+    .recipe-stat-value.danger { color: var(--danger); }
+    .recipe-status { display: inline-block; padding: 3px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; margin-top: 10px; }
+    .recipe-status.active { background: #d1fae5; color: #065f46; }
+    .recipe-status.disabled { background: #f3f4f6; color: var(--muted); }
+
+    /* ── Review Queue ── */
+    .section-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .section-title .count { background: var(--warning); color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+
+    .review-list { background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 24px; }
+    .review-item { display: flex; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); gap: 14px; }
+    .review-item:last-child { border-bottom: none; }
+    .review-item:hover { background: #f8f9fc; }
+    .review-confidence { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; border: 3px solid; }
+    .review-confidence.high { border-color: var(--success); color: var(--success); }
+    .review-confidence.medium { border-color: var(--warning); color: var(--warning); }
+    .review-confidence.low { border-color: var(--danger); color: var(--danger); }
+    .review-info { flex: 1; }
+    .review-title { font-weight: 700; font-size: 13px; }
+    .review-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .review-recipe-tag { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; background: #eef6ff; color: var(--accent); }
+    .review-actions { display: flex; gap: 6px; }
+    .review-btn { border: none; border-radius: 6px; padding: 7px 12px; font-size: 11px; cursor: pointer; font-weight: 700; }
+    .review-btn.confirm { background: var(--success); color: #fff; }
+    .review-btn.reject { background: var(--danger); color: #fff; }
+    .review-btn.view { background: #f0f0f0; color: var(--muted); }
+
+    /* ── Activity Feed ── */
+    .activity-feed { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    .activity-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .activity-item:last-child { border-bottom: none; }
+    .activity-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+    .activity-dot.match { background: var(--success); }
+    .activity-dot.alert { background: var(--danger); }
+    .activity-dot.new { background: var(--accent); }
+    .activity-dot.pending { background: var(--warning); }
+    .activity-text { font-size: 13px; flex: 1; }
+    .activity-text strong { color: var(--text); }
+    .activity-time { font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+    /* ── Layout ── */
+    .two-col { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+  </style>
+</head>
+<body>
+
+<nav class="topnav">
+  <span class="topnav-brand">🦉 OWL</span>
+  <div class="topnav-links">
+    <a href="#" class="topnav-link">Dashboard</a>
+    <a href="#" class="topnav-link">Action Queue</a>
+    <a href="#" class="topnav-link">Statements</a>
+    <a href="#" class="topnav-link">Medical</a>
+    <a href="#" class="topnav-link active">Reconciliation <span class="badge">4</span></a>
+    <a href="#" class="topnav-link">Alerts</a>
+    <a href="#" class="topnav-link">Triage</a>
+  </div>
+</nav>
+
+<div class="page">
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">💰 Reconciliation Dashboard</h1>
+      <p class="page-subtitle">Cross-document matching engine — 4 active recipes, 3 pending reviews</p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-outline">⚙️ Manage Recipes</button>
+      <button class="btn btn-primary">▶ Run All Recipes</button>
+    </div>
+  </div>
+
+  <!-- Recipe Cards -->
+  <div class="recipes-grid">
+    <div class="recipe-card">
+      <div class="recipe-card-header">
+        <div class="recipe-icon receipt">🧾</div>
+        <div>
+          <div class="recipe-card-title">Receipt ↔ Bill</div>
+          <div class="recipe-card-subtitle">Payment confirmation matching</div>
+        </div>
+      </div>
+      <div class="recipe-stats">
+        <div class="recipe-stat">
+          <div class="recipe-stat-value success">12</div>
+          <div class="recipe-stat-label">Matched</div>
+        </div>
+        <div class="recipe-stat">
+          <div class="recipe-stat-value warning">3</div>
+          <div class="recipe-stat-label">Pending</div>
+        </div>
+        <div class="recipe-stat">
+          <div class="recipe-stat-value danger">1</div>
+          <div class="recipe-stat-label">Alert</div>
+        </div>
+      </div>
+      <span class="recipe-status active">● Active</span>
+    </div>
+
+    <div class="recipe-card">
+      <div class="recipe-card-header">
+        <div class="recipe-icon order">📦</div>
+        <div>
+          <div class="recipe-card-title">Order Lifecycle</div>
+          <div class="recipe-card-subtitle">Order → Invoice → Shipping</div>
+        </div>
+      </div>
+      <div class="recipe-stats">
+        <div class="recipe-stat">
+          <div class="recipe-stat-value success">5</div>
+          <div class="recipe-stat-label">Complete</div>
+        </div>
+        <div class="recipe-stat">
+          <div class="recipe-stat-value warning">2</div>
+          <div class="recipe-stat-label">In Transit</div>
+        </div>
+        <div class="recipe-stat">
+          <div class="recipe-stat-value">0</div>
+          <div class="recipe-stat-label">Alert</div>
+        </div>
+      </div>
+      <span class="recipe-status active">● Active</span>
+    </div>
+
+    <div class="recipe-card">
+      <div class="recipe-card-header">
+        <div class="recipe-icon eob">🏥</div>
+        <div>
+          <div class="recipe-card-title">EOB ↔ Bill</div>
+          <div class="recipe-card-subtitle">Medical matching (migrated)</div>
+        </div>
+      </div>
+      <div class="recipe-stats">
+        <div class="recipe-stat">
+          <div class="recipe-stat-value success">28</div>
+          <div class="recipe-stat-label">Matched</div>
+        </div>
+        <div class="recipe-stat">
+          <div class="recipe-stat-value warning">1</div>
+          <div class="recipe-stat-label">Review</div>
+        </div>
+        <div class="recipe-stat">
+          <div class="recipe-stat-value">0</div>
+          <div class="recipe-stat-label">Alert</div>
+        </div>
+      </div>
+      <span class="recipe-status active">● Active</span>
+    </div>
+
+    <div class="recipe-card">
+      <div class="recipe-card-header">
+        <div class="recipe-icon insurance">🛡️</div>
+        <div>
+          <div class="recipe-card-title">Insurance Premiums</div>
+          <div class="recipe-card-subtitle">Policy ↔ Premium ↔ Payment</div>
+        </div>
+      </div>
+      <div class="recipe-stats">
+        <div class="recipe-stat">
+          <div class="recipe-stat-value success">4</div>
+          <div class="recipe-stat-label">Policies</div>
+        </div>
+        <div class="recipe-stat">
+          <div class="recipe-stat-value">0</div>
+          <div class="recipe-stat-label">Pending</div>
+        </div>
+        <div class="recipe-stat">
+          <div class="recipe-stat-value">0</div>
+          <div class="recipe-stat-label">Alert</div>
+        </div>
+      </div>
+      <span class="recipe-status active">● Active</span>
+    </div>
+
+    <div class="recipe-card" style="opacity: 0.6;">
+      <div class="recipe-card-header">
+        <div class="recipe-icon contract">📑</div>
+        <div>
+          <div class="recipe-card-title">Contract ↔ Bills</div>
+          <div class="recipe-card-subtitle">Rate variance detection</div>
+        </div>
+      </div>
+      <div class="recipe-stats">
+        <div class="recipe-stat">
+          <div class="recipe-stat-value">—</div>
+          <div class="recipe-stat-label">Matched</div>
+        </div>
+        <div class="recipe-stat">
+          <div class="recipe-stat-value">—</div>
+          <div class="recipe-stat-label">Pending</div>
+        </div>
+        <div class="recipe-stat">
+          <div class="recipe-stat-value">—</div>
+          <div class="recipe-stat-label">Alert</div>
+        </div>
+      </div>
+      <span class="recipe-status disabled">○ Disabled</span>
+    </div>
+
+    <div class="recipe-card" style="opacity: 0.6;">
+      <div class="recipe-card-header">
+        <div class="recipe-icon bank">🏦</div>
+        <div>
+          <div class="recipe-card-title">Bank Statement</div>
+          <div class="recipe-card-subtitle">Full transaction reconciliation</div>
+        </div>
+      </div>
+      <div class="recipe-stats">
+        <div class="recipe-stat">
+          <div class="recipe-stat-value">—</div>
+          <div class="recipe-stat-label">Matched</div>
+        </div>
+        <div class="recipe-stat">
+          <div class="recipe-stat-value">—</div>
+          <div class="recipe-stat-label">Pending</div>
+        </div>
+        <div class="recipe-stat">
+          <div class="recipe-stat-value">—</div>
+          <div class="recipe-stat-label">Alert</div>
+        </div>
+      </div>
+      <span class="recipe-status disabled">○ Future</span>
+    </div>
+  </div>
+
+  <div class="two-col">
+    <div>
+      <!-- Review Queue -->
+      <div class="section-title">👁️ Pending Reviews <span class="count">4</span></div>
+      <div class="review-list">
+        <div class="review-item">
+          <div class="review-confidence medium">78%</div>
+          <div class="review-info">
+            <div class="review-title">Comcast Payment $89.99 ↔ Internet Bill Jul 2026</div>
+            <div class="review-meta">Provider match: 92% · Amount: exact · No reference # found</div>
+            <span class="review-recipe-tag">Receipt ↔ Bill</span>
+          </div>
+          <div class="review-actions">
+            <button class="review-btn confirm">✓</button>
+            <button class="review-btn reject">✗</button>
+            <button class="review-btn view">View</button>
+          </div>
+        </div>
+        <div class="review-item">
+          <div class="review-confidence medium">74%</div>
+          <div class="review-info">
+            <div class="review-title">Amazon Invoice $142.67 ↔ Order ORD-2026-4521</div>
+            <div class="review-meta">Order # partial match · Amount exact · Merchant: 88%</div>
+            <span class="review-recipe-tag">Order Lifecycle</span>
+          </div>
+          <div class="review-actions">
+            <button class="review-btn confirm">✓</button>
+            <button class="review-btn reject">✗</button>
+            <button class="review-btn view">View</button>
+          </div>
+        </div>
+        <div class="review-item">
+          <div class="review-confidence low">68%</div>
+          <div class="review-info">
+            <div class="review-title">UHC EOB #2026-1102 ↔ Urgent Care Bill</div>
+            <div class="review-meta">Date: 12 days apart · Provider fuzzy match · Amount off by $18</div>
+            <span class="review-recipe-tag">EOB ↔ Bill</span>
+          </div>
+          <div class="review-actions">
+            <button class="review-btn confirm">✓</button>
+            <button class="review-btn reject">✗</button>
+            <button class="review-btn view">View</button>
+          </div>
+        </div>
+        <div class="review-item">
+          <div class="review-confidence medium">76%</div>
+          <div class="review-info">
+            <div class="review-title">Electric Co Payment $156.23 ↔ Electric Bill Jul 2026</div>
+            <div class="review-meta">Amount exact · Provider: "ELEC CO" vs "Electric Company" (fuzzy) · Date: 3 days</div>
+            <span class="review-recipe-tag">Receipt ↔ Bill</span>
+          </div>
+          <div class="review-actions">
+            <button class="review-btn confirm">✓</button>
+            <button class="review-btn reject">✗</button>
+            <button class="review-btn view">View</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <!-- Activity Feed -->
+      <div class="section-title">📜 Recent Activity</div>
+      <div class="activity-feed">
+        <div class="activity-item">
+          <span class="activity-dot match"></span>
+          <div class="activity-text"><strong>Auto-matched:</strong> Spotify receipt → Jul subscription bill</div>
+          <span class="activity-time">2 min ago</span>
+        </div>
+        <div class="activity-item">
+          <span class="activity-dot new"></span>
+          <div class="activity-text"><strong>New bill:</strong> Electric Company $156.23 due Aug 1</div>
+          <span class="activity-time">45 min ago</span>
+        </div>
+        <div class="activity-item">
+          <span class="activity-dot alert"></span>
+          <div class="activity-text"><strong>⚠️ Double payment:</strong> Gym membership $49.99 paid twice</div>
+          <span class="activity-time">3 hrs ago</span>
+        </div>
+        <div class="activity-item">
+          <span class="activity-dot match"></span>
+          <div class="activity-text"><strong>Auto-matched:</strong> Amazon shipping notice → order ORD-4488</div>
+          <span class="activity-time">5 hrs ago</span>
+        </div>
+        <div class="activity-item">
+          <span class="activity-dot pending"></span>
+          <div class="activity-text"><strong>Needs review:</strong> Comcast receipt scored 78% against bill</div>
+          <span class="activity-time">6 hrs ago</span>
+        </div>
+        <div class="activity-item">
+          <span class="activity-dot match"></span>
+          <div class="activity-text"><strong>User confirmed:</strong> State Farm premium → Jan policy bill</div>
+          <span class="activity-time">1 day ago</span>
+        </div>
+        <div class="activity-item">
+          <span class="activity-dot new"></span>
+          <div class="activity-text"><strong>Recipe run:</strong> All recipes completed (4 new matches)</div>
+          <span class="activity-time">1 day ago</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
