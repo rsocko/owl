@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { PageHeader } from '../components/ui';
+import { Breadcrumb, PageHeader } from '../components/ui';
 import EobMatchDetail from '../components/EobMatchDetail';
 import '../styles/eob-pages.css';
 
@@ -23,15 +23,29 @@ export default function EobMatchReview() {
 
   if (!matchId || Number.isNaN(numericMatchId)) {
     return (
-      <PageHeader
-        title="Match review"
-        desc="Invalid match ID."
-      />
+      <>
+        <Breadcrumb
+          items={[
+            { label: 'EOB Matching', to: '/eob' },
+            { label: 'Match Review' },
+          ]}
+        />
+        <PageHeader
+          title="Match review"
+          desc="Invalid match ID."
+        />
+      </>
     );
   }
 
   return (
     <>
+      <Breadcrumb
+        items={[
+          { label: 'EOB Matching', to: '/eob' },
+          { label: 'Match Review' },
+        ]}
+      />
       <PageHeader
         title={
           <div className="eob-header-stack">

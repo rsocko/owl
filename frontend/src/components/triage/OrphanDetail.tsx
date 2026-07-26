@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Toast } from '../ui';
 import { endpoints } from '../../lib/api';
+import { getToastDuration } from '../../lib/toast';
 import '../../styles/orphan-detail.css';
 
 // ------------------------------------------------------------------
@@ -81,7 +82,9 @@ export default function OrphanDetail({ triageItem, onResolved, onSkip }: OrphanD
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timeout = window.setTimeout(() => setToast(null), 3500);
+    const duration = getToastDuration(toast.tone);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), duration);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
@@ -381,7 +384,7 @@ export default function OrphanDetail({ triageItem, onResolved, onSkip }: OrphanD
       {/* Toast */}
       {toast && (
         <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 1000 }}>
-          <Toast message={toast.message} tone={toast.tone} />
+          <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />
         </div>
       )}
     </div>

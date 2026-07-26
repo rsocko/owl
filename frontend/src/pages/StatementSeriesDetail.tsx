@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, Toast } from '../components/ui';
+import { Badge, Breadcrumb, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, Toast } from '../components/ui';
 import { endpoints } from '../lib/api';
+import { getToastDuration } from '../lib/toast';
 import '../styles/statement-series-detail.css';
 
 interface MissingStatement {
@@ -130,8 +131,10 @@ export default function StatementSeriesDetail() {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timeoutId = window.setTimeout(() => setToast(null), 4000);
-    return () => window.clearTimeout(timeoutId);
+    const duration = getToastDuration(toast.tone);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), duration);
+    return () => window.clearTimeout(timeout);
   }, [toast]);
 
   const seriesRows = useMemo(() => {
@@ -224,6 +227,12 @@ export default function StatementSeriesDetail() {
 
   return (
     <>
+      <Breadcrumb
+        items={[
+          { label: 'Statements', to: '/statements' },
+          { label: 'Series Detail' },
+        ]}
+      />
       <PageHeader
         title={`Statement series: ${seriesName}`}
         desc="Review the current missing-period snapshot for this provider and capture any provider-specific override details."
@@ -414,7 +423,7 @@ export default function StatementSeriesDetail() {
         </>
       ) : null}
 
-      {toast ? <Toast message={toast.message} tone={toast.tone} /> : null}
+      {toast ? <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} /> : null}
     </>
   );
 }
