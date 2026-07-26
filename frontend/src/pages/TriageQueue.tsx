@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Badge,
   Button,
   Card,
-  ConfidenceBar,
   EmptyState,
   ErrorState,
+  FilterPills,
   PageHeader,
   SkeletonLoader,
   Tabs,
@@ -15,497 +14,522 @@ import {
 import { endpoints } from '../lib/api';
 import '../styles/triage-queue.css';
 
-interface MatchBreakdown {
-  date?: number | null;
-  provider?: number | null;
-  patient?: number | null;
-  amount?: number | null;
-  procedures?: number | null;
-}
-
-interface MatchRecord {
-  id: number;
-  eob_document_id?: number | null;
-  bill_document_id?: number | null;
-  score?: number | null;
-  confidence?: string | null;
-  breakdown?: MatchBreakdown | null;
-  status?: string | null;
-  linked_in_paperless?: boolean;
-  eob_preview_url?: string | null;
-  bill_preview_url?: string | null;
-  created_at?: string | null;
-  confirmed_at?: string | null;
-  flag_reason?: string | null;
-}
-
-interface MatchesResponse {
-  matches?: MatchRecord[];
-}
-
-interface UnmatchedItem {
-  id: string;
-  provider?: string | null;
-  amount?: number | null;
-  date_of_service?: string | null;
-  patient_responsibility?: number | null;
-  document_url?: string | null;
-  created_at?: string | null;
-}
-
-type QueueKind = 'eob' | 'grouping' | 'orphan';
-type QueueFilter = 'all' | QueueKind;
-type ToastState = { message: string; tone?: 'success' | 'error' } | null;
+// ------------------------------------------------------------------
+// Types
+// ------------------------------------------------------------------
 
 interface TriageItem {
-  key: string;
-  kind: QueueKind;
-  title: string;
-  reason: string;
-  score?: number;
-  priority: 'high' | 'medium' | 'low';
-  createdAt?: string | null;
-  match?: MatchRecord;
-  orphan?: UnmatchedItem;
-  relatedUnmatched?: UnmatchedItem[];
+  id: string;
+  item_type: string;
+  priority: number;
+  status: string;
+  source: string;
+  target_type: string;
+  target_id: string;
+  reason: string | null;
+  metadata: Record<string, unknown> | null;
+  deferred_until: string | null;
+  resolved_at: string | null;
+  resolved_action: string | null;
+  created_at: string | null;
 }
 
-const priorityLabels: Record<'high' | 'medium' | 'low', string> = {
-  high: 'High',
-  medium: 'Medium',
-  low: 'Low',
-};
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 2,
-});
-
-function formatCurrency(value?: number | null) {
-  return typeof value === 'number' ? currencyFormatter.format(value) : '—';
+interface QueueResponse {
+  items: TriageItem[];
+  count: number;
+  offset: number;
+  limit: number;
 }
 
-function formatDate(value?: string | null) {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+interface StatsResponse {
+  total: number;
+  by_type: Record<string, number>;
+  by_status: Record<string, number>;
+  pending: number;
 }
 
-function formatDateTime(value?: string | null) {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
+type ItemTypeFilter = 'all' | 'eob_match_review' | 'grouping_anomaly' | 'orphan_document';
+type StatusFilter = 'pending' | 'deferred' | 'resolved';
+type ToastState = { message: string; tone?: 'success' | 'error'; undoId?: string } | null;
+
+// ------------------------------------------------------------------
+// Helpers
+// ------------------------------------------------------------------
 
 function timeAgo(value?: string | null) {
-  if (!value) return 'Unknown age';
+  if (!value) return 'Unknown';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   const diff = Math.max(0, Date.now() - date.getTime());
-  const days = Math.floor(diff / 86400000);
-  if (days === 0) return 'Today';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return mins <= 1 ? 'Just now' : `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
   if (days === 1) return '1d ago';
   return `${days}d ago`;
 }
 
-function valueToPercent(value?: number | null) {
-  if (typeof value !== 'number' || Number.isNaN(value)) return 0;
-  return Math.max(0, Math.min(100, Math.round(value)));
+function typeLabel(itemType: string): string {
+  switch (itemType) {
+    case 'eob_match_review': return 'EOB';
+    case 'grouping_anomaly': return 'GROUPING';
+    case 'orphan_document': return 'ORPHAN';
+    default: return itemType.toUpperCase();
+  }
 }
 
-function factorLabel(label: string, value?: number | null) {
-  const pct = valueToPercent(value);
-  if (pct >= 90) return `${label} aligns strongly`;
-  if (pct >= 70) return `${label} is close but worth a quick review`;
-  return `${label} has a meaningful mismatch`;
+function typeBadgeTone(itemType: string) {
+  switch (itemType) {
+    case 'eob_match_review': return 'info' as const;
+    case 'grouping_anomaly': return 'warning' as const;
+    case 'orphan_document': return 'danger' as const;
+    default: return 'muted' as const;
+  }
 }
 
-function mismatchLabel(value?: number | null) {
-  const pct = valueToPercent(value);
-  if (pct >= 90) return 'Aligned';
-  if (pct >= 70) return 'Close';
-  return 'Mismatch';
+function priorityLabel(priority: number): string {
+  if (priority >= 80) return 'High';
+  if (priority >= 50) return 'Medium';
+  return 'Low';
 }
 
-function mismatchClass(value?: number | null) {
-  const pct = valueToPercent(value);
-  if (pct >= 90) return 'ok';
-  if (pct >= 70) return 'warn';
-  return 'danger';
-}
-
-function weakestBreakdown(breakdown?: MatchBreakdown | null) {
-  const entries: Array<{ label: string; value: number }> = [
-    { label: 'Date', value: valueToPercent(breakdown?.date) },
-    { label: 'Provider', value: valueToPercent(breakdown?.provider) },
-    { label: 'Patient', value: valueToPercent(breakdown?.patient) },
-    { label: 'Amount', value: valueToPercent(breakdown?.amount) },
-    { label: 'Procedures', value: valueToPercent(breakdown?.procedures) },
-  ];
-
-  return entries.sort((left, right) => left.value - right.value)[0];
-}
-
-function priorityForScore(score?: number | null): 'high' | 'medium' | 'low' {
-  const safeScore = valueToPercent(score);
-  if (safeScore < 70) return 'high';
-  if (safeScore < 85) return 'medium';
-  return 'low';
-}
-
-function itemBadgeTone(kind: QueueKind) {
-  if (kind === 'eob') return 'info' as const;
-  if (kind === 'grouping') return 'warning' as const;
-  return 'danger' as const;
-}
-
-function priorityBadgeTone(priority: 'high' | 'medium' | 'low') {
-  if (priority === 'high') return 'danger' as const;
-  if (priority === 'medium') return 'warning' as const;
+function priorityBadgeTone(priority: number) {
+  if (priority >= 80) return 'danger' as const;
+  if (priority >= 50) return 'warning' as const;
   return 'muted' as const;
 }
 
-function itemBadgeLabel(kind: QueueKind) {
-  if (kind === 'eob') return 'EOB';
-  if (kind === 'grouping') return 'GROUPING';
-  return 'ORPHAN';
+function itemTitle(item: TriageItem): string {
+  const meta = item.metadata || {};
+  if (item.item_type === 'eob_match_review') {
+    const eobId = meta.eob_document_id ?? '?';
+    const billId = meta.bill_document_id ?? '?';
+    const scorePct = typeof meta.score_pct === 'number' ? `${meta.score_pct}%` : '';
+    return `EOB #${eobId} ↔ Bill #${billId}${scorePct ? ` (${scorePct})` : ''}`;
+  }
+  if (item.item_type === 'orphan_document') {
+    const provider = meta.provider_name || 'Unknown provider';
+    return `Orphan: ${provider} (doc #${meta.document_id ?? item.target_id})`;
+  }
+  if (item.item_type === 'grouping_anomaly') {
+    return `Grouping: ${meta.series_name || item.target_id}`;
+  }
+  return `${typeLabel(item.item_type)}: ${item.target_id}`;
 }
 
+// ------------------------------------------------------------------
+// Component
+// ------------------------------------------------------------------
+
+const UNDO_TIMEOUT_MS = 30_000;
+
 export default function TriageQueue() {
-  const navigate = useNavigate();
-  const [matches, setMatches] = useState<MatchRecord[]>([]);
-  const [unmatched, setUnmatched] = useState<UnmatchedItem[]>([]);
+  // Data state
+  const [items, setItems] = useState<TriageItem[]>([]);
+  const [stats, setStats] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<QueueFilter>('all');
+
+  // Filters
+  const [typeFilter, setTypeFilter] = useState<ItemTypeFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
+
+  // Selection
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const lastCheckedRef = useRef<string | null>(null);
+
+  // UI state
   const [collapsed, setCollapsed] = useState(false);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [toast, setToast] = useState<ToastState>(null);
-  const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [populating, setPopulating] = useState(false);
+  const undoTimerRef = useRef<number | null>(null);
+
+  // ------------------------------------------------------------------
+  // Data loading
+  // ------------------------------------------------------------------
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [matchesResponse, unmatchedResponse] = await Promise.all([
-        endpoints.eob.matches('status=candidate&limit=200') as Promise<MatchesResponse>,
-        endpoints.eob.unmatched() as Promise<UnmatchedItem[]>,
+      const params = new URLSearchParams();
+      if (typeFilter !== 'all') params.set('type', typeFilter);
+      params.set('status', statusFilter);
+      params.set('limit', '200');
+
+      const [queueRes, statsRes] = await Promise.all([
+        endpoints.triage.queue(params.toString()) as Promise<QueueResponse>,
+        endpoints.triage.stats() as Promise<StatsResponse>,
       ]);
 
-      setMatches(matchesResponse?.matches ?? []);
-      setUnmatched(unmatchedResponse ?? []);
+      setItems(queueRes?.items ?? []);
+      setStats(statsRes ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load triage items.');
+      setError(err instanceof Error ? err.message : 'Failed to load triage queue.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [typeFilter, statusFilter]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
+  // Auto-clear toast
   useEffect(() => {
     if (!toast) return undefined;
-    const timeout = window.setTimeout(() => setToast(null), 3200);
+    const timeout = window.setTimeout(() => setToast(null), toast.undoId ? UNDO_TIMEOUT_MS : 3200);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
-  const items = useMemo<TriageItem[]>(() => {
-    const matchItems = [...matches]
-      .sort((left, right) => valueToPercent(left.score) - valueToPercent(right.score))
-      .map((match) => {
-        const weakest = weakestBreakdown(match.breakdown);
-        const score = valueToPercent(match.score);
-        return {
-          key: `match-${match.id}`,
-          kind: 'eob' as const,
-          title: `EOB #${match.eob_document_id ?? '—'} ↔ Bill #${match.bill_document_id ?? '—'}`,
-          reason: match.flag_reason ?? `${weakest.label} factor needs review (${weakest.value}%).`,
-          score,
-          priority: priorityForScore(score),
-          createdAt: match.created_at,
-          match,
-        };
-      });
-
-    const providerGroups = unmatched.reduce<Record<string, UnmatchedItem[]>>((acc, item) => {
-      const key = (item.provider || 'Unknown provider').trim();
-      acc[key] = [...(acc[key] ?? []), item];
-      return acc;
-    }, {});
-
-    const groupingItems = Object.entries(providerGroups)
-      .filter(([, docs]) => docs.length > 1)
-      .map(([provider, docs]) => ({
-        key: `group-${provider}`,
-        kind: 'grouping' as const,
-        title: `${provider} — ${docs.length} unmatched documents`,
-        reason: 'Repeated unmatched documents suggest a grouping or series review issue.',
-        priority: docs.length >= 3 ? ('high' as const) : ('medium' as const),
-        createdAt: docs[0]?.created_at,
-        relatedUnmatched: docs,
-      }));
-
-    const groupedIds = new Set(groupingItems.flatMap((item) => item.relatedUnmatched?.map((doc) => doc.id) ?? []));
-    const orphanItems = unmatched
-      .filter((item) => !groupedIds.has(item.id))
-      .map((item) => ({
-        key: `orphan-${item.id}`,
-        kind: 'orphan' as const,
-        title: `${item.provider || 'Unknown provider'} invoice — no confirmed link`,
-        reason: 'No confirmed EOB match is currently available for this document.',
-        priority: (item.amount ?? item.patient_responsibility ?? 0) > 100 ? ('high' as const) : ('medium' as const),
-        createdAt: item.created_at,
-        orphan: item,
-      }));
-
-    return [...matchItems, ...groupingItems, ...orphanItems];
-  }, [matches, unmatched]);
-
-  const counts = useMemo(
-    () => ({
-      all: items.length,
-      eob: items.filter((item) => item.kind === 'eob').length,
-      grouping: items.filter((item) => item.kind === 'grouping').length,
-      orphan: items.filter((item) => item.kind === 'orphan').length,
-    }),
-    [items],
-  );
-
-  const filteredItems = useMemo(() => {
-    return filter === 'all' ? items : items.filter((item) => item.kind === filter);
-  }, [filter, items]);
-
-  useEffect(() => {
-    if (filteredItems.length === 0) {
-      setSelectedKey(null);
-      return;
-    }
-
-    if (!filteredItems.some((item) => item.key === selectedKey)) {
-      setSelectedKey(filteredItems[0]?.key ?? null);
-    }
-  }, [filteredItems, selectedKey]);
+  // ------------------------------------------------------------------
+  // Selection helpers
+  // ------------------------------------------------------------------
 
   const selectedItem = useMemo(
-    () => filteredItems.find((item) => item.key === selectedKey) ?? null,
-    [filteredItems, selectedKey],
+    () => items.find((item) => item.id === selectedId) ?? null,
+    [items, selectedId],
   );
 
-  const selectedMatchItems = useMemo(
-    () => items.filter((item) => selectedIds.includes(item.key) && item.match),
-    [items, selectedIds],
-  );
+  // Keep selectedId valid when items change
+  useEffect(() => {
+    if (items.length === 0) {
+      setSelectedId(null);
+      return;
+    }
+    if (!items.some((item) => item.id === selectedId)) {
+      setSelectedId(items[0]?.id ?? null);
+    }
+  }, [items, selectedId]);
 
-  const toggleSelection = (itemKey: string) => {
-    setSelectedIds((current) => (current.includes(itemKey) ? current.filter((value) => value !== itemKey) : [...current, itemKey]));
+  const toggleCheck = (itemId: string, shiftKey = false) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+
+      if (shiftKey && lastCheckedRef.current) {
+        const startIdx = items.findIndex((i) => i.id === lastCheckedRef.current);
+        const endIdx = items.findIndex((i) => i.id === itemId);
+        if (startIdx >= 0 && endIdx >= 0) {
+          const [lo, hi] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+          for (let i = lo; i <= hi; i++) {
+            next.add(items[i].id);
+          }
+          lastCheckedRef.current = itemId;
+          return next;
+        }
+      }
+
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      lastCheckedRef.current = itemId;
+      return next;
+    });
   };
 
   const selectAllVisible = () => {
-    const visibleKeys = filteredItems.map((item) => item.key);
-    const allSelected = visibleKeys.length > 0 && visibleKeys.every((key) => selectedIds.includes(key));
-    setSelectedIds(allSelected ? selectedIds.filter((id) => !visibleKeys.includes(id)) : Array.from(new Set([...selectedIds, ...visibleKeys])));
+    const allChecked = items.length > 0 && items.every((i) => checkedIds.has(i.id));
+    if (allChecked) {
+      setCheckedIds(new Set());
+    } else {
+      setCheckedIds(new Set(items.map((i) => i.id)));
+    }
   };
 
   const moveSelection = (direction: -1 | 1) => {
-    if (filteredItems.length === 0) return;
-    const currentIndex = filteredItems.findIndex((item) => item.key === selectedKey);
-    const nextIndex = currentIndex < 0 ? 0 : Math.max(0, Math.min(filteredItems.length - 1, currentIndex + direction));
-    setSelectedKey(filteredItems[nextIndex]?.key ?? null);
+    if (items.length === 0) return;
+    const idx = items.findIndex((i) => i.id === selectedId);
+    const next = idx < 0 ? 0 : Math.max(0, Math.min(items.length - 1, idx + direction));
+    setSelectedId(items[next]?.id ?? null);
   };
 
-  const skipSelected = () => {
-    if (!selectedItem) return;
-    const currentIndex = filteredItems.findIndex((item) => item.key === selectedItem.key);
-    const nextItem = filteredItems[currentIndex + 1] ?? filteredItems[currentIndex - 1] ?? null;
-    setSelectedKey(nextItem?.key ?? null);
-  };
+  // ------------------------------------------------------------------
+  // Actions
+  // ------------------------------------------------------------------
 
-  const updateMatchStatus = async (matchId: number, nextStatus: 'confirmed' | 'rejected') => {
-    setBusyKey(`match-${matchId}-${nextStatus}`);
+  const handleResolve = async (itemId: string, action: string) => {
+    setBusyAction(`${itemId}-${action}`);
     try {
-      await endpoints.eob.updateMatch(String(matchId), { status: nextStatus });
+      await endpoints.triage.resolve(itemId, { action });
+      setToast({ message: `Item ${action}ed.`, tone: 'success', undoId: itemId });
       await loadData();
-      setToast({ message: `Match ${nextStatus}.` });
-      setSelectedIds((current) => current.filter((value) => value !== `match-${matchId}`));
     } catch (err) {
-      setToast({ message: err instanceof Error ? err.message : 'Failed to update match.', tone: 'error' });
+      setToast({ message: err instanceof Error ? err.message : 'Action failed.', tone: 'error' });
     } finally {
-      setBusyKey(null);
+      setBusyAction(null);
     }
   };
 
-  const bulkUpdate = async (nextStatus: 'confirmed' | 'rejected') => {
-    if (selectedMatchItems.length === 0) {
-      setToast({ message: 'Select at least one EOB match to use bulk actions.', tone: 'error' });
-      return;
-    }
-
-    setBusyKey(`bulk-${nextStatus}`);
+  const handleDefer = async (itemId: string) => {
+    setBusyAction(`${itemId}-defer`);
     try {
-      await Promise.all(
-        selectedMatchItems.map((item) => endpoints.eob.updateMatch(String(item.match?.id ?? ''), { status: nextStatus })),
-      );
+      await endpoints.triage.defer(itemId);
+      setToast({ message: 'Item deferred for 7 days.', tone: 'success', undoId: itemId });
       await loadData();
-      setSelectedIds([]);
-      setToast({ message: `${selectedMatchItems.length} match${selectedMatchItems.length === 1 ? '' : 'es'} ${nextStatus}.` });
     } catch (err) {
-      setToast({ message: err instanceof Error ? err.message : 'Bulk update failed.', tone: 'error' });
+      setToast({ message: err instanceof Error ? err.message : 'Defer failed.', tone: 'error' });
     } finally {
-      setBusyKey(null);
+      setBusyAction(null);
     }
   };
+
+  const handleDismiss = async (itemId: string) => {
+    setBusyAction(`${itemId}-dismiss`);
+    try {
+      await endpoints.triage.dismiss(itemId);
+      setToast({ message: 'Item dismissed.', tone: 'success', undoId: itemId });
+      await loadData();
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Dismiss failed.', tone: 'error' });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleUndo = async (itemId: string) => {
+    try {
+      await endpoints.triage.undo(itemId);
+      setToast({ message: 'Action undone.', tone: 'success' });
+      await loadData();
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Undo failed.', tone: 'error' });
+    }
+  };
+
+  const handleBulkAction = async (action: 'confirm' | 'reject' | 'defer' | 'dismiss') => {
+    const ids = Array.from(checkedIds);
+    if (ids.length === 0) return;
+    setBusyAction(`bulk-${action}`);
+    try {
+      if (action === 'defer') {
+        await Promise.all(ids.map((id) => endpoints.triage.defer(id)));
+      } else if (action === 'dismiss') {
+        await Promise.all(ids.map((id) => endpoints.triage.dismiss(id)));
+      } else {
+        await Promise.all(ids.map((id) => endpoints.triage.resolve(id, { action })));
+      }
+      setCheckedIds(new Set());
+      setToast({ message: `${ids.length} item${ids.length > 1 ? 's' : ''} ${action}ed.`, tone: 'success' });
+      await loadData();
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : `Bulk ${action} failed.`, tone: 'error' });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handlePopulate = async () => {
+    setPopulating(true);
+    try {
+      const result = await endpoints.triage.populate() as { items_created: number };
+      setToast({ message: `Queue scan complete: ${result.items_created} items added.`, tone: 'success' });
+      await loadData();
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Queue population failed.', tone: 'error' });
+    } finally {
+      setPopulating(false);
+    }
+  };
+
+  // ------------------------------------------------------------------
+  // Keyboard shortcuts
+  // ------------------------------------------------------------------
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const tagName = target?.tagName?.toLowerCase();
-      if (tagName === 'input' || tagName === 'textarea' || target?.isContentEditable) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
 
-      if (event.key === 'ArrowDown') {
-        event.preventDefault();
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
         moveSelection(1);
-      } else if (event.key === 'ArrowUp') {
-        event.preventDefault();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
         moveSelection(-1);
-      } else if (event.key.toLowerCase() === 'f') {
-        event.preventDefault();
-        setCollapsed((current) => !current);
-      } else if (event.key.toLowerCase() === 's') {
-        event.preventDefault();
-        skipSelected();
-      } else if (event.key.toLowerCase() === 'y' && selectedItem?.match) {
-        event.preventDefault();
-        void updateMatchStatus(selectedItem.match.id, 'confirmed');
-      } else if (event.key.toLowerCase() === 'n' && selectedItem?.match) {
-        event.preventDefault();
-        void updateMatchStatus(selectedItem.match.id, 'rejected');
-      } else if (event.key.toLowerCase() === 'r' && selectedItem) {
-        event.preventDefault();
-        if (selectedItem.match) {
-          navigate(`/triage/manual-search?matchId=${selectedItem.match.id}&docId=${selectedItem.match.eob_document_id ?? ''}`);
-        } else if (selectedItem.orphan) {
-          navigate(`/triage/manual-search?docId=${selectedItem.orphan.id}`);
-        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setSelectedId(null);
+      } else if (e.key.toLowerCase() === 'y' && selectedId) {
+        e.preventDefault();
+        void handleResolve(selectedId, 'confirm');
+      } else if (e.key.toLowerCase() === 'n' && selectedId) {
+        e.preventDefault();
+        void handleResolve(selectedId, 'reject');
+      } else if (e.key.toLowerCase() === 's' && selectedId) {
+        e.preventDefault();
+        // Skip — move to next
+        moveSelection(1);
+      } else if (e.key.toLowerCase() === 'd' && selectedId) {
+        e.preventDefault();
+        void handleDefer(selectedId);
+      } else if (e.key.toLowerCase() === 'x' && selectedId) {
+        e.preventDefault();
+        void handleDismiss(selectedId);
+      } else if (e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        setCollapsed((c) => !c);
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [navigate, selectedItem, filteredItems, selectedKey]);
+  }, [items, selectedId]);
 
-  const alternatives = useMemo(() => {
-    if (!selectedItem?.match) return [];
-    return matches
-      .filter(
-        (match) =>
-          match.id !== selectedItem.match?.id &&
-          (match.eob_document_id === selectedItem.match?.eob_document_id ||
-            match.bill_document_id === selectedItem.match?.bill_document_id),
-      )
-      .slice(0, 4);
-  }, [matches, selectedItem]);
+  // ------------------------------------------------------------------
+  // Derived counts
+  // ------------------------------------------------------------------
 
-  const selectedNote = selectedItem ? notes[selectedItem.key] ?? '' : '';
+  const pendingCount = stats?.pending ?? 0;
+  const typeCounts = stats?.by_type ?? {};
+  const statusCounts = stats?.by_status ?? {};
+
+  // ------------------------------------------------------------------
+  // Render
+  // ------------------------------------------------------------------
 
   return (
     <>
       <PageHeader
         title="Triage Queue"
-        desc="Review low-confidence EOB matches, triage unmatched documents, and work through queue actions with keyboard-friendly controls."
+        desc="Review flagged items: low-confidence EOB matches, grouping anomalies, and orphan documents."
       />
 
-      {loading ? (
+      {loading && !items.length ? (
         <SkeletonLoader variant="table" rows={8} />
       ) : error ? (
         <ErrorState message={error} onRetry={() => void loadData()} />
       ) : (
         <div className="triage-shell">
+          {/* ── Queue list panel (left) ── */}
           <section className={collapsed ? 'triage-queue-panel collapsed' : 'triage-queue-panel'}>
             <div className="triage-queue-header">
-              <button className="triage-collapse-button" onClick={() => setCollapsed((current) => !current)} title="Toggle queue panel (F)">
+              <button
+                className="triage-collapse-button"
+                onClick={() => setCollapsed((c) => !c)}
+                title="Toggle queue panel (F)"
+              >
                 {collapsed ? '▶' : '◀'}
               </button>
               <div className="triage-queue-header-content">
-                <div className="triage-queue-title">Triage Queue <span>{counts.all} pending</span></div>
+                <div className="triage-queue-title">
+                  Triage Queue <span>{pendingCount} pending</span>
+                </div>
+
+                {/* Type filter tabs */}
                 <Tabs
-                  active={filter}
-                  onChange={(value) => setFilter(value as QueueFilter)}
+                  active={typeFilter}
+                  onChange={(v) => setTypeFilter(v as ItemTypeFilter)}
                   tabs={[
-                    { key: 'all', label: `All (${counts.all})` },
-                    { key: 'eob', label: `EOB (${counts.eob})` },
-                    { key: 'grouping', label: `Groups (${counts.grouping})` },
-                    { key: 'orphan', label: `Orphans (${counts.orphan})` },
+                    { key: 'all', label: `All (${stats?.total ?? 0})` },
+                    { key: 'eob_match_review', label: `EOB (${typeCounts.eob_match_review ?? 0})` },
+                    { key: 'grouping_anomaly', label: `Groups (${typeCounts.grouping_anomaly ?? 0})` },
+                    { key: 'orphan_document', label: `Orphans (${typeCounts.orphan_document ?? 0})` },
                   ]}
                 />
+
+                {/* Status filter */}
+                <div className="triage-status-filter">
+                  <FilterPills
+                    active={statusFilter}
+                    onChange={(v) => setStatusFilter(v as StatusFilter)}
+                    options={[
+                      { key: 'pending', label: `Pending (${statusCounts.pending ?? 0})` },
+                      { key: 'deferred', label: `Deferred (${statusCounts.deferred ?? 0})` },
+                      { key: 'resolved', label: `Resolved (${statusCounts.resolved ?? 0})` },
+                    ]}
+                  />
+                </div>
               </div>
             </div>
 
             {collapsed ? (
               <div className="triage-collapsed-strip">
-                <span>{counts.all} items</span>
+                <span>{items.length} items</span>
               </div>
             ) : (
               <>
-                {selectedIds.length > 0 && (
+                {/* Bulk action bar */}
+                {checkedIds.size > 0 && (
                   <div className="triage-bulk-bar">
-                    <span>{selectedIds.length} selected</span>
+                    <span>{checkedIds.size} selected</span>
                     <div className="btn-group">
-                      <Button variant="success" size="sm" onClick={() => void bulkUpdate('confirmed')} disabled={busyKey !== null}>
+                      <Button variant="success" size="sm" onClick={() => void handleBulkAction('confirm')} disabled={busyAction !== null}>
                         Confirm
                       </Button>
-                      <Button variant="danger" size="sm" onClick={() => void bulkUpdate('rejected')} disabled={busyKey !== null}>
+                      <Button variant="danger" size="sm" onClick={() => void handleBulkAction('reject')} disabled={busyAction !== null}>
                         Reject
                       </Button>
-                      <Button size="sm" onClick={() => setSelectedIds([])} disabled={busyKey !== null}>
+                      <Button size="sm" onClick={() => void handleBulkAction('defer')} disabled={busyAction !== null}>
+                        Defer
+                      </Button>
+                      <Button size="sm" onClick={() => void handleBulkAction('dismiss')} disabled={busyAction !== null}>
+                        Dismiss
+                      </Button>
+                      <Button size="sm" onClick={() => setCheckedIds(new Set())} disabled={busyAction !== null}>
                         Clear
                       </Button>
                     </div>
                   </div>
                 )}
 
+                {/* Select-all + populate */}
                 <div className="triage-list-toolbar">
                   <label className="triage-select-all">
                     <input
                       type="checkbox"
-                      checked={filteredItems.length > 0 && filteredItems.every((item) => selectedIds.includes(item.key))}
+                      checked={items.length > 0 && items.every((i) => checkedIds.has(i.id))}
                       onChange={selectAllVisible}
                     />
                     <span>Select visible</span>
                   </label>
+                  <Button size="sm" onClick={() => void handlePopulate()} disabled={populating}>
+                    {populating ? 'Scanning…' : '🔄 Populate'}
+                  </Button>
                 </div>
 
+                {/* Queue list */}
                 <div className="triage-queue-list">
-                  {filteredItems.length === 0 ? (
-                    <EmptyState title="No triage items in this filter" desc="Try another tab or rerun EOB matching to produce new review candidates." />
+                  {items.length === 0 ? (
+                    <EmptyState
+                      title="Queue is empty"
+                      desc={
+                        statusFilter === 'pending'
+                          ? 'No items need review. Use "Populate" to scan for new flagged items.'
+                          : `No ${statusFilter} items found.`
+                      }
+                    />
                   ) : (
-                    filteredItems.map((item) => (
+                    items.map((item) => (
                       <article
-                        key={item.key}
-                        className={selectedKey === item.key ? 'triage-item selected' : 'triage-item'}
-                        onClick={() => setSelectedKey(item.key)}
+                        key={item.id}
+                        className={selectedId === item.id ? 'triage-item selected' : 'triage-item'}
+                        onClick={() => setSelectedId(item.id)}
                       >
                         <div className="triage-item-top">
                           <input
                             type="checkbox"
-                            checked={selectedIds.includes(item.key)}
-                            onChange={() => toggleSelection(item.key)}
-                            onClick={(event) => event.stopPropagation()}
+                            checked={checkedIds.has(item.id)}
+                            onChange={(e) => toggleCheck(item.id, e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey)}
+                            onClick={(e) => e.stopPropagation()}
                           />
-                          <Badge tone={itemBadgeTone(item.kind)}>{itemBadgeLabel(item.kind)}</Badge>
-                          {item.score != null ? (
-                            <span className={`triage-score ${priorityForScore(item.score)}`}>{item.score}%</span>
-                          ) : null}
+                          <Badge tone={typeBadgeTone(item.item_type)}>{typeLabel(item.item_type)}</Badge>
+                          {item.metadata && typeof item.metadata.score_pct === 'number' && (
+                            <span className={`triage-score ${item.metadata.score_pct >= 85 ? 'high' : item.metadata.score_pct >= 70 ? 'medium' : 'low'}`}>
+                              {item.metadata.score_pct}%
+                            </span>
+                          )}
                         </div>
-                        <div className="triage-item-title">{item.title}</div>
-                        <div className="triage-item-reason">{item.reason}</div>
+                        <div className="triage-item-title">{itemTitle(item)}</div>
+                        <div className="triage-item-reason">{item.reason || 'Flagged for review'}</div>
                         <div className="triage-item-meta">
-                          <Badge tone={priorityBadgeTone(item.priority)}>{priorityLabels[item.priority]}</Badge>
-                          <span>{timeAgo(item.createdAt)}</span>
+                          <Badge tone={priorityBadgeTone(item.priority)}>{priorityLabel(item.priority)}</Badge>
+                          <span>{timeAgo(item.created_at)}</span>
                         </div>
                       </article>
                     ))
@@ -515,244 +539,138 @@ export default function TriageQueue() {
             )}
           </section>
 
+          {/* ── Detail panel (right) ── */}
           <section className="triage-detail-panel">
             {selectedItem ? (
               <>
                 <div className="triage-detail-header">
                   <div>
-                    <div className="triage-detail-title">{selectedItem.kind === 'eob' ? 'EOB Match Review' : selectedItem.kind === 'grouping' ? 'Grouping Review' : 'Orphan Review'}</div>
-                    <div className="text-muted">{selectedItem.title}</div>
+                    <div className="triage-detail-title">{itemTitle(selectedItem)}</div>
+                    <div className="text-muted">
+                      <Badge tone={typeBadgeTone(selectedItem.item_type)}>{typeLabel(selectedItem.item_type)}</Badge>
+                      {' · '}
+                      Status: {selectedItem.status}
+                      {' · '}
+                      Priority: {selectedItem.priority}
+                    </div>
                   </div>
                   <div className="btn-group">
                     <Button
                       variant="success"
-                      onClick={() => selectedItem.match && void updateMatchStatus(selectedItem.match.id, 'confirmed')}
-                      disabled={!selectedItem.match || busyKey !== null}
+                      onClick={() => void handleResolve(selectedItem.id, 'confirm')}
+                      disabled={busyAction !== null || selectedItem.status !== 'pending'}
                       title="Confirm (Y)"
                     >
                       Confirm
                     </Button>
                     <Button
                       variant="danger"
-                      onClick={() => selectedItem.match && void updateMatchStatus(selectedItem.match.id, 'rejected')}
-                      disabled={!selectedItem.match || busyKey !== null}
+                      onClick={() => void handleResolve(selectedItem.id, 'reject')}
+                      disabled={busyAction !== null || selectedItem.status !== 'pending'}
                       title="Reject (N)"
                     >
                       Reject
                     </Button>
                     <Button
-                      onClick={() => {
-                        if (selectedItem.match) {
-                          navigate(`/triage/manual-search?matchId=${selectedItem.match.id}&docId=${selectedItem.match.eob_document_id ?? ''}`);
-                        } else if (selectedItem.orphan) {
-                          navigate(`/triage/manual-search?docId=${selectedItem.orphan.id}`);
-                        }
-                      }}
-                      title="Re-link (R)"
+                      onClick={() => void handleDefer(selectedItem.id)}
+                      disabled={busyAction !== null || selectedItem.status !== 'pending'}
+                      title="Defer (D)"
                     >
-                      Re-link
+                      Defer
                     </Button>
-                    <Button variant="ghost" onClick={skipSelected} title="Skip (S)">
-                      Skip
+                    <Button
+                      variant="ghost"
+                      onClick={() => void handleDismiss(selectedItem.id)}
+                      disabled={busyAction !== null || selectedItem.status !== 'pending'}
+                      title="Dismiss (X)"
+                    >
+                      Dismiss
                     </Button>
-                    {selectedItem.match?.bill_preview_url ? (
-                      <a className="triage-paperless-link" href={selectedItem.match.bill_preview_url} target="_blank" rel="noreferrer">
-                        Paperless
-                      </a>
-                    ) : selectedItem.orphan?.document_url ? (
-                      <a className="triage-paperless-link" href={selectedItem.orphan.document_url} target="_blank" rel="noreferrer">
-                        Paperless
-                      </a>
-                    ) : null}
                   </div>
                 </div>
 
-                <div className="triage-reason-banner">
-                  <strong>Flagged for review:</strong> {selectedItem.reason}
-                </div>
-
-                {selectedItem.match ? (
-                  <>
-                    <Card title="Confidence breakdown">
-                      <div className="triage-confidence-summary">
-                        <div>
-                          <div className={`triage-overall-score ${priorityForScore(selectedItem.score)}`}>{selectedItem.score}%</div>
-                          <div className="text-muted">Weighted 5-factor score · auto-confirm typically starts at 85%.</div>
-                        </div>
-                        <Badge tone={selectedItem.score != null && selectedItem.score >= 85 ? 'success' : 'warning'}>
-                          {selectedItem.score != null && selectedItem.score >= 85 ? 'Ready to confirm' : 'Needs review'}
-                        </Badge>
-                      </div>
-                      <div className="triage-confidence-list">
-                        <ConfidenceBar label="Date (30%)" pct={valueToPercent(selectedItem.match.breakdown?.date)} />
-                        <ConfidenceBar label="Provider (25%)" pct={valueToPercent(selectedItem.match.breakdown?.provider)} />
-                        <ConfidenceBar label="Patient (20%)" pct={valueToPercent(selectedItem.match.breakdown?.patient)} />
-                        <ConfidenceBar label="Amount (15%)" pct={valueToPercent(selectedItem.match.breakdown?.amount)} />
-                        <ConfidenceBar label="Procedures (10%)" pct={valueToPercent(selectedItem.match.breakdown?.procedures)} />
-                      </div>
-                    </Card>
-
-                    <Card title="Amount validation">
-                      <div className={`triage-amount-card ${mismatchClass(selectedItem.match.breakdown?.amount)}`}>
-                        <div className="triage-amount-title">{mismatchLabel(selectedItem.match.breakdown?.amount)}</div>
-                        <div className="text-muted">
-                          The current API exposes the amount confidence factor but not the raw extracted bill/EOB amounts, so this view summarizes the signal strength instead of exact values.
-                        </div>
-                        <div className="triage-amount-score">Amount factor: {valueToPercent(selectedItem.match.breakdown?.amount)}%</div>
-                      </div>
-                    </Card>
-
-                    <Card title="Document comparison">
-                      <div className="triage-compare-grid">
-                        <div className="triage-compare-col">
-                          <div className="triage-compare-header">EOB document</div>
-                          <div className="triage-compare-row"><span>Reference</span><strong>#{selectedItem.match.eob_document_id ?? '—'}</strong></div>
-                          <div className={`triage-compare-row ${mismatchClass(selectedItem.match.breakdown?.date)}`}><span>Date</span><strong>{factorLabel('Date', selectedItem.match.breakdown?.date)}</strong></div>
-                          <div className={`triage-compare-row ${mismatchClass(selectedItem.match.breakdown?.provider)}`}><span>Provider</span><strong>{factorLabel('Provider', selectedItem.match.breakdown?.provider)}</strong></div>
-                          <div className={`triage-compare-row ${mismatchClass(selectedItem.match.breakdown?.patient)}`}><span>Patient</span><strong>{factorLabel('Patient', selectedItem.match.breakdown?.patient)}</strong></div>
-                          <div className={`triage-compare-row ${mismatchClass(selectedItem.match.breakdown?.amount)}`}><span>Amount</span><strong>{factorLabel('Amount', selectedItem.match.breakdown?.amount)}</strong></div>
-                          <div className="triage-compare-row"><span>Preview</span>{selectedItem.match.eob_preview_url ? <a href={selectedItem.match.eob_preview_url} target="_blank" rel="noreferrer">Open →</a> : <strong>Unavailable</strong>}</div>
-                        </div>
-                        <div className="triage-compare-col">
-                          <div className="triage-compare-header">Bill / claim document</div>
-                          <div className="triage-compare-row"><span>Reference</span><strong>#{selectedItem.match.bill_document_id ?? '—'}</strong></div>
-                          <div className={`triage-compare-row ${mismatchClass(selectedItem.match.breakdown?.date)}`}><span>Date signal</span><strong>{valueToPercent(selectedItem.match.breakdown?.date)}%</strong></div>
-                          <div className={`triage-compare-row ${mismatchClass(selectedItem.match.breakdown?.provider)}`}><span>Provider signal</span><strong>{valueToPercent(selectedItem.match.breakdown?.provider)}%</strong></div>
-                          <div className={`triage-compare-row ${mismatchClass(selectedItem.match.breakdown?.patient)}`}><span>Patient signal</span><strong>{valueToPercent(selectedItem.match.breakdown?.patient)}%</strong></div>
-                          <div className={`triage-compare-row ${mismatchClass(selectedItem.match.breakdown?.procedures)}`}><span>Procedure overlap</span><strong>{valueToPercent(selectedItem.match.breakdown?.procedures)}%</strong></div>
-                          <div className="triage-compare-row"><span>Preview</span>{selectedItem.match.bill_preview_url ? <a href={selectedItem.match.bill_preview_url} target="_blank" rel="noreferrer">Open →</a> : <strong>Unavailable</strong>}</div>
-                        </div>
-                      </div>
-                    </Card>
-
-                    <Card title="Alternative candidates">
-                      {alternatives.length > 0 ? (
-                        <div className="triage-alt-list">
-                          {alternatives.map((match) => (
-                            <button
-                              key={match.id}
-                              className="triage-alt-item"
-                              onClick={() => setSelectedKey(`match-${match.id}`)}
-                            >
-                              <span className="triage-alt-score">{valueToPercent(match.score)}%</span>
-                              <span>EOB #{match.eob_document_id ?? '—'} ↔ Bill #{match.bill_document_id ?? '—'}</span>
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <EmptyState icon="🔎" title="No alternative candidates" desc="No other candidate match shares this EOB or bill document in the current result set." />
-                      )}
-                    </Card>
-
-                    <div className="triage-detail-grid">
-                      <Card title="Match history">
-                        <div className="triage-history-list">
-                          <div className="triage-history-item">
-                            <span className="triage-history-dot auto" />
-                            <div>
-                              <div><strong>Auto-matched</strong> by the EOB matching engine.</div>
-                              <div className="text-muted">{formatDateTime(selectedItem.match.created_at)} · Score {valueToPercent(selectedItem.match.score)}%</div>
-                            </div>
-                          </div>
-                          <div className="triage-history-item">
-                            <span className="triage-history-dot" />
-                            <div>
-                              <div><strong>Queued for manual review</strong> because {weakestBreakdown(selectedItem.match.breakdown).label.toLowerCase()} was the weakest factor.</div>
-                              <div className="text-muted">Status: {selectedItem.match.status ?? 'candidate'}</div>
-                            </div>
-                          </div>
-                          {selectedItem.match.confirmed_at ? (
-                            <div className="triage-history-item">
-                              <span className="triage-history-dot confirm" />
-                              <div>
-                                <div><strong>Previously confirmed</strong></div>
-                                <div className="text-muted">{formatDateTime(selectedItem.match.confirmed_at)}</div>
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-                      </Card>
-
-                      <Card title="Notes">
-                        <div className="form-group" style={{ marginBottom: 0 }}>
-                          <textarea
-                            rows={6}
-                            placeholder="Add context for the next reviewer or note why this match is correct / incorrect."
-                            value={selectedNote}
-                            onChange={(event) =>
-                              setNotes((current) => ({
-                                ...current,
-                                [selectedItem.key]: event.target.value,
-                              }))
-                            }
-                          />
-                        </div>
-                      </Card>
-                    </div>
-                  </>
-                ) : selectedItem.kind === 'grouping' ? (
-                  <>
-                    <Card title="Grouping summary">
-                      <div className="triage-group-summary">
-                        <div>This provider currently has <strong>{selectedItem.relatedUnmatched?.length ?? 0}</strong> unmatched documents that likely belong to the same series or grouping rule.</div>
-                        <div className="text-muted">Use manual search to inspect candidates individually or keep this item in the queue until richer grouping actions exist in the backend.</div>
-                      </div>
-                    </Card>
-                    <Card title="Documents in this cluster">
-                      <div className="triage-group-docs">
-                        {(selectedItem.relatedUnmatched ?? []).map((doc) => (
-                          <div key={doc.id} className="triage-group-doc">
-                            <div>
-                              <strong>{doc.provider || 'Unknown provider'}</strong>
-                              <div className="text-muted">Service date {formatDate(doc.date_of_service)} · Amount {formatCurrency(doc.amount ?? doc.patient_responsibility)}</div>
-                            </div>
-                            {doc.document_url ? <a href={doc.document_url} target="_blank" rel="noreferrer">Open →</a> : null}
-                          </div>
-                        ))}
-                      </div>
-                    </Card>
-                  </>
-                ) : (
-                  <>
-                    <Card title="Unmatched document">
-                      <div className="triage-group-summary">
-                        <div><strong>Provider:</strong> {selectedItem.orphan?.provider || 'Unknown provider'}</div>
-                        <div><strong>Service date:</strong> {formatDate(selectedItem.orphan?.date_of_service)}</div>
-                        <div><strong>Amount:</strong> {formatCurrency(selectedItem.orphan?.amount ?? selectedItem.orphan?.patient_responsibility)}</div>
-                        <div className="text-muted">This item does not have a candidate match record yet, so confirm/reject actions stay disabled until a dedicated manual-link endpoint exists.</div>
-                      </div>
-                    </Card>
-                    <Card title="Next step">
-                      <div className="triage-group-summary">
-                        <div>Use manual search to review nearby candidate claims for document #{selectedItem.orphan?.id}.</div>
-                        <div className="btn-group">
-                          <Button onClick={() => navigate(`/triage/manual-search?docId=${selectedItem.orphan?.id ?? ''}`)}>Open manual search</Button>
-                          {selectedItem.orphan?.document_url ? (
-                            <a className="triage-paperless-link" href={selectedItem.orphan.document_url} target="_blank" rel="noreferrer">
-                              Open in Paperless
-                            </a>
-                          ) : null}
-                        </div>
-                      </div>
-                    </Card>
-                  </>
+                {/* Reason banner */}
+                {selectedItem.reason && (
+                  <div className="triage-reason-banner">
+                    <strong>Flagged for review:</strong> {selectedItem.reason}
+                  </div>
                 )}
+
+                {/* Item info card */}
+                <Card title="Item details">
+                  <div className="triage-detail-info">
+                    <div className="triage-detail-row">
+                      <span>Type</span>
+                      <strong>{typeLabel(selectedItem.item_type)}</strong>
+                    </div>
+                    <div className="triage-detail-row">
+                      <span>Priority</span>
+                      <strong>{selectedItem.priority} ({priorityLabel(selectedItem.priority)})</strong>
+                    </div>
+                    <div className="triage-detail-row">
+                      <span>Source</span>
+                      <strong>{selectedItem.source}</strong>
+                    </div>
+                    <div className="triage-detail-row">
+                      <span>Target</span>
+                      <strong>{selectedItem.target_type}: {selectedItem.target_id}</strong>
+                    </div>
+                    <div className="triage-detail-row">
+                      <span>Created</span>
+                      <strong>{selectedItem.created_at ? new Date(selectedItem.created_at).toLocaleString() : '—'}</strong>
+                    </div>
+                    {selectedItem.deferred_until && (
+                      <div className="triage-detail-row">
+                        <span>Deferred until</span>
+                        <strong>{new Date(selectedItem.deferred_until).toLocaleString()}</strong>
+                      </div>
+                    )}
+                    {selectedItem.resolved_at && (
+                      <div className="triage-detail-row">
+                        <span>Resolved</span>
+                        <strong>{selectedItem.resolved_action} at {new Date(selectedItem.resolved_at).toLocaleString()}</strong>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+
+                {/* Metadata dump — placeholder for specific detail views (#834, #829, #830, #831) */}
+                <Card title="Item metadata">
+                  <div className="triage-metadata-dump">
+                    {selectedItem.metadata ? (
+                      <pre>{JSON.stringify(selectedItem.metadata, null, 2)}</pre>
+                    ) : (
+                      <div className="text-muted">No additional metadata available for this item.</div>
+                    )}
+                  </div>
+                </Card>
               </>
             ) : (
               <EmptyState
                 title="No triage item selected"
-                desc="Choose a queue item to inspect the confidence breakdown, alternatives, and review actions."
+                desc="Choose a queue item to inspect its details, metadata, and available actions."
               />
             )}
           </section>
         </div>
       )}
 
+      {/* Keyboard hint */}
       <div className="triage-keyboard-hint">
-        <kbd>Y</kbd> Confirm · <kbd>N</kbd> Reject · <kbd>R</kbd> Re-link · <kbd>S</kbd> Skip · <kbd>↑↓</kbd> Navigate · <kbd>F</kbd> Toggle queue
+        <kbd>Y</kbd> Confirm · <kbd>N</kbd> Reject · <kbd>S</kbd> Skip · <kbd>D</kbd> Defer · <kbd>X</kbd> Dismiss · <kbd>↑↓</kbd> Navigate · <kbd>Esc</kbd> Deselect · <kbd>F</kbd> Toggle queue
       </div>
 
-      {toast && <Toast message={toast.message} tone={toast.tone} />}
+      {/* Toast with optional undo */}
+      {toast && (
+        <div className="triage-toast-wrapper">
+          <Toast message={toast.message} tone={toast.tone} />
+          {toast.undoId && (
+            <button className="triage-undo-btn" onClick={() => void handleUndo(toast.undoId!)}>
+              Undo
+            </button>
+          )}
+        </div>
+      )}
     </>
   );
 }
