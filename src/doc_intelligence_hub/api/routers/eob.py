@@ -911,6 +911,7 @@ class BenchmarkRequest(BaseModel):
     )
     trigger: str = Field(
         default="manual",
+        pattern="^(manual|scheduled)$",
         description="Trigger source: 'manual' or 'scheduled'",
     )
 
@@ -1075,9 +1076,10 @@ async def get_benchmark_history(
     """List recent benchmark runs with summary metrics.
 
     Args:
-        limit: Max number of runs to return (default 20).
+        limit: Max number of runs to return (default 20, max 100).
         trigger: Optional filter by trigger type ('manual' or 'scheduled').
     """
+    limit = min(limit, 100)
     init_db()
     db = get_db_session()
     try:
@@ -1162,6 +1164,7 @@ async def get_benchmark_trends(
     Returns the last *limit* completed benchmark runs with per-model metrics
     ordered chronologically (oldest first) for easy charting.
     """
+    limit = min(limit, 50)
     init_db()
     db = get_db_session()
     try:
