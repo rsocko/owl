@@ -159,9 +159,39 @@ def get_session() -> Session:
 
 
 def init_db():
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist, and migrate missing columns."""
     engine = get_engine()
     Base.metadata.create_all(engine)
+    _migrate_missing_columns(engine)
+
+
+def _migrate_missing_columns(engine):
+    """Add columns that were introduced after initial table creation.
+
+    SQLAlchemy's ``create_all`` only creates tables — it never alters them.
+    We inspect the live schema and issue ALTER TABLE for anything missing.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+
+    inspector = sa_inspect(engine)
+
+    _expected_additions: dict[str, list[tuple[str, str]]] = {
+        "correction_events": [
+            ("paperless_synced", "INTEGER DEFAULT 0"),
+            ("paperless_synced_at", "DATETIME"),
+            ("undone", "INTEGER DEFAULT 0"),
+            ("undone_at", "DATETIME"),
+        ],
+    }
+
+    with engine.begin() as conn:
+        for table, columns in _expected_additions.items():
+            if not inspector.has_table(table):
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table)}
+            for col_name, col_ddl in columns:
+                if col_name not in existing:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_ddl}"))
 
 
 # ------------------------------------------------------------------
