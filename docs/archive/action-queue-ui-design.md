@@ -1,8 +1,13 @@
 ---
-title: "UI Design"
-sidebar_label: UI Design
-sidebar_position: 5
+title: "Action Queue UI Design (Archived)"
+sidebar_label: AQ UI Design
+sidebar_position: 3
+draft: true
 ---
+
+:::note
+This document is archived for historical reference. It may not reflect current implementation. The Action Queue module currently operates as an API-only service with no dedicated frontend dashboard.
+:::
 
 # UI Design Document: Paperless Action Queue Dashboard
 

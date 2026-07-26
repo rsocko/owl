@@ -1,7 +1,7 @@
 ---
 title: "OCR n8n Workflow"
 sidebar_label: OCR n8n
-sidebar_position: 12
+sidebar_position: 6
 ---
 
 # OCR n8n Workflow Specification

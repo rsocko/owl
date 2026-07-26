@@ -1,8 +1,13 @@
 ---
-title: "EOB UI Design"
-sidebar_label: UI Design
-sidebar_position: 7
+title: "EOB UI Design (Archived)"
+sidebar_label: EOB UI Design
+sidebar_position: 5
+draft: true
 ---
+
+:::note
+This document is archived for historical reference. It may not reflect current implementation. The EOB Matching module currently operates as an API/CLI service without a dedicated AppSmith or standalone dashboard.
+:::
 
 # UI Design: Medical EOB & Bill Matching Dashboard
 
