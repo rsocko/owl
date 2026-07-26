@@ -10,5 +10,5 @@ export type ToastTone = 'success' | 'error' | 'warning';
 
 export function getToastDuration(tone: ToastTone | undefined = 'success', hasUndo = false): number {
   if (hasUndo) return TOAST_DURATION.undo;
-  return TOAST_DURATION[tone] || TOAST_DURATION.success;
+  return TOAST_DURATION[tone] ?? TOAST_DURATION.success;
 }
