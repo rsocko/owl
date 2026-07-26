@@ -123,6 +123,8 @@ export const endpoints = {
     status: () => api.get('/api/queue/status'),
     actions: (params?: string) => api.get(`/api/queue/actions${params ? `?${params}` : ''}`),
     updateAction: (id: string, body: unknown) => api.patch(`/api/queue/actions/${id}`, body),
+    bulk: (body: { action: string; action_ids: number[] }) =>
+      api.post<{ affected: number; action: string }>('/api/queue/actions/bulk', body),
   },
   alerts: {
     list: (params?: string) => api.get(`/api/insights/alerts${params ? `?${params}` : ''}`),
