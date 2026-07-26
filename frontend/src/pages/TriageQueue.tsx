@@ -11,6 +11,7 @@ import {
   Tabs,
   Toast,
 } from '../components/ui';
+import EobMatchDetail from '../components/EobMatchDetail';
 import { endpoints } from '../lib/api';
 import { StatementGroupingDetail } from '../components/triage/StatementGroupingDetail';
 import DuplicateDetail from './DuplicateDetail';
@@ -355,6 +356,9 @@ export default function TriageQueue() {
       const tag = target?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
 
+      // When an EOB match review item is selected, EobMatchDetail owns Y/N/S/R
+      const eobDetailActive = selectedItem?.item_type === 'eob_match_review';
+
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         moveSelection(1);
@@ -364,13 +368,13 @@ export default function TriageQueue() {
       } else if (e.key === 'Escape') {
         e.preventDefault();
         setSelectedId(null);
-      } else if (e.key.toLowerCase() === 'y' && selectedId) {
+      } else if (e.key.toLowerCase() === 'y' && selectedId && !eobDetailActive) {
         e.preventDefault();
         void handleResolve(selectedId, 'confirm');
-      } else if (e.key.toLowerCase() === 'n' && selectedId) {
+      } else if (e.key.toLowerCase() === 'n' && selectedId && !eobDetailActive) {
         e.preventDefault();
         void handleResolve(selectedId, 'reject');
-      } else if (e.key.toLowerCase() === 's' && selectedId) {
+      } else if (e.key.toLowerCase() === 's' && selectedId && !eobDetailActive) {
         e.preventDefault();
         // Skip — move to next
         moveSelection(1);
@@ -388,7 +392,7 @@ export default function TriageQueue() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [items, selectedId]);
+  }, [items, selectedId, selectedItem]);
 
   // ------------------------------------------------------------------
   // Derived counts
@@ -552,7 +556,25 @@ export default function TriageQueue() {
           {/* ── Detail panel (right) ── */}
           <section className="triage-detail-panel">
             {selectedItem ? (
-              <>
+              selectedItem.item_type === 'eob_match_review' ? (
+                /* EOB Match Review — rich detail component (#834) */
+                <EobMatchDetail
+                  matchId={Number(selectedItem.target_id)}
+                  triageItemId={selectedItem.id}
+                  onResolved={() => {
+                    void loadData();
+                  }}
+                  onSkip={() => {
+                    // Advance to next item in the list
+                    const currentIndex = items.findIndex((i) => i.id === selectedItem.id);
+                    const nextItem = items[currentIndex + 1] ?? items[0];
+                    if (nextItem && nextItem.id !== selectedItem.id) {
+                      setSelectedId(nextItem.id);
+                    }
+                  }}
+                />
+              ) : (
+                <>
                 <div className="triage-detail-header">
                   <div>
                     <div className="triage-detail-title">{itemTitle(selectedItem)}</div>
@@ -679,6 +701,7 @@ export default function TriageQueue() {
                   </Card>
                 )}
               </>
+              )
             ) : (
               <EmptyState
                 title="No triage item selected"

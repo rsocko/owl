@@ -96,6 +96,12 @@ export const endpoints = {
     matches: (params?: string) => api.get(`/api/eob/matches${params ? `?${params}` : ''}`),
     updateMatch: (id: string, body: unknown) => api.patch(`/api/eob/matches/${id}`, body),
     matchHistory: (id: string) => api.get(`/api/eob/matches/${id}/history`),
+    getMatch: (id: string) => api.get(`/api/eob/matches/${id}`),
+    confirmMatch: (id: string, body?: unknown) => api.post(`/api/eob/matches/${id}/confirm`, body),
+    rejectMatch: (id: string, body?: unknown) => api.post(`/api/eob/matches/${id}/reject`, body),
+    manualMatch: (body: unknown) => api.post('/api/eob/matches/manual', body),
+    candidates: (docId: string, params?: string) =>
+      api.get(`/api/eob/candidates/${docId}${params ? `?${params}` : ''}`),
     unmatched: () => api.get('/api/eob/unmatched'),
     purgeStale: () => api.post('/api/eob/purge-stale'),
     benchmark: (body?: unknown) => api.post('/api/eob/benchmark', body),
