@@ -644,6 +644,15 @@ export default function TriageQueue() {
                     )}
                   </div>
                 </Card>
+
+                {/* Metadata correction link — when target is a document */}
+                {(selectedItem.target_type === 'document' || selectedItem.metadata?.document_id) && (
+                  <div className="triage-metadata-link">
+                    <a href={`#/metadata/${selectedItem.metadata?.document_id ?? selectedItem.target_id}`}>
+                      ✏️ Correct Metadata →
+                    </a>
+                  </div>
+                )}
               </>
             ) : (
               <EmptyState
