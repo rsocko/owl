@@ -195,14 +195,14 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 ### Phase 1: Quick Win UI Polish (Weeks 2-3) 🎨
 **Goal:** Tighten the existing UI with low-effort, high-impact improvements.
 
-| Priority | Issue | Effort |
-|----------|-------|--------|
-| P1 | #876 | Keyboard shortcut hints | Quick Win |
-| P1 | #878 | Confidence factor narratives | Quick Win |
-| P1 | #871 | Match decision notes textarea | Quick Win |
-| P1 | #873 | Match history timeline | Quick Win |
-| P1 | #904 | Action Queue risk score + AI reasoning | Quick Win |
-| P1 | #883 | Loading skeletons | Medium |
+| Priority | Issue | Effort                                 |       |
+| -------- | ----- | -------------------------------------- | ----- |
+| P1       | #876  | Keyboard shortcut hints                | defer |
+| P1       | #878  | Confidence factor narratives           | done  |
+| P1       | #871  | Match decision notes textarea          | done  |
+| P1       | #873  | Match history timeline                 |       |
+| P1       | #904  | Action Queue risk score + AI reasoning |       |
+| P1       | #883  | Loading skeletons                      |       |
 
 **Exit Criteria:** Match review workflow feels polished; users can add notes, see narratives, use keyboard shortcuts.
 
