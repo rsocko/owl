@@ -15,8 +15,9 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any, Callable, Coroutine, Optional
+from typing import Any
 
 import httpx
 
@@ -38,7 +39,7 @@ class PaperlessClient:
         verify_ssl: bool = True,
         timeout: float = 30.0,
         connect_timeout: float = 10.0,
-        read_timeout: Optional[float] = None,
+        read_timeout: float | None = None,
         write_timeout: float = 10.0,
         pool_timeout: float = 10.0,
     ):
@@ -61,11 +62,11 @@ class PaperlessClient:
         # Reused across calls so we don't pay a fresh TCP/TLS handshake for
         # every single request (health check, per-tag lookups, per-document
         # content fetches, etc). Created lazily on first use.
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
         # Tag names rarely change within the lifetime of a single client, so
         # cache the name→id mapping instead of re-fetching /api/tags/ on
         # every list_documents()/get_documents_by_tags() call.
-        self._tag_name_to_id_cache: Optional[dict[str, int]] = None
+        self._tag_name_to_id_cache: dict[str, int] | None = None
 
     def _make_client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -96,10 +97,10 @@ class PaperlessClient:
             await self._client.aclose()
         self._client = None
 
-    async def __aenter__(self) -> "PaperlessClient":
+    async def __aenter__(self) -> PaperlessClient:
         return self
 
-    async def __aexit__(self, *exc_info: Any) -> None:
+    async def __aexit__(self, *exc_info: object) -> None:
         await self.aclose()
 
     # ------------------------------------------------------------------
@@ -169,18 +170,18 @@ class PaperlessClient:
     async def list_documents(
         self,
         *,
-        tags: Optional[list[str]] = None,
-        query: Optional[str] = None,
-        correspondent: Optional[str] = None,
-        document_type: Optional[str] = None,
-        created_after: Optional[str] = None,
-        created_before: Optional[str] = None,
-        added_after: Optional[str] = None,
-        added_before: Optional[str] = None,
-        saved_view: Optional[int] = None,
+        tags: list[str] | None = None,
+        query: str | None = None,
+        correspondent: str | None = None,
+        document_type: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        added_after: str | None = None,
+        added_before: str | None = None,
+        saved_view: int | None = None,
         page_size: int = 100,
-        limit: Optional[int] = None,
-        on_progress: Optional[ProgressCallback] = None,
+        limit: int | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> list[dict]:
         """Fetch documents with flexible filtering.
 
@@ -236,7 +237,7 @@ class PaperlessClient:
         )
 
     async def list_documents_by_tag_ids(
-        self, tag_ids: list[int], *, page_size: int = 100, limit: Optional[int] = None
+        self, tag_ids: list[int], *, page_size: int = 100, limit: int | None = None
     ) -> list[dict]:
         """Fetch documents matching any of the given tag IDs.
 
@@ -399,7 +400,7 @@ class PaperlessClient:
     async def fetch_all_metadata(
         self,
         *,
-        on_progress: Optional[ProgressCallback] = None,
+        on_progress: ProgressCallback | None = None,
     ) -> tuple[dict[int, str], dict[int, str], dict[int, str]]:
         """Fetch all correspondents, tags, and document types as {id: name} mappings.
 
@@ -453,8 +454,8 @@ class PaperlessClient:
         endpoint: str,
         params: dict,
         *,
-        limit: Optional[int] = None,
-        on_progress: Optional[ProgressCallback] = None,
+        limit: int | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> list[dict]:
         """Paginate through results for an endpoint, stopping early if limit is reached."""
         start = time.monotonic()
@@ -536,9 +537,7 @@ class PaperlessClient:
             self._tag_name_to_id_cache = {tag["name"]: tag["id"] for tag in tags}
         return self._tag_name_to_id_cache
 
-    async def _resolve_correspondent_id(
-        self, client: httpx.AsyncClient, name: str
-    ) -> Optional[int]:
+    async def _resolve_correspondent_id(self, client: httpx.AsyncClient, name: str) -> int | None:
         """Resolve correspondent name to ID."""
         resp = await client.get("/api/correspondents/", params={"name__icontains": name})
         resp.raise_for_status()
@@ -546,9 +545,7 @@ class PaperlessClient:
         results = data["results"] if isinstance(data, dict) and "results" in data else data
         return results[0]["id"] if results else None
 
-    async def _resolve_document_type_id(
-        self, client: httpx.AsyncClient, name: str
-    ) -> Optional[int]:
+    async def _resolve_document_type_id(self, client: httpx.AsyncClient, name: str) -> int | None:
         """Resolve document type name to ID."""
         resp = await client.get("/api/document_types/", params={"name__icontains": name})
         resp.raise_for_status()

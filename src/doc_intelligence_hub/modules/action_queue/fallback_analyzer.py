@@ -7,8 +7,6 @@ ensures the pipeline still produces useful results without AI.
 
 import re
 from datetime import date, timedelta
-from typing import Optional
-
 
 # Keyword patterns for action type detection
 _PAY_KEYWORDS = re.compile(
@@ -77,7 +75,7 @@ _DATE_PATTERN = re.compile(r"\b(\d{1,2})[/\-](\d{1,2})[/\-](20\d{2})\b")
 class RuleBasedAnalyzer:
     """Fallback analyzer using keyword matching and heuristics."""
 
-    def analyze_document(self, document: dict) -> Optional[dict]:
+    def analyze_document(self, document: dict) -> dict | None:
         """Analyze a document using rules only (no LLM needed).
 
         Returns the same format as OllamaAnalyzer for compatibility.
@@ -188,7 +186,7 @@ class RuleBasedAnalyzer:
 
         return best_type, confidence
 
-    def _extract_amount(self, text: str) -> Optional[float]:
+    def _extract_amount(self, text: str) -> float | None:
         """Extract the largest dollar amount from text."""
         matches = _AMOUNT_PATTERN.findall(text)
         if not matches:
@@ -202,7 +200,7 @@ class RuleBasedAnalyzer:
         # Return the largest amount (likely the total due)
         return max(amounts) if amounts else None
 
-    def _extract_due_date(self, text: str) -> Optional[date]:
+    def _extract_due_date(self, text: str) -> date | None:
         """Extract the first plausible future date from text."""
         matches = _DATE_PATTERN.findall(text)
         today = date.today()
@@ -216,7 +214,7 @@ class RuleBasedAnalyzer:
                 continue
         return None
 
-    def _determine_urgency(self, text: str, due_date: Optional[date]) -> str:
+    def _determine_urgency(self, text: str, due_date: date | None) -> str:
         """Determine urgency from keywords and due date."""
         text_lower = text.lower()
         if any(
@@ -237,7 +235,7 @@ class RuleBasedAnalyzer:
         return "MEDIUM"
 
     def _build_title(
-        self, action_type: str, title: str, correspondent: str, amount: Optional[float]
+        self, action_type: str, title: str, correspondent: str, amount: float | None
     ) -> str:
         """Build a concise action title."""
         correspondent = str(correspondent) if correspondent else ""

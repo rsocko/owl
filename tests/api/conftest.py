@@ -15,30 +15,47 @@ from fastapi.testclient import TestClient
 from doc_intelligence_hub.api.app import HubSettings, create_app
 from doc_intelligence_hub.core.alerts import (
     Alert,
+)
+from doc_intelligence_hub.core.alerts import (
     configure as alerts_configure,
+)
+from doc_intelligence_hub.core.alerts import (
     get_session as get_alerts_session,
+)
+from doc_intelligence_hub.core.alerts import (
     init_db as alerts_init_db,
 )
 from doc_intelligence_hub.modules.action_queue.config import settings as aq_settings
 from doc_intelligence_hub.modules.action_queue.database import (
     Action,
+)
+from doc_intelligence_hub.modules.action_queue.database import (
     get_session as get_aq_session,
+)
+from doc_intelligence_hub.modules.action_queue.database import (
     init_db as aq_init_db,
 )
 from doc_intelligence_hub.modules.eob_matching.database import (
     BillRecord,
     EOBRecord,
-    MatchRecord,
     MatchingRun,
+    MatchRecord,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
     configure as eob_configure,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
     get_session as get_eob_session,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
     init_db as eob_init_db,
 )
 from doc_intelligence_hub.modules.triage.database import (
     configure as triage_configure,
+)
+from doc_intelligence_hub.modules.triage.database import (
     init_db as triage_init_db,
 )
-
 
 # ---------------------------------------------------------------------------
 # Mock Paperless client

@@ -53,8 +53,9 @@ async def list_document_types(request: Request) -> dict[str, Any]:
         resp = await http_client.get("/api/document_types/", params={"page": page})
         resp.raise_for_status()
         data = resp.json()
-        for item in data.get("results", []):
-            types.append({"id": int(item["id"]), "name": item["name"]})
+        types.extend(
+            {"id": int(item["id"]), "name": item["name"]} for item in data.get("results", [])
+        )
         if not data.get("next"):
             break
         page += 1
@@ -73,10 +74,7 @@ async def list_document_types(request: Request) -> dict[str, Any]:
         type_id = doc_type["id"]
         suggested = _is_suggested(doc_type["name"])
         # If a mapping exists in DB, use its enabled state; otherwise use suggested as default
-        if has_saved_mapping:
-            enabled = saved_mapping.get(type_id, False)
-        else:
-            enabled = suggested
+        enabled = saved_mapping.get(type_id, False) if has_saved_mapping else suggested
         result.append(
             {
                 "id": type_id,

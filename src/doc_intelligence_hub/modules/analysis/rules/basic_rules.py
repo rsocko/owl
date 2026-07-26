@@ -186,7 +186,7 @@ class SeriesAnomaly(AnalysisRule):
                 if d:
                     try:
                         if isinstance(d, str):
-                            dates.append(datetime.fromisoformat(d.replace("Z", "+00:00")))
+                            dates.append(datetime.fromisoformat(d))
                         elif isinstance(d, datetime):
                             dates.append(d)
                     except ValueError:
@@ -242,7 +242,7 @@ class MissingStatement(AnalysisRule):
 
         try:
             if isinstance(last_seen, str):
-                last_date = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+                last_date = datetime.fromisoformat(last_seen)
             else:
                 last_date = last_seen
         except (ValueError, TypeError):
@@ -326,7 +326,7 @@ class StatementReceived(AnalysisRule):
                 if doc_date:
                     try:
                         if isinstance(doc_date, str):
-                            dt = datetime.fromisoformat(doc_date.replace("Z", "+00:00"))
+                            dt = datetime.fromisoformat(doc_date)
                         else:
                             dt = doc_date
                         day_diff = abs(dt.day - int(expected_day))
@@ -473,7 +473,7 @@ def _extract_period(doc: dict[str, Any]) -> str | None:
         if val:
             try:
                 if isinstance(val, str):
-                    dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+                    dt = datetime.fromisoformat(val)
                 elif isinstance(val, datetime):
                     dt = val
                 else:

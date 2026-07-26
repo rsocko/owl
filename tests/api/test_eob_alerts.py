@@ -11,15 +11,18 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-
 from doc_intelligence_hub.core.alerts import (
     Alert,
     check_eob_due_dates,
     emit_eob_alerts,
+)
+from doc_intelligence_hub.core.alerts import (
     get_session as get_alerts_session,
 )
 from doc_intelligence_hub.modules.eob_matching.database import (
     BillRecord,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
     get_session as get_eob_session,
 )
 

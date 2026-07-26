@@ -396,10 +396,7 @@ def emit_action_queue_alerts(actions: list[dict[str, Any]]) -> int:
             try:
                 from datetime import date as date_type
 
-                if isinstance(due_date, str):
-                    due = date_type.fromisoformat(due_date)
-                else:
-                    due = due_date
+                due = date_type.fromisoformat(due_date) if isinstance(due_date, str) else due_date
                 is_overdue = due < today
             except (ValueError, TypeError):
                 pass

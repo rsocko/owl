@@ -1,8 +1,7 @@
 """Paperless-NGX API client for Action Queue — delegates to shared client."""
 
-from typing import Optional
-
 from doc_intelligence_hub.core.paperless import PaperlessClient
+
 from .config import settings
 
 
@@ -24,7 +23,7 @@ class ActionQueuePaperlessClient:
         self._client = _get_client()
 
     async def get_documents_by_tags(
-        self, tag_names: list[str], *, limit: Optional[int] = None
+        self, tag_names: list[str], *, limit: int | None = None
     ) -> list[dict]:
         """Fetch documents that have any of the specified tags.
 
@@ -37,22 +36,22 @@ class ActionQueuePaperlessClient:
         return await self._client.list_documents_by_tag_ids(tag_ids, limit=limit)
 
     async def get_documents_by_saved_view(
-        self, view_id: int, *, limit: Optional[int] = None
+        self, view_id: int, *, limit: int | None = None
     ) -> list[dict]:
         """Fetch documents matching a Paperless saved view."""
         return await self._client.list_documents(saved_view=view_id, limit=limit)
 
     async def get_documents_by_query(
         self,
-        query: Optional[str] = None,
-        tags: Optional[list[str]] = None,
-        created_after: Optional[str] = None,
-        created_before: Optional[str] = None,
-        added_after: Optional[str] = None,
-        added_before: Optional[str] = None,
-        correspondent: Optional[str] = None,
-        document_type: Optional[str] = None,
-        limit: Optional[int] = None,
+        query: str | None = None,
+        tags: list[str] | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        added_after: str | None = None,
+        added_before: str | None = None,
+        correspondent: str | None = None,
+        document_type: str | None = None,
+        limit: int | None = None,
     ) -> list[dict]:
         """Flexible document query using Paperless API filter parameters."""
         return await self._client.list_documents(

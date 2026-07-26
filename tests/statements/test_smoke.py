@@ -29,7 +29,6 @@ from doc_intelligence_hub.modules.statements.service import (  # noqa: E402
     run_discovery,
 )
 
-
 # ---------------------------------------------------------------------------
 # Realistic mock data: 5 providers, 60+ documents, noise, mixed frequencies
 # ---------------------------------------------------------------------------
@@ -178,21 +177,19 @@ def _noise_docs(*, id_base: int, count: int = 10) -> list[dict]:
         "Home Renovation Plan",
         "Car Maintenance Log",
     ]
-    docs = []
-    for i in range(count):
-        docs.append(
-            {
-                "id": id_base + i,
-                "title": titles[i % len(titles)],
-                "correspondent": 99,
-                "document_type": "note",
-                "created_date": date(2025, 1 + (i % 12), 5).isoformat(),
-                "added": f"{date(2025, 1 + (i % 12), 5).isoformat()}T10:00:00Z",
-                "tags": [5],
-                "original_file_name": f"noise_{id_base + i}.pdf",
-            }
-        )
-    return docs
+    return [
+        {
+            "id": id_base + i,
+            "title": titles[i % len(titles)],
+            "correspondent": 99,
+            "document_type": "note",
+            "created_date": date(2025, 1 + (i % 12), 5).isoformat(),
+            "added": f"{date(2025, 1 + (i % 12), 5).isoformat()}T10:00:00Z",
+            "tags": [5],
+            "original_file_name": f"noise_{id_base + i}.pdf",
+        }
+        for i in range(count)
+    ]
 
 
 CORRESPONDENTS = {
@@ -449,6 +446,7 @@ async def test_smoke_recommendations_pipeline_end_to_end(tmp_path, monkeypatch):
 async def test_smoke_api_discovery_endpoint_with_mock(tmp_path, monkeypatch):
     """Verify the FastAPI discovery endpoint works end-to-end."""
     from fastapi.testclient import TestClient
+
     from doc_intelligence_hub.modules.statements.api import create_app
 
     monkeypatch.setattr(httpx, "AsyncClient", _mock_client_class())
@@ -480,8 +478,9 @@ async def test_smoke_api_discovery_endpoint_with_mock(tmp_path, monkeypatch):
 async def test_smoke_api_recommendations_endpoint_with_mock(tmp_path, monkeypatch):
     """Verify the FastAPI recommendations endpoint works end-to-end."""
     from fastapi.testclient import TestClient
-    from doc_intelligence_hub.modules.statements.api import create_app
+
     from doc_intelligence_hub.modules.statements import config as config_mod
+    from doc_intelligence_hub.modules.statements.api import create_app
 
     monkeypatch.setattr(httpx, "AsyncClient", _mock_client_class())
     monkeypatch.setenv("PAPERLESS_API_TOKEN", "test-token")

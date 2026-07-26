@@ -103,6 +103,7 @@ export function SeriesTimeline({
 
   // Group entries by account (or single group)
   const rowGroups: { label: string; color: string; docs: TimelineEntry[] }[] = useMemo(() => {
+    if (!entries.length) return [];
     if (!hasMultiAccounts) {
       return [{
         label: 'All documents',

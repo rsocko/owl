@@ -152,7 +152,7 @@ def cleanup_processing_history(days: int = 90, *, dry_run: bool = False) -> Modu
         logger.info("Processing history retention set to infinite — skipping cleanup")
         return result
 
-    from doc_intelligence_hub.modules.action_queue.database import get_session, ProcessingHistory
+    from doc_intelligence_hub.modules.action_queue.database import ProcessingHistory, get_session
 
     result = ModuleCleanupResult(module="processing_history")
     cutoff = datetime.utcnow() - timedelta(days=days)
@@ -260,8 +260,8 @@ def archive_old_matches(days: int = 365, *, dry_run: bool = False) -> ModuleClea
     from doc_intelligence_hub.modules.eob_matching.database import (
         BillRecord,
         EOBRecord,
-        MatchRecord,
         MatchingRun,
+        MatchRecord,
         get_session,
     )
 

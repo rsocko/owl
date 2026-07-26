@@ -1,7 +1,8 @@
 """Tests for the OllamaAnalyzer prompt building — ensures integer tag IDs don't crash."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer
 

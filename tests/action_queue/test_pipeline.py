@@ -12,7 +12,6 @@ from doc_intelligence_hub.modules.action_queue.config import settings as aq_sett
 from doc_intelligence_hub.modules.action_queue.database import init_db
 from doc_intelligence_hub.modules.action_queue.pipeline import Pipeline
 
-
 VALID_EXTRACTION = {
     "actions": [
         {

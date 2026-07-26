@@ -6,10 +6,16 @@ import pytest
 
 from doc_intelligence_hub.modules.eob_matching.database import (
     EOBRecord,
-    MatchRecord,
     MatchingRun,
+    MatchRecord,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
     configure as eob_configure,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
     get_session as get_eob_session,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
     init_db as eob_init_db,
 )
 from doc_intelligence_hub.modules.eob_matching.purge import (
@@ -250,6 +256,7 @@ class TestPurgeStaleApi:
     @pytest.fixture()
     def api_client(self, tmp_path):
         from fastapi.testclient import TestClient
+
         from doc_intelligence_hub.api.app import HubSettings, create_app
 
         db_path = tmp_path / "test_purge_api.db"
