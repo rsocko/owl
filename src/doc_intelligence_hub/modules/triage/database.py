@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import (
     Column,
     DateTime,
+    Float,
     Integer,
     String,
     Text,
@@ -46,6 +47,22 @@ class TriageQueueItem(Base):
     deferred_until = Column(DateTime, nullable=True)
     resolved_at = Column(DateTime, nullable=True)
     resolved_action = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class DocumentDuplicate(Base):
+    """A detected pair of potentially duplicate documents."""
+
+    __tablename__ = "document_duplicates"
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex[:12])
+    doc_a_id = Column(Integer, nullable=False)
+    doc_b_id = Column(Integer, nullable=False)
+    similarity_score = Column(Float, nullable=False)
+    breakdown_json = Column("breakdown", Text, nullable=True)  # JSON: per-signal scores
+    status = Column(String, default="pending")  # 'pending', 'true_duplicate', 'superseded', 'not_duplicate'
+    primary_doc_id = Column(Integer, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
 
@@ -329,3 +346,143 @@ def _item_to_dict(item: TriageQueueItem) -> dict[str, Any]:
         "resolved_action": item.resolved_action,
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }
+
+
+# ------------------------------------------------------------------
+# DocumentDuplicate CRUD
+# ------------------------------------------------------------------
+
+
+def _duplicate_to_dict(dup: DocumentDuplicate) -> dict[str, Any]:
+    """Convert a DocumentDuplicate to a plain dict for JSON serialization."""
+    import json
+
+    breakdown = None
+    if dup.breakdown_json:
+        try:
+            breakdown = json.loads(dup.breakdown_json)
+        except (json.JSONDecodeError, TypeError):
+            breakdown = dup.breakdown_json
+
+    return {
+        "id": dup.id,
+        "doc_a_id": dup.doc_a_id,
+        "doc_b_id": dup.doc_b_id,
+        "similarity_score": dup.similarity_score,
+        "breakdown": breakdown,
+        "status": dup.status,
+        "primary_doc_id": dup.primary_doc_id,
+        "resolved_at": dup.resolved_at.isoformat() if dup.resolved_at else None,
+        "created_at": dup.created_at.isoformat() if dup.created_at else None,
+    }
+
+
+def create_duplicate_pair(
+    *,
+    doc_a_id: int,
+    doc_b_id: int,
+    similarity_score: float,
+    breakdown: dict | None = None,
+) -> dict[str, Any]:
+    """Create a new duplicate pair record."""
+    import json
+
+    session = get_session()
+    try:
+        dup = DocumentDuplicate(
+            doc_a_id=doc_a_id,
+            doc_b_id=doc_b_id,
+            similarity_score=similarity_score,
+            breakdown_json=json.dumps(breakdown) if breakdown else None,
+        )
+        session.add(dup)
+        session.commit()
+        session.refresh(dup)
+        return _duplicate_to_dict(dup)
+    finally:
+        session.close()
+
+
+def list_duplicate_pairs(
+    *,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """List duplicate pairs with optional status filter."""
+    session = get_session()
+    try:
+        query = session.query(DocumentDuplicate)
+        if status:
+            query = query.filter(DocumentDuplicate.status == status)
+        else:
+            query = query.filter(DocumentDuplicate.status == "pending")
+        query = query.order_by(DocumentDuplicate.similarity_score.desc())
+        pairs = query.offset(offset).limit(limit).all()
+        return [_duplicate_to_dict(p) for p in pairs]
+    finally:
+        session.close()
+
+
+def get_duplicate_pair(pair_id: str) -> dict[str, Any] | None:
+    """Get a single duplicate pair by ID."""
+    session = get_session()
+    try:
+        dup = session.query(DocumentDuplicate).filter(DocumentDuplicate.id == pair_id).first()
+        return _duplicate_to_dict(dup) if dup else None
+    finally:
+        session.close()
+
+
+def resolve_duplicate_pair(
+    pair_id: str,
+    resolution: str,
+    primary_doc_id: int | None = None,
+) -> dict[str, Any] | None:
+    """Resolve a duplicate pair with the given resolution status."""
+    import json
+
+    session = get_session()
+    try:
+        dup = session.query(DocumentDuplicate).filter(DocumentDuplicate.id == pair_id).first()
+        if not dup:
+            return None
+
+        dup.status = resolution
+        dup.primary_doc_id = primary_doc_id
+        dup.resolved_at = datetime.now(UTC)
+
+        # Record correction event
+        event = CorrectionEvent(
+            event_type=f"duplicate_{resolution}",
+            target_type="document_duplicate",
+            target_id=pair_id,
+            payload_json=json.dumps({
+                "resolution": resolution,
+                "primary_doc_id": primary_doc_id,
+                "doc_a_id": dup.doc_a_id,
+                "doc_b_id": dup.doc_b_id,
+            }),
+        )
+        session.add(event)
+        session.commit()
+        return _duplicate_to_dict(dup)
+    finally:
+        session.close()
+
+
+def find_existing_duplicate_pair(doc_a_id: int, doc_b_id: int) -> dict[str, Any] | None:
+    """Check if a duplicate pair already exists for the two document IDs (in either order)."""
+    session = get_session()
+    try:
+        dup = (
+            session.query(DocumentDuplicate)
+            .filter(
+                ((DocumentDuplicate.doc_a_id == doc_a_id) & (DocumentDuplicate.doc_b_id == doc_b_id))
+                | ((DocumentDuplicate.doc_a_id == doc_b_id) & (DocumentDuplicate.doc_b_id == doc_a_id))
+            )
+            .first()
+        )
+        return _duplicate_to_dict(dup) if dup else None
+    finally:
+        session.close()

@@ -13,6 +13,7 @@ import {
 } from '../components/ui';
 import { endpoints } from '../lib/api';
 import { StatementGroupingDetail } from '../components/triage/StatementGroupingDetail';
+import DuplicateDetail from './DuplicateDetail';
 import '../styles/triage-queue.css';
 
 // ------------------------------------------------------------------
@@ -49,7 +50,7 @@ interface StatsResponse {
   pending: number;
 }
 
-type ItemTypeFilter = 'all' | 'eob_match_review' | 'grouping_anomaly' | 'orphan_document';
+type ItemTypeFilter = 'all' | 'eob_match_review' | 'grouping_anomaly' | 'orphan_document' | 'duplicate_document';
 type StatusFilter = 'pending' | 'deferred' | 'resolved';
 type ToastState = { message: string; tone?: 'success' | 'error'; undoId?: string } | null;
 
@@ -76,6 +77,7 @@ function typeLabel(itemType: string): string {
     case 'eob_match_review': return 'EOB';
     case 'grouping_anomaly': return 'GROUPING';
     case 'orphan_document': return 'ORPHAN';
+    case 'duplicate_document': return 'DUPLICATE';
     default: return itemType.toUpperCase();
   }
 }
@@ -85,6 +87,7 @@ function typeBadgeTone(itemType: string) {
     case 'eob_match_review': return 'info' as const;
     case 'grouping_anomaly': return 'warning' as const;
     case 'orphan_document': return 'danger' as const;
+    case 'duplicate_document': return 'warning' as const;
     default: return 'muted' as const;
   }
 }
@@ -115,6 +118,12 @@ function itemTitle(item: TriageItem): string {
   }
   if (item.item_type === 'grouping_anomaly') {
     return `Grouping: ${meta.series_name || item.target_id}`;
+  }
+  if (item.item_type === 'duplicate_document') {
+    const docA = meta.doc_a_id ?? '?';
+    const docB = meta.doc_b_id ?? '?';
+    const scorePct = typeof meta.score_pct === 'number' ? `${meta.score_pct}%` : '';
+    return `Duplicate: #${docA} ↔ #${docB}${scorePct ? ` (${scorePct})` : ''}`;
   }
   return `${typeLabel(item.item_type)}: ${item.target_id}`;
 }
@@ -430,6 +439,7 @@ export default function TriageQueue() {
                     { key: 'eob_match_review', label: `EOB (${typeCounts.eob_match_review ?? 0})` },
                     { key: 'grouping_anomaly', label: `Groups (${typeCounts.grouping_anomaly ?? 0})` },
                     { key: 'orphan_document', label: `Orphans (${typeCounts.orphan_document ?? 0})` },
+                    { key: 'duplicate_document', label: `Dupes (${typeCounts.duplicate_document ?? 0})` },
                   ]}
                 />
 
@@ -589,15 +599,15 @@ export default function TriageQueue() {
                   </div>
                 </div>
 
-                {/* Reason banner — skip for grouping_anomaly (shown in detail component) */}
-                {selectedItem.reason && selectedItem.item_type !== 'grouping_anomaly' && (
+                {/* Reason banner — skip for types with dedicated detail components */}
+                {selectedItem.reason && !['grouping_anomaly', 'duplicate_document'].includes(selectedItem.item_type) && (
                   <div className="triage-reason-banner">
                     <strong>Flagged for review:</strong> {selectedItem.reason}
                   </div>
                 )}
 
-                {/* Item info card — skip for grouping_anomaly (detail component shows series info) */}
-                {selectedItem.item_type !== 'grouping_anomaly' && (
+                {/* Item info card — skip for types with dedicated detail components */}
+                {!['grouping_anomaly', 'duplicate_document'].includes(selectedItem.item_type) && (
                 <Card title="Item details">
                   <div className="triage-detail-info">
                     <div className="triage-detail-row">
@@ -651,7 +661,13 @@ export default function TriageQueue() {
                       setSelectedId(next?.id ?? null);
                     }}
                   />
+                ) : selectedItem.item_type === 'duplicate_document' && selectedItem.metadata?.duplicate_pair_id ? (
+                  <DuplicateDetail
+                    pairId={selectedItem.metadata.duplicate_pair_id as string}
+                    onResolved={() => void loadData()}
+                  />
                 ) : (
+                  /* Metadata dump — placeholder for specific detail views (#834, #831) */
                   <Card title="Item metadata">
                     <div className="triage-metadata-dump">
                       {selectedItem.metadata ? (
