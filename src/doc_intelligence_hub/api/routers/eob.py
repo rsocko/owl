@@ -996,3 +996,112 @@ async def bulk_update_eobs(body: BulkUpdateRequest):
         raise exc
     finally:
         db.close()
+
+
+# ------------------------------------------------------------------
+# Coverage analysis
+# ------------------------------------------------------------------
+
+
+@router.get("/coverage")
+async def get_coverage_analysis(
+    group_by: str | None = None,
+) -> dict[str, Any]:
+    """Aggregate insurance coverage stats across all EOB records.
+
+    Returns overall totals (billed, plan_pays, patient_responsibility) and
+    optional breakdowns grouped by ``insurance_company``, ``provider``, or
+    ``month``.  Pass ``group_by`` as a comma-separated string to request
+    multiple groupings (e.g. ``?group_by=insurance_company,provider``).
+    Valid values: ``insurance_company``, ``provider``, ``month``.
+    """
+
+    init_db()
+    db = get_db_session()
+    try:
+        eobs = (
+            db.query(EOBRecord)
+            .filter(EOBRecord.total_billed.isnot(None))
+            .all()
+        )
+
+        # --- Overall totals ---
+        total_billed = 0.0
+        total_allowed = 0.0
+        total_plan_pays = 0.0
+        total_patient_responsibility = 0.0
+        record_count = len(eobs)
+
+        for eob in eobs:
+            total_billed += eob.total_billed or 0.0
+            total_allowed += eob.total_allowed or 0.0
+            total_plan_pays += eob.total_plan_pays or 0.0
+            total_patient_responsibility += eob.total_patient_responsibility or 0.0
+
+        coverage_pct = round(total_plan_pays / total_billed * 100, 1) if total_billed else 0.0
+
+        summary = {
+            "record_count": record_count,
+            "total_billed": round(total_billed, 2),
+            "total_allowed": round(total_allowed, 2),
+            "total_plan_pays": round(total_plan_pays, 2),
+            "total_patient_responsibility": round(total_patient_responsibility, 2),
+            "coverage_pct": coverage_pct,
+        }
+
+        # --- Breakdowns ---
+        requested = {g.strip() for g in (group_by or "").split(",") if g.strip()}
+        valid_groups = {"insurance_company", "provider", "month"}
+        requested = requested & valid_groups if requested else valid_groups
+
+        def _bucket_key(eob: EOBRecord, kind: str) -> str:
+            if kind == "insurance_company":
+                return eob.insurance_company or "Unknown"
+            if kind == "provider":
+                return eob.provider_name or "Unknown"
+            # month — derive from date_of_service (stored as string YYYY-MM-DD)
+            dos = eob.date_of_service or ""
+            return dos[:7] if len(dos) >= 7 else "Unknown"
+
+        breakdowns: dict[str, list[dict[str, Any]]] = {}
+
+        for kind in sorted(requested):
+            buckets: dict[str, dict[str, float]] = {}
+            for eob in eobs:
+                key = _bucket_key(eob, kind)
+                if key not in buckets:
+                    buckets[key] = {
+                        "total_billed": 0.0,
+                        "total_plan_pays": 0.0,
+                        "total_patient_responsibility": 0.0,
+                        "count": 0,
+                    }
+                b = buckets[key]
+                b["total_billed"] += eob.total_billed or 0.0
+                b["total_plan_pays"] += eob.total_plan_pays or 0.0
+                b["total_patient_responsibility"] += eob.total_patient_responsibility or 0.0
+                b["count"] += 1
+
+            rows = []
+            for name, vals in sorted(buckets.items(), key=lambda x: -x[1]["total_billed"]):
+                billed = vals["total_billed"]
+                pct = round(vals["total_plan_pays"] / billed * 100, 1) if billed else 0.0
+                rows.append({
+                    "name": name,
+                    "count": int(vals["count"]),
+                    "total_billed": round(billed, 2),
+                    "total_plan_pays": round(vals["total_plan_pays"], 2),
+                    "total_patient_responsibility": round(vals["total_patient_responsibility"], 2),
+                    "coverage_pct": pct,
+                })
+            breakdowns[kind] = rows
+
+        return {
+            "status": "ok",
+            "summary": summary,
+            "by_insurance_company": breakdowns.get("insurance_company", []),
+            "by_provider": breakdowns.get("provider", []),
+            "by_month": breakdowns.get("month", []),
+        }
+    finally:
+        db.close()

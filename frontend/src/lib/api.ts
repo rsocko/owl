@@ -91,6 +91,8 @@ export const endpoints = {
       api.post('/api/eob/bulk-update', body),
     purgeStale: () => api.post('/api/eob/purge-stale'),
     benchmark: (body?: unknown) => api.post('/api/eob/benchmark', body),
+    coverage: (groupBy?: string) =>
+      api.get(`/api/eob/coverage${groupBy ? `?group_by=${groupBy}` : ''}`),
   },
   actionQueue: {
     check: () => api.get('/api/queue/check'),
