@@ -1065,14 +1065,25 @@ async def check_due_dates(body: DueDateCheckRequest | None = None) -> dict[str, 
     due_soon_days = body.due_soon_days if body else 7
 
     try:
-        # Query all bills that have a due_date and are not paid
-        bills = (
-            db.query(BillRecord)
+        # Query the most recent bill record per document_id that has a due_date
+        # and is not paid. Multiple runs can produce duplicate BillRecords for the
+        # same document; we only want the latest to avoid redundant processing.
+        from sqlalchemy import func
+
+        latest_bill_ids = (
+            db.query(func.max(BillRecord.id).label("id"))
             .filter(BillRecord.due_date.isnot(None))
             .filter(
                 (BillRecord.payment_status.is_(None))
                 | (BillRecord.payment_status != "paid")
             )
+            .group_by(BillRecord.document_id)
+            .subquery()
+        )
+
+        bills = (
+            db.query(BillRecord)
+            .filter(BillRecord.id.in_(db.query(latest_bill_ids.c.id)))
             .all()
         )
 
