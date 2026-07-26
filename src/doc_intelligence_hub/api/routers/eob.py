@@ -12,15 +12,23 @@ from pydantic import BaseModel, Field
 from doc_intelligence_hub.api.routers import make_paperless_client
 from doc_intelligence_hub.modules.eob_matching.classifier import classify_document
 from doc_intelligence_hub.modules.eob_matching.database import (
+    BenchmarkModelResult,
+    BenchmarkRun,
     BillRecord,
     EOBRecord,
     MatchEvent,
     MatchRecord,
     MatchingRun,
     add_match_event,
+    get_benchmark_results,
+    get_benchmark_run,
     get_match_events,
+    get_previous_benchmark_results,
     get_session as get_db_session,
     init_db,
+    latest_benchmark_runs,
+    store_benchmark_result,
+    store_benchmark_run,
 )
 from doc_intelligence_hub.modules.eob_matching.enricher import EOBEnricher
 from doc_intelligence_hub.modules.eob_matching.extractor import extract_bill, extract_eob
@@ -901,6 +909,10 @@ class BenchmarkRequest(BaseModel):
         default="https://service-001.example.invalid/openai/v1",
         description="Bifrost gateway URL override",
     )
+    trigger: str = Field(
+        default="manual",
+        description="Trigger source: 'manual' or 'scheduled'",
+    )
 
 
 @router.post("/benchmark")
@@ -909,9 +921,11 @@ async def run_model_benchmark(request: Request, body: BenchmarkRequest) -> dict[
 
     Compares multiple models by running them against real EOB documents
     from Paperless. Returns timing, success rate, confidence, and cost data.
+    Results are persisted for trend tracking and regression detection.
     """
     import os
 
+    from doc_intelligence_hub.core.alerts import emit_benchmark_alerts
     from doc_intelligence_hub.core.llm import reset_llm_client
     from doc_intelligence_hub.modules.eob_matching.benchmark import (
         benchmark_to_json,
@@ -936,6 +950,19 @@ async def run_model_benchmark(request: Request, body: BenchmarkRequest) -> dict[
             "Paperless connection settings required for benchmark.",
         )
 
+    # Create benchmark run record
+    init_db()
+    db = get_db_session()
+    benchmark_run = BenchmarkRun(
+        trigger=body.trigger,
+        models_tested=len(body.models),
+        status="running",
+    )
+    try:
+        benchmark_run = store_benchmark_run(db, benchmark_run)
+    finally:
+        db.close()
+
     documents = await fetch_eob_documents(
         paperless_url=paperless_url,
         paperless_token=paperless_token,
@@ -947,23 +974,235 @@ async def run_model_benchmark(request: Request, body: BenchmarkRequest) -> dict[
     )
 
     if not documents:
+        # Mark run as completed with zero documents
+        db = get_db_session()
+        try:
+            run = db.query(BenchmarkRun).filter_by(id=benchmark_run.id).first()
+            if run:
+                run.finished_at = datetime.now(UTC)
+                run.documents_tested = 0
+                run.status = "completed"
+                db.commit()
+        finally:
+            db.close()
+
         return {
             "status": "no_documents",
             "message": "No documents found matching the specified criteria.",
             "models": body.models,
+            "run_id": benchmark_run.id,
             "results": [],
         }
 
     # Run benchmark
-    summaries = await run_benchmark(documents, body.models)
-    results = benchmark_to_json(summaries)
+    try:
+        summaries = await run_benchmark(documents, body.models)
+        results = benchmark_to_json(summaries)
+
+        # Persist results
+        db = get_db_session()
+        try:
+            run = db.query(BenchmarkRun).filter_by(id=benchmark_run.id).first()
+            if run:
+                run.finished_at = datetime.now(UTC)
+                run.documents_tested = len(documents)
+                run.status = "completed"
+                db.commit()
+
+            for model_result in results:
+                store_benchmark_result(db, BenchmarkModelResult(
+                    run_id=benchmark_run.id,
+                    model=model_result["model"],
+                    documents_tested=model_result["documents_tested"],
+                    avg_time_seconds=model_result["avg_time_seconds"],
+                    success_rate=model_result["success_rate"],
+                    avg_confidence=model_result["avg_confidence"],
+                    total_time_seconds=model_result["total_time_seconds"],
+                    estimated_cost_usd=model_result.get("estimated_cost_usd"),
+                    results_json=json.dumps(model_result.get("results", [])),
+                ))
+
+            # Check for regressions
+            previous = get_previous_benchmark_results(db, benchmark_run.id)
+            prev_dicts = [
+                {
+                    "model": r.model,
+                    "success_rate": r.success_rate,
+                    "avg_confidence": r.avg_confidence,
+                    "documents_tested": r.documents_tested,
+                }
+                for r in previous
+            ]
+            emit_benchmark_alerts(
+                current_results=results,
+                previous_results=prev_dicts if prev_dicts else None,
+            )
+        finally:
+            db.close()
+
+    except Exception:
+        # Mark run as failed
+        db = get_db_session()
+        try:
+            run = db.query(BenchmarkRun).filter_by(id=benchmark_run.id).first()
+            if run:
+                run.finished_at = datetime.now(UTC)
+                run.status = "failed"
+                db.commit()
+        finally:
+            db.close()
+        raise
 
     return {
         "status": "ok",
         "documents_tested": len(documents),
         "models_tested": len(body.models),
+        "run_id": benchmark_run.id,
         "results": results,
     }
+
+
+# ------------------------------------------------------------------
+# Benchmark history endpoints
+# ------------------------------------------------------------------
+
+
+@router.get("/benchmark/history")
+async def get_benchmark_history(
+    limit: int = 20,
+    trigger: str | None = None,
+) -> dict[str, Any]:
+    """List recent benchmark runs with summary metrics.
+
+    Args:
+        limit: Max number of runs to return (default 20).
+        trigger: Optional filter by trigger type ('manual' or 'scheduled').
+    """
+    init_db()
+    db = get_db_session()
+    try:
+        runs = latest_benchmark_runs(db, limit=limit)
+        if trigger:
+            runs = [r for r in runs if r.trigger == trigger]
+
+        result = []
+        for run in runs:
+            model_results = get_benchmark_results(db, run.id)
+            result.append({
+                "id": run.id,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                "documents_tested": run.documents_tested,
+                "models_tested": run.models_tested,
+                "trigger": run.trigger,
+                "status": run.status,
+                "models": [
+                    {
+                        "model": r.model,
+                        "success_rate": r.success_rate,
+                        "avg_confidence": r.avg_confidence,
+                        "avg_time_seconds": r.avg_time_seconds,
+                        "estimated_cost_usd": r.estimated_cost_usd,
+                    }
+                    for r in model_results
+                ],
+            })
+
+        return {"status": "ok", "runs": result}
+    finally:
+        db.close()
+
+
+@router.get("/benchmark/history/{run_id}")
+async def get_benchmark_run_detail(run_id: int) -> dict[str, Any]:
+    """Get detailed results for a single benchmark run, including per-document data."""
+    init_db()
+    db = get_db_session()
+    try:
+        run = get_benchmark_run(db, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Benchmark run {run_id} not found.")
+
+        model_results = get_benchmark_results(db, run.id)
+        return {
+            "status": "ok",
+            "run": {
+                "id": run.id,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                "documents_tested": run.documents_tested,
+                "models_tested": run.models_tested,
+                "trigger": run.trigger,
+                "status": run.status,
+            },
+            "results": [
+                {
+                    "model": r.model,
+                    "documents_tested": r.documents_tested,
+                    "avg_time_seconds": r.avg_time_seconds,
+                    "success_rate": r.success_rate,
+                    "avg_confidence": r.avg_confidence,
+                    "total_time_seconds": r.total_time_seconds,
+                    "estimated_cost_usd": r.estimated_cost_usd,
+                    "results": json.loads(r.results_json) if r.results_json else [],
+                }
+                for r in model_results
+            ],
+        }
+    finally:
+        db.close()
+
+
+@router.get("/benchmark/trends")
+async def get_benchmark_trends(
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Per-model success rate and confidence over time for trend visualization.
+
+    Returns the last *limit* completed benchmark runs with per-model metrics
+    ordered chronologically (oldest first) for easy charting.
+    """
+    init_db()
+    db = get_db_session()
+    try:
+        runs = (
+            db.query(BenchmarkRun)
+            .filter(BenchmarkRun.status == "completed")
+            .order_by(BenchmarkRun.started_at.desc())
+            .limit(limit)
+            .all()
+        )
+        # Reverse to chronological order for charting
+        runs = list(reversed(runs))
+
+        # Collect all unique models across runs
+        all_models: set[str] = set()
+        runs_data = []
+        for run in runs:
+            model_results = get_benchmark_results(db, run.id)
+            run_entry = {
+                "run_id": run.id,
+                "date": run.started_at.isoformat() if run.started_at else None,
+                "trigger": run.trigger,
+                "models": {},
+            }
+            for r in model_results:
+                all_models.add(r.model)
+                run_entry["models"][r.model] = {
+                    "success_rate": r.success_rate,
+                    "avg_confidence": r.avg_confidence,
+                    "avg_time_seconds": r.avg_time_seconds,
+                    "estimated_cost_usd": r.estimated_cost_usd,
+                }
+            runs_data.append(run_entry)
+
+        return {
+            "status": "ok",
+            "models": sorted(all_models),
+            "runs": runs_data,
+        }
+    finally:
+        db.close()
 
 
 # ------------------------------------------------------------------
