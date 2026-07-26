@@ -6,7 +6,7 @@ sidebar_position: 1
 
 # OWL 🦉 — Organize. Watch. Learn.
 
-OWL is a headless document intelligence API that turns your [Paperless-ngx](https://docs.paperless-ngx.com/) archive into an actionable system. It classifies incoming documents, detects missing recurring statements, matches medical EOBs to bills, and surfaces alerts — all consumed by [Mission Control](https://service-004.example.invalid) as the primary user interface.
+OWL is a document intelligence application that turns your [Paperless-ngx](https://docs.paperless-ngx.com/) archive into an actionable system. It provides a built-in dashboard for triage, tracking, and matching workflows, and also feeds alerts into [Mission Control](https://service-004.example.invalid) for cross-service visibility. It classifies incoming documents, detects missing recurring statements, matches medical EOBs to bills, and surfaces alerts.
 
 ## Core Capabilities
 
