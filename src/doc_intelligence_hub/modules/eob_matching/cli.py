@@ -63,8 +63,10 @@ def cli(ctx, db_url):
               help="Skip documents that were successfully extracted in a prior run (default: enabled)")
 @click.option("--use-llm/--no-llm", default=None,
               help="Use LLM extractor (default: auto-detect from LLM_BASE_URL)")
+@click.option("--since-last-run", is_flag=True, default=False,
+              help="Only process documents created since the last successful run (mutually exclusive with --created-after)")
 @click.pass_context
-def run(ctx, paperless_url, paperless_token, tag, correspondent, document_type, created_after, created_before, limit, output, verbose, write_to_paperless, skip_processed, use_llm):
+def run(ctx, paperless_url, paperless_token, tag, correspondent, document_type, created_after, created_before, limit, output, verbose, write_to_paperless, skip_processed, use_llm, since_last_run):
     """Run the full pipeline: fetch → classify → extract → match → store.
 
     Results are persisted to SQLite. Use --write-to-paperless to also
@@ -74,24 +76,64 @@ def run(ctx, paperless_url, paperless_token, tag, correspondent, document_type, 
         eob-match run --tag medical --limit 20
         eob-match run --correspondent "UnitedHealthcare" --verbose
         eob-match run --created-after 2026-01-01 --limit 50
-        eob-match run --document-type "EOB - Explanation of Benefits" --created-after 2026-06-01
+        eob-match run --since-last-run --limit 200 --verbose
     """
+    if since_last_run and created_after:
+        raise click.UsageError("--since-last-run and --created-after are mutually exclusive.")
+
     _init_database(ctx.obj.get("db_url"))
-    asyncio.run(_run_pipeline(
-        paperless_url=paperless_url,
-        paperless_token=paperless_token,
-        tags=list(tag) if tag else None,
-        correspondent=correspondent,
-        document_type=document_type,
-        created_after=created_after,
-        created_before=created_before,
-        limit=limit,
-        output_path=output,
-        verbose=verbose,
-        write_to_paperless=write_to_paperless,
-        skip_processed=skip_processed,
-        use_llm=use_llm,
-    ))
+
+    # Resolve --since-last-run into a created_after date
+    if since_last_run:
+        from doc_intelligence_hub.modules.eob_matching.database import (
+            get_session as get_db_session,
+            last_successful_run,
+        )
+        db = get_db_session()
+        try:
+            last_run = last_successful_run(db)
+            if last_run and last_run.finished_at:
+                created_after = last_run.finished_at.strftime("%Y-%m-%d")
+                console.print(f"  [dim]--since-last-run: using created_after={created_after} "
+                              f"(from run #{last_run.id}, finished {last_run.finished_at.isoformat()})[/dim]")
+            else:
+                console.print("  [dim]--since-last-run: no prior successful run found, processing all documents[/dim]")
+        finally:
+            db.close()
+
+    try:
+        asyncio.run(_run_pipeline(
+            paperless_url=paperless_url,
+            paperless_token=paperless_token,
+            tags=list(tag) if tag else None,
+            correspondent=correspondent,
+            document_type=document_type,
+            created_after=created_after,
+            created_before=created_before,
+            limit=limit,
+            output_path=output,
+            verbose=verbose,
+            write_to_paperless=write_to_paperless,
+            skip_processed=skip_processed,
+            use_llm=use_llm,
+        ))
+    except Exception as exc:
+        # Emit failure alert for monitoring
+        try:
+            from doc_intelligence_hub.core.alerts import emit_alert
+
+            emit_alert(
+                alert_type="eob_run_failed",
+                severity="high",
+                module="eob",
+                title="EOB matching pipeline failed",
+                description=f"CLI pipeline failed: {exc}",
+                metadata={"error": str(exc), "since_last_run": since_last_run},
+            )
+        except Exception:
+            pass  # Alert emission is best-effort
+        console.print(f"\n[red]✗ Pipeline failed:[/red] {exc}")
+        raise SystemExit(1) from exc
 
 
 @cli.command()

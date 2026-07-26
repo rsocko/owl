@@ -36,16 +36,29 @@ statement_tracker:
 
 eob_matching:
   run:
-    description: "Classify and match EOBs to medical bills"
-    cron: "0 10 * * 0"         # Weekly on Sunday at 10:00 AM
+    description: "Classify and match EOBs to medical bills (incremental)"
+    cron: "0 10 * * *"         # Daily at 10:00 AM (was weekly; --since-last-run makes daily efficient)
     endpoint: "/api/eob/run"
     method: POST
     body:
       limit: 200
       tags: ["medical"]
+      since_last_run: true
     limit: 200
     enabled: true
     timeout: 300
+
+  benchmark:
+    description: "Benchmark LLM models for EOB extraction quality and detect regressions"
+    cron: "0 6 * * 1"          # Weekly on Monday at 6:00 AM
+    endpoint: "/api/eob/benchmark"
+    method: POST
+    body:
+      models: ["phi3:mini", "gpt-4o-mini", "gpt-4o"]
+      limit: 5
+      trigger: "scheduled"
+    enabled: true
+    timeout: 600
 
 action_queue:
   run:

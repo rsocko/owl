@@ -19,8 +19,11 @@ HUB_URL=http://localhost:8071
 
 # --- EOB Matching ---
 
-# EOB Matching pipeline — weekly on Sunday at 10:00 AM
-0 10 * * 0  ***REMOVED*** -sf -X POST "$HUB_URL/api/eob/run" -H 'Content-Type: application/json' -d '{"limit":200,"tags":["medical"]}' -o /dev/null && echo "[$(date)] EOB matching OK" >> /var/log/doc-intelligence-cron.log
+# EOB Matching pipeline — daily at 10:00 AM (incremental: since last run)
+0 10 * * *  ***REMOVED*** -sf -X POST "$HUB_URL/api/eob/run" -H 'Content-Type: application/json' -d '{"limit":200,"tags":["medical"],"since_last_run":true}' -o /dev/null && echo "[$(date)] EOB matching OK" >> /var/log/doc-intelligence-cron.log
+
+# EOB Benchmark — weekly on Monday at 6:00 AM
+0 6 * * 1   ***REMOVED*** -sf -X POST "$HUB_URL/api/eob/benchmark" -H 'Content-Type: application/json' -d '{"models":["phi3:mini","gpt-4o-mini","gpt-4o"],"limit":5,"trigger":"scheduled"}' -o /dev/null && echo "[$(date)] EOB benchmark OK" >> /var/log/doc-intelligence-cron.log
 
 # --- Action Queue ---
 
@@ -31,5 +34,10 @@ HUB_URL=http://localhost:8071
 # --- Alternative: Docker Compose one-shot jobs ---
 # Use these if the hub API is not reachable from the cron host:
 #
-# 0 10 * * 0  docker compose -f $COMPOSE_FILE run --rm eob-matching
+# 0 10 * * *  docker compose -f $COMPOSE_FILE run --rm eob-matching
 # 0 8 * * *   docker compose -f $COMPOSE_FILE run --rm action-queue
+#
+# --- Alternative: Supercronic scheduler sidecar ---
+# Instead of host cron, use the eob-scheduler Docker service:
+#
+# docker compose --profile scheduled up -d eob-scheduler

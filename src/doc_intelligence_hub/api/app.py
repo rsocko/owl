@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from doc_intelligence_hub.api.routers import action_queue, admin, alerts, analysis, document_types, eob, insights, mc_connector, metadata, statements, stats, system, triage
+from doc_intelligence_hub.api.routers import action_queue, admin, alerts, analysis, dashboard, document_types, duplicates, eob, extraction, insights, mc_connector, metadata, statements, stats, system, triage
 from doc_intelligence_hub.core.llm import get_llm_settings, validate_model_availability
 from doc_intelligence_hub.core.logging_config import configure_logging
 from doc_intelligence_hub.core.scheduler import HubScheduler
@@ -192,6 +192,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
             {"name": "triage", "description": "Triage queue for human review of automated decisions."},
             {"name": "analysis", "description": "Analysis engine — configurable rules, execution, and management."},
             {"name": "insights", "description": "Browsable insights produced by the analysis engine."},
+            {"name": "extraction", "description": "Account number and entity extraction pipelines."},
             {"name": "stats", "description": "Aggregate statistics across all DI modules for MC integration."},
         ],
         lifespan=lifespan,
@@ -229,9 +230,12 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(stats.router)
     app.include_router(mc_connector.router)
     app.include_router(triage.router)
+    app.include_router(dashboard.router)
+    app.include_router(duplicates.router)
     app.include_router(metadata.router)
     app.include_router(analysis.router)
     app.include_router(insights.router)
+    app.include_router(extraction.router)
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:

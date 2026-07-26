@@ -12,21 +12,34 @@ from pydantic import BaseModel, Field
 from doc_intelligence_hub.api.routers import make_paperless_client
 from doc_intelligence_hub.modules.eob_matching.classifier import classify_document
 from doc_intelligence_hub.modules.eob_matching.database import (
+    BenchmarkModelResult,
+    BenchmarkRun,
     BillRecord,
     EOBRecord,
     MatchEvent,
     MatchRecord,
     MatchingRun,
+    PaymentRecord,
     add_match_event,
+    get_benchmark_results,
+    get_benchmark_run,
     get_match_events,
+    get_payments_for_match,
+    get_previous_benchmark_results,
     get_session as get_db_session,
     init_db,
+    last_successful_run,
+    latest_benchmark_runs,
+    payment_summary,
+    record_payment,
+    store_benchmark_result,
+    store_benchmark_run,
 )
 from doc_intelligence_hub.modules.eob_matching.enricher import EOBEnricher
 from doc_intelligence_hub.modules.eob_matching.extractor import extract_bill, extract_eob
 from doc_intelligence_hub.modules.eob_matching.llm_extractor import extract_bill_llm, extract_eob_llm
 from doc_intelligence_hub.modules.eob_matching.matcher import match_documents
-from doc_intelligence_hub.modules.eob_matching.models import DocumentType
+from doc_intelligence_hub.modules.eob_matching.models import DocumentType, PaymentRequest
 
 router = APIRouter(prefix="/api/eob", tags=["eob-matching"])
 
@@ -52,11 +65,33 @@ class ClassifyRequest(BaseModel):
 class RunRequest(ClassifyRequest):
     verbose: bool = False
     write_to_paperless: bool | None = None  # None = inherit from hub settings
+    since_last_run: bool = Field(
+        default=False,
+        description="Only process documents created since the last successful run. Mutually exclusive with created_after.",
+    )
 
 
 class MatchUpdateRequest(BaseModel):
     status: str = Field(..., pattern=r"^(confirmed|rejected|candidate)$")
     notes: str | None = Field(default=None, description="Optional reviewer notes for this match decision")
+
+
+class MatchConfirmRequest(BaseModel):
+    notes: str | None = Field(default=None, description="Optional reviewer notes")
+    triage_item_id: str | None = Field(default=None, description="If provided, also resolve this triage queue item")
+
+
+class MatchRejectRequest(BaseModel):
+    reason: str | None = Field(default=None, description="Rejection reason")
+    reassign_to: int | None = Field(default=None, description="Alternative match ID to reassign to")
+    triage_item_id: str | None = Field(default=None, description="If provided, also resolve this triage queue item")
+
+
+class ManualMatchRequest(BaseModel):
+    eob_doc_id: int = Field(..., description="EOB document ID")
+    bill_doc_id: int = Field(..., description="Bill document ID")
+    notes: str | None = Field(default=None, description="Optional notes")
+    triage_item_id: str | None = Field(default=None, description="If provided, also resolve this triage queue item")
 
 
 class BulkUpdateRequest(BaseModel):
@@ -223,12 +258,18 @@ def _serialize_match(
             "procedures": m.breakdown_procedures,
         },
         "status": m.status,
+        "payment_status": m.payment_status or "unpaid",
+        "paid_amount": m.paid_amount or 0.0,
+        "paid_date": m.paid_date.isoformat() if m.paid_date else None,
         "linked_in_paperless": bool(m.linked_in_paperless),
         "eob_preview_url": f"{base_url}/documents/{m.eob_document_id}/details" if base_url else None,
         "bill_preview_url": f"{base_url}/documents/{m.bill_document_id}/details" if base_url else None,
         "created_at": m.created_at.isoformat() if m.created_at else None,
         "confirmed_at": m.confirmed_at.isoformat() if m.confirmed_at else None,
         "notes": m.notes,
+        "user_status": m.user_status or "unreviewed",
+        "reviewed_at": m.reviewed_at.isoformat() if m.reviewed_at else None,
+        "user_notes": m.user_notes,
         "eob_details": _serialize_eob_details(eob),
         "bill_details": _serialize_bill_details(bill),
     }
@@ -324,6 +365,30 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
     init_db()
     db = get_db_session()
 
+    # Resolve since_last_run into a created_after filter
+    resolved_created_after = body.created_after
+    since_last_run_info: dict[str, Any] | None = None
+    if body.since_last_run:
+        if body.created_after:
+            raise HTTPException(
+                status_code=422,
+                detail="since_last_run and created_after are mutually exclusive.",
+            )
+        last_run = last_successful_run(db)
+        if last_run and last_run.finished_at:
+            resolved_created_after = last_run.finished_at.strftime("%Y-%m-%d")
+            since_last_run_info = {
+                "resolved_from_run_id": last_run.id,
+                "resolved_created_after": resolved_created_after,
+                "last_run_finished_at": last_run.finished_at.isoformat(),
+            }
+        else:
+            since_last_run_info = {
+                "resolved_from_run_id": None,
+                "resolved_created_after": None,
+                "note": "No prior successful run found — processing all documents.",
+            }
+
     # Determine write mode
     write_enabled = body.write_to_paperless if body.write_to_paperless is not None else _is_write_enabled(request)
 
@@ -344,7 +409,7 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
             tags=body.tags,
             correspondent=body.correspondent,
             document_type=body.document_type,
-            created_after=body.created_after,
+            created_after=resolved_created_after,
             created_before=body.created_before,
         )
 
@@ -497,9 +562,9 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
         run_record.finished_at = datetime.now(UTC)
         db.commit()
 
-        # Emit unified alerts for unmatched EOBs and low-confidence matches
+        # Emit unified alerts for unmatched EOBs, low-confidence, and high-confidence matches
         try:
-            from doc_intelligence_hub.core.alerts import emit_eob_alerts
+            from doc_intelligence_hub.core.alerts import check_eob_due_dates, emit_eob_alerts
 
             unmatched = [
                 {"document_id": int(e.document_id), "provider_name": e.provider_name}
@@ -516,7 +581,34 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
                 for m in matches
                 if m.confidence.value == "LOW"
             ]
-            emit_eob_alerts(unmatched_eobs=unmatched, low_confidence_matches=low_conf)
+            high_conf = [
+                {
+                    "eob_document_id": int(m.eob_id),
+                    "bill_document_id": int(m.bill_id),
+                    "score": m.score,
+                    "confidence": m.confidence.value,
+                }
+                for m in matches
+                if m.confidence.value == "HIGH"
+            ]
+            emit_eob_alerts(
+                unmatched_eobs=unmatched,
+                low_confidence_matches=low_conf,
+                high_confidence_matches=high_conf,
+            )
+
+            # Also check due dates for bills found in this run
+            bill_dicts = [
+                {
+                    "document_id": int(b.document_id),
+                    "provider_name": b.provider_name,
+                    "due_date": str(b.due_date) if b.due_date else None,
+                    "payment_status": b.payment_status,
+                    "balance_due": b.balance_due,
+                }
+                for b in extracted_bills
+            ]
+            check_eob_due_dates(bill_dicts)
         except Exception:
             pass  # Alert emission is best-effort
 
@@ -528,6 +620,7 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
             "run_at": run_record.started_at.isoformat() if run_record.started_at else None,
             "write_to_paperless": write_enabled,
             "documents_scanned": len(documents),
+            "since_last_run": since_last_run_info,
             "summary": {
                 **_summarize_classifications(classified_documents),
                 "matches": len(matches),
@@ -543,6 +636,27 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
             "extracted_eobs": [e.model_dump(mode="json") for e in extracted_eobs] if body.verbose else [],
             "extracted_bills": [b.model_dump(mode="json") for b in extracted_bills] if body.verbose else [],
         }
+    except Exception as exc:
+        # Emit failure alert for scheduled run monitoring
+        try:
+            from doc_intelligence_hub.core.alerts import emit_alert
+
+            emit_alert(
+                alert_type="eob_run_failed",
+                severity="high",
+                module="eob",
+                title="EOB matching pipeline failed",
+                description=f"Run #{run_record.id} failed: {exc}",
+                metadata={
+                    "run_id": run_record.id,
+                    "error": str(exc),
+                    "since_last_run": body.since_last_run,
+                },
+            )
+        except Exception:
+            pass  # Alert emission is best-effort
+
+        raise
     finally:
         db.close()
 
@@ -649,6 +763,24 @@ async def list_matches(
             "limit": limit,
             "offset": offset,
         }
+    finally:
+        db.close()
+
+
+@router.get("/matches/{match_id}")
+async def get_match(request: Request, match_id: int) -> dict[str, Any]:
+    """Get a single match record by ID."""
+    init_db()
+    db = get_db_session()
+    try:
+        match = db.query(MatchRecord).filter_by(id=match_id).first()
+        if not match:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
+
+        paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
+        return _serialize_match(match, paperless_url)
     finally:
         db.close()
 
@@ -878,6 +1010,267 @@ async def purge_stale_records(body: PurgeStaleRequest | None = None) -> dict[str
 
 
 # ------------------------------------------------------------------
+# EOB Match Correction endpoints (triage-aware confirm/reject/manual)
+# ------------------------------------------------------------------
+
+
+def _resolve_triage_item(triage_item_id: str, action: str, match_id: int) -> None:
+    """Resolve a triage queue item and create a correction event.
+
+    Validates the item exists, is pending, and targets this match before resolving.
+    """
+    try:
+        from doc_intelligence_hub.modules.triage.database import get_queue_item, resolve_queue_item
+
+        item = get_queue_item(triage_item_id)
+        if not item:
+            return
+        # Verify it's an EOB review targeting this match
+        if item.get("item_type") != "eob_match_review":
+            return
+        if str(item.get("target_id")) != str(match_id):
+            return
+        if item.get("status") != "pending":
+            return
+
+        resolve_queue_item(triage_item_id, action, {"match_id": match_id})
+    except Exception:
+        pass  # Non-fatal: triage integration is best-effort
+
+
+@router.post("/matches/{match_id}/confirm")
+async def confirm_match(
+    request: Request,
+    match_id: int,
+    body: MatchConfirmRequest | None = None,
+) -> dict[str, Any]:
+    """Confirm a match — updates status, creates correction event, optionally resolves triage item."""
+    init_db()
+    db = get_db_session()
+    try:
+        match = db.query(MatchRecord).filter_by(id=match_id).first()
+        if not match:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
+
+        match.status = "confirmed"
+        match.user_status = "confirmed"
+        match.confirmed_at = datetime.now(UTC)
+        match.reviewed_at = datetime.now(UTC)
+        if body and body.notes:
+            match.notes = body.notes
+            match.user_notes = body.notes
+
+        db.add(MatchEvent(
+            match_id=match_id,
+            event_type="confirmed",
+            actor="user",
+            detail=f"Match confirmed by reviewer{(': ' + body.notes) if body and body.notes else ''}",
+        ))
+
+        # Write to Paperless if enabled
+        if _is_write_enabled(request) and not match.linked_in_paperless:
+            try:
+                client = make_paperless_client(request, timeout=30.0)
+                enricher = EOBEnricher(client)
+                await enricher.link_match(
+                    eob_document_id=match.eob_document_id,
+                    bill_document_id=match.bill_document_id,
+                    score=match.score,
+                    confidence=match.confidence,
+                )
+                match.linked_in_paperless = 1
+            except Exception:
+                pass  # Non-fatal
+
+        db.commit()
+
+        # Create correction event and resolve triage item
+        if body and body.triage_item_id:
+            _resolve_triage_item(body.triage_item_id, "confirm", match_id)
+
+        paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
+        return {
+            "status": "ok",
+            "match": _serialize_match(match, paperless_url),
+        }
+    finally:
+        db.close()
+
+
+@router.post("/matches/{match_id}/reject")
+async def reject_match(
+    request: Request,
+    match_id: int,
+    body: MatchRejectRequest | None = None,
+) -> dict[str, Any]:
+    """Reject a match — updates status, creates correction event, optionally resolves triage item."""
+    init_db()
+    db = get_db_session()
+    try:
+        match = db.query(MatchRecord).filter_by(id=match_id).first()
+        if not match:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
+
+        match.status = "rejected"
+        match.user_status = "rejected"
+        match.reviewed_at = datetime.now(UTC)
+        match.confirmed_at = None  # Clear if previously confirmed
+        detail_parts = ["Match rejected by reviewer"]
+        if body and body.reason:
+            match.notes = body.reason
+            match.user_notes = body.reason
+            detail_parts.append(f"Reason: {body.reason}")
+        if body and body.reassign_to:
+            detail_parts.append(f"Reassigned to match #{body.reassign_to}")
+
+        db.add(MatchEvent(
+            match_id=match_id,
+            event_type="rejected",
+            actor="user",
+            detail=". ".join(detail_parts),
+        ))
+        db.commit()
+
+        # Resolve triage item
+        if body and body.triage_item_id:
+            _resolve_triage_item(body.triage_item_id, "reject", match_id)
+
+        paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
+        return {
+            "status": "ok",
+            "match": _serialize_match(match, paperless_url),
+        }
+    finally:
+        db.close()
+
+
+@router.post("/matches/manual")
+async def create_manual_match(request: Request, body: ManualMatchRequest) -> dict[str, Any]:
+    """Create a manual EOB↔Bill match — user-driven re-link (#877)."""
+    from fastapi import HTTPException
+
+    init_db()
+    db = get_db_session()
+    try:
+        # Check for existing confirmed match between these two documents
+        existing = (
+            db.query(MatchRecord)
+            .filter_by(eob_document_id=body.eob_doc_id, bill_document_id=body.bill_doc_id)
+            .filter(MatchRecord.status == "confirmed")
+            .first()
+        )
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A confirmed match already exists between EOB {body.eob_doc_id} and Bill {body.bill_doc_id} (match #{existing.id}).",
+            )
+
+        now = datetime.now(UTC)
+        match = MatchRecord(
+            eob_document_id=body.eob_doc_id,
+            bill_document_id=body.bill_doc_id,
+            score=100.0,
+            confidence="MANUAL",
+            breakdown_date=0.0,
+            breakdown_provider=0.0,
+            breakdown_patient=0.0,
+            breakdown_amount=0.0,
+            breakdown_procedures=0.0,
+            status="confirmed",
+            user_status="manual",
+            confirmed_at=now,
+            reviewed_at=now,
+            notes=body.notes,
+            user_notes=body.notes,
+        )
+        db.add(match)
+        db.flush()  # get match.id
+
+        db.add(MatchEvent(
+            match_id=match.id,
+            event_type="manual_match",
+            actor="user",
+            detail=f"Manual match created by user linking EOB {body.eob_doc_id} ↔ Bill {body.bill_doc_id}"
+            + (f": {body.notes}" if body.notes else ""),
+        ))
+
+        # Write to Paperless if enabled
+        if _is_write_enabled(request) and not match.linked_in_paperless:
+            try:
+                client = make_paperless_client(request, timeout=30.0)
+                enricher = EOBEnricher(client)
+                await enricher.link_match(
+                    eob_document_id=match.eob_document_id,
+                    bill_document_id=match.bill_document_id,
+                    score=match.score,
+                    confidence=match.confidence,
+                )
+                match.linked_in_paperless = 1
+            except Exception:
+                pass  # Non-fatal
+
+        db.commit()
+
+        # Resolve triage item if provided
+        if body.triage_item_id:
+            _resolve_triage_item(body.triage_item_id, "manual_match", match.id)
+
+        paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
+        return {
+            "status": "ok",
+            "match": _serialize_match(match, paperless_url),
+        }
+    finally:
+        db.close()
+
+
+@router.get("/candidates/{doc_id}")
+async def get_candidates(
+    request: Request,
+    doc_id: int,
+    type: str | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Find alternative match candidates for a document.
+
+    Returns other matches that share the same EOB or Bill document ID,
+    useful for re-linking when the current match is rejected.
+    """
+    init_db()
+    db = get_db_session()
+    try:
+        # Find matches that share the same EOB or Bill document
+        query = db.query(MatchRecord).filter(
+            (MatchRecord.eob_document_id == doc_id) | (MatchRecord.bill_document_id == doc_id)
+        )
+        if type == "eob":
+            query = db.query(MatchRecord).filter(MatchRecord.eob_document_id == doc_id)
+        elif type == "bill":
+            query = db.query(MatchRecord).filter(MatchRecord.bill_document_id == doc_id)
+
+        candidates = (
+            query
+            .filter(MatchRecord.score > 50)
+            .order_by(MatchRecord.score.desc())
+            .limit(max(1, min(limit, 100)))
+            .all()
+        )
+
+        paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
+        return {
+            "doc_id": doc_id,
+            "candidates": [_serialize_match(m, paperless_url) for m in candidates],
+            "count": len(candidates),
+        }
+    finally:
+        db.close()
+
+
+# ------------------------------------------------------------------
 # Benchmark endpoint
 # ------------------------------------------------------------------
 
@@ -901,6 +1294,11 @@ class BenchmarkRequest(BaseModel):
         default="https://service-001.example.invalid/openai/v1",
         description="Bifrost gateway URL override",
     )
+    trigger: str = Field(
+        default="manual",
+        pattern="^(manual|scheduled)$",
+        description="Trigger source: 'manual' or 'scheduled'",
+    )
 
 
 @router.post("/benchmark")
@@ -909,9 +1307,11 @@ async def run_model_benchmark(request: Request, body: BenchmarkRequest) -> dict[
 
     Compares multiple models by running them against real EOB documents
     from Paperless. Returns timing, success rate, confidence, and cost data.
+    Results are persisted for trend tracking and regression detection.
     """
     import os
 
+    from doc_intelligence_hub.core.alerts import emit_benchmark_alerts
     from doc_intelligence_hub.core.llm import reset_llm_client
     from doc_intelligence_hub.modules.eob_matching.benchmark import (
         benchmark_to_json,
@@ -936,6 +1336,19 @@ async def run_model_benchmark(request: Request, body: BenchmarkRequest) -> dict[
             "Paperless connection settings required for benchmark.",
         )
 
+    # Create benchmark run record
+    init_db()
+    db = get_db_session()
+    benchmark_run = BenchmarkRun(
+        trigger=body.trigger,
+        models_tested=len(body.models),
+        status="running",
+    )
+    try:
+        benchmark_run = store_benchmark_run(db, benchmark_run)
+    finally:
+        db.close()
+
     documents = await fetch_eob_documents(
         paperless_url=paperless_url,
         paperless_token=paperless_token,
@@ -947,23 +1360,305 @@ async def run_model_benchmark(request: Request, body: BenchmarkRequest) -> dict[
     )
 
     if not documents:
+        # Mark run as completed with zero documents
+        db = get_db_session()
+        try:
+            run = db.query(BenchmarkRun).filter_by(id=benchmark_run.id).first()
+            if run:
+                run.finished_at = datetime.now(UTC)
+                run.documents_tested = 0
+                run.status = "completed"
+                db.commit()
+        finally:
+            db.close()
+
         return {
             "status": "no_documents",
             "message": "No documents found matching the specified criteria.",
             "models": body.models,
+            "run_id": benchmark_run.id,
             "results": [],
         }
 
     # Run benchmark
-    summaries = await run_benchmark(documents, body.models)
-    results = benchmark_to_json(summaries)
+    try:
+        summaries = await run_benchmark(documents, body.models)
+        results = benchmark_to_json(summaries)
+
+        # Persist results
+        db = get_db_session()
+        try:
+            run = db.query(BenchmarkRun).filter_by(id=benchmark_run.id).first()
+            if run:
+                run.finished_at = datetime.now(UTC)
+                run.documents_tested = len(documents)
+                run.status = "completed"
+                db.commit()
+
+            for model_result in results:
+                store_benchmark_result(db, BenchmarkModelResult(
+                    run_id=benchmark_run.id,
+                    model=model_result["model"],
+                    documents_tested=model_result["documents_tested"],
+                    avg_time_seconds=model_result["avg_time_seconds"],
+                    success_rate=model_result["success_rate"],
+                    avg_confidence=model_result["avg_confidence"],
+                    total_time_seconds=model_result["total_time_seconds"],
+                    estimated_cost_usd=model_result.get("estimated_cost_usd"),
+                    results_json=json.dumps(model_result.get("results", [])),
+                ))
+
+            # Check for regressions
+            previous = get_previous_benchmark_results(db, benchmark_run.id)
+            prev_dicts = [
+                {
+                    "model": r.model,
+                    "success_rate": r.success_rate,
+                    "avg_confidence": r.avg_confidence,
+                    "documents_tested": r.documents_tested,
+                }
+                for r in previous
+            ]
+            emit_benchmark_alerts(
+                current_results=results,
+                previous_results=prev_dicts if prev_dicts else None,
+            )
+        finally:
+            db.close()
+
+    except Exception:
+        # Mark run as failed
+        db = get_db_session()
+        try:
+            run = db.query(BenchmarkRun).filter_by(id=benchmark_run.id).first()
+            if run:
+                run.finished_at = datetime.now(UTC)
+                run.status = "failed"
+                db.commit()
+        finally:
+            db.close()
+        raise
 
     return {
         "status": "ok",
         "documents_tested": len(documents),
         "models_tested": len(body.models),
+        "run_id": benchmark_run.id,
         "results": results,
     }
+
+
+# ------------------------------------------------------------------
+# Benchmark history endpoints
+# ------------------------------------------------------------------
+
+
+@router.get("/benchmark/history")
+async def get_benchmark_history(
+    limit: int = 20,
+    trigger: str | None = None,
+) -> dict[str, Any]:
+    """List recent benchmark runs with summary metrics.
+
+    Args:
+        limit: Max number of runs to return (default 20, max 100).
+        trigger: Optional filter by trigger type ('manual' or 'scheduled').
+    """
+    limit = min(limit, 100)
+    init_db()
+    db = get_db_session()
+    try:
+        runs = latest_benchmark_runs(db, limit=limit)
+        if trigger:
+            runs = [r for r in runs if r.trigger == trigger]
+
+        result = []
+        for run in runs:
+            model_results = get_benchmark_results(db, run.id)
+            result.append({
+                "id": run.id,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                "documents_tested": run.documents_tested,
+                "models_tested": run.models_tested,
+                "trigger": run.trigger,
+                "status": run.status,
+                "models": [
+                    {
+                        "model": r.model,
+                        "success_rate": r.success_rate,
+                        "avg_confidence": r.avg_confidence,
+                        "avg_time_seconds": r.avg_time_seconds,
+                        "estimated_cost_usd": r.estimated_cost_usd,
+                    }
+                    for r in model_results
+                ],
+            })
+
+        return {"status": "ok", "runs": result}
+    finally:
+        db.close()
+
+
+@router.get("/benchmark/history/{run_id}")
+async def get_benchmark_run_detail(run_id: int) -> dict[str, Any]:
+    """Get detailed results for a single benchmark run, including per-document data."""
+    init_db()
+    db = get_db_session()
+    try:
+        run = get_benchmark_run(db, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Benchmark run {run_id} not found.")
+
+        model_results = get_benchmark_results(db, run.id)
+        return {
+            "status": "ok",
+            "run": {
+                "id": run.id,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                "documents_tested": run.documents_tested,
+                "models_tested": run.models_tested,
+                "trigger": run.trigger,
+                "status": run.status,
+            },
+            "results": [
+                {
+                    "model": r.model,
+                    "documents_tested": r.documents_tested,
+                    "avg_time_seconds": r.avg_time_seconds,
+                    "success_rate": r.success_rate,
+                    "avg_confidence": r.avg_confidence,
+                    "total_time_seconds": r.total_time_seconds,
+                    "estimated_cost_usd": r.estimated_cost_usd,
+                    "results": json.loads(r.results_json) if r.results_json else [],
+                }
+                for r in model_results
+            ],
+        }
+    finally:
+        db.close()
+
+
+@router.get("/benchmark/trends")
+async def get_benchmark_trends(
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Per-model success rate and confidence over time for trend visualization.
+
+    Returns the last *limit* completed benchmark runs with per-model metrics
+    ordered chronologically (oldest first) for easy charting.
+    """
+    limit = min(limit, 50)
+    init_db()
+    db = get_db_session()
+    try:
+        runs = (
+            db.query(BenchmarkRun)
+            .filter(BenchmarkRun.status == "completed")
+            .order_by(BenchmarkRun.started_at.desc())
+            .limit(limit)
+            .all()
+        )
+        # Reverse to chronological order for charting
+        runs = list(reversed(runs))
+
+        # Collect all unique models across runs
+        all_models: set[str] = set()
+        runs_data = []
+        for run in runs:
+            model_results = get_benchmark_results(db, run.id)
+            run_entry = {
+                "run_id": run.id,
+                "date": run.started_at.isoformat() if run.started_at else None,
+                "trigger": run.trigger,
+                "models": {},
+            }
+            for r in model_results:
+                all_models.add(r.model)
+                run_entry["models"][r.model] = {
+                    "success_rate": r.success_rate,
+                    "avg_confidence": r.avg_confidence,
+                    "avg_time_seconds": r.avg_time_seconds,
+                    "estimated_cost_usd": r.estimated_cost_usd,
+                }
+            runs_data.append(run_entry)
+
+        return {
+            "status": "ok",
+            "models": sorted(all_models),
+            "runs": runs_data,
+        }
+    finally:
+        db.close()
+
+
+# ------------------------------------------------------------------
+# Due-date check endpoint
+# ------------------------------------------------------------------
+
+
+class DueDateCheckRequest(BaseModel):
+    due_soon_days: int = Field(default=7, ge=1, le=90, description="Days threshold for 'due soon' alerts")
+
+
+@router.post("/check-due-dates")
+async def check_due_dates(body: DueDateCheckRequest | None = None) -> dict[str, Any]:
+    """Scan all unpaid bills for approaching or overdue due dates and emit alerts.
+
+    This endpoint is designed to be called by the scheduler daily, but can
+    also be triggered manually.
+    """
+    init_db()
+    db = get_db_session()
+    due_soon_days = body.due_soon_days if body else 7
+
+    try:
+        # Query the most recent bill record per document_id that has a due_date
+        # and is not paid. Multiple runs can produce duplicate BillRecords for the
+        # same document; we only want the latest to avoid redundant processing.
+        from sqlalchemy import func
+
+        latest_bill_ids = (
+            db.query(func.max(BillRecord.id).label("id"))
+            .filter(BillRecord.due_date.isnot(None))
+            .filter(
+                (BillRecord.payment_status.is_(None))
+                | (BillRecord.payment_status != "paid")
+            )
+            .group_by(BillRecord.document_id)
+            .subquery()
+        )
+
+        bills = (
+            db.query(BillRecord)
+            .filter(BillRecord.id.in_(db.query(latest_bill_ids.c.id)))
+            .all()
+        )
+
+        bill_dicts = [
+            {
+                "document_id": b.document_id,
+                "provider_name": b.provider_name,
+                "due_date": b.due_date,
+                "payment_status": b.payment_status,
+                "balance_due": b.balance_due,
+            }
+            for b in bills
+        ]
+
+        from doc_intelligence_hub.core.alerts import check_eob_due_dates
+
+        alerts_emitted = check_eob_due_dates(bill_dicts, due_soon_days=due_soon_days)
+
+        return {
+            "status": "ok",
+            "bills_checked": len(bill_dicts),
+            "alerts_emitted": alerts_emitted,
+            "due_soon_days": due_soon_days,
+        }
+    finally:
+        db.close()
 
 
 # ------------------------------------------------------------------
@@ -994,6 +1689,115 @@ async def bulk_update_eobs(body: BulkUpdateRequest):
     except Exception as exc:
         db.rollback()
         raise exc
+    finally:
+        db.close()
+
+
+# ------------------------------------------------------------------
+# ------------------------------------------------------------------
+# Payment tracking endpoints
+# ------------------------------------------------------------------
+
+
+@router.post("/matches/{match_id}/pay")
+async def pay_match(match_id: int, body: PaymentRequest) -> dict[str, Any]:
+    """Record a payment against a confirmed match."""
+    init_db()
+    db = get_db_session()
+    try:
+        match = db.query(MatchRecord).filter_by(id=match_id).first()
+        if not match:
+            raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
+        if match.status != "confirmed":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Match must be confirmed before recording payment (current status: {match.status})",
+            )
+
+        paid_date = None
+        if body.paid_date:
+            from dateutil.parser import parse as parse_date
+            try:
+                paid_date = parse_date(body.paid_date)
+            except (ValueError, TypeError):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid paid_date format: '{body.paid_date}'. Use ISO 8601 (e.g. 2024-03-15).",
+                )
+
+        payment = record_payment(
+            db,
+            match_id=match_id,
+            amount=body.amount,
+            paid_date=paid_date,
+            method=body.method,
+            notes=body.notes,
+        )
+
+        # Reload match for updated payment fields
+        db.refresh(match)
+        return {
+            "status": "ok",
+            "payment": {
+                "id": payment.id,
+                "match_id": payment.match_id,
+                "amount": payment.amount,
+                "paid_date": payment.paid_date.isoformat() if payment.paid_date else None,
+                "method": payment.method,
+                "notes": payment.notes,
+                "created_at": payment.created_at.isoformat() if payment.created_at else None,
+            },
+            "match_payment_status": match.payment_status,
+            "match_paid_amount": match.paid_amount,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while recording the payment.")
+    finally:
+        db.close()
+
+
+@router.get("/matches/{match_id}/payments")
+async def list_match_payments(match_id: int) -> dict[str, Any]:
+    """List all payments recorded against a match."""
+    init_db()
+    db = get_db_session()
+    try:
+        match = db.query(MatchRecord).filter_by(id=match_id).first()
+        if not match:
+            raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
+
+        payments = get_payments_for_match(db, match_id)
+        return {
+            "match_id": match_id,
+            "payment_status": match.payment_status or "unpaid",
+            "paid_amount": match.paid_amount or 0.0,
+            "payments": [
+                {
+                    "id": p.id,
+                    "amount": p.amount,
+                    "paid_date": p.paid_date.isoformat() if p.paid_date else None,
+                    "method": p.method,
+                    "notes": p.notes,
+                    "created_at": p.created_at.isoformat() if p.created_at else None,
+                }
+                for p in payments
+            ],
+        }
+    finally:
+        db.close()
+
+
+@router.get("/payments/summary")
+async def get_payment_summary() -> dict[str, Any]:
+    """Aggregate payment statistics across all confirmed matches."""
+    init_db()
+    db = get_db_session()
+    try:
+        summary = payment_summary(db)
+        return {"status": "ok", **summary}
     finally:
         db.close()
 
