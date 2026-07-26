@@ -57,7 +57,8 @@ function buildMonthRange(entries: TimelineEntry[]): string[] {
   const end = new Date(dates[dates.length - 1].getFullYear(), dates[dates.length - 1].getMonth(), 1);
   const result: string[] = [];
   const cursor = new Date(start);
-  while (cursor <= end) {
+  const MAX_MONTHS = 120; // 10 years safety cap
+  while (cursor <= end && result.length < MAX_MONTHS) {
     result.push(monthKey(cursor));
     cursor.setMonth(cursor.getMonth() + 1);
   }
