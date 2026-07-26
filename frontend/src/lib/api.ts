@@ -130,6 +130,15 @@ export const endpoints = {
       update: (body: unknown) => api.put('/api/admin/document-type-mapping', body),
     },
   },
+  rules: {
+    list: () => api.get('/api/rules'),
+    get: (id: string) => api.get(`/api/rules/${id}`),
+    create: (body: unknown) => api.post('/api/rules', body),
+    update: (id: string, body: unknown) => api.put(`/api/rules/${id}`, body),
+    delete: (id: string) => api.delete(`/api/rules/${id}`),
+    toggle: (id: string, body: { enabled: boolean }) => api.patch(`/api/rules/${id}/toggle`, body),
+    test: (id: string, body: unknown) => api.post(`/api/rules/${id}/test`, body),
+  },
   documents: {
     preview: (id: string) => `/api/documents/${id}/metadata`,
     download: (id: string) => `/api/documents/${id}/download`,
