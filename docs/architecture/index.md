@@ -6,13 +6,20 @@ sidebar_position: 1
 
 # Architecture Overview
 
-OWL is a **headless API** — it has no user interface of its own. [Mission Control](https://service-004.example.invalid) consumes OWL's endpoints to present document intelligence to the user. Paperless-ngx remains the document source-of-truth; OWL reads from it but never modifies documents directly.
+OWL is a **full-stack document intelligence application** with its own built-in web UI and a rich API layer. It serves two audiences:
+
+- **Direct users** interact with the OWL dashboard (a React/Vite SPA served from the same container) for triage, action queues, statement tracking, and EOB matching.
+- **Mission Control** consumes OWL's dedicated connector endpoints to surface alerts and actions within the broader homelab dashboard.
+
+Paperless-ngx remains the document source-of-truth; OWL reads from it but never modifies documents directly.
 
 ```mermaid
 graph LR
-    P[Paperless-ngx] -->|documents & metadata| OWL[OWL API]
-    OWL -->|alerts & actions| MC[Mission Control]
+    P[Paperless-ngx] -->|documents & metadata| OWL[OWL]
     LLM[LLM Gateway] -->|analysis| OWL
+    OWL -->|built-in UI| User
+    OWL -->|connector API| MC[Mission Control]
+    User -->|interacts| OWL
     User -->|interacts| MC
 ```
 
@@ -55,7 +62,7 @@ For usage instructions, see the [User Guide](../guide/). For deep-dive design do
 
 ## Data Flow
 
-Documents flow through OWL in a single direction — from ingestion to actionable alerts:
+Documents flow through OWL in a single direction — from ingestion to actionable alerts, surfaced in both the built-in UI and Mission Control:
 
 ```mermaid
 flowchart TD
@@ -70,9 +77,10 @@ flowchart TD
         eob[EOB Matching]
         triage[Triage / Analysis]
         alerts[Alerts Engine]
+        ui[Built-in Dashboard]
     end
 
-    subgraph Consumers
+    subgraph External
         mc[Mission Control]
     end
 
@@ -85,10 +93,11 @@ flowchart TD
     st --> alerts
     eob --> alerts
     triage --> alerts
+    alerts --> ui
     alerts --> mc
 ```
 
-Each module independently queries Paperless via the shared client, processes documents through its own logic (potentially calling the LLM), and emits alerts. Mission Control polls the alerts endpoint to surface them to the user.
+Each module independently queries Paperless via the shared client, processes documents through its own logic (potentially calling the LLM), and emits alerts. The built-in dashboard displays these directly; Mission Control polls the connector endpoints for integration into its own UI.
 
 ## Technology Stack
 
@@ -135,11 +144,29 @@ The FastAPI application is constructed via an app factory in `api/app.py`. On st
 1. Loads `hub_settings` from YAML + env vars and attaches it to `app.state`
 2. Initializes a shared **Paperless client** (token-based HTTP client)
 3. Registers module routers under versioned prefixes
+4. Serves the **built-in React/Vite dashboard** at `/` (HashRouter SPA)
+5. Mounts the legacy **Statement Tracker dashboard** at `/statements/`
+
+### Frontend
+
+OWL ships a React/Vite single-page application as its primary UI. The compiled assets are served directly from the FastAPI container — no separate frontend deployment is needed. The SPA uses HashRouter, so all client-side routes are handled without server-side catch-all configuration.
+
+### Mission Control Connector
+
+A dedicated `mc_connector` router exposes flat-array endpoints that Mission Control's Document Intelligence connector expects:
+
+- `/api/action-queue/actions` — pending actions for MC badges
+- `/api/statements/missing` — missing statement alerts
+- `/api/eob/unmatched` — unmatched EOB records
+
+This allows Mission Control to aggregate OWL data alongside other homelab services without duplicating business logic.
+
+### Module Routers
 
 All routers share the Paperless client instance but maintain their own database connections and session factories.
 
 :::info Router structure
-Each router is self-contained — it defines its own Pydantic models, dependencies, and SQLAlchemy sessions. This keeps modules independently deployable in the future.
+Each router is self-contained — it defines its own Pydantic models, dependencies, and SQLAlchemy sessions. This keeps modules independently deployable in the future. The built-in UI consumes the same API endpoints that external clients use.
 :::
 
 ## Storage

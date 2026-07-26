@@ -6,9 +6,9 @@ sidebar_position: 1
 
 # OWL 🦉 Documentation
 
-> **Organize. Watch. Learn.** — Headless document intelligence for your Paperless-ngx archive.
+> **Organize. Watch. Learn.** — Document intelligence for your Paperless-ngx archive.
 
-OWL transforms a passive document archive into an actionable intelligence layer, consumed by [Mission Control](https://service-004.example.invalid) as the primary user interface.
+OWL transforms a passive document archive into an actionable intelligence layer with its own built-in dashboard UI, and also feeds data into [Mission Control](https://service-004.example.invalid) for cross-service visibility.
 
 ## Documentation Map
 
