@@ -13,6 +13,7 @@ import {
 } from '../components/ui';
 import EobMatchDetail from '../components/EobMatchDetail';
 import OrphanDetail from '../components/triage/OrphanDetail';
+import DocumentPreview from '../components/DocumentPreview';
 import { endpoints } from '../lib/api';
 import '../styles/triage-queue.css';
 
@@ -670,6 +671,15 @@ export default function TriageQueue() {
                     )}
                   </div>
                 </Card>
+
+                {/* Document preview — show when target is a document */}
+                {selectedItem.target_type === 'document' && selectedItem.target_id && !Number.isNaN(Number(selectedItem.target_id)) && (
+                  <Card title="Document preview">
+                    <DocumentPreview
+                      documentId={Number(selectedItem.target_id)}
+                    />
+                  </Card>
+                )}
 
                 {/* Metadata dump — placeholder for specific detail views (#834, #829, #830, #831) */}
                 <Card title="Item metadata">

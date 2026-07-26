@@ -131,8 +131,12 @@ export const endpoints = {
     },
   },
   documents: {
-    preview: (id: string) => `/api/documents/${id}/metadata`,
-    download: (id: string) => `/api/documents/${id}/download`,
+    metadata: (id: string | number) => api.get(`/api/documents/${id}/metadata`),
+    preview: (id: string | number) => `/api/documents/${id}/metadata`,
+    download: (id: string | number) => `/api/documents/${id}/download`,
+    thumbnailUrl: (id: string | number) => `/api/statements/documents/${id}/thumb`,
+    previewUrl: (id: string | number) => `/api/statements/documents/${id}/preview`,
+    downloadUrl: (id: string | number) => `/api/documents/${id}/download`,
   },
   triage: {
     queue: (params?: string) => api.get(`/api/triage/queue${params ? `?${params}` : ''}`),

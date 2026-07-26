@@ -18,6 +18,7 @@ import {
   confidenceTone,
 } from './ui';
 import { endpoints } from '../lib/api';
+import DocumentPreview from './DocumentPreview';
 import '../styles/eob-pages.css';
 
 // ------------------------------------------------------------------
@@ -622,28 +623,30 @@ export default function EobMatchDetail({
       {/* Document preview thumbnails */}
       <div className="eob-grid-2">
         <Card title="EOB document preview">
-          <div className="eob-preview-placeholder">
-            {match.eob_preview_url ? (
-              <a className="eob-link" href={match.eob_preview_url} target="_blank" rel="noreferrer">
-                <div className="eob-preview-thumb">📄</div>
-                <span>Open EOB in Paperless →</span>
-              </a>
-            ) : (
-              <div className="eob-preview-thumb muted">Preview unavailable</div>
-            )}
-          </div>
+          {match.eob_document_id ? (
+            <DocumentPreview
+              documentId={match.eob_document_id}
+              paperlessUrl={match.eob_preview_url}
+              label="EOB"
+            />
+          ) : (
+            <div className="eob-preview-placeholder">
+              <div className="eob-preview-thumb muted">No EOB document linked</div>
+            </div>
+          )}
         </Card>
         <Card title="Bill document preview">
-          <div className="eob-preview-placeholder">
-            {match.bill_preview_url ? (
-              <a className="eob-link" href={match.bill_preview_url} target="_blank" rel="noreferrer">
-                <div className="eob-preview-thumb">📄</div>
-                <span>Open Bill in Paperless →</span>
-              </a>
-            ) : (
-              <div className="eob-preview-thumb muted">Preview unavailable</div>
-            )}
-          </div>
+          {match.bill_document_id ? (
+            <DocumentPreview
+              documentId={match.bill_document_id}
+              paperlessUrl={match.bill_preview_url}
+              label="Bill"
+            />
+          ) : (
+            <div className="eob-preview-placeholder">
+              <div className="eob-preview-thumb muted">No bill document linked</div>
+            </div>
+          )}
         </Card>
       </div>
 
