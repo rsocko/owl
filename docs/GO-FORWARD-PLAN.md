@@ -212,17 +212,17 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 ### Phase 2: EOB Matching Completion (Weeks 3-5) 🏥 ✅ NEARLY COMPLETE
 **Goal:** Complete the EOB matching loop end-to-end.
 
-| Priority | Issue | Description | |
-|----------|-------|-------------|---|
-| P2 | #848 | Full EOB dashboard UI (replaces basic tab) | done |
-| P2 | #906 | EOB Dashboard inline alerts + quick stats | done |
-| P2 | #882 | Amount validation pass/fail cards | |
-| P2 | #874 | Alternative matches display | done |
-| P2 | #884 | Unmatched filters + suggested matches | done |
-| P2 | #903 | Unmatched view bulk actions | done |
-| P2 | #852 | Include extraction details in API results | done |
-| P2 | #844 | Add --use-llm flag to CLI | done |
-| P2 | #845 | Cross-run document deduplication | done |
+| Priority | Issue | Description                                |      |
+| -------- | ----- | ------------------------------------------ | ---- |
+| P2       | #848  | Full EOB dashboard UI (replaces basic tab) | done |
+| P2       | #906  | EOB Dashboard inline alerts + quick stats  | done |
+| P2       | #882  | Amount validation pass/fail cards          |      |
+| P2       | #874  | Alternative matches display                | done |
+| P2       | #884  | Unmatched filters + suggested matches      | done |
+| P2       | #903  | Unmatched view bulk actions                | done |
+| P2       | #852  | Include extraction details in API results  | done |
+| P2       | #844  | Add --use-llm flag to CLI                  | done |
+| P2       | #845  | Cross-run document deduplication           | done |
 
 **Exit Criteria:** EOB matching dashboard is fully functional with rich match review, unmatched management, and deduplication.
 
