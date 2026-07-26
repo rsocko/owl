@@ -78,6 +78,25 @@ interface EobUnmatchedItem {
   created_at?: string | null;
 }
 
+interface EobAlert {
+  id: number;
+  alert_type?: string | null;
+  severity?: string | null;
+  module?: string | null;
+  title?: string | null;
+  description?: string | null;
+  action_url?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at?: string | null;
+  acknowledged_at?: string | null;
+  resolved_at?: string | null;
+}
+
+interface EobAlertsResponse {
+  alerts?: EobAlert[];
+  total?: number;
+}
+
 interface EobCheckResponse {
   read_only?: boolean;
   write_to_paperless?: boolean;
@@ -169,6 +188,8 @@ export default function EobDashboard() {
   const [matches, setMatches] = useState<EobMatch[]>([]);
   const [unmatched, setUnmatched] = useState<EobUnmatchedItem[]>([]);
   const [check, setCheck] = useState<EobCheckResponse | null>(null);
+  const [alerts, setAlerts] = useState<EobAlert[]>([]);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -180,18 +201,22 @@ export default function EobDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [resultsRes, runsRes, matchesRes, unmatchedRes, checkRes] = await Promise.all([
+      const [resultsRes, runsRes, matchesRes, unmatchedRes, checkRes, alertsRes] = await Promise.all([
         endpoints.eob.results() as Promise<EobResultsResponse>,
         endpoints.eob.runs() as Promise<EobRunsResponse>,
         endpoints.eob.matches('limit=8') as Promise<EobMatchesResponse>,
         endpoints.eob.unmatched() as Promise<EobUnmatchedItem[]>,
         endpoints.eob.check() as Promise<EobCheckResponse>,
+        endpoints.alerts.list('module=eob&acknowledged=false&limit=10') as Promise<EobAlertsResponse>,
       ]);
       setResults(resultsRes);
       setRuns(runsRes.runs ?? []);
       setMatches(matchesRes.matches ?? []);
       setUnmatched(Array.isArray(unmatchedRes) ? unmatchedRes : []);
       setCheck(checkRes);
+      setAlerts(alertsRes.alerts ?? []);
+      const latestRun = runsRes.runs?.[0] ?? resultsRes?.run;
+      setLastSyncedAt(latestRun?.finished_at ?? latestRun?.started_at ?? null);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load EOB dashboard.';
       setError(message);
@@ -224,6 +249,14 @@ export default function EobDashboard() {
     if (!validScores.length) return null;
     return validScores.reduce((sum, score) => sum + score, 0) / validScores.length;
   }, [matches]);
+
+  const totalDue = useMemo(() => {
+    if (!unmatched.length) return 0;
+    return unmatched.reduce((sum, item) => {
+      const amount = item.patient_responsibility ?? item.amount ?? 0;
+      return sum + (typeof amount === 'number' ? amount : 0);
+    }, 0);
+  }, [unmatched]);
 
   const handleRun = useCallback(async () => {
     setIsRunning(true);
@@ -270,6 +303,26 @@ export default function EobDashboard() {
     }
   }, [loadDashboard]);
 
+  const handleDismissAlert = useCallback(async (alertId: number) => {
+    try {
+      await endpoints.alerts.acknowledge(String(alertId));
+      setAlerts((prev) => prev.filter((a) => a.id !== alertId));
+      setToast({ message: 'Alert dismissed.', tone: 'success' });
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Failed to dismiss alert.', tone: 'error' });
+    }
+  }, []);
+
+  const handleResolveAlert = useCallback(async (alertId: number) => {
+    try {
+      await endpoints.alerts.resolve(String(alertId));
+      setAlerts((prev) => prev.filter((a) => a.id !== alertId));
+      setToast({ message: 'Alert resolved.', tone: 'success' });
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Failed to resolve alert.', tone: 'error' });
+    }
+  }, []);
+
   if (loading) {
     return (
       <>
@@ -301,10 +354,16 @@ export default function EobDashboard() {
             <Badge tone={check?.read_only ? 'warning' : 'success'}>
               {check?.read_only ? 'Read-only mode' : 'Paperless writeback enabled'}
             </Badge>
+            {lastSyncedAt && (
+              <span className="eob-table-secondary">Last synced: {formatDateTime(lastSyncedAt)}</span>
+            )}
           </div>
         }
         actions={
           <div className="btn-group">
+            <Button variant="ghost" onClick={() => void loadDashboard()}>
+              🔄 Sync
+            </Button>
             <Button variant="ghost" onClick={() => navigate('/eob/unmatched')}>
               Unmatched queue
               <Badge tone={unmatched.length ? 'warning' : 'muted'}>{unmatched.length}</Badge>
@@ -345,11 +404,61 @@ export default function EobDashboard() {
             desc="Average score across recent candidate matches"
           />
           <StatCard
+            title="Total due"
+            metric={formatCurrency(totalDue || null) === '—' ? '$0' : formatCurrency(totalDue)}
+            desc={`Across ${unmatched.length} unmatched bill${unmatched.length === 1 ? '' : 's'}`}
+            status={{ label: totalDue > 0 ? 'Outstanding' : 'Clear', tone: totalDue > 0 ? 'warning' : 'success' }}
+          />
+          <StatCard
+            title="Alerts"
+            metric={alerts.length}
+            desc="Unacknowledged EOB alerts needing attention"
+            status={{ label: alerts.length ? 'Needs attention' : 'Clear', tone: alerts.length ? 'danger' : 'success' }}
+          />
+          <StatCard
             title="Last run"
             metric={lastRun?.started_at ? formatDate(lastRun.started_at) : 'Never'}
             desc={lastRun?.finished_at ? `Finished ${formatDateTime(lastRun.finished_at)}` : 'Run the pipeline to refresh matches'}
           />
         </StatGrid>
+
+        {alerts.length > 0 && (
+          <section>
+            <div className="eob-header-stack" style={{ marginBottom: 12 }}>
+              <strong>⚠️ Alerts &amp; Action Items</strong>
+            </div>
+            <div className="eob-alerts-section">
+              {alerts.map((alert) => {
+                const isDanger = alert.severity === 'critical' || alert.severity === 'high';
+                const isInfo = alert.severity === 'info';
+                return (
+                  <div
+                    key={alert.id}
+                    className={`eob-alert-card${isDanger ? ' danger' : ''}${isInfo ? ' info' : ''}`}
+                  >
+                    <div className="eob-alert-header">
+                      {isDanger ? '🔴' : isInfo ? 'ℹ️' : '⚠️'} {alert.title || 'Alert'}
+                    </div>
+                    {alert.description && <div className="eob-alert-body">{alert.description}</div>}
+                    <div className="eob-alert-actions">
+                      {alert.action_url && (
+                        <Button size="sm" variant="primary" onClick={() => navigate(alert.action_url!)}>
+                          Review →
+                        </Button>
+                      )}
+                      <Button size="sm" variant="ghost" onClick={() => void handleResolveAlert(alert.id)}>
+                        ✓ Resolve
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => void handleDismissAlert(alert.id)}>
+                        Dismiss
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         <Card
           title="Recent runs"
@@ -538,6 +647,27 @@ export default function EobDashboard() {
             <EmptyState title="No unmatched EOBs" desc="Every extracted EOB currently has at least one confirmed match." />
           )}
         </Card>
+
+        <div className="eob-quick-stats">
+          <div className="eob-qs-card">
+            <div>
+              <div className="eob-qs-label">Unmatched EOBs</div>
+              <div className="eob-qs-count">{unmatched.length}</div>
+            </div>
+            <Button size="sm" variant="ghost" onClick={() => navigate('/eob/unmatched')}>
+              View →
+            </Button>
+          </div>
+          <div className="eob-qs-card">
+            <div>
+              <div className="eob-qs-label">Pending review</div>
+              <div className="eob-qs-count">{pendingCount}</div>
+            </div>
+            <Button size="sm" variant="ghost" onClick={() => navigate('/eob/unmatched')}>
+              View →
+            </Button>
+          </div>
+        </div>
       </div>
 
       {toast ? <Toast message={toast.message} tone={toast.tone} /> : null}
