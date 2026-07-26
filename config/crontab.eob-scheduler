@@ -1,0 +1,12 @@
+# EOB Matching — Supercronic Crontab
+# ====================================
+# Used by the eob-scheduler Docker service to run the EOB matching
+# pipeline on a daily schedule. Supercronic is a cron replacement
+# designed for containers (no syslog dependency, stdout logging).
+#
+# Schedule: Daily at 10:00 AM (server local time)
+# The --since-last-run flag ensures only documents added since the
+# last successful run are processed, making daily runs efficient.
+
+# Daily EOB matching — process new documents since last run
+0 10 * * * eob-match run --since-last-run --limit 200 --verbose

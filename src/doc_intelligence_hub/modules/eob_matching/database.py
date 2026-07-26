@@ -131,6 +131,9 @@ class MatchRecord(Base):
     payment_status = Column(String, default="unpaid")  # unpaid, partial, paid, overpaid
     paid_amount = Column(Float, default=0.0)
     paid_date = Column(DateTime, nullable=True)
+    user_status = Column(String, default="unreviewed")  # unreviewed, confirmed, rejected, override
+    reviewed_at = Column(DateTime, nullable=True)
+    user_notes = Column(Text, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("eob_document_id", "bill_document_id", "run_id", name="uq_match_pair_run"),
@@ -211,6 +214,9 @@ def _migrate_missing_columns(engine):
             ("payment_status", "TEXT DEFAULT 'unpaid'"),
             ("paid_amount", "REAL DEFAULT 0.0"),
             ("paid_date", "DATETIME"),
+            ("user_status", "TEXT DEFAULT 'unreviewed'"),
+            ("reviewed_at", "DATETIME"),
+            ("user_notes", "TEXT"),
         ],
         "eob_records": [
             ("status", "TEXT DEFAULT 'unmatched'"),
@@ -272,6 +278,16 @@ def store_match(session: Session, record: MatchRecord) -> MatchRecord:
     session.commit()
     session.refresh(record)
     return record
+
+
+def last_successful_run(session: Session) -> Optional[MatchingRun]:
+    """Return the most recent MatchingRun that completed successfully (has finished_at)."""
+    return (
+        session.query(MatchingRun)
+        .filter(MatchingRun.finished_at.isnot(None))
+        .order_by(MatchingRun.finished_at.desc())
+        .first()
+    )
 
 
 def latest_runs(session: Session, limit: int = 10) -> list[MatchingRun]:
