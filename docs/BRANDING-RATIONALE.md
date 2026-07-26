@@ -109,6 +109,59 @@ The temptation exists to work owl sounds into the UI -- "Hoo's watching your doc
 
 **The guiding principle:** The owl metaphor should be *felt* (dark palette, amber alert glow, watchful icon) rather than *stated* (puns, sound effects, forced wordplay). Show, don't tell.
 
+## Brand Kit vs. Production UI — Alignment Guide
+
+### Current State (July 2026)
+
+The brand kit (`branding-owl.html`) and the production UI (`frontend/src/styles/theme.css`) are **separate design systems**. The brand kit is an aspirational identity exploration; the production UI was built for usability with standard SaaS conventions (system fonts, blue accent, light-first).
+
+### Guiding Principle: Usability > Aesthetics
+
+The app processes financial documents, medical EOBs, and time-sensitive actions. Users need:
+1. **High contrast** -- text must be instantly readable at a glance
+2. **Clear status hierarchy** -- red/yellow/green must be unmistakable (no amber-vs-warning confusion)
+3. **Low cognitive load** -- familiar patterns (blue links, white cards) reduce learning curve
+4. **Both light and dark modes** -- light for focused daytime work, dark for evening/preference
+
+### What to Adopt from the Brand Kit
+
+| Element | Adopt? | Rationale |
+|---------|--------|-----------|
+| Name + tagline ("OWL: Organize. Watch. Learn.") | Yes | Already used in top nav brand text |
+| Owl icon/favicon | Yes | Small, distinctive, doesn't affect usability |
+| Deep navy dark theme (`#1A1B2E`) | Maybe | Current dark (`#0f1117`) is fine; navy adds slight warmth. Low priority. |
+| Amber as PRIMARY accent | No | Amber conflicts with `--warning` semantics. Status colors must be unambiguous in a finance/medical app. |
+| Amber as SECONDARY highlight | Maybe | Could work for non-status decorative elements (brand mark, active nav underline, empty-state illustrations). Must never appear near warning badges. |
+| Space Grotesk typography | No | System fonts are faster-loading, more accessible, and users already scan them effortlessly. Custom fonts add weight for zero usability gain in a data-dense app. |
+| Amber "glow" alerts | No | Alert severity must use standard red/yellow/green. "Glowing amber" blurs the line between decorative and urgent. |
+
+### What to Keep as-Is
+
+- **Blue accent** (`#3498db` light / `#4f8ff7` dark) -- trustworthy, medical-appropriate, distinct from all status colors
+- **System font stack** -- fast, accessible, familiar
+- **Light theme as default** -- data-heavy apps are more readable in light mode for most users
+- **Semantic status colors** -- green/yellow/red are non-negotiable for a finance/medical tool
+- **Minimal card shadows** -- current `0 1px 2px` is subtle and clean
+
+### Light + Dark Mode Requirements
+
+Both themes must meet these criteria:
+- WCAG AA contrast ratio (4.5:1 for text, 3:1 for UI elements)
+- Status badges readable without relying on color alone (text labels present)
+- No brand color in functional positions (accent != warning != decoration)
+- Smooth transition (`transition: background 0.15s` -- already implemented)
+- User preference persisted to localStorage (already implemented)
+
+### When to Revisit Brand Integration
+
+After the audit's Priority 1-3 issues are resolved (nav consolidation, EOB workflow redesign, bulk operations), the app will be structurally sound. At that point, subtle brand touches could be layered in:
+- Owl silhouette in empty states
+- Navy-tinted dark mode (swap `#0f1117` for `#1A1B2E`)
+- Amber accent on the brand wordmark only (top-left nav text)
+- Favicon with owl eyes motif
+
+These are low-risk, zero-UX-impact additions that create identity without compromising function.
+
 ## Decision Date
 
 July 2026. Revisit only if another bird-themed service name creates ecosystem confusion.
