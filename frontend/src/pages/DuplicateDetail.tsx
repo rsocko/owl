@@ -138,7 +138,7 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
   };
 
   // Loading state
-  if (loading) return <SkeletonLoader variant="card" rows={6} />;
+  if (loading) return <SkeletonLoader variant="cards" rows={6} />;
   if (error) return <div className="text-muted">Error: {error}</div>;
   if (!pair) return <div className="text-muted">Duplicate pair not found.</div>;
 
@@ -308,7 +308,7 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
               {busy === 'true_duplicate' ? 'Merging…' : '🔗 True Duplicate'}
             </Button>
             <Button
-              variant="warning"
+              variant="danger"
               onClick={() => void handleResolve('superseded')}
               disabled={busy !== null || !primaryDocId}
             >
