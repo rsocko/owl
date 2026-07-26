@@ -2,6 +2,10 @@
 title: "EOB UI Design"
 sidebar_label: UI Design
 sidebar_position: 7
+mockups:
+  - "[eob-match-review.html](../../../mockups/triage-correction/eob-match-review.html)"
+  - "[manual-match-search.html](../../../mockups/triage-correction/manual-match-search.html)"
+  - "[orphans-dupes-metadata.html](../../../mockups/triage-correction/orphans-dupes-metadata.html)"
 ---
 
 # UI Design: Medical EOB & Bill Matching Dashboard

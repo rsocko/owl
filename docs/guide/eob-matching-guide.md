@@ -2,11 +2,22 @@
 title: EOB Matching User Guide
 sidebar_label: EOB Matching
 sidebar_position: 4
+mockups:
+  - "[eob-match-review.html](../../mockups/triage-correction/eob-match-review.html)"
+  - "[manual-match-search.html](../../mockups/triage-correction/manual-match-search.html)"
+  - "[orphans-dupes-metadata.html](../../mockups/triage-correction/orphans-dupes-metadata.html)"
 ---
 
 # EOB Matching — Insurance & Medical Bill Reconciliation
 
 The EOB Matching module automatically pairs insurance Explanations of Benefit (EOBs) with their corresponding medical bills using a multi-factor weighted scoring algorithm. It tracks payment status and surfaces orphaned documents that need attention.
+
+:::info Interactive Mockups
+Preview the planned UI for this module:
+- [EOB Match Review](../../mockups/triage-correction/eob-match-review.html) — Side-by-side EOB/bill comparison with match scoring
+- [Manual Match Search](../../mockups/triage-correction/manual-match-search.html) — Search interface for manually pairing documents
+- [Orphans & Duplicates](../../mockups/triage-correction/orphans-dupes-metadata.html) — Managing unmatched and duplicate documents
+:::
 
 ## How It Works
 

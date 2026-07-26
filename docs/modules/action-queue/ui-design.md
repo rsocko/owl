@@ -2,6 +2,8 @@
 title: "UI Design"
 sidebar_label: UI Design
 sidebar_position: 5
+mockups:
+  - "[triage-unified.html](../../../mockups/triage-correction/triage-unified.html)"
 ---
 
 # UI Design Document: Paperless Action Queue Dashboard
