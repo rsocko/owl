@@ -3,11 +3,14 @@
 /* ── Timeline Container ── */
 .st-root {
   overflow-x: auto;
+  overflow-y: visible;
   padding-bottom: 4px;
+  padding-top: 4px;
 }
 
 .st-root.st-compact {
   overflow-x: auto;
+  overflow-y: hidden;
 }
 
 /* ── Legend ── */

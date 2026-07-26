@@ -69,12 +69,17 @@ function docMonthKey(entry: TimelineEntry): string | null {
   return d ? monthKey(d) : null;
 }
 
-/** Position a doc marker as a percentage within the track based on its month index. */
-function docLeftPercent(mk: string, months: string[]): number {
+/** Position a doc marker as a percentage within the track based on its month index.
+ *  When multiple docs share the same month, offset them so they don't stack. */
+function docLeftPercent(mk: string, months: string[], offsetIndex: number, totalInMonth: number): number {
   const idx = months.indexOf(mk);
   if (idx < 0) return 0;
   if (months.length <= 1) return 5;
-  return 2 + (idx / (months.length - 1)) * 88;
+  const base = 2 + (idx / (months.length - 1)) * 88;
+  if (totalInMonth <= 1) return base;
+  // Spread docs within a ~4% band centered on the month position
+  const spread = Math.min(4, 88 / months.length * 0.6);
+  return base - spread / 2 + (offsetIndex / (totalInMonth - 1)) * spread;
 }
 
 // ── Component ──
@@ -115,13 +120,33 @@ export function SeriesTimeline({
     }));
   }, [entries, accounts, hasMultiAccounts, accountColorMap]);
 
-  const renderDocMarker = (entry: TimelineEntry, color: string) => {
+  // Pre-compute per-month doc counts for offset calculation
+  const monthDocCounts = useMemo(() => {
+    const counts = new Map<string, { ids: string[] }>();
+    for (const group of rowGroups) {
+      for (const entry of group.docs) {
+        const mk = docMonthKey(entry);
+        if (!mk) continue;
+        const key = `${group.label}:${mk}`;
+        const existing = counts.get(key);
+        if (existing) existing.ids.push(entry.document_id);
+        else counts.set(key, { ids: [entry.document_id] });
+      }
+    }
+    return counts;
+  }, [rowGroups]);
+
+  const renderDocMarker = (entry: TimelineEntry, color: string, groupLabel: string) => {
     const mk = docMonthKey(entry);
     if (!mk) return null;
-    const left = docLeftPercent(mk, months);
+    const monthKey = `${groupLabel}:${mk}`;
+    const monthInfo = monthDocCounts.get(monthKey);
+    const offsetIndex = monthInfo ? monthInfo.ids.indexOf(entry.document_id) : 0;
+    const totalInMonth = monthInfo ? monthInfo.ids.length : 1;
+    const left = docLeftPercent(mk, months, offsetIndex, totalInMonth);
     const isGap = entry.gap_before_days != null && entry.gap_before_days > 60;
     const isSelected = selectedDocIds?.has(entry.document_id);
-    const isDuplicate = duplicatePeriods?.has(entry.period_label || '');
+    const isDuplicate = entry.period_label ? duplicatePeriods?.has(entry.period_label) : false;
     const isHovered = hoveredDoc === entry.document_id;
     const label = entry.period_label?.charAt(0) || entry.statement_date?.slice(5, 7) || '?';
 
@@ -193,7 +218,7 @@ export function SeriesTimeline({
             {group.label}
           </div>
           <div className="st-track">
-            {group.docs.map(entry => renderDocMarker(entry, group.color))}
+            {group.docs.map(entry => renderDocMarker(entry, group.color, group.label))}
           </div>
         </div>
       ))}
