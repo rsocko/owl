@@ -121,7 +121,7 @@ score_db             Paperless Consume
 ### Data Store
 
 Single SQLite database (upgradeable to Postgres) — `ocr_quality.db`.  
-See [OCR-QUALITY-SCORING.md](OCR-QUALITY-SCORING.md) for schema.
+See [OCR-QUALITY-SCORING.md](./ocr-quality-scoring.md) for schema.
 
 ### Shared Infrastructure with Action Queue Agent
 
@@ -206,10 +206,10 @@ Paperless API calls and Azure API calls are both rate-limited:
 
 | Document | Content |
 |---------|---------|
-| [OCR-QUALITY-SCORING.md](OCR-QUALITY-SCORING.md) | Scoring algorithm, code samples, data schema |
-| [OCR-REMEDIATION-ENGINE.md](OCR-REMEDIATION-ENGINE.md) | Tier engine design, comparison gate, OCRmyPDF and Azure integration |
-| [OCR-OLLAMA-INTEGRATION.md](OCR-OLLAMA-INTEGRATION.md) | Prompt templates, Ollama roles, integration patterns |
-| [OCR-N8N-WORKFLOW.md](OCR-N8N-WORKFLOW.md) | n8n workflow specification, node-by-node design |
-| [OCR-BASELINE-INVENTORY.md](OCR-BASELINE-INVENTORY.md) | Phase 0 one-shot inventory script specification |
-| [DESIGN.md](experiments/personal-automation/mission-control/DESIGN.md) | Action Queue Agent overall system design |
-| [TECHNOLOGY-STACK.md](TECHNOLOGY-STACK.md) | Full technology stack decisions |
+| [OCR-QUALITY-SCORING.md](./ocr-quality-scoring.md) | Scoring algorithm, code samples, data schema |
+| [OCR-REMEDIATION-ENGINE.md](./ocr-remediation-engine.md) | Tier engine design, comparison gate, OCRmyPDF and Azure integration |
+| [OCR-OLLAMA-INTEGRATION.md](./ocr-ollama-integration.md) | Prompt templates, Ollama roles, integration patterns |
+| [OCR-N8N-WORKFLOW.md](./ocr-n8n-workflow.md) | n8n workflow specification, node-by-node design |
+| [OCR-BASELINE-INVENTORY.md](./ocr-baseline-inventory.md) | Phase 0 one-shot inventory script specification |
+| [DESIGN.md](https://github.com/rsocko/mission-control) | Action Queue Agent overall system design |
+| [TECHNOLOGY-STACK.md](./technology-stack.md) | Full technology stack decisions |

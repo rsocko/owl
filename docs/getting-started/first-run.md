@@ -247,3 +247,12 @@ You've verified OWL's connectivity, scanned your documents, discovered recurring
 :::tip Automation
 Once you're comfortable with OWL's output, automate everything. Set `WRITE_TO_PAPERLESS=true` and let the scheduled jobs handle daily document triage, statement tracking, and EOB matching without manual intervention.
 :::
+
+---
+
+## What's Next
+
+- **[User Guide](../guide/)** — Detailed guides for each module
+- **[Configuration Reference](../guide/configuration.md)** — All environment variables and YAML options
+- **[Architecture](../architecture/)** — System design and data flow
+- **[Development Guide](../development/)** — Contributing and running locally

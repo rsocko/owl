@@ -12,8 +12,8 @@ sources:
   - "clusterzx/paperless-ai (5,834 ⭐)"
   - "icereed/paperless-gpt (2,558 ⭐)"
 related:
-  - "[Tagvico Integration Plan](tagvico-integration-plan.md)"
-  - "[DI Hub README](../README.md)"
+  - "[Tagvico Integration Plan](../design/proposed/tagvico-integration.md)"
+  - "[DI Hub README](../../README.md)"
 tracking:
   github_label: "ecosystem-research"
   repos:

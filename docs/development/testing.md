@@ -301,3 +301,10 @@ Integration tests are slow and require infrastructure. Run them selectively duri
 4. **Mark slow tests** â€” use `@pytest.mark.slow` for tests that take >1s
 5. **Test error cases** â€” verify proper error responses for invalid input
 6. **Keep tests independent** â€” no test should depend on another test's side effects
+
+---
+
+## Related
+
+- **[Development Guide](./index.md)** — Project structure, running locally, CI/CD
+- **[Architecture](../architecture/)** — How modules are organized and interact

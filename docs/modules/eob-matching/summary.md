@@ -527,11 +527,11 @@ If this experiment proves successful, it could:
 ## Support and Resources
 
 ### Documentation
-- [Design Document](docs/DESIGN.md) - Comprehensive technical design
-- [Technology Stack](docs/TECHNOLOGY-STACK.md) - Tech decisions
-- [UI Design](docs/UI-DESIGN.md) - Dashboard specifications
-- [Paperless Setup](docs/SETUP-PAPERLESS.md) - Integration guide
-- [Quick Reference](QUICK-REFERENCE.md) - Implementation guide
+- [Design Document](./design.md) - Comprehensive technical design
+- [Technology Stack](./technology-stack.md) - Tech decisions
+- [UI Design](./ui-design.md) - Dashboard specifications
+- [Paperless Setup](./setup-paperless.md) - Integration guide
+- [Quick Reference](./quick-reference.md) - Implementation guide
 
 ### External Resources
 - [Paperless-ngx Documentation](https://docs.paperless-ngx.com/)

@@ -11,8 +11,8 @@ sources:
   - "https://tagvico.arturf.ch/docs/"
   - "ideation#804 - REVIEW: Paperless Triage Tool"
 related:
-  - "[DI ↔ MC Unified Integration Plan](di-integration-unified-plan.md)"
-  - "[Connector Expansion Review](../active/connector-expansion-review.md)"
+  - "[DI ↔ MC Unified Integration Plan](./copilot-sdk-provider.md)"
+  - "[Connector Expansion Review](../active/current-state-assessment.md)"
   - "[Tagvico Comparative Assessment](https://github.com/rsocko/ideation/issues/804#issuecomment-5074558128)"
 tracking:
   github_label: "tagvico-integration"

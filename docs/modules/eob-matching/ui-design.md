@@ -558,7 +558,7 @@ flowchart LR
 
 ## Implementation: Standalone Web App
 
-> **Updated**: The dashboard is implemented as a standalone web app (FastAPI backend + vanilla JS or React frontend), served as a single Docker container on the homelab. See [TECHNOLOGY-STACK.md](TECHNOLOGY-STACK.md) ADR-005 for rationale.
+> **Updated**: The dashboard is implemented as a standalone web app (FastAPI backend + vanilla JS or React frontend), served as a single Docker container on the homelab. See [TECHNOLOGY-STACK.md](./technology-stack.md) ADR-005 for rationale.
 
 ### Page Structure
 

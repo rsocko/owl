@@ -299,7 +299,7 @@ def compute_ocr_quality_score(text: str, page_count: int) -> dict:
 | 45–64 | **C** | Mediocre OCR, artifacts present | Ollama secondary validation → queue for remediation if confirmed |
 | 0–44 | **F** | Poor or failed OCR | Direct queue for Tier 1 remediation |
 
-> **Threshold tuning:** Run the Phase 0 baseline inventory first. These thresholds are starting points; the actual distribution in your library may require adjustment. See [OCR-BASELINE-INVENTORY.md](OCR-BASELINE-INVENTORY.md).
+> **Threshold tuning:** Run the Phase 0 baseline inventory first. These thresholds are starting points; the actual distribution in your library may require adjustment. See [OCR-BASELINE-INVENTORY.md](./ocr-baseline-inventory.md).
 
 ---
 
@@ -307,7 +307,7 @@ def compute_ocr_quality_score(text: str, page_count: int) -> dict:
 
 Ollama (`phi3:mini`) is invoked as a secondary signal only for documents scoring in the 40–70 range. This resolves ambiguity between "document has lots of proper nouns and abbreviations" (legitimately lower dict_ratio but good OCR) vs "document has genuine OCR garbage."
 
-Full prompt design is specified in [OCR-OLLAMA-INTEGRATION.md](OCR-OLLAMA-INTEGRATION.md).
+Full prompt design is specified in [OCR-OLLAMA-INTEGRATION.md](./ocr-ollama-integration.md).
 
 **Decision logic after Ollama response:**
 
