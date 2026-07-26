@@ -84,6 +84,8 @@ export const endpoints = {
     matches: (params?: string) => api.get(`/api/eob/matches${params ? `?${params}` : ''}`),
     updateMatch: (id: string, body: unknown) => api.patch(`/api/eob/matches/${id}`, body),
     matchHistory: (id: string) => api.get(`/api/eob/matches/${id}/history`),
+    matchDetail: (matchId: string) => api.get(`/api/eob/matches/${matchId}/detail`),
+    recordDetail: (docId: string) => api.get(`/api/eob/records/${docId}`),
     unmatched: () => api.get('/api/eob/unmatched'),
     bulkUpdate: (body: { ids: string[]; action: 'mark_orphan' | 'mark_paid' }) =>
       api.post('/api/eob/bulk-update', body),
