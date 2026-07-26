@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Badge,
+  Breadcrumb,
   Button,
   Card,
   ConfidenceBar,
@@ -13,6 +14,7 @@ import {
   Toast,
 } from '../components/ui';
 import { endpoints } from '../lib/api';
+import { getToastDuration } from '../lib/toast';
 import '../styles/metadata-correction.css';
 
 // ------------------------------------------------------------------
@@ -161,8 +163,10 @@ export default function MetadataCorrection() {
   // Auto-clear toast
   useEffect(() => {
     if (!toast) return undefined;
-    const t = window.setTimeout(() => setToast(null), 3500);
-    return () => window.clearTimeout(t);
+    const duration = getToastDuration(toast.tone);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), duration);
+    return () => window.clearTimeout(timeout);
   }, [toast]);
 
   // ------------------------------------------------------------------
@@ -307,6 +311,12 @@ export default function MetadataCorrection() {
   if (loading && !data) {
     return (
       <div className="metadata-page">
+        <Breadcrumb
+          items={[
+            { label: 'Overview', to: '/' },
+            { label: 'Metadata Correction' },
+          ]}
+        />
         <PageHeader title="Metadata Correction" />
         <SkeletonLoader variant="detail-panel" />
       </div>
@@ -316,6 +326,12 @@ export default function MetadataCorrection() {
   if (error || !data) {
     return (
       <div className="metadata-page">
+        <Breadcrumb
+          items={[
+            { label: 'Overview', to: '/' },
+            { label: 'Metadata Correction' },
+          ]}
+        />
         <PageHeader title="Metadata Correction" />
         <ErrorState message={error ?? 'Document not found.'} onRetry={() => void loadData()} />
       </div>
@@ -324,6 +340,12 @@ export default function MetadataCorrection() {
 
   return (
     <div className="metadata-page">
+      <Breadcrumb
+        items={[
+          { label: 'Overview', to: '/' },
+          { label: 'Metadata Correction' },
+        ]}
+      />
       <PageHeader
         title={`Metadata Correction: ${data.title || `Document #${data.document_id}`}`}
         desc={`Paperless #${data.document_id}`}
@@ -599,7 +621,7 @@ export default function MetadataCorrection() {
         </Modal>
       )}
 
-      {toast && <Toast message={toast.message} tone={toast.tone} />}
+      {toast && <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />}
     </div>
   );
 }

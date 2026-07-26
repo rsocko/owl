@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, PageHeader, Toast } from '../components/ui';
+import { getToastDuration } from '../lib/toast';
 
 // ── Types ──
 
@@ -729,8 +730,10 @@ export default function RulesConfig() {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const t = window.setTimeout(() => setToast(null), 3200);
-    return () => window.clearTimeout(t);
+    const duration = getToastDuration(toast.tone);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), duration);
+    return () => window.clearTimeout(timeout);
   }, [toast]);
 
   useEffect(() => {
@@ -834,7 +837,7 @@ export default function RulesConfig() {
         }
       />
 
-      {toast && <Toast message={toast.message} tone={toast.tone} />}
+      {toast && <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />}
 
       <EngineCards />
 
@@ -876,4 +879,3 @@ export default function RulesConfig() {
     </>
   );
 }
-

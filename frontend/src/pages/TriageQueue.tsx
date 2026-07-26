@@ -15,6 +15,7 @@ import EobMatchDetail from '../components/EobMatchDetail';
 import OrphanDetail from '../components/triage/OrphanDetail';
 import DocumentPreview from '../components/DocumentPreview';
 import { endpoints } from '../lib/api';
+import { getToastDuration } from '../lib/toast';
 import { StatementGroupingDetail } from '../components/triage/StatementGroupingDetail';
 import DuplicateDetail from './DuplicateDetail';
 import '../styles/triage-queue.css';
@@ -131,11 +132,33 @@ function itemTitle(item: TriageItem): string {
   return `${typeLabel(item.item_type)}: ${item.target_id}`;
 }
 
+function TriageDetailBreadcrumb({ item }: { item: TriageItem }) {
+  const typeIcons: Record<string, string> = {
+    eob_match_review: '🔗',
+    grouping_anomaly: '📊',
+    orphan_document: '📎',
+    duplicate_document: '📋',
+  };
+  const icon = typeIcons[item.item_type] ?? '📄';
+
+  return (
+    <div className="triage-detail-breadcrumb">
+      <span className="triage-breadcrumb-trail">
+        <span className="triage-breadcrumb-segment">Queue</span>
+        <span className="triage-breadcrumb-sep">›</span>
+        <span className="triage-breadcrumb-segment">
+          <Badge tone={typeBadgeTone(item.item_type)}>{icon} {typeLabel(item.item_type)}</Badge>
+        </span>
+        <span className="triage-breadcrumb-sep">›</span>
+        <span className="triage-breadcrumb-segment triage-breadcrumb-current">Item #{item.id}</span>
+      </span>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------
 // Component
 // ------------------------------------------------------------------
-
-const UNDO_TIMEOUT_MS = 30_000;
 
 export default function TriageQueue() {
   // Data state
@@ -198,7 +221,9 @@ export default function TriageQueue() {
   // Auto-clear toast
   useEffect(() => {
     if (!toast) return undefined;
-    const timeout = window.setTimeout(() => setToast(null), toast.undoId ? UNDO_TIMEOUT_MS : 3200);
+    const duration = getToastDuration(toast.tone, !!toast.undoId);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), duration);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
@@ -650,38 +675,45 @@ export default function TriageQueue() {
             {selectedItem ? (
               selectedItem.item_type === 'eob_match_review' ? (
                 /* EOB Match Review — rich detail component (#834) */
-                <EobMatchDetail
-                  matchId={Number(selectedItem.target_id)}
-                  triageItemId={selectedItem.id}
-                  onResolved={() => {
-                    void loadData();
-                  }}
-                  onSkip={() => {
-                    // Advance to next item in the list
-                    const currentIndex = items.findIndex((i) => i.id === selectedItem.id);
-                    const nextItem = items[currentIndex + 1] ?? items[0];
-                    if (nextItem && nextItem.id !== selectedItem.id) {
-                      setSelectedId(nextItem.id);
-                    }
-                  }}
-                />
+                <>
+                  <TriageDetailBreadcrumb item={selectedItem} />
+                  <EobMatchDetail
+                    matchId={Number(selectedItem.target_id)}
+                    triageItemId={selectedItem.id}
+                    onResolved={() => {
+                      void loadData();
+                    }}
+                    onSkip={() => {
+                      // Advance to next item in the list
+                      const currentIndex = items.findIndex((i) => i.id === selectedItem.id);
+                      const nextItem = items[currentIndex + 1] ?? items[0];
+                      if (nextItem && nextItem.id !== selectedItem.id) {
+                        setSelectedId(nextItem.id);
+                      }
+                    }}
+                  />
+                </>
               ) : selectedItem.item_type === 'orphan_document' ? (
                 /* Orphan Document — rich detail component (#831) */
-                <OrphanDetail
-                  triageItem={selectedItem}
-                  onResolved={() => {
-                    void loadData();
-                  }}
-                  onSkip={() => {
-                    const currentIndex = items.findIndex((i) => i.id === selectedItem.id);
-                    const nextItem = items[currentIndex + 1] ?? items[0];
-                    if (nextItem && nextItem.id !== selectedItem.id) {
-                      setSelectedId(nextItem.id);
-                    }
-                  }}
-                />
+                <>
+                  <TriageDetailBreadcrumb item={selectedItem} />
+                  <OrphanDetail
+                    triageItem={selectedItem}
+                    onResolved={() => {
+                      void loadData();
+                    }}
+                    onSkip={() => {
+                      const currentIndex = items.findIndex((i) => i.id === selectedItem.id);
+                      const nextItem = items[currentIndex + 1] ?? items[0];
+                      if (nextItem && nextItem.id !== selectedItem.id) {
+                        setSelectedId(nextItem.id);
+                      }
+                    }}
+                  />
+                </>
               ) : (
                 <>
+                <TriageDetailBreadcrumb item={selectedItem} />
                 <div className="triage-detail-header">
                   <div>
                     <div className="triage-detail-title">{itemTitle(selectedItem)}</div>
@@ -896,7 +928,7 @@ export default function TriageQueue() {
       {/* Toast with optional undo */}
       {toast && (
         <div className="triage-toast-wrapper">
-          <Toast message={toast.message} tone={toast.tone} />
+          <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />
           {toast.undoId && (
             <button className="triage-undo-btn" onClick={() => void handleUndo(toast.undoId!)}>
               Undo
