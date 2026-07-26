@@ -20,6 +20,7 @@ import {
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import ManualMatchModal from './ManualMatchModal';
+import ConfirmModal from './ConfirmModal';
 import DocumentPreview from './DocumentPreview';
 import '../styles/eob-pages.css';
 
@@ -278,6 +279,7 @@ export default function EobMatchDetail({
   const [payMethod, setPayMethod] = useState('');
   const [payNotes, setPayNotes] = useState('');
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'confirm' | 'reject' | null>(null);
 
   // Guard against stale requests when matchId changes rapidly
   const loadGenRef = useRef(0);
@@ -421,8 +423,10 @@ export default function EobMatchDetail({
 
   // ---- Actions ----
 
-  const handleConfirm = useCallback(async () => {
+  /** Execute confirm — called after modal confirmation. */
+  const executeConfirm = useCallback(async () => {
     if (!match || saving) return;
+    setPendingAction(null);
     setSaving('confirm');
     try {
       await endpoints.eob.confirmMatch(String(match.id), {
@@ -440,8 +444,10 @@ export default function EobMatchDetail({
     }
   }, [match, saving, notes, triageItemId, loadMatch, onResolved]);
 
-  const handleReject = useCallback(async () => {
+  /** Execute reject — called after modal confirmation. */
+  const executeReject = useCallback(async () => {
     if (!match || saving) return;
+    setPendingAction(null);
     setSaving('reject');
     try {
       await endpoints.eob.rejectMatch(String(match.id), {
@@ -458,6 +464,18 @@ export default function EobMatchDetail({
       setSaving(null);
     }
   }, [match, saving, notes, triageItemId, loadMatch, onResolved]);
+
+  /** Prompt confirm modal (destructive — opens modal per UX-03). */
+  const handleConfirm = useCallback(() => {
+    if (!match || saving) return;
+    setPendingAction('confirm');
+  }, [match, saving]);
+
+  /** Prompt reject modal (destructive — opens modal per UX-03). */
+  const handleReject = useCallback(() => {
+    if (!match || saving) return;
+    setPendingAction('reject');
+  }, [match, saving]);
 
   const handleRelink = useCallback(() => {
     if (onRelink) {
@@ -501,17 +519,17 @@ export default function EobMatchDetail({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Suppress shortcuts when modal is open or focus is in a form field
-      if (showManualMatch) return;
+      // Suppress shortcuts when any modal is open or focus is in a form field
+      if (showManualMatch || pendingAction !== null) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       switch (e.key.toLowerCase()) {
         case 'y':
           e.preventDefault();
-          void handleConfirm();
+          handleConfirm();
           break;
         case 'n':
           e.preventDefault();
-          void handleReject();
+          handleReject();
           break;
         case 's':
           e.preventDefault();
@@ -525,7 +543,7 @@ export default function EobMatchDetail({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleConfirm, handleReject, handleSkip, handleRelink, showManualMatch]);
+  }, [handleConfirm, handleReject, handleSkip, handleRelink, showManualMatch, pendingAction]);
 
   // ---- Render ----
 
@@ -1012,6 +1030,38 @@ export default function EobMatchDetail({
       </div>
 
       {toast ? <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} /> : null}
+
+      {/* Confirm/Reject modals — destructive actions require explicit confirmation (UX-03) */}
+      <ConfirmModal
+        open={pendingAction === 'confirm'}
+        title="Confirm this match?"
+        description={
+          <>
+            This will mark <strong>EOB #{match?.eob_document_id ?? '—'} ↔ Bill #{match?.bill_document_id ?? '—'}</strong> as
+            confirmed and link the documents in Paperless. This action cannot be easily undone.
+          </>
+        }
+        confirmLabel="Confirm match"
+        confirmVariant="success"
+        busy={saving === 'confirm'}
+        onConfirm={() => void executeConfirm()}
+        onCancel={() => setPendingAction(null)}
+      />
+      <ConfirmModal
+        open={pendingAction === 'reject'}
+        title="Reject this match?"
+        description={
+          <>
+            This will reject <strong>EOB #{match?.eob_document_id ?? '—'} ↔ Bill #{match?.bill_document_id ?? '—'}</strong>.
+            The documents will need to be re-matched manually if this rejection is incorrect.
+          </>
+        }
+        confirmLabel="Reject match"
+        confirmVariant="danger"
+        busy={saving === 'reject'}
+        onConfirm={() => void executeReject()}
+        onCancel={() => setPendingAction(null)}
+      />
 
       <ManualMatchModal
         open={showManualMatch}
