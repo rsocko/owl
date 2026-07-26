@@ -370,7 +370,9 @@ def bulk_confirm_by_threshold(min_confidence: int) -> int:
             meta = {}
             if item.metadata_json:
                 try:
-                    meta = json.loads(item.metadata_json)
+                    parsed = json.loads(item.metadata_json)
+                    if isinstance(parsed, dict):
+                        meta = parsed
                 except (json.JSONDecodeError, TypeError):
                     continue
             score = meta.get("score_pct")

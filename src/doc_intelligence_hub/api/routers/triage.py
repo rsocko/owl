@@ -15,6 +15,7 @@ Endpoints:
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -58,7 +59,7 @@ class DeferRequest(BaseModel):
 
 class BulkActionRequest(BaseModel):
     action: str = Field(..., description="Bulk action: 'confirm', 'reject', 'defer', or 'dismiss'")
-    item_ids: list[str] = Field(..., description="List of triage queue item IDs")
+    item_ids: list[str] = Field(..., max_length=200, description="List of triage queue item IDs (max 200)")
     payload: dict[str, Any] | None = Field(default=None, description="Action-specific details (e.g. defer until)")
 
 
@@ -119,6 +120,11 @@ async def bulk_action(body: BulkActionRequest) -> dict[str, Any]:
         affected = bulk_resolve_items(body.item_ids, body.action, body.payload)
     elif body.action == "defer":
         until = body.payload.get("until") if body.payload else None
+        if until is not None:
+            try:
+                datetime.fromisoformat(until)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=422, detail=f"Invalid 'until' timestamp: {until}")
         affected = bulk_defer_items(body.item_ids, until)
     elif body.action == "dismiss":
         affected = bulk_dismiss_items(body.item_ids)
