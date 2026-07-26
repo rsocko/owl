@@ -280,6 +280,118 @@ def create_queue_item(
         session.close()
 
 
+def bulk_resolve_items(item_ids: list[str], action: str, payload: dict | None = None) -> int:
+    """Resolve multiple triage queue items in a single transaction. Returns count of affected items."""
+    import json
+
+    session = get_session()
+    try:
+        items = session.query(TriageQueueItem).filter(
+            TriageQueueItem.id.in_(item_ids),
+            TriageQueueItem.status == "pending",
+        ).all()
+
+        now = datetime.now(UTC)
+        for item in items:
+            item.status = "resolved"
+            item.resolved_at = now
+            item.resolved_action = action
+            session.add(CorrectionEvent(
+                event_type=f"triage_{action}",
+                target_type=item.target_type,
+                target_id=item.target_id,
+                payload_json=json.dumps(payload or {}),
+            ))
+
+        session.commit()
+        return len(items)
+    finally:
+        session.close()
+
+
+def bulk_defer_items(item_ids: list[str], until: str | None = None) -> int:
+    """Defer multiple triage queue items in a single transaction. Returns count of affected items."""
+    from datetime import timedelta
+
+    session = get_session()
+    try:
+        items = session.query(TriageQueueItem).filter(
+            TriageQueueItem.id.in_(item_ids),
+            TriageQueueItem.status == "pending",
+        ).all()
+
+        defer_until = datetime.fromisoformat(until) if until else datetime.now(UTC) + timedelta(days=7)
+        for item in items:
+            item.status = "deferred"
+            item.deferred_until = defer_until
+
+        session.commit()
+        return len(items)
+    finally:
+        session.close()
+
+
+def bulk_dismiss_items(item_ids: list[str]) -> int:
+    """Dismiss multiple triage queue items in a single transaction. Returns count of affected items."""
+    session = get_session()
+    try:
+        items = session.query(TriageQueueItem).filter(
+            TriageQueueItem.id.in_(item_ids),
+            TriageQueueItem.status == "pending",
+        ).all()
+
+        now = datetime.now(UTC)
+        for item in items:
+            item.status = "dismissed"
+            item.resolved_at = now
+            item.resolved_action = "dismissed"
+
+        session.commit()
+        return len(items)
+    finally:
+        session.close()
+
+
+def bulk_confirm_by_threshold(min_confidence: int) -> int:
+    """Confirm all pending EOB match items with score_pct >= threshold. Returns count of affected items."""
+    import json
+
+    session = get_session()
+    try:
+        # Get all pending eob_match_review items
+        items = session.query(TriageQueueItem).filter(
+            TriageQueueItem.item_type == "eob_match_review",
+            TriageQueueItem.status == "pending",
+        ).all()
+
+        now = datetime.now(UTC)
+        count = 0
+        for item in items:
+            meta = {}
+            if item.metadata_json:
+                try:
+                    meta = json.loads(item.metadata_json)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            score = meta.get("score_pct")
+            if isinstance(score, (int, float)) and score >= min_confidence:
+                item.status = "resolved"
+                item.resolved_at = now
+                item.resolved_action = "confirm"
+                session.add(CorrectionEvent(
+                    event_type="triage_bulk_confirm_threshold",
+                    target_type=item.target_type,
+                    target_id=item.target_id,
+                    payload_json=json.dumps({"min_confidence": min_confidence, "score_pct": score}),
+                ))
+                count += 1
+
+        session.commit()
+        return count
+    finally:
+        session.close()
+
+
 def undo_resolution(item_id: str) -> dict[str, Any] | None:
     """Undo a resolve/dismiss action — reset item back to pending."""
     session = get_session()
