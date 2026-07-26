@@ -37,7 +37,7 @@ CUSTOM_FIELD_DEFINITIONS = [
     },
     {
         "name": "Action Amount",
-        "data_type": "decimal",
+        "data_type": "float",
     },
     {
         "name": "Action Urgency",
@@ -103,13 +103,22 @@ class PaperlessEnricher:
                 if field_def.get("data_type") == "select":
                     self._cache_select_options(name, existing_by_name[name])
             else:
-                created = await self.client.create_custom_field(field_def)
-                field_map[name] = created["id"]
-                print(f"  Created custom field: {name} (id={created['id']})")
-                logger.info("Created Paperless custom field: %s (id=%s)", name, created["id"])
-                # Cache select option IDs for newly created fields
-                if field_def.get("data_type") == "select":
-                    self._cache_select_options(name, created)
+                try:
+                    created = await self.client.create_custom_field(field_def)
+                    field_map[name] = created["id"]
+                    print(f"  Created custom field: {name} (id={created['id']})")
+                    logger.info("Created Paperless custom field: %s (id=%s)", name, created["id"])
+                    # Cache select option IDs for newly created fields
+                    if field_def.get("data_type") == "select":
+                        self._cache_select_options(name, created)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to create custom field %r (data_type=%s): %s",
+                        name,
+                        field_def.get("data_type"),
+                        e,
+                    )
+                    # Continue creating other fields — partial enrichment is better than none
 
         self._field_id_cache = field_map
         return field_map
@@ -163,77 +172,49 @@ class PaperlessEnricher:
 
         custom_fields = []
 
+        def _add_field(name: str, value) -> None:
+            """Append a field entry if the field ID exists in Paperless."""
+            fid = field_ids.get(name)
+            if fid is not None:
+                custom_fields.append({"field": fid, "value": value})
+
         # Action Type (select)
         if extraction.get("action_type"):
-            custom_fields.append(
-                {
-                    "field": field_ids["Action Type"],
-                    "value": self._resolve_select_value("Action Type", extraction["action_type"]),
-                }
+            _add_field(
+                "Action Type",
+                self._resolve_select_value("Action Type", extraction["action_type"]),
             )
 
         # Due Date
         if extraction.get("due_date"):
-            custom_fields.append(
-                {
-                    "field": field_ids["Action Due Date"],
-                    "value": extraction["due_date"],
-                }
-            )
+            _add_field("Action Due Date", extraction["due_date"])
 
         # Amount
         if extraction.get("amount") is not None:
-            custom_fields.append(
-                {
-                    "field": field_ids["Action Amount"],
-                    "value": extraction["amount"],
-                }
-            )
+            _add_field("Action Amount", extraction["amount"])
 
         # Urgency (select)
         if extraction.get("urgency"):
-            custom_fields.append(
-                {
-                    "field": field_ids["Action Urgency"],
-                    "value": self._resolve_select_value("Action Urgency", extraction["urgency"]),
-                }
+            _add_field(
+                "Action Urgency",
+                self._resolve_select_value("Action Urgency", extraction["urgency"]),
             )
 
         # Status (select — always starts as pending)
-        custom_fields.append(
-            {
-                "field": field_ids["Action Status"],
-                "value": self._resolve_select_value("Action Status", "pending"),
-            }
-        )
+        _add_field("Action Status", self._resolve_select_value("Action Status", "pending"))
 
         # Summary (include action count hint if multiple)
         summary = extraction.get("summary", "")
         if action_count > 1:
             summary = f"[{action_count} actions] {summary}"
         if summary:
-            custom_fields.append(
-                {
-                    "field": field_ids["Action Summary"],
-                    "value": summary[:255],
-                }
-            )
+            _add_field("Action Summary", summary[:255])
 
         # Analyzed date
-        custom_fields.append(
-            {
-                "field": field_ids["Action Analyzed"],
-                "value": date.today().isoformat(),
-            }
-        )
+        _add_field("Action Analyzed", date.today().isoformat())
 
         # Action Count
-        custom_fields.append(
-            {
-                "field": field_ids["Action Count"],
-                "value": action_count,
-            }
-        )
+        _add_field("Action Count", action_count)
 
         if custom_fields:
             logger.info(
