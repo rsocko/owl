@@ -12,6 +12,7 @@ import {
   Toast,
 } from '../components/ui';
 import { endpoints } from '../lib/api';
+import { StatementGroupingDetail } from '../components/triage/StatementGroupingDetail';
 import '../styles/triage-queue.css';
 
 // ------------------------------------------------------------------
@@ -588,14 +589,15 @@ export default function TriageQueue() {
                   </div>
                 </div>
 
-                {/* Reason banner */}
-                {selectedItem.reason && (
+                {/* Reason banner — skip for grouping_anomaly (shown in detail component) */}
+                {selectedItem.reason && selectedItem.item_type !== 'grouping_anomaly' && (
                   <div className="triage-reason-banner">
                     <strong>Flagged for review:</strong> {selectedItem.reason}
                   </div>
                 )}
 
-                {/* Item info card */}
+                {/* Item info card — skip for grouping_anomaly (detail component shows series info) */}
+                {selectedItem.item_type !== 'grouping_anomaly' && (
                 <Card title="Item details">
                   <div className="triage-detail-info">
                     <div className="triage-detail-row">
@@ -632,17 +634,34 @@ export default function TriageQueue() {
                     )}
                   </div>
                 </Card>
+                )}
 
-                {/* Metadata dump — placeholder for specific detail views (#834, #829, #830, #831) */}
-                <Card title="Item metadata">
-                  <div className="triage-metadata-dump">
-                    {selectedItem.metadata ? (
-                      <pre>{JSON.stringify(selectedItem.metadata, null, 2)}</pre>
-                    ) : (
-                      <div className="text-muted">No additional metadata available for this item.</div>
-                    )}
-                  </div>
-                </Card>
+                {/* Type-specific detail views */}
+                {selectedItem.item_type === 'grouping_anomaly' ? (
+                  <StatementGroupingDetail
+                    seriesId={selectedItem.target_id}
+                    triageItemId={selectedItem.id}
+                    reason={selectedItem.reason}
+                    onResolved={(action) => {
+                      setToast({ message: `Series ${action} completed.`, tone: 'success' });
+                      void loadData();
+                      // Auto-advance to next item
+                      const currentIdx = items.findIndex(i => i.id === selectedItem.id);
+                      const next = items[currentIdx + 1] || items[currentIdx - 1];
+                      setSelectedId(next?.id ?? null);
+                    }}
+                  />
+                ) : (
+                  <Card title="Item metadata">
+                    <div className="triage-metadata-dump">
+                      {selectedItem.metadata ? (
+                        <pre>{JSON.stringify(selectedItem.metadata, null, 2)}</pre>
+                      ) : (
+                        <div className="text-muted">No additional metadata available for this item.</div>
+                      )}
+                    </div>
+                  </Card>
+                )}
               </>
             ) : (
               <EmptyState
