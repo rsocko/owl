@@ -15,6 +15,8 @@ import EobMatchDetail from '../components/EobMatchDetail';
 import OrphanDetail from '../components/triage/OrphanDetail';
 import DocumentPreview from '../components/DocumentPreview';
 import { endpoints } from '../lib/api';
+import { StatementGroupingDetail } from '../components/triage/StatementGroupingDetail';
+import DuplicateDetail from './DuplicateDetail';
 import '../styles/triage-queue.css';
 
 // ------------------------------------------------------------------
@@ -51,7 +53,7 @@ interface StatsResponse {
   pending: number;
 }
 
-type ItemTypeFilter = 'all' | 'eob_match_review' | 'grouping_anomaly' | 'orphan_document';
+type ItemTypeFilter = 'all' | 'eob_match_review' | 'grouping_anomaly' | 'orphan_document' | 'duplicate_document';
 type StatusFilter = 'pending' | 'deferred' | 'resolved';
 type ToastState = { message: string; tone?: 'success' | 'error'; undoId?: string } | null;
 
@@ -78,6 +80,7 @@ function typeLabel(itemType: string): string {
     case 'eob_match_review': return 'EOB';
     case 'grouping_anomaly': return 'GROUPING';
     case 'orphan_document': return 'ORPHAN';
+    case 'duplicate_document': return 'DUPLICATE';
     default: return itemType.toUpperCase();
   }
 }
@@ -87,6 +90,7 @@ function typeBadgeTone(itemType: string) {
     case 'eob_match_review': return 'info' as const;
     case 'grouping_anomaly': return 'warning' as const;
     case 'orphan_document': return 'danger' as const;
+    case 'duplicate_document': return 'warning' as const;
     default: return 'muted' as const;
   }
 }
@@ -118,6 +122,12 @@ function itemTitle(item: TriageItem): string {
   if (item.item_type === 'grouping_anomaly') {
     return `Grouping: ${meta.series_name || item.target_id}`;
   }
+  if (item.item_type === 'duplicate_document') {
+    const docA = meta.doc_a_id ?? '?';
+    const docB = meta.doc_b_id ?? '?';
+    const scorePct = typeof meta.score_pct === 'number' ? `${meta.score_pct}%` : '';
+    return `Duplicate: #${docA} ↔ #${docB}${scorePct ? ` (${scorePct})` : ''}`;
+  }
   return `${typeLabel(item.item_type)}: ${item.target_id}`;
 }
 
@@ -148,6 +158,11 @@ export default function TriageQueue() {
   const [toast, setToast] = useState<ToastState>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [populating, setPopulating] = useState(false);
+
+  // Bulk confirm modal & threshold
+  const [pendingBulkAction, setPendingBulkAction] = useState<{ action: string; ids: string[] } | null>(null);
+  const [thresholdPct, setThresholdPct] = useState(90);
+  const [pendingThreshold, setPendingThreshold] = useState(false);
 
   // ------------------------------------------------------------------
   // Data loading
@@ -306,20 +321,56 @@ export default function TriageQueue() {
   const handleBulkAction = async (action: 'confirm' | 'reject' | 'defer' | 'dismiss') => {
     const ids = Array.from(checkedIds);
     if (ids.length === 0) return;
+
+    // Destructive actions require confirmation
+    if (action === 'reject' || action === 'dismiss') {
+      setPendingBulkAction({ action, ids });
+      return;
+    }
+
+    await executeBulkAction(action, ids);
+  };
+
+  const executeBulkAction = async (action: string, ids: string[]) => {
     setBusyAction(`bulk-${action}`);
     try {
-      if (action === 'defer') {
-        await Promise.all(ids.map((id) => endpoints.triage.defer(id)));
-      } else if (action === 'dismiss') {
-        await Promise.all(ids.map((id) => endpoints.triage.dismiss(id)));
-      } else {
-        await Promise.all(ids.map((id) => endpoints.triage.resolve(id, { action })));
-      }
+      const result = await endpoints.triage.bulk({ action, item_ids: ids });
       setCheckedIds(new Set());
-      setToast({ message: `${ids.length} item${ids.length > 1 ? 's' : ''} ${action}ed.`, tone: 'success' });
+      setToast({
+        message: `${result.affected} item${result.affected !== 1 ? 's' : ''} ${action}ed.`,
+        tone: 'success',
+      });
       await loadData();
     } catch (err) {
       setToast({ message: err instanceof Error ? err.message : `Bulk ${action} failed.`, tone: 'error' });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const confirmPendingBulkAction = async () => {
+    if (!pendingBulkAction) return;
+    const { action, ids } = pendingBulkAction;
+    setPendingBulkAction(null);
+    await executeBulkAction(action, ids);
+  };
+
+  const handleBulkConfirmThreshold = async () => {
+    setPendingThreshold(true);
+  };
+
+  const executeBulkConfirmThreshold = async () => {
+    setPendingThreshold(false);
+    setBusyAction('bulk-threshold');
+    try {
+      const result = await endpoints.triage.bulkConfirmThreshold({ min_confidence: thresholdPct });
+      setToast({
+        message: `${result.affected} item${result.affected !== 1 ? 's' : ''} auto-confirmed (≥${thresholdPct}%).`,
+        tone: 'success',
+      });
+      await loadData();
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Threshold confirm failed.', tone: 'error' });
     } finally {
       setBusyAction(null);
     }
@@ -351,15 +402,24 @@ export default function TriageQueue() {
       // When an EOB match review item is selected, EobMatchDetail owns Y/N/S/R
       const eobDetailActive = selectedItem?.item_type === 'eob_match_review';
 
+      // Escape closes modals first, then deselects
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (pendingBulkAction) { setPendingBulkAction(null); return; }
+        if (pendingThreshold) { setPendingThreshold(false); return; }
+        setSelectedId(null);
+        return;
+      }
+
+      // Suppress all other shortcuts while a modal is open
+      if (pendingBulkAction || pendingThreshold) return;
+
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         moveSelection(1);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         moveSelection(-1);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        setSelectedId(null);
       } else if (e.key.toLowerCase() === 'y' && selectedId && !eobDetailActive) {
         e.preventDefault();
         void handleResolve(selectedId, 'confirm');
@@ -384,7 +444,7 @@ export default function TriageQueue() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [items, selectedId, selectedItem]);
+  }, [items, selectedId, selectedItem, pendingBulkAction, pendingThreshold]);
 
   // ------------------------------------------------------------------
   // Derived counts
@@ -435,6 +495,7 @@ export default function TriageQueue() {
                     { key: 'eob_match_review', label: `EOB (${typeCounts.eob_match_review ?? 0})` },
                     { key: 'grouping_anomaly', label: `Groups (${typeCounts.grouping_anomaly ?? 0})` },
                     { key: 'orphan_document', label: `Orphans (${typeCounts.orphan_document ?? 0})` },
+                    { key: 'duplicate_document', label: `Dupes (${typeCounts.duplicate_document ?? 0})` },
                   ]}
                 />
 
@@ -450,6 +511,29 @@ export default function TriageQueue() {
                     ]}
                   />
                 </div>
+
+                {/* Auto-confirm threshold */}
+                {statusFilter === 'pending' && (
+                  <div className="triage-threshold-bar">
+                    <button
+                      className="triage-auto-confirm-btn"
+                      onClick={() => void handleBulkConfirmThreshold()}
+                      disabled={busyAction !== null}
+                      title={`Auto-confirm all EOB matches with confidence ≥ ${thresholdPct}%`}
+                    >
+                      ⚡ Auto-confirm ≥
+                    </button>
+                    <input
+                      type="number"
+                      className="triage-threshold-input"
+                      value={thresholdPct}
+                      onChange={(e) => setThresholdPct(Math.max(0, Math.min(100, Number(e.target.value))))}
+                      min={0}
+                      max={100}
+                    />
+                    <span className="triage-threshold-label">%</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -459,10 +543,17 @@ export default function TriageQueue() {
               </div>
             ) : (
               <>
-                {/* Bulk action bar */}
-                {checkedIds.size > 0 && (
+                {/* Bulk action bar — only for pending items (bulk ops target pending status) */}
+                {checkedIds.size > 0 && statusFilter === 'pending' && (
                   <div className="triage-bulk-bar">
-                    <span>{checkedIds.size} selected</span>
+                    <span>
+                      {checkedIds.size} selected
+                      {(() => {
+                        const visibleIds = new Set(items.map((i) => i.id));
+                        const hiddenCount = Array.from(checkedIds).filter((id) => !visibleIds.has(id)).length;
+                        return hiddenCount > 0 ? ` (${hiddenCount} hidden by filter)` : '';
+                      })()}
+                    </span>
                     <div className="btn-group">
                       <Button variant="success" size="sm" onClick={() => void handleBulkAction('confirm')} disabled={busyAction !== null}>
                         Confirm
@@ -485,14 +576,18 @@ export default function TriageQueue() {
 
                 {/* Select-all + populate */}
                 <div className="triage-list-toolbar">
-                  <label className="triage-select-all">
-                    <input
-                      type="checkbox"
-                      checked={items.length > 0 && items.every((i) => checkedIds.has(i.id))}
-                      onChange={selectAllVisible}
-                    />
-                    <span>Select visible</span>
-                  </label>
+                  {statusFilter === 'pending' ? (
+                    <label className="triage-select-all">
+                      <input
+                        type="checkbox"
+                        checked={items.length > 0 && items.every((i) => checkedIds.has(i.id))}
+                        onChange={selectAllVisible}
+                      />
+                      <span>Select visible</span>
+                    </label>
+                  ) : (
+                    <span />
+                  )}
                   <Button size="sm" onClick={() => void handlePopulate()} disabled={populating}>
                     {populating ? 'Scanning…' : '🔄 Populate'}
                   </Button>
@@ -513,16 +608,22 @@ export default function TriageQueue() {
                     items.map((item) => (
                       <article
                         key={item.id}
-                        className={selectedId === item.id ? 'triage-item selected' : 'triage-item'}
+                        className={[
+                          'triage-item',
+                          selectedId === item.id ? 'selected' : '',
+                          checkedIds.has(item.id) ? 'checked' : '',
+                        ].filter(Boolean).join(' ')}
                         onClick={() => setSelectedId(item.id)}
                       >
                         <div className="triage-item-top">
-                          <input
-                            type="checkbox"
-                            checked={checkedIds.has(item.id)}
-                            onChange={(e) => toggleCheck(item.id, e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey)}
-                            onClick={(e) => e.stopPropagation()}
-                          />
+                          {statusFilter === 'pending' && (
+                            <input
+                              type="checkbox"
+                              checked={checkedIds.has(item.id)}
+                              onChange={(e) => toggleCheck(item.id, e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          )}
                           <Badge tone={typeBadgeTone(item.item_type)}>{typeLabel(item.item_type)}</Badge>
                           {item.metadata && typeof item.metadata.score_pct === 'number' && (
                             <span className={`triage-score ${item.metadata.score_pct >= 85 ? 'high' : item.metadata.score_pct >= 70 ? 'medium' : 'low'}`}>
@@ -627,14 +728,15 @@ export default function TriageQueue() {
                   </div>
                 </div>
 
-                {/* Reason banner */}
-                {selectedItem.reason && (
+                {/* Reason banner — skip for types with dedicated detail components */}
+                {selectedItem.reason && !['grouping_anomaly', 'duplicate_document'].includes(selectedItem.item_type) && (
                   <div className="triage-reason-banner">
                     <strong>Flagged for review:</strong> {selectedItem.reason}
                   </div>
                 )}
 
-                {/* Item info card */}
+                {/* Item info card — skip for types with dedicated detail components */}
+                {!['grouping_anomaly', 'duplicate_document'].includes(selectedItem.item_type) && (
                 <Card title="Item details">
                   <div className="triage-detail-info">
                     <div className="triage-detail-row">
@@ -671,6 +773,7 @@ export default function TriageQueue() {
                     )}
                   </div>
                 </Card>
+                )}
 
                 {/* Document preview — show when target is a document */}
                 {selectedItem.target_type === 'document' && selectedItem.target_id && !Number.isNaN(Number(selectedItem.target_id)) && (
@@ -681,16 +784,47 @@ export default function TriageQueue() {
                   </Card>
                 )}
 
-                {/* Metadata dump — placeholder for specific detail views (#834, #829, #830, #831) */}
-                <Card title="Item metadata">
-                  <div className="triage-metadata-dump">
-                    {selectedItem.metadata ? (
-                      <pre>{JSON.stringify(selectedItem.metadata, null, 2)}</pre>
-                    ) : (
-                      <div className="text-muted">No additional metadata available for this item.</div>
-                    )}
+                {/* Type-specific detail views */}
+                {selectedItem.item_type === 'grouping_anomaly' ? (
+                  <StatementGroupingDetail
+                    seriesId={selectedItem.target_id}
+                    triageItemId={selectedItem.id}
+                    reason={selectedItem.reason}
+                    onResolved={(action) => {
+                      setToast({ message: `Series ${action} completed.`, tone: 'success' });
+                      void loadData();
+                      // Auto-advance to next item
+                      const currentIdx = items.findIndex(i => i.id === selectedItem.id);
+                      const next = items[currentIdx + 1] || items[currentIdx - 1];
+                      setSelectedId(next?.id ?? null);
+                    }}
+                  />
+                ) : selectedItem.item_type === 'duplicate_document' && selectedItem.metadata?.duplicate_pair_id ? (
+                  <DuplicateDetail
+                    pairId={selectedItem.metadata.duplicate_pair_id as string}
+                    onResolved={() => void loadData()}
+                  />
+                ) : (
+                  /* Metadata dump — placeholder for remaining detail views */
+                  <Card title="Item metadata">
+                    <div className="triage-metadata-dump">
+                      {selectedItem.metadata ? (
+                        <pre>{JSON.stringify(selectedItem.metadata, null, 2)}</pre>
+                      ) : (
+                        <div className="text-muted">No additional metadata available for this item.</div>
+                      )}
+                    </div>
+                  </Card>
+                )}
+
+                {/* Metadata correction link — when target is a document */}
+                {(selectedItem.target_type === 'document' || selectedItem.metadata?.document_id) && (
+                  <div className="triage-metadata-link">
+                    <a href={`#/metadata/${selectedItem.metadata?.document_id ?? selectedItem.target_id}`}>
+                      ✏️ Correct Metadata →
+                    </a>
                   </div>
-                </Card>
+                )}
               </>
               )
             ) : (
@@ -700,6 +834,57 @@ export default function TriageQueue() {
               />
             )}
           </section>
+        </div>
+      )}
+
+      {/* Confirmation modal for destructive bulk actions */}
+      {pendingBulkAction && (
+        <div className="triage-modal-overlay" onClick={() => setPendingBulkAction(null)}>
+          <div className="triage-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="triage-modal-title">
+              Confirm bulk {pendingBulkAction.action}
+            </div>
+            <p className="triage-modal-desc">
+              Are you sure you want to <strong>{pendingBulkAction.action}</strong>{' '}
+              {pendingBulkAction.ids.length} item{pendingBulkAction.ids.length !== 1 ? 's' : ''}?
+              This action cannot be easily undone in bulk.
+            </p>
+            <div className="triage-modal-actions">
+              <Button size="sm" onClick={() => setPendingBulkAction(null)}>Cancel</Button>
+              <Button
+                variant={pendingBulkAction.action === 'reject' ? 'danger' : 'ghost'}
+                size="sm"
+                onClick={() => void confirmPendingBulkAction()}
+              >
+                {pendingBulkAction.action === 'reject' ? 'Reject' : 'Dismiss'} {pendingBulkAction.ids.length} items
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation modal for threshold auto-confirm */}
+      {pendingThreshold && (
+        <div className="triage-modal-overlay" onClick={() => setPendingThreshold(false)}>
+          <div className="triage-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="triage-modal-title">
+              Auto-confirm matches ≥ {thresholdPct}%
+            </div>
+            <p className="triage-modal-desc">
+              This will confirm <strong>all pending EOB matches</strong> with a confidence score
+              of {thresholdPct}% or higher. This may affect many items.
+            </p>
+            <div className="triage-modal-actions">
+              <Button size="sm" onClick={() => setPendingThreshold(false)}>Cancel</Button>
+              <Button
+                variant="success"
+                size="sm"
+                onClick={() => void executeBulkConfirmThreshold()}
+              >
+                ⚡ Auto-confirm
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 

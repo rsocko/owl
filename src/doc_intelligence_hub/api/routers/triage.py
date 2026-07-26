@@ -1,27 +1,33 @@
 """Triage Queue API router — unified inbox for items needing human review.
 
 Endpoints:
-    GET    /api/triage/queue           — List queue items (with filters)
-    POST   /api/triage/queue/populate  — Trigger queue population scan
-    GET    /api/triage/queue/{id}      — Single item detail
-    POST   /api/triage/queue/{id}/resolve — Resolve item
-    POST   /api/triage/queue/{id}/defer   — Defer item
-    POST   /api/triage/queue/{id}/dismiss — Dismiss item
-    POST   /api/triage/queue/{id}/undo    — Undo resolution
-    GET    /api/triage/stats           — Counts by type and status
+    GET    /api/triage/queue                       — List queue items (with filters)
+    POST   /api/triage/queue/populate              — Trigger queue population scan
+    POST   /api/triage/queue/bulk                  — Bulk action on multiple items
+    POST   /api/triage/queue/bulk-confirm-threshold — Confirm all matches ≥ threshold
+    GET    /api/triage/queue/{id}                   — Single item detail
+    POST   /api/triage/queue/{id}/resolve           — Resolve item
+    POST   /api/triage/queue/{id}/defer             — Defer item
+    POST   /api/triage/queue/{id}/dismiss           — Dismiss item
+    POST   /api/triage/queue/{id}/undo              — Undo resolution
+    GET    /api/triage/stats                        — Counts by type and status
 """
 
 from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.modules.triage.database import (
     CorrectionEvent,
+    bulk_confirm_by_threshold,
+    bulk_defer_items,
+    bulk_dismiss_items,
+    bulk_resolve_items,
     defer_queue_item,
     dismiss_queue_item,
     get_queue_item,
@@ -55,6 +61,16 @@ class ResolveRequest(BaseModel):
 
 class DeferRequest(BaseModel):
     until: str | None = Field(default=None, description="ISO timestamp to defer until (default: 7 days from now)")
+
+
+class BulkActionRequest(BaseModel):
+    action: str = Field(..., description="Bulk action: 'confirm', 'reject', 'defer', or 'dismiss'")
+    item_ids: list[str] = Field(..., max_length=200, description="List of triage queue item IDs (max 200)")
+    payload: dict[str, Any] | None = Field(default=None, description="Action-specific details (e.g. defer until)")
+
+
+class BulkConfirmThresholdRequest(BaseModel):
+    min_confidence: int = Field(default=90, ge=0, le=100, description="Minimum confidence percentage")
 
 
 # ------------------------------------------------------------------
@@ -97,6 +113,37 @@ async def populate() -> dict[str, Any]:
 
     result = populate_queue()
     return result
+
+
+# NOTE: /queue/bulk* MUST be registered BEFORE /queue/{item_id} to avoid
+# FastAPI matching "bulk" as an item_id path parameter.
+@router.post("/queue/bulk")
+async def bulk_action(body: BulkActionRequest) -> dict[str, Any]:
+    """Apply an action to multiple triage queue items at once."""
+    if not body.item_ids:
+        raise HTTPException(status_code=400, detail="item_ids must not be empty")
+    if body.action in ("confirm", "reject"):
+        affected = bulk_resolve_items(body.item_ids, body.action, body.payload)
+    elif body.action == "defer":
+        until = body.payload.get("until") if body.payload else None
+        if until is not None:
+            try:
+                datetime.fromisoformat(until)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=422, detail=f"Invalid 'until' timestamp: {until}")
+        affected = bulk_defer_items(body.item_ids, until)
+    elif body.action == "dismiss":
+        affected = bulk_dismiss_items(body.item_ids)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown action: {body.action}")
+    return {"affected": affected}
+
+
+@router.post("/queue/bulk-confirm-threshold")
+async def bulk_confirm_threshold(body: BulkConfirmThresholdRequest) -> dict[str, Any]:
+    """Confirm all pending EOB matches at or above a confidence threshold."""
+    affected = bulk_confirm_by_threshold(body.min_confidence)
+    return {"affected": affected}
 
 
 @router.get("/queue/{item_id}")

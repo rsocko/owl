@@ -69,7 +69,9 @@ class EOBRecord(Base):
     total_plan_pays = Column(Float, nullable=True)
     total_patient_responsibility = Column(Float, nullable=True)
     services_json = Column(Text, nullable=True)
+    status = Column(String, default="unmatched")  # unmatched, orphan, paid
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    last_processed_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("document_id", "run_id", name="uq_eob_doc_run"),
@@ -96,6 +98,7 @@ class BillRecord(Base):
     payment_status = Column(String, nullable=True)
     services_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    last_processed_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("document_id", "run_id", name="uq_bill_doc_run"),
@@ -193,6 +196,13 @@ def _migrate_missing_columns(engine):
             ("reviewed_at", "DATETIME"),
             ("user_notes", "TEXT"),
         ],
+        "eob_records": [
+            ("status", "TEXT DEFAULT 'unmatched'"),
+            ("last_processed_at", "DATETIME"),
+        ],
+        "bill_records": [
+            ("last_processed_at", "DATETIME"),
+        ],
     }
 
     with engine.begin() as conn:
@@ -246,6 +256,16 @@ def store_match(session: Session, record: MatchRecord) -> MatchRecord:
     session.commit()
     session.refresh(record)
     return record
+
+
+def last_successful_run(session: Session) -> Optional[MatchingRun]:
+    """Return the most recent MatchingRun that completed successfully (has finished_at)."""
+    return (
+        session.query(MatchingRun)
+        .filter(MatchingRun.finished_at.isnot(None))
+        .order_by(MatchingRun.finished_at.desc())
+        .first()
+    )
 
 
 def latest_runs(session: Session, limit: int = 10) -> list[MatchingRun]:
