@@ -2,6 +2,11 @@
 title: "Triage & Correction Design"
 sidebar_label: Design
 sidebar_position: 1
+mockups:
+  - "[triage-unified.html](../../../mockups/triage-correction/triage-unified.html)"
+  - "[eob-match-review.html](../../../mockups/triage-correction/eob-match-review.html)"
+  - "[orphans-dupes-metadata.html](../../../mockups/triage-correction/orphans-dupes-metadata.html)"
+  - "[manual-match-search.html](../../../mockups/triage-correction/manual-match-search.html)"
 ---
 
 # Design Document: Document Relationship Triage & Correction UI
