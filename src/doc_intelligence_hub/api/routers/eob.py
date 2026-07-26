@@ -526,9 +526,9 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
         run_record.finished_at = datetime.now(UTC)
         db.commit()
 
-        # Emit unified alerts for unmatched EOBs and low-confidence matches
+        # Emit unified alerts for unmatched EOBs, low-confidence, and high-confidence matches
         try:
-            from doc_intelligence_hub.core.alerts import emit_eob_alerts
+            from doc_intelligence_hub.core.alerts import check_eob_due_dates, emit_eob_alerts
 
             unmatched = [
                 {"document_id": int(e.document_id), "provider_name": e.provider_name}
@@ -545,7 +545,34 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
                 for m in matches
                 if m.confidence.value == "LOW"
             ]
-            emit_eob_alerts(unmatched_eobs=unmatched, low_confidence_matches=low_conf)
+            high_conf = [
+                {
+                    "eob_document_id": int(m.eob_id),
+                    "bill_document_id": int(m.bill_id),
+                    "score": m.score,
+                    "confidence": m.confidence.value,
+                }
+                for m in matches
+                if m.confidence.value == "HIGH"
+            ]
+            emit_eob_alerts(
+                unmatched_eobs=unmatched,
+                low_confidence_matches=low_conf,
+                high_confidence_matches=high_conf,
+            )
+
+            # Also check due dates for bills found in this run
+            bill_dicts = [
+                {
+                    "document_id": int(b.document_id),
+                    "provider_name": b.provider_name,
+                    "due_date": str(b.due_date) if b.due_date else None,
+                    "payment_status": b.payment_status,
+                    "balance_due": b.balance_due,
+                }
+                for b in extracted_bills
+            ]
+            check_eob_due_dates(bill_dicts)
         except Exception:
             pass  # Alert emission is best-effort
 
@@ -1015,6 +1042,63 @@ async def run_model_benchmark(request: Request, body: BenchmarkRequest) -> dict[
         "models_tested": len(body.models),
         "results": results,
     }
+
+
+# ------------------------------------------------------------------
+# Due-date check endpoint
+# ------------------------------------------------------------------
+
+
+class DueDateCheckRequest(BaseModel):
+    due_soon_days: int = Field(default=7, ge=1, le=90, description="Days threshold for 'due soon' alerts")
+
+
+@router.post("/check-due-dates")
+async def check_due_dates(body: DueDateCheckRequest | None = None) -> dict[str, Any]:
+    """Scan all unpaid bills for approaching or overdue due dates and emit alerts.
+
+    This endpoint is designed to be called by the scheduler daily, but can
+    also be triggered manually.
+    """
+    init_db()
+    db = get_db_session()
+    due_soon_days = body.due_soon_days if body else 7
+
+    try:
+        # Query all bills that have a due_date and are not paid
+        bills = (
+            db.query(BillRecord)
+            .filter(BillRecord.due_date.isnot(None))
+            .filter(
+                (BillRecord.payment_status.is_(None))
+                | (BillRecord.payment_status != "paid")
+            )
+            .all()
+        )
+
+        bill_dicts = [
+            {
+                "document_id": b.document_id,
+                "provider_name": b.provider_name,
+                "due_date": b.due_date,
+                "payment_status": b.payment_status,
+                "balance_due": b.balance_due,
+            }
+            for b in bills
+        ]
+
+        from doc_intelligence_hub.core.alerts import check_eob_due_dates
+
+        alerts_emitted = check_eob_due_dates(bill_dicts, due_soon_days=due_soon_days)
+
+        return {
+            "status": "ok",
+            "bills_checked": len(bill_dicts),
+            "alerts_emitted": alerts_emitted,
+            "due_soon_days": due_soon_days,
+        }
+    finally:
+        db.close()
 
 
 # ------------------------------------------------------------------
