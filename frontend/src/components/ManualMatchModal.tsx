@@ -487,8 +487,7 @@ export default function ManualMatchModal({
                             <span>Match #{match.id} · {formatDateTime(match.created_at)}</span>
                             <Button
                               variant="success"
-                              onClick={(e: React.MouseEvent) => {
-                                e.stopPropagation();
+                              onClick={() => {
                                 void linkMatch(match);
                               }}
                               disabled={linkingId !== null}
