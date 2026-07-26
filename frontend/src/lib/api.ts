@@ -74,6 +74,18 @@ export const endpoints = {
     clearProviderOverride: (key: string) => api.delete(`/api/statements/providers/${key}/override`),
     documentPreview: (docId: string) => `/api/statements/documents/${docId}/preview`,
     documentThumb: (docId: string) => `/api/statements/documents/${docId}/thumb`,
+    // Series grouping
+    series: (params?: string) => api.get(`/api/statements/series${params ? `?${params}` : ''}`),
+    seriesDetail: (id: string) => api.get(`/api/statements/series/${id}`),
+    seriesTimeline: (id: string) => api.get(`/api/statements/series/${id}/timeline`),
+    seriesSplit: (id: string, body: { document_ids: string[]; new_series_name: string; account_identifier?: string }) =>
+      api.post(`/api/statements/series/${id}/split`, body),
+    seriesMerge: (body: { source_series_id: string; target_series_id: string }) =>
+      api.post('/api/statements/series/merge', body),
+    seriesReassign: (id: string, body: { document_id: string; target_series_id: string }) =>
+      api.post(`/api/statements/series/${id}/reassign`, body),
+    seriesRename: (id: string, body: { name?: string; account_identifier?: string }) =>
+      api.post(`/api/statements/series/${id}/rename`, body),
   },
   eob: {
     check: () => api.get('/api/eob/check'),
