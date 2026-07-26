@@ -376,16 +376,30 @@ def _compute_payment_status(session: Session, match: MatchRecord) -> str:
         .order_by(BillRecord.id.desc())
         .first()
     )
-    balance = (bill.balance_due or bill.total_amount or 0.0) if bill else 0.0
+    balance = _bill_balance(bill)
     paid = match.paid_amount or 0.0
 
     if paid <= 0:
         return "unpaid"
-    if balance > 0 and paid < balance:
+    if balance is None:
+        # No bill or no amount info — treat any positive payment as "paid"
+        return "paid"
+    if paid < balance:
         return "partial"
-    if balance > 0 and paid > balance:
+    if paid > balance:
         return "overpaid"
     return "paid"
+
+
+def _bill_balance(bill: BillRecord | None) -> float | None:
+    """Extract the authoritative balance from a bill, distinguishing 0 from unknown."""
+    if bill is None:
+        return None
+    if bill.balance_due is not None:
+        return bill.balance_due
+    if bill.total_amount is not None:
+        return bill.total_amount
+    return None
 
 
 def get_payments_for_match(session: Session, match_id: int) -> list[PaymentRecord]:
@@ -400,8 +414,6 @@ def get_payments_for_match(session: Session, match_id: int) -> list[PaymentRecor
 
 def payment_summary(session: Session) -> dict:
     """Aggregate payment stats across all confirmed matches."""
-    from sqlalchemy import func
-
     confirmed = (
         session.query(MatchRecord)
         .filter_by(status="confirmed")
@@ -409,6 +421,7 @@ def payment_summary(session: Session) -> dict:
     )
     if not confirmed:
         return {
+            "total_billed": 0.0,
             "total_due": 0.0,
             "total_paid": 0.0,
             "unpaid_count": 0,
@@ -419,21 +432,26 @@ def payment_summary(session: Session) -> dict:
 
     total_paid = sum(m.paid_amount or 0.0 for m in confirmed)
 
-    # Compute total due from linked bills
+    # Batch-load linked bills, keeping latest per document_id
     bill_doc_ids = {m.bill_document_id for m in confirmed}
     bills = session.query(BillRecord).filter(BillRecord.document_id.in_(bill_doc_ids)).all()
     bill_map: dict[int, BillRecord] = {}
     for b in bills:
         bill_map[b.document_id] = b
-    total_due = sum(
-        (bill_map.get(m.bill_document_id).balance_due or bill_map.get(m.bill_document_id).total_amount or 0.0)
-        if bill_map.get(m.bill_document_id) else 0.0
-        for m in confirmed
-    )
+
+    total_billed = 0.0
+    total_outstanding = 0.0
+    for m in confirmed:
+        bill = bill_map.get(m.bill_document_id)
+        balance = _bill_balance(bill)
+        if balance is not None:
+            total_billed += balance
+            total_outstanding += max(balance - (m.paid_amount or 0.0), 0.0)
 
     status_counts = Counter(m.payment_status or "unpaid" for m in confirmed)
     return {
-        "total_due": total_due,
+        "total_billed": total_billed,
+        "total_due": total_outstanding,
         "total_paid": total_paid,
         "unpaid_count": status_counts.get("unpaid", 0),
         "partial_count": status_counts.get("partial", 0),

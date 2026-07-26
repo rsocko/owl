@@ -1031,7 +1031,10 @@ async def pay_match(match_id: int, body: PaymentRequest) -> dict[str, Any]:
             try:
                 paid_date = parse_date(body.paid_date)
             except (ValueError, TypeError):
-                paid_date = datetime.now(UTC)
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid paid_date format: '{body.paid_date}'. Use ISO 8601 (e.g. 2024-03-15).",
+                )
 
         payment = record_payment(
             db,
@@ -1060,9 +1063,9 @@ async def pay_match(match_id: int, body: PaymentRequest) -> dict[str, Any]:
         }
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while recording the payment.")
     finally:
         db.close()
 

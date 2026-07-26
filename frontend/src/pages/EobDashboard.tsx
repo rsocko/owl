@@ -192,6 +192,7 @@ export default function EobDashboard() {
   const [alertBusyId, setAlertBusyId] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [paymentSummary, setPaymentSummary] = useState<{
+    total_billed: number;
     total_due: number;
     total_paid: number;
     unpaid_count: number;
@@ -210,17 +211,13 @@ export default function EobDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [resultsRes, runsRes, matchesRes, unmatchedRes, checkRes, alertsRes, paymentSummaryRes] = await Promise.all([
+      const [resultsRes, runsRes, matchesRes, unmatchedRes, checkRes, alertsRes] = await Promise.all([
         endpoints.eob.results() as Promise<EobResultsResponse>,
         endpoints.eob.runs() as Promise<EobRunsResponse>,
         endpoints.eob.matches('limit=8') as Promise<EobMatchesResponse>,
         endpoints.eob.unmatched() as Promise<EobUnmatchedItem[]>,
         endpoints.eob.check() as Promise<EobCheckResponse>,
         endpoints.alerts.list('module=eob&resolved=false&limit=5') as Promise<AlertsResponse>,
-        endpoints.eob.paymentSummary() as Promise<{
-          total_due: number; total_paid: number;
-          unpaid_count: number; partial_count: number; paid_count: number; overpaid_count: number;
-        }>,
       ]);
       setResults(resultsRes);
       setRuns(runsRes.runs ?? []);
@@ -228,9 +225,19 @@ export default function EobDashboard() {
       setUnmatched(Array.isArray(unmatchedRes) ? unmatchedRes : []);
       setCheck(checkRes);
       setAlerts(Array.isArray(alertsRes.alerts) ? alertsRes.alerts : []);
-      setPaymentSummary(paymentSummaryRes);
       const latestRun = runsRes.runs?.[0] ?? resultsRes?.run;
       setLastSyncedAt(latestRun?.finished_at ?? latestRun?.started_at ?? null);
+
+      // Fetch payment summary separately so dashboard still works if it fails
+      try {
+        const paymentSummaryRes = await endpoints.eob.paymentSummary() as {
+          total_billed: number; total_due: number; total_paid: number;
+          unpaid_count: number; partial_count: number; paid_count: number; overpaid_count: number;
+        };
+        setPaymentSummary(paymentSummaryRes);
+      } catch {
+        setPaymentSummary(null);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load EOB dashboard.';
       setError(message);
