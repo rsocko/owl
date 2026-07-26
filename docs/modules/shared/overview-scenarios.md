@@ -15,6 +15,7 @@ Here's the categorized summary of the **Document Intelligence Hub**:
 - **Detect missing recurring statements** (bank, credit card, utilities, insurance) — never miss a bill
 - **Gap alerts** — get notified when an expected statement is overdue
 - **Financial reconciliation** — verify all quarterly/annual statements received
+- 
 
 ### EOB ↔ Bill Matching (Medical)
 
@@ -57,3 +58,9 @@ Here's the categorized summary of the **Document Intelligence Hub**:
 - **85+ API tests**, 100% endpoint coverage
 - **Fully local/private** — no cloud APIs for sensitive data (cloud LLM optional)
 - **Phased roadmap** — Phases 0–4 complete; Phase 5 (infrastructure) in progress; future plans include transaction matching, tax export, mobile app
+
+
+---
+
+## Feature Areas:
+- 
