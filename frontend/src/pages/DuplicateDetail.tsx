@@ -90,6 +90,7 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
   const [pair, setPair] = useState<DuplicatePairDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [resolveError, setResolveError] = useState<string | null>(null);
   const [primaryDocId, setPrimaryDocId] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [resolved, setResolved] = useState(false);
@@ -121,6 +122,7 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
   const handleResolve = async (resolution: string) => {
     if (!pair) return;
     setBusy(resolution);
+    setResolveError(null);
     try {
       await endpoints.duplicates.resolve(pair.id, {
         resolution,
@@ -129,7 +131,7 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
       setResolved(true);
       onResolved?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Resolution failed.');
+      setResolveError(err instanceof Error ? err.message : 'Resolution failed.');
     } finally {
       setBusy(null);
     }
@@ -290,6 +292,12 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
             <br />
             <strong>Not duplicate</strong> — Related but different documents. Keeps both, no merge.
           </div>
+
+          {resolveError && (
+            <div style={{ color: 'var(--red-600, #dc2626)', fontSize: '0.85rem', padding: '0.5rem 0' }}>
+              ⚠ {resolveError}
+            </div>
+          )}
 
           <div className="duplicate-actions">
             <Button

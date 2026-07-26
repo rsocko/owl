@@ -81,8 +81,6 @@ def _score_amount(meta_a: dict, meta_b: dict) -> float:
         return 0.0
     if a == b:
         return 1.0
-    if a == 0 and b == 0:
-        return 1.0
     max_val = max(abs(a), abs(b))
     if max_val == 0:
         return 1.0
@@ -200,7 +198,7 @@ def score_documents(meta_a: dict, meta_b: dict) -> tuple[float, dict[str, float]
 # ------------------------------------------------------------------
 
 
-def _get_document_metadata(doc_id: int) -> dict | None:
+def get_document_metadata(doc_id: int) -> dict | None:
     """Fetch metadata for a Paperless document. Returns None if unavailable."""
     try:
         from doc_intelligence_hub.modules.eob_matching.database import (
@@ -252,7 +250,7 @@ def detect_duplicates(doc_id: int) -> list[dict[str, Any]]:
 
     Returns list of dicts with keys: doc_id, similarity_score, breakdown.
     """
-    meta_a = _get_document_metadata(doc_id)
+    meta_a = get_document_metadata(doc_id)
     if not meta_a:
         return []
 
@@ -280,7 +278,7 @@ def detect_duplicates(doc_id: int) -> list[dict[str, Any]]:
         eob_session.close()
 
     for other_id in all_doc_ids:
-        meta_b = _get_document_metadata(other_id)
+        meta_b = get_document_metadata(other_id)
         if not meta_b:
             continue
 
@@ -327,7 +325,7 @@ def scan_all_duplicates() -> dict[str, Any]:
     # Collect metadata for all docs
     meta_cache: dict[int, dict] = {}
     for did in all_doc_ids:
-        meta = _get_document_metadata(did)
+        meta = get_document_metadata(did)
         if meta:
             meta_cache[did] = meta
 
@@ -478,26 +476,73 @@ def _priority_from_similarity(score: float) -> int:
 
 
 def _tag_archived_in_paperless(archived_doc_id: int, primary_doc_id: int) -> None:
-    """Tag the archived document in Paperless with duplicate-of:{primary_id}."""
-    try:
-        from doc_intelligence_hub.core.paperless import PaperlessClient
-        from doc_intelligence_hub.api.settings import get_hub_settings
+    """Tag the archived document in Paperless with duplicate-of:{primary_id}.
 
-        settings = get_hub_settings()
-        if not settings.paperless_url or not settings.resolved_paperless_token:
+    Uses the Paperless REST API to:
+    1. Resolve or create the tag name
+    2. Add the tag to the document
+    Since PaperlessClient is async, we use asyncio.run for the sync context.
+    """
+    try:
+        import asyncio
+        from doc_intelligence_hub.core.paperless import PaperlessClient
+        from doc_intelligence_hub.modules.statements.config import load_config, resolve_api_token
+
+        # Get config the same way routers/__init__.py does
+        config = None
+        try:
+            config = load_config()
+        except Exception:
+            pass
+
+        base_url = None
+        token = None
+        if config:
+            base_url = config.source.paperless_url
+            token = resolve_api_token(config)
+
+        if not base_url or not token:
             logger.warning("Paperless not configured, skipping tag write for doc %d", archived_doc_id)
             return
 
-        client = PaperlessClient(
-            base_url=settings.paperless_url,
-            token=settings.resolved_paperless_token,
-        )
-
         tag_name = f"duplicate-of:{primary_doc_id}"
-        # Ensure tag exists
-        tag_id = client.ensure_tag(tag_name)
-        # Add tag to document
-        client.add_tag_to_document(archived_doc_id, tag_id)
+
+        async def _apply_tag() -> None:
+            client = PaperlessClient(base_url=base_url, token=token)
+            try:
+                # Resolve or create tag
+                tags = await client.list_tags()
+                tag_id = None
+                for t in tags:
+                    if t.get("name") == tag_name:
+                        tag_id = t["id"]
+                        break
+
+                if tag_id is None:
+                    # Create the tag via the Paperless API
+                    http_client = client._get_client()
+                    resp = await http_client.post("/api/tags/", json={"name": tag_name})
+                    resp.raise_for_status()
+                    tag_id = resp.json()["id"]
+
+                # Get current document tags and add the new one
+                doc = await client.get_document(archived_doc_id)
+                current_tags = doc.get("tags", [])
+                if tag_id not in current_tags:
+                    current_tags.append(tag_id)
+                    await client.update_document(archived_doc_id, {"tags": current_tags})
+            finally:
+                await client.aclose()
+
+        # Run async code from sync context
+        try:
+            loop = asyncio.get_running_loop()
+            # Already in an async context — schedule as a task
+            loop.create_task(_apply_tag())
+        except RuntimeError:
+            # No running loop — run synchronously
+            asyncio.run(_apply_tag())
+
         logger.info("Tagged doc %d with '%s'", archived_doc_id, tag_name)
     except ImportError:
         logger.warning("Paperless client not available, skipping tag write")

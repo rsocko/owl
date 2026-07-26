@@ -22,7 +22,7 @@ from doc_intelligence_hub.modules.triage.duplicates import (
     merge_documents,
     resolve_not_duplicate,
     scan_all_duplicates,
-    _get_document_metadata,
+    get_document_metadata,
 )
 
 router = APIRouter(prefix="/api/duplicates", tags=["duplicates"])
@@ -60,6 +60,13 @@ async def list_duplicates(
     return {"pairs": pairs, "count": len(pairs), "offset": offset, "limit": limit}
 
 
+@router.post("/scan")
+async def trigger_scan() -> dict[str, Any]:
+    """Trigger a full duplicate detection scan."""
+    result = scan_all_duplicates()
+    return result
+
+
 @router.get("/{pair_id}")
 async def get_duplicate(pair_id: str) -> dict[str, Any]:
     """Get a single duplicate pair with full detail including document metadata."""
@@ -68,8 +75,8 @@ async def get_duplicate(pair_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Duplicate pair {pair_id} not found")
 
     # Enrich with document metadata
-    doc_a_meta = _get_document_metadata(pair["doc_a_id"])
-    doc_b_meta = _get_document_metadata(pair["doc_b_id"])
+    doc_a_meta = get_document_metadata(pair["doc_a_id"])
+    doc_b_meta = get_document_metadata(pair["doc_b_id"])
 
     return {
         **pair,
@@ -102,11 +109,4 @@ async def resolve_duplicate(pair_id: str, body: ResolveRequest) -> dict[str, Any
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
-    return result
-
-
-@router.post("/scan")
-async def trigger_scan() -> dict[str, Any]:
-    """Trigger a full duplicate detection scan."""
-    result = scan_all_duplicates()
     return result
