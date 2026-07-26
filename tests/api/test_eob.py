@@ -46,6 +46,17 @@ class TestEOBResults:
         assert "matches" in data
         assert len(data["matches"]) == 2
 
+    def test_results_include_extraction_details(self, client, seed_eob):
+        resp = client.get("/api/eob/results")
+        data = resp.json()
+        # Find the high-confidence match (eob_doc=100, bill_doc=200)
+        match = next(m for m in data["matches"] if m["eob_document_id"] == 100)
+        assert match["eob_details"] is not None
+        assert match["eob_details"]["provider_name"] == "UnitedHealth"
+        assert match["bill_details"] is not None
+        assert match["bill_details"]["provider_name"] == "Dr. Smith"
+        assert match["bill_details"]["invoice_number"] == "INV-001"
+
 
 class TestEOBRuns:
     """Tests for GET /api/eob/runs."""
@@ -168,3 +179,52 @@ class TestPurgeStale:
         data = resp.json()
         # Default dry_run=False, should execute purge
         assert data["status"] == "ok"
+
+
+class TestRecordDetail:
+    """Tests for GET /api/eob/records/{document_id}."""
+
+    def test_record_detail_eob(self, client, seed_eob):
+        resp = client.get("/api/eob/records/100")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["document_id"] == 100
+        assert data["type"] == "eob"
+        assert data["eob"]["provider_name"] == "UnitedHealth"
+        assert data["eob"]["total_patient_responsibility"] == 150.00
+
+    def test_record_detail_bill(self, client, seed_eob):
+        resp = client.get("/api/eob/records/200")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["document_id"] == 200
+        assert data["type"] == "bill"
+        assert data["bill"]["provider_name"] == "Dr. Smith"
+        assert data["bill"]["invoice_number"] == "INV-001"
+
+    def test_record_detail_not_found(self, client):
+        resp = client.get("/api/eob/records/99999")
+        assert resp.status_code == 404
+
+
+class TestMatchDetail:
+    """Tests for GET /api/eob/matches/{match_id}/detail."""
+
+    def test_match_detail(self, client, seed_eob):
+        # Get a match ID first
+        matches = client.get("/api/eob/matches").json()
+        match_id = matches["matches"][0]["id"]
+
+        resp = client.get(f"/api/eob/matches/{match_id}/detail")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "match" in data
+        assert "eob_record" in data or data["eob_record"] is None
+        assert "bill_record" in data or data["bill_record"] is None
+        # match should include eob_details and bill_details
+        assert "eob_details" in data["match"]
+        assert "bill_details" in data["match"]
+
+    def test_match_detail_not_found(self, client):
+        resp = client.get("/api/eob/matches/99999/detail")
+        assert resp.status_code == 404

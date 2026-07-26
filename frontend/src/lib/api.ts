@@ -84,7 +84,11 @@ export const endpoints = {
     matches: (params?: string) => api.get(`/api/eob/matches${params ? `?${params}` : ''}`),
     updateMatch: (id: string, body: unknown) => api.patch(`/api/eob/matches/${id}`, body),
     matchHistory: (id: string) => api.get(`/api/eob/matches/${id}/history`),
+    matchDetail: (matchId: string) => api.get(`/api/eob/matches/${matchId}/detail`),
+    recordDetail: (docId: string) => api.get(`/api/eob/records/${docId}`),
     unmatched: () => api.get('/api/eob/unmatched'),
+    bulkUpdate: (body: { ids: string[]; action: 'mark_orphan' | 'mark_paid' }) =>
+      api.post('/api/eob/bulk-update', body),
     purgeStale: () => api.post('/api/eob/purge-stale'),
     benchmark: (body?: unknown) => api.post('/api/eob/benchmark', body),
   },
@@ -137,6 +141,10 @@ export const endpoints = {
       api.post(`/api/triage/queue/${id}/defer`, body),
     dismiss: (id: string) => api.post(`/api/triage/queue/${id}/dismiss`),
     undo: (id: string) => api.post(`/api/triage/queue/${id}/undo`),
+    bulk: (body: { action: string; item_ids: string[]; payload?: unknown }) =>
+      api.post<{ affected: number }>('/api/triage/queue/bulk', body),
+    bulkConfirmThreshold: (body: { min_confidence: number }) =>
+      api.post<{ affected: number }>('/api/triage/queue/bulk-confirm-threshold', body),
     stats: () => api.get('/api/triage/stats'),
     populate: () => api.post('/api/triage/queue/populate'),
   },

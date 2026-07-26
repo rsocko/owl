@@ -24,12 +24,17 @@ from doc_intelligence_hub.modules.action_queue.database import (
     init_db as aq_init_db,
 )
 from doc_intelligence_hub.modules.eob_matching.database import (
+    BillRecord,
     EOBRecord,
     MatchRecord,
     MatchingRun,
     configure as eob_configure,
     get_session as get_eob_session,
     init_db as eob_init_db,
+)
+from doc_intelligence_hub.modules.triage.database import (
+    configure as triage_configure,
+    init_db as triage_init_db,
 )
 
 
@@ -147,6 +152,11 @@ def app(hub_settings, mock_llm, tmp_path):
     alerts_configure(f"sqlite:///{alerts_db_path}")
     alerts_init_db()
 
+    # Triage DB
+    triage_db_path = tmp_path / "test_triage.db"
+    triage_configure(f"sqlite:///{triage_db_path}")
+    triage_init_db()
+
     application = create_app(hub_settings)
 
     yield application
@@ -242,6 +252,28 @@ def seed_eob():
             title="EOB from Aetna",
             provider_name="Aetna",
             total_patient_responsibility=75.50,
+        ))
+        db.add(BillRecord(
+            document_id=200,
+            run_id=run.id,
+            title="Bill from Dr. Smith",
+            provider_name="Dr. Smith",
+            patient_name="Jane Doe",
+            date_of_service="2026-06-15",
+            total_amount=150.00,
+            balance_due=150.00,
+            invoice_number="INV-001",
+        ))
+        db.add(BillRecord(
+            document_id=201,
+            run_id=run.id,
+            title="Bill from City Hospital",
+            provider_name="City Hospital",
+            patient_name="Jane Doe",
+            date_of_service="2026-06-20",
+            total_amount=75.50,
+            balance_due=75.50,
+            invoice_number="INV-002",
         ))
         db.add(MatchRecord(
             run_id=run.id,
