@@ -347,6 +347,9 @@ export default function TriageQueue() {
       const tag = target?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
 
+      // When an EOB match review item is selected, EobMatchDetail owns Y/N/S/R
+      const eobDetailActive = selectedItem?.item_type === 'eob_match_review';
+
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         moveSelection(1);
@@ -356,13 +359,13 @@ export default function TriageQueue() {
       } else if (e.key === 'Escape') {
         e.preventDefault();
         setSelectedId(null);
-      } else if (e.key.toLowerCase() === 'y' && selectedId) {
+      } else if (e.key.toLowerCase() === 'y' && selectedId && !eobDetailActive) {
         e.preventDefault();
         void handleResolve(selectedId, 'confirm');
-      } else if (e.key.toLowerCase() === 'n' && selectedId) {
+      } else if (e.key.toLowerCase() === 'n' && selectedId && !eobDetailActive) {
         e.preventDefault();
         void handleResolve(selectedId, 'reject');
-      } else if (e.key.toLowerCase() === 's' && selectedId) {
+      } else if (e.key.toLowerCase() === 's' && selectedId && !eobDetailActive) {
         e.preventDefault();
         // Skip — move to next
         moveSelection(1);
@@ -380,7 +383,7 @@ export default function TriageQueue() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [items, selectedId]);
+  }, [items, selectedId, selectedItem]);
 
   // ------------------------------------------------------------------
   // Derived counts

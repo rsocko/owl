@@ -538,6 +538,24 @@ async def list_matches(
         db.close()
 
 
+@router.get("/matches/{match_id}")
+async def get_match(request: Request, match_id: int) -> dict[str, Any]:
+    """Get a single match record by ID."""
+    init_db()
+    db = get_db_session()
+    try:
+        match = db.query(MatchRecord).filter_by(id=match_id).first()
+        if not match:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
+
+        paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
+        return _serialize_match(match, paperless_url)
+    finally:
+        db.close()
+
+
 @router.patch("/matches/{match_id}")
 async def update_match(
     request: Request,
@@ -678,9 +696,23 @@ async def purge_stale_records(body: PurgeStaleRequest | None = None) -> dict[str
 
 
 def _resolve_triage_item(triage_item_id: str, action: str, match_id: int) -> None:
-    """Resolve a triage queue item and create a correction event."""
+    """Resolve a triage queue item and create a correction event.
+
+    Validates the item exists, is pending, and targets this match before resolving.
+    """
     try:
-        from doc_intelligence_hub.modules.triage.database import resolve_queue_item
+        from doc_intelligence_hub.modules.triage.database import get_queue_item, resolve_queue_item
+
+        item = get_queue_item(triage_item_id)
+        if not item:
+            return
+        # Verify it's an EOB review targeting this match
+        if item.get("item_type") != "eob_match_review":
+            return
+        if str(item.get("target_id")) != str(match_id):
+            return
+        if item.get("status") != "pending":
+            return
 
         resolve_queue_item(triage_item_id, action, {"match_id": match_id})
     except Exception:
@@ -767,6 +799,7 @@ async def reject_match(
         match.status = "rejected"
         match.user_status = "rejected"
         match.reviewed_at = datetime.now(UTC)
+        match.confirmed_at = None  # Clear if previously confirmed
         detail_parts = ["Match rejected by reviewer"]
         if body and body.reason:
             match.notes = body.reason
@@ -835,7 +868,7 @@ async def get_candidates(
             query
             .filter(MatchRecord.score > 50)
             .order_by(MatchRecord.score.desc())
-            .limit(limit)
+            .limit(max(1, min(limit, 100)))
             .all()
         )
 
