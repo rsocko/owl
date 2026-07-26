@@ -70,6 +70,7 @@ class EOBRecord(Base):
     total_patient_responsibility = Column(Float, nullable=True)
     services_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    last_processed_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("document_id", "run_id", name="uq_eob_doc_run"),
@@ -96,6 +97,7 @@ class BillRecord(Base):
     payment_status = Column(String, nullable=True)
     services_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    last_processed_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("document_id", "run_id", name="uq_bill_doc_run"),
@@ -186,6 +188,12 @@ def _migrate_missing_columns(engine):
             ("linked_in_paperless", "INTEGER DEFAULT 0"),
             ("confirmed_at", "DATETIME"),
             ("notes", "TEXT"),
+        ],
+        "eob_records": [
+            ("last_processed_at", "DATETIME"),
+        ],
+        "bill_records": [
+            ("last_processed_at", "DATETIME"),
         ],
     }
 
