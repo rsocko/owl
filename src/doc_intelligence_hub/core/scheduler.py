@@ -48,6 +48,24 @@ DEFAULT_SCHEDULES: dict[str, dict[str, Any]] = {
         "limit": 200,
         "enabled": True,
     },
+    "analysis_daily": {
+        "cron": "0 2 * * *",
+        "endpoint": "/api/analysis/execute/scheduled/daily",
+        "method": "POST",
+        "enabled": True,
+    },
+    "analysis_weekly": {
+        "cron": "0 3 * * 0",
+        "endpoint": "/api/analysis/execute/scheduled/weekly",
+        "method": "POST",
+        "enabled": True,
+    },
+    "analysis_monthly": {
+        "cron": "0 4 1 * *",
+        "endpoint": "/api/analysis/execute/scheduled/monthly",
+        "method": "POST",
+        "enabled": True,
+    },
     "eob_benchmark": {
         "cron": "0 6 * * 1",
         "endpoint": "/api/eob/benchmark",

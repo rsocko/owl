@@ -1,0 +1,233 @@
+# Analysis Engine — Default Rule Definitions
+# =============================================
+# These rules ship with Document Intelligence Hub.
+# Override parameters, routing, or enable/disable via the Admin UI.
+# Custom rules can also be added via the API.
+#
+# Rule tiers:
+#   basic — Threshold/field comparison (free, fast)
+#   llm   — AI analysis via prompt (~$0.02-0.05/analysis)
+#   n8n   — External webhook (multi-step workflows)
+
+rules:
+  # ── Tier 1: MVP Rules ──────────────────────────────────
+
+  - id: monthly-spend-comparison
+    name: "Monthly Spend vs Average"
+    description: "Compare statement amount to rolling 3-month average for the same series"
+    tier: basic
+    trigger:
+      type: document_added
+      filter:
+        document_type: statement
+    context:
+      - current_document
+      - "series_history: 6"
+    analyzer: "builtin:spend_comparison"
+    params:
+      comparison_window: 3
+    routing:
+      default: informational
+      escalation:
+        - condition: "pct_change > 50"
+          route: actionable
+          severity: warning
+          mc_alert: true
+        - condition: "pct_change > 100"
+          route: actionable
+          severity: critical
+          mc_alert: true
+    display:
+      card_type: comparison
+      highlight_fields:
+        - total_amount
+        - pct_change
+
+  - id: eob-match-review
+    name: "EOB Match Confidence"
+    description: "Flag EOB matches below confidence threshold for human review"
+    tier: basic
+    trigger:
+      type: document_added
+      filter:
+        document_type:
+          - eob
+          - bill
+    context:
+      - current_document
+      - related_matches
+    analyzer: "builtin:eob_match_review"
+    params:
+      confidence_threshold: 75
+    routing:
+      default: actionable
+    display:
+      card_type: alert
+
+  - id: series-anomaly
+    name: "Statement Grouping Anomaly"
+    description: "Detect anomalies in statement series grouping or timing"
+    tier: basic
+    trigger:
+      type: document_added
+    context:
+      - current_document
+      - "series_history: 6"
+    analyzer: "builtin:series_anomaly"
+    routing:
+      default: actionable
+    display:
+      card_type: alert
+
+  - id: missing-statement
+    name: "Missing Expected Statement"
+    description: "Detect missing statements based on series recurrence patterns"
+    tier: basic
+    trigger:
+      type: schedule
+      cron: "0 2 * * *"
+    context:
+      - "series_history: 3"
+    analyzer: "builtin:missing_statement"
+    params:
+      grace_days: 7
+    routing:
+      default: actionable
+      escalation:
+        - condition: "days_late > 30"
+          route: actionable
+          severity: critical
+          mc_alert: true
+    display:
+      card_type: alert
+
+  - id: statement-received
+    name: "Statement Arrival Confirmation"
+    description: "Confirm that a statement arrived on time"
+    tier: basic
+    trigger:
+      type: document_added
+      filter:
+        document_type: statement
+    context:
+      - current_document
+    analyzer: "builtin:statement_received"
+    routing:
+      default: informational
+    display:
+      card_type: summary
+
+  # ── Tier 2: Fast Follow ────────────────────────────────
+
+  - id: spend-spike
+    name: "Spend Spike Detection"
+    description: "Detect sudden spend increases above a configurable threshold"
+    tier: basic
+    trigger:
+      type: document_added
+      filter:
+        document_type: statement
+    context:
+      - current_document
+      - "series_history: 6"
+    analyzer: "builtin:spend_spike"
+    params:
+      spike_threshold_pct: 30
+    routing:
+      default: informational
+      escalation:
+        - condition: "pct_change > 50"
+          route: actionable
+          severity: warning
+          mc_alert: true
+        - condition: "pct_change > 100"
+          route: actionable
+          severity: critical
+          mc_alert: true
+    display:
+      card_type: alert
+      highlight_fields:
+        - pct_change
+        - current_amount
+
+  # ── LLM Rules ──────────────────────────────────────────
+
+  - id: document-classification
+    name: "Document Classification"
+    description: "Classify unknown or ambiguous documents using AI"
+    tier: llm
+    trigger:
+      type: document_added
+    context:
+      - current_document
+    analyzer: "llm:classify"
+    params:
+      categories:
+        - statement
+        - bill
+        - eob
+        - receipt
+        - letter
+        - notice
+        - contract
+        - other
+    routing:
+      default: informational
+    display:
+      card_type: summary
+
+  - id: coverage-analysis
+    name: "Insurance Coverage Analysis"
+    description: "Analyze insurance coverage patterns from EOB data using AI"
+    tier: llm
+    trigger:
+      type: schedule
+      cron: "0 3 * * 0"
+    context:
+      - "series_history: 10"
+    analyzer: "llm:coverage_analysis"
+    routing:
+      default: informational
+    display:
+      card_type: trend
+
+  # ── n8n Webhook Rules ──────────────────────────────────
+
+  - id: n8n-webhook
+    name: "n8n Workflow"
+    description: "Run an external n8n workflow for custom analysis"
+    tier: n8n
+    enabled: false
+    trigger:
+      type: manual
+    context:
+      - current_document
+    analyzer: "n8n:webhook"
+    params:
+      webhook_url: ""
+      timeout: 30
+    routing:
+      default: informational
+    display:
+      card_type: summary
+
+  - id: cross-reference-check
+    name: "Cross-Reference Check"
+    description: "Cross-reference documents against external systems via n8n"
+    tier: n8n
+    enabled: false
+    trigger:
+      type: schedule
+      cron: "0 4 * * 0"
+    context:
+      - current_document
+    analyzer: "n8n:cross_reference"
+    params:
+      webhook_url: ""
+      timeout: 60
+      check_systems:
+        - monarch
+    routing:
+      default: informational
+    display:
+      card_type: table
