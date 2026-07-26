@@ -419,15 +419,18 @@ class Database:
         if correspondent:
             sql += " AND correspondent_name = ?"
             params.append(correspondent)
+        if flagged:
+            # Flagged series: not manually curated (still needs review)
+            sql += " AND manually_curated = 0"
         sql += " ORDER BY correspondent_name, name"
         rows = conn.execute(sql, params).fetchall()
-        return [dict(row) for row in rows]
+        return [self._series_row_to_dict(row) for row in rows]
 
     def get_series(self, series_id: str) -> dict | None:
         """Get a single statement series by ID."""
         conn = self.connect()
         row = conn.execute("SELECT * FROM statement_series WHERE id = ?", (series_id,)).fetchone()
-        return dict(row) if row else None
+        return self._series_row_to_dict(row) if row else None
 
     def get_series_documents(self, series_id: str) -> list[dict]:
         """Get all documents belonging to a series, sorted by date."""
@@ -448,7 +451,14 @@ class Database:
             "SELECT * FROM statement_series WHERE correspondent_name = ? AND id != ? ORDER BY name",
             (row["correspondent_name"], series_id),
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._series_row_to_dict(row) for row in rows]
+
+    @staticmethod
+    def _series_row_to_dict(row: sqlite3.Row) -> dict:
+        """Convert a series row to a dict with proper boolean for manually_curated."""
+        d = dict(row)
+        d["manually_curated"] = bool(d.get("manually_curated"))
+        return d
 
     def create_series(
         self,
@@ -522,6 +532,8 @@ class Database:
 
     def remove_documents_from_series(self, series_id: str, document_ids: list[str]) -> None:
         """Remove documents from a series."""
+        if not document_ids:
+            return
         conn = self.connect()
         placeholders = ",".join("?" for _ in document_ids)
         conn.execute(

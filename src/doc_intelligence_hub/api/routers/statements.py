@@ -524,7 +524,8 @@ async def rename_series(request: Request, series_id: str, body: RenameSeriesRequ
             "old_name": old_name,
             "new_name": body.name,
         })
-        _resolve_triage_item_for_series(series_id, "rename")
+        # Note: rename does NOT resolve the triage item — the grouping issue
+        # may still need a split or merge after renaming.
 
         return {"status": "ok", "series": updated}
     finally:
