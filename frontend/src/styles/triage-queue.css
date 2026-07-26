@@ -407,6 +407,81 @@
   color: var(--text);
 }
 
+/* ── Status filter bar ── */
+.triage-status-filter {
+  margin-top: 8px;
+}
+
+/* ── Detail info rows ── */
+.triage-detail-info {
+  display: grid;
+  gap: 2px;
+}
+
+.triage-detail-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.triage-detail-row:last-child {
+  border-bottom: none;
+}
+
+.triage-detail-row span {
+  color: var(--text-muted);
+}
+
+.triage-detail-row strong {
+  text-align: right;
+  word-break: break-word;
+}
+
+/* ── Metadata dump ── */
+.triage-metadata-dump pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  max-height: 400px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Undo toast ── */
+.triage-toast-wrapper {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.triage-undo-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.triage-undo-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
 @media (max-width: 1080px) {
   .triage-shell,
   .triage-compare-grid,

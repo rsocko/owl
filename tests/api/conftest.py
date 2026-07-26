@@ -32,6 +32,10 @@ from doc_intelligence_hub.modules.eob_matching.database import (
     get_session as get_eob_session,
     init_db as eob_init_db,
 )
+from doc_intelligence_hub.modules.triage.database import (
+    configure as triage_configure,
+    init_db as triage_init_db,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +151,11 @@ def app(hub_settings, mock_llm, tmp_path):
     alerts_db_path = tmp_path / "test_alerts.db"
     alerts_configure(f"sqlite:///{alerts_db_path}")
     alerts_init_db()
+
+    # Triage DB
+    triage_db_path = tmp_path / "test_triage.db"
+    triage_configure(f"sqlite:///{triage_db_path}")
+    triage_init_db()
 
     application = create_app(hub_settings)
 
