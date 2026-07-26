@@ -6,7 +6,6 @@ the automatically discovered provider list.
 
 from __future__ import annotations
 
-
 from doc_intelligence_hub.modules.statements.config import ProviderHint
 from doc_intelligence_hub.modules.statements.models import (
     AnalysisPattern,
@@ -140,10 +139,8 @@ def _apply_merge(providers: list[ProviderCandidate], hint: ProviderHint) -> list
     for p in to_merge:
         all_doc_ids.extend(p.sample_document_ids)
         total_count += p.document_count
-        if p.first_seen < earliest:
-            earliest = p.first_seen
-        if p.last_seen > latest:
-            latest = p.last_seen
+        earliest = min(earliest, p.first_seen)
+        latest = max(latest, p.last_seen)
 
     merged_name = hint.rename_to or base.provider_name
     merged = ProviderCandidate(

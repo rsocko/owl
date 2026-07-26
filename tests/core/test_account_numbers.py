@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from doc_intelligence_hub.core.extractors.account_numbers import (
     ExtractionResult,
     extract_account_numbers,

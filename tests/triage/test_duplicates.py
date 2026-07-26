@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from doc_intelligence_hub.modules.triage.duplicates import (
     DUPLICATE_THRESHOLD,
     WEIGHTS,

@@ -80,9 +80,8 @@ async def execute_single_rule(
 ) -> dict[str, Any]:
     """Execute a single rule manually."""
     result = await execute_rule(rule_id, document_id=document_id, dry_run=dry_run)
-    if not result.get("success") and result.get("error"):
-        if "not found" in result["error"]:
-            raise HTTPException(status_code=404, detail=result["error"])
+    if not result.get("success") and result.get("error") and "not found" in result["error"]:
+        raise HTTPException(status_code=404, detail=result["error"])
     return result
 
 

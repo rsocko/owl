@@ -202,6 +202,7 @@ def test_load_returns_none_when_empty(tmp_path) -> None:
 def test_service_persists_to_database(tmp_path) -> None:
     """Integration: verify service.run_discovery writes to SQLite."""
     import asyncio
+
     from doc_intelligence_hub.modules.statements import config as config_mod
     from doc_intelligence_hub.modules.statements.service import run_discovery
 

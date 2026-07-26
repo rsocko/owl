@@ -17,14 +17,13 @@ from doc_intelligence_hub.modules.eob_matching.database import (
     BillRecord,
     EOBRecord,
     MatchEvent,
-    MatchRecord,
     MatchingRun,
+    MatchRecord,
     get_benchmark_results,
     get_benchmark_run,
     get_match_events,
     get_payments_for_match,
     get_previous_benchmark_results,
-    get_session as get_db_session,
     init_db,
     last_successful_run,
     latest_benchmark_runs,
@@ -32,6 +31,9 @@ from doc_intelligence_hub.modules.eob_matching.database import (
     record_payment,
     store_benchmark_result,
     store_benchmark_run,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
+    get_session as get_db_session,
 )
 from doc_intelligence_hub.modules.eob_matching.enricher import EOBEnricher
 from doc_intelligence_hub.modules.eob_matching.llm_extractor import (
@@ -1490,7 +1492,7 @@ async def run_model_benchmark(request: Request, body: BenchmarkRequest) -> dict[
             ]
             emit_benchmark_alerts(
                 current_results=results,
-                previous_results=prev_dicts if prev_dicts else None,
+                previous_results=prev_dicts or None,
             )
         finally:
             db.close()
@@ -1743,8 +1745,8 @@ async def bulk_update_eobs(body: BulkUpdateRequest):
     try:
         try:
             int_ids = [int(i) for i in body.ids]
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=422, detail="All IDs must be valid integers.")
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail="All IDs must be valid integers.") from exc
         updated = (
             db.query(EOBRecord)
             .filter(EOBRecord.id.in_(int_ids))
@@ -1752,9 +1754,9 @@ async def bulk_update_eobs(body: BulkUpdateRequest):
         )
         db.commit()
         return {"status": "ok", "updated": updated, "new_status": new_status}
-    except Exception as exc:
+    except Exception:
         db.rollback()
-        raise exc
+        raise
     finally:
         db.close()
 
@@ -1786,11 +1788,11 @@ async def pay_match(match_id: int, body: PaymentRequest) -> dict[str, Any]:
 
             try:
                 paid_date = parse_date(body.paid_date)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError) as exc:
                 raise HTTPException(
                     status_code=422,
                     detail=f"Invalid paid_date format: '{body.paid_date}'. Use ISO 8601 (e.g. 2024-03-15).",
-                )
+                ) from exc
 
         payment = record_payment(
             db,
@@ -1819,11 +1821,11 @@ async def pay_match(match_id: int, body: PaymentRequest) -> dict[str, Any]:
         }
     except HTTPException:
         raise
-    except Exception:
+    except Exception as exc:
         db.rollback()
         raise HTTPException(
             status_code=500, detail="An unexpected error occurred while recording the payment."
-        )
+        ) from exc
     finally:
         db.close()
 

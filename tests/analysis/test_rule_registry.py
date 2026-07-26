@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from doc_intelligence_hub.modules.analysis import database as db
+from doc_intelligence_hub.modules.analysis.models import TriggerType
 from doc_intelligence_hub.modules.analysis.rule_registry import (
     create_custom_rule,
     delete_custom_rule,
@@ -14,7 +15,6 @@ from doc_intelligence_hub.modules.analysis.rule_registry import (
     load_rules,
     update_rule_config,
 )
-from doc_intelligence_hub.modules.analysis.models import TriggerType
 
 
 @pytest.fixture(autouse=True)

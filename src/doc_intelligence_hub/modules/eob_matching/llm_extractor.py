@@ -14,7 +14,11 @@ from typing import Any
 from doc_intelligence_hub.core.llm import chat_json
 from doc_intelligence_hub.modules.eob_matching.extractor import (
     extract_bill as regex_extract_bill,
+)
+from doc_intelligence_hub.modules.eob_matching.extractor import (
     extract_eob as regex_extract_eob,
+)
+from doc_intelligence_hub.modules.eob_matching.extractor import (
     parse_amount,
     parse_date,
 )
@@ -105,18 +109,17 @@ async def extract_eob_llm(text: str, document_id: str, *, model: str | None = No
         logger.info("LLM extraction failed for EOB %s, falling back to regex", document_id)
         return regex_extract_eob(text, document_id)
 
-    services = []
-    for svc in data.get("services") or []:
-        services.append(
-            ServiceLine(
-                description=svc.get("description", "Service"),
-                cpt_code=svc.get("cpt_code"),
-                billed_amount=_safe_float(svc.get("billed_amount")),
-                allowed_amount=_safe_float(svc.get("allowed_amount")),
-                plan_pays=_safe_float(svc.get("plan_pays")),
-                patient_responsibility=_safe_float(svc.get("patient_responsibility")),
-            )
+    services = [
+        ServiceLine(
+            description=svc.get("description", "Service"),
+            cpt_code=svc.get("cpt_code"),
+            billed_amount=_safe_float(svc.get("billed_amount")),
+            allowed_amount=_safe_float(svc.get("allowed_amount")),
+            plan_pays=_safe_float(svc.get("plan_pays")),
+            patient_responsibility=_safe_float(svc.get("patient_responsibility")),
         )
+        for svc in data.get("services") or []
+    ]
 
     eob = ExtractedEOB(
         insurance_company=data.get("insurance_company"),
@@ -162,15 +165,14 @@ async def extract_bill_llm(
         logger.info("LLM extraction failed for bill %s, falling back to regex", document_id)
         return regex_extract_bill(text, document_id)
 
-    services = []
-    for svc in data.get("services") or []:
-        services.append(
-            ServiceLine(
-                description=svc.get("description", "Service"),
-                cpt_code=svc.get("cpt_code"),
-                amount=_safe_float(svc.get("amount")),
-            )
+    services = [
+        ServiceLine(
+            description=svc.get("description", "Service"),
+            cpt_code=svc.get("cpt_code"),
+            amount=_safe_float(svc.get("amount")),
         )
+        for svc in data.get("services") or []
+    ]
 
     bill = ExtractedBill(
         provider_name=_safe_provider_name(data.get("provider_name")),

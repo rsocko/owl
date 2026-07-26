@@ -8,10 +8,10 @@ import pytest
 from doc_intelligence_hub.modules.eob_matching.database import (
     BillRecord,
     EOBRecord,
-    MatchRecord,
     MatchingRun,
-    confirmed_matches,
+    MatchRecord,
     configure,
+    confirmed_matches,
     get_session,
     init_db,
     latest_runs,
@@ -282,8 +282,8 @@ class TestPaymentTracking:
 
     def test_multiple_payments_aggregate(self, db):
         from doc_intelligence_hub.modules.eob_matching.database import (
-            record_payment,
             get_payments_for_match,
+            record_payment,
         )
 
         m = self._make_confirmed_match(db, bill_balance=300.0)
@@ -299,8 +299,8 @@ class TestPaymentTracking:
 
     def test_payment_summary(self, db):
         from doc_intelligence_hub.modules.eob_matching.database import (
-            record_payment,
             payment_summary,
+            record_payment,
         )
 
         m1 = self._make_confirmed_match(db, bill_balance=200.0)
@@ -337,8 +337,8 @@ class TestPaymentTracking:
 
     def test_payment_creates_match_event(self, db):
         from doc_intelligence_hub.modules.eob_matching.database import (
-            record_payment,
             get_match_events,
+            record_payment,
         )
 
         m = self._make_confirmed_match(db)

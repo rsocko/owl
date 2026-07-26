@@ -312,33 +312,31 @@ def format_benchmark_table(summaries: list[ModelBenchmarkSummary]) -> str:
 
 def benchmark_to_json(summaries: list[ModelBenchmarkSummary]) -> list[dict[str, Any]]:
     """Convert benchmark summaries to JSON-serializable dicts."""
-    output = []
-    for s in summaries:
-        output.append(
-            {
-                "model": s.model,
-                "documents_tested": s.documents_tested,
-                "avg_time_seconds": s.avg_time_seconds,
-                "success_rate": s.success_rate,
-                "avg_confidence": s.avg_confidence,
-                "total_time_seconds": s.total_time_seconds,
-                "estimated_cost_usd": s.estimated_cost_usd,
-                "sample_fields": s.sample_fields,
-                "results": [
-                    {
-                        "document_id": r.document_id,
-                        "success": r.success,
-                        "elapsed_seconds": round(r.elapsed_seconds, 2),
-                        "confidence": r.confidence,
-                        "validation_error": r.validation_error,
-                        "error": r.error,
-                        "extracted_fields": r.extracted_fields,
-                    }
-                    for r in s.results
-                ],
-            }
-        )
-    return output
+    return [
+        {
+            "model": s.model,
+            "documents_tested": s.documents_tested,
+            "avg_time_seconds": s.avg_time_seconds,
+            "success_rate": s.success_rate,
+            "avg_confidence": s.avg_confidence,
+            "total_time_seconds": s.total_time_seconds,
+            "estimated_cost_usd": s.estimated_cost_usd,
+            "sample_fields": s.sample_fields,
+            "results": [
+                {
+                    "document_id": r.document_id,
+                    "success": r.success,
+                    "elapsed_seconds": round(r.elapsed_seconds, 2),
+                    "confidence": r.confidence,
+                    "validation_error": r.validation_error,
+                    "error": r.error,
+                    "extracted_fields": r.extracted_fields,
+                }
+                for r in s.results
+            ],
+        }
+        for s in summaries
+    ]
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ Merge behavior:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -29,8 +30,10 @@ from doc_intelligence_hub.modules.triage.database import (
     create_duplicate_pair,
     create_queue_item,
     find_existing_duplicate_pair,
-    get_session as get_triage_session,
     resolve_duplicate_pair,
+)
+from doc_intelligence_hub.modules.triage.database import (
+    get_session as get_triage_session,
 )
 
 logger = logging.getLogger(__name__)
@@ -219,8 +222,10 @@ def get_document_metadata(doc_id: int) -> dict | None:
     """Fetch metadata for a Paperless document. Returns None if unavailable."""
     try:
         from doc_intelligence_hub.modules.eob_matching.database import (
-            EOBRecord,
             BillRecord,
+            EOBRecord,
+        )
+        from doc_intelligence_hub.modules.eob_matching.database import (
             get_session as get_eob_session,
         )
 
@@ -275,8 +280,10 @@ def detect_duplicates(doc_id: int) -> list[dict[str, Any]]:
 
     try:
         from doc_intelligence_hub.modules.eob_matching.database import (
-            EOBRecord,
             BillRecord,
+            EOBRecord,
+        )
+        from doc_intelligence_hub.modules.eob_matching.database import (
             get_session as get_eob_session,
         )
     except ImportError:
@@ -323,8 +330,10 @@ def scan_all_duplicates() -> dict[str, Any]:
     """
     try:
         from doc_intelligence_hub.modules.eob_matching.database import (
-            EOBRecord,
             BillRecord,
+            EOBRecord,
+        )
+        from doc_intelligence_hub.modules.eob_matching.database import (
             get_session as get_eob_session,
         )
     except ImportError:
@@ -335,11 +344,13 @@ def scan_all_duplicates() -> dict[str, Any]:
     all_doc_ids: list[int] = []
 
     try:
-        for row in eob_session.query(EOBRecord.document_id).all():
-            all_doc_ids.append(row[0])
-        for row in eob_session.query(BillRecord.document_id).all():
-            if row[0] not in all_doc_ids:
-                all_doc_ids.append(row[0])
+        all_doc_ids.extend(row[0] for row in eob_session.query(EOBRecord.document_id).all())
+        existing_doc_ids = set(all_doc_ids)
+        all_doc_ids.extend(
+            row[0]
+            for row in eob_session.query(BillRecord.document_id).all()
+            if row[0] not in existing_doc_ids
+        )
     finally:
         eob_session.close()
 
@@ -510,15 +521,14 @@ def _tag_archived_in_paperless(archived_doc_id: int, primary_doc_id: int) -> Non
     """
     try:
         import asyncio
+
         from doc_intelligence_hub.core.paperless import PaperlessClient
         from doc_intelligence_hub.modules.statements.config import load_config, resolve_api_token
 
         # Get config the same way routers/__init__.py does
         config = None
-        try:
+        with contextlib.suppress(Exception):
             config = load_config()
-        except Exception:
-            pass
 
         base_url = None
         token = None
@@ -582,6 +592,8 @@ def _transfer_eob_links(from_doc_id: int, to_doc_id: int) -> None:
     try:
         from doc_intelligence_hub.modules.eob_matching.database import (
             MatchRecord,
+        )
+        from doc_intelligence_hub.modules.eob_matching.database import (
             get_session as get_eob_session,
         )
 

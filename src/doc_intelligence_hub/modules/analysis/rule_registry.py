@@ -8,6 +8,7 @@ Rules come from three sources, merged in priority order:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -350,7 +351,7 @@ def _load_builtin_defaults() -> None:
         },
     }
 
-    for rule_id, cls in rule_classes.items():
+    for rule_id in rule_classes:
         config_data = defaults.get(rule_id, {})
         if not config_data:
             # Minimal config for undocumented rules
@@ -467,10 +468,8 @@ def _apply_db_overrides() -> None:
                 # DB returns ISO string — parse back to datetime
                 raw = state["last_run_at"]
                 if isinstance(raw, str):
-                    try:
+                    with contextlib.suppress(ValueError, TypeError):
                         rule.last_run_at = datetime.fromisoformat(raw)
-                    except (ValueError, TypeError):
-                        pass
                 else:
                     rule.last_run_at = raw
             if state.get("last_run_status"):

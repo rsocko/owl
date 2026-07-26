@@ -30,8 +30,8 @@ def _setup_db(tmp_path):
     db.init_db()
 
     # Also init triage DB for routing tests
-    from doc_intelligence_hub.modules.triage.database import set_db_url as triage_set_url
     from doc_intelligence_hub.modules.triage.database import init_db as triage_init
+    from doc_intelligence_hub.modules.triage.database import set_db_url as triage_set_url
 
     triage_set_url(f"sqlite:///{tmp_path}/test_triage.db")
     triage_init()

@@ -117,6 +117,6 @@ class TestDefaultSchedules:
             assert "method" in config, f"{key} missing method"
 
     def test_all_defaults_have_valid_cron(self):
-        for key, config in DEFAULT_SCHEDULES.items():
+        for config in DEFAULT_SCHEDULES.values():
             # Should not raise
             _parse_cron(config["cron"])

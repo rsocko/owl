@@ -4,7 +4,6 @@ import calendar
 import re
 from datetime import date, timedelta
 
-
 MONTH_PATTERN = re.compile(
     r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)\b",
     re.IGNORECASE,

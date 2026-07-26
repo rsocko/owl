@@ -66,10 +66,7 @@ def is_stale_eob(record: EOBRecord) -> bool:
         record.total_patient_responsibility,
     ]
     all_amounts_empty = all(a is None or a == 0 for a in amounts)
-    if all_amounts_empty and word_count > 4:
-        return True
-
-    return False
+    return bool(all_amounts_empty and word_count > 4)
 
 
 def find_stale_eobs(db: Session) -> list[EOBRecord]:

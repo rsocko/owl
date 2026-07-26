@@ -3,6 +3,7 @@
 import logging
 
 from doc_intelligence_hub.core.paperless import PaperlessClient
+
 from .config import settings
 
 logger = logging.getLogger(__name__)

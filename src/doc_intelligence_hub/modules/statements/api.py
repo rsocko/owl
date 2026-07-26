@@ -41,7 +41,7 @@ def create_app(config_path: str) -> FastAPI:
         return result.model_dump(mode="json")
 
     @app.post("/api/recommendations/run")
-    async def recommendations(as_of: date = Query(...)) -> dict:
+    async def recommendations(as_of: date = Query(...)) -> dict:  # noqa: B008
         result = await run_recommendations(config_path, as_of)
         return result.model_dump(mode="json")
 
@@ -55,7 +55,7 @@ def create_app(config_path: str) -> FastAPI:
         )
 
     @app.get("/api/recommendations/stream")
-    async def recommendations_stream(as_of: date = Query(...)):
+    async def recommendations_stream(as_of: date = Query(...)):  # noqa: B008
         """SSE endpoint that streams progress during recommendations."""
         return StreamingResponse(
             _recommendations_event_generator(config_path, as_of),

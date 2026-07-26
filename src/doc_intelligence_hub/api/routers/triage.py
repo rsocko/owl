@@ -32,10 +32,12 @@ from doc_intelligence_hub.modules.triage.database import (
     dismiss_queue_item,
     get_queue_item,
     get_queue_stats,
-    get_session as get_triage_session,
     list_queue_items,
     resolve_queue_item,
     undo_resolution,
+)
+from doc_intelligence_hub.modules.triage.database import (
+    get_session as get_triage_session,
 )
 
 router = APIRouter(prefix="/api/triage", tags=["triage"])
@@ -148,8 +150,10 @@ async def bulk_action(body: BulkActionRequest) -> dict[str, Any]:
         if until is not None:
             try:
                 datetime.fromisoformat(until)
-            except (ValueError, TypeError):
-                raise HTTPException(status_code=422, detail=f"Invalid 'until' timestamp: {until}")
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(
+                    status_code=422, detail=f"Invalid 'until' timestamp: {until}"
+                ) from exc
         affected = bulk_defer_items(body.item_ids, until)
     elif body.action == "dismiss":
         affected = bulk_dismiss_items(body.item_ids)
