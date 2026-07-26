@@ -1,7 +1,7 @@
 ---
 title: "OCR Quality Design"
 sidebar_label: OCR Quality Design
-sidebar_position: 8
+sidebar_position: 2
 ---
 
 # OCR Quality Assessment & Remediation — Design Document

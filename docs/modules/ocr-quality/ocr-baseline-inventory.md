@@ -1,7 +1,7 @@
 ---
 title: "OCR Baseline Inventory"
 sidebar_label: OCR Inventory
-sidebar_position: 7
+sidebar_position: 1
 ---
 
 # OCR Baseline Inventory — Phase 0 Specification

@@ -1,7 +1,7 @@
 ---
 title: "OCR Quality Scoring"
 sidebar_label: OCR Scoring
-sidebar_position: 9
+sidebar_position: 3
 ---
 
 # OCR Quality Scoring — Algorithm Specification

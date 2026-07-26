@@ -2,7 +2,12 @@
 title: "Technology Stack"
 sidebar_label: Tech Stack
 sidebar_position: 5
+status: active
 ---
+
+:::info Design Document
+This is a design document for a planned module. Implementation has not yet started.
+:::
 
 # Technology Stack Recommendations
 
