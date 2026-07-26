@@ -1,3 +1,9 @@
+---
+title: "Statement Tracking Notes"
+sidebar_label: ST Notes
+sidebar_position: 5
+---
+
 # Statement Tracking: 
 - **Analyze paperless-ngx** - find recurring, regular statements and bills
 - Build a catalog (by account?) for statement metadata

@@ -1,5 +1,7 @@
 ---
 title: "OWL Audit Findings"
+sidebar_label: Audit Findings
+sidebar_position: 4
 status: active
 created: 2026-07-26
 ---
