@@ -234,11 +234,16 @@ class PaperlessEnricher:
             return  # Safety: writes disabled via config
 
         field_ids = await self.get_field_ids()
+        status_field_id = field_ids.get("Action Status")
+        if not status_field_id:
+            logger.warning("Cannot sync status — 'Action Status' field not found in Paperless")
+            return
+
         await self.client.update_custom_fields(
             document_id,
             [
                 {
-                    "field": field_ids["Action Status"],
+                    "field": status_field_id,
                     "value": self._resolve_select_value("Action Status", status),
                 }
             ],
