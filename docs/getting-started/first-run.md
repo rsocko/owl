@@ -252,7 +252,7 @@ Once you're comfortable with OWL's output, automate everything. Set `WRITE_TO_PA
 
 ## What's Next
 
-- **[User Guide](../guide/)** — Detailed guides for each module
-- **[Configuration Reference](../guide/configuration.md)** — All environment variables and YAML options
-- **[Architecture](../architecture/)** — System design and data flow
-- **[Development Guide](../development/)** — Contributing and running locally
+- **[User Guide](../guide/)** ï¿½ Detailed guides for each module
+- **[Configuration Reference](../guide/configuration.md)** ï¿½ All environment variables and YAML options
+- **[Architecture](../architecture/)** ï¿½ System design and data flow
+- **[Development Guide](../development/)** ï¿½ Contributing and running locally
