@@ -5,7 +5,7 @@
  * within the triage queue detail panel when item_type === 'eob_match_review'.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Badge,
   Button,
@@ -203,6 +203,18 @@ export default function EobMatchDetail({
   const [alternatives, setAlternatives] = useState<EobMatch[]>([]);
   const [historyEvents, setHistoryEvents] = useState<MatchHistoryEvent[]>([]);
 
+  // Guard against stale requests when matchId changes rapidly
+  const loadGenRef = useRef(0);
+
+  // Reset state when matchId changes
+  useEffect(() => {
+    setNotes('');
+    setMatch(null);
+    setAlternatives([]);
+    setHistoryEvents([]);
+    setError(null);
+  }, [matchId]);
+
   useEffect(() => {
     if (!toast) return undefined;
     const timeout = window.setTimeout(() => setToast(null), 3500);
@@ -218,15 +230,16 @@ export default function EobMatchDetail({
       return;
     }
 
+    const gen = ++loadGenRef.current;
+
     setLoading(true);
     setError(null);
     try {
-      // Load match details
-      const response = (await endpoints.eob.matches(`limit=250`)) as { matches?: EobMatch[] };
-      const allMatches = response.matches ?? [];
-      const currentMatch = allMatches.find((item) => item.id === matchId) ?? null;
+      // Load match details directly by ID
+      const currentMatch = (await endpoints.eob.getMatch(String(matchId))) as EobMatch | null;
+      if (gen !== loadGenRef.current) return; // stale request
       if (!currentMatch) {
-        setError(`Match #${matchId} was not found in the recent EOB queue.`);
+        setError(`Match #${matchId} was not found.`);
         setMatch(null);
         setAlternatives([]);
         return;
@@ -241,6 +254,7 @@ export default function EobMatchDetail({
             String(eobId),
             'limit=10',
           )) as CandidatesResponse;
+          if (gen !== loadGenRef.current) return; // stale
           setAlternatives(
             (candidatesResp.candidates ?? []).filter((c) => c.id !== currentMatch.id).slice(0, 5),
           );
@@ -248,12 +262,8 @@ export default function EobMatchDetail({
           setAlternatives([]);
         }
       } catch {
-        // Fallback: use same-run matches
-        setAlternatives(
-          allMatches
-            .filter((item) => item.id !== currentMatch.id && item.run_id === currentMatch.run_id)
-            .slice(0, 3),
-        );
+        if (gen !== loadGenRef.current) return;
+        setAlternatives([]);
       }
 
       // Fetch match history
@@ -261,14 +271,17 @@ export default function EobMatchDetail({
         const historyResponse = (await endpoints.eob.matchHistory(
           String(matchId),
         )) as MatchHistoryResponse;
+        if (gen !== loadGenRef.current) return; // stale
         setHistoryEvents(historyResponse.events ?? []);
       } catch {
+        if (gen !== loadGenRef.current) return;
         setHistoryEvents([]);
       }
     } catch (err) {
+      if (gen !== loadGenRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load match details.');
     } finally {
-      setLoading(false);
+      if (gen === loadGenRef.current) setLoading(false);
     }
   }, [matchId]);
 
@@ -278,20 +291,21 @@ export default function EobMatchDetail({
 
   // ---- Derived state ----
 
-  const factorRows = useMemo(
-    () => [
-      { key: 'date', label: 'Date of service', weight: '30%', pct: Math.round(match?.breakdown?.date ?? 0) },
-      { key: 'provider', label: 'Provider', weight: '25%', pct: Math.round(match?.breakdown?.provider ?? 0) },
-      { key: 'patient', label: 'Patient', weight: '20%', pct: Math.round(match?.breakdown?.patient ?? 0) },
-      { key: 'amount', label: 'Amount', weight: '15%', pct: Math.round(match?.breakdown?.amount ?? 0) },
-      { key: 'procedures', label: 'Procedures', weight: '10%', pct: Math.round(match?.breakdown?.procedures ?? 0) },
-    ],
-    [match],
-  );
+  const factorRows = useMemo(() => {
+    const bd = match?.breakdown;
+    const round = (v?: number | null) => (typeof v === 'number' ? Math.round(v) : null);
+    return [
+      { key: 'date', label: 'Date of service', weight: '30%', pct: round(bd?.date) },
+      { key: 'provider', label: 'Provider', weight: '25%', pct: round(bd?.provider) },
+      { key: 'patient', label: 'Patient', weight: '20%', pct: round(bd?.patient) },
+      { key: 'amount', label: 'Amount', weight: '15%', pct: round(bd?.amount) },
+      { key: 'procedures', label: 'Procedures', weight: '10%', pct: round(bd?.procedures) },
+    ];
+  }, [match]);
 
   const weakestFactor = useMemo(() => {
-    const withValues = factorRows.filter((row) => typeof row.pct === 'number');
-    return withValues.reduce<(typeof factorRows)[0] | null>(
+    const available = factorRows.filter((row): row is typeof row & { pct: number } => row.pct !== null);
+    return available.reduce<(typeof available)[0] | null>(
       (lowest, row) => (lowest === null || row.pct < lowest.pct ? row : lowest),
       null,
     );
@@ -432,7 +446,7 @@ export default function EobMatchDetail({
             >
               {saving === 'reject' ? 'Rejecting…' : '✗ Reject (N)'}
             </Button>
-            <Button onClick={handleRelink} disabled={saving !== null} title="Re-link (R)">
+            <Button onClick={handleRelink} disabled={saving !== null || !onRelink} title="Re-link (R)">
               🔗 Re-link (R)
             </Button>
             <Button onClick={handleSkip} disabled={saving !== null} title="Skip (S)">
@@ -480,7 +494,7 @@ export default function EobMatchDetail({
             <div className="eob-card-stack">
               {factorRows.map((row) => (
                 <div key={row.key} className="eob-factor-bar-row">
-                  <ConfidenceBar label={row.label} pct={row.pct} />
+                  <ConfidenceBar label={row.label} pct={row.pct ?? 0} />
                   <span className="eob-factor-weight">{row.weight}</span>
                 </div>
               ))}
@@ -489,10 +503,10 @@ export default function EobMatchDetail({
               {factorRows.map((row) => (
                 <div
                   key={`${row.key}-note`}
-                  className={`eob-factor-card ${row.pct < 70 ? 'mismatch' : ''}`}
+                  className={`eob-factor-card ${row.pct !== null && row.pct < 70 ? 'mismatch' : ''}`}
                 >
                   <div className="eob-field-label">{row.label}</div>
-                  <div className="eob-field-value">{formatPercent(row.pct)}</div>
+                  <div className="eob-field-value">{row.pct !== null ? formatPercent(row.pct) : 'Unavailable'}</div>
                   <div className="eob-field-note">{factorNarrative(row.label, row.pct)}</div>
                 </div>
               ))}
