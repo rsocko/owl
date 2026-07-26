@@ -12,6 +12,7 @@ import {
   Toast,
 } from '../components/ui';
 import { endpoints } from '../lib/api';
+import { StatementGroupingDetail } from '../components/triage/StatementGroupingDetail';
 import DuplicateDetail from './DuplicateDetail';
 import '../styles/triage-queue.css';
 
@@ -598,14 +599,15 @@ export default function TriageQueue() {
                   </div>
                 </div>
 
-                {/* Reason banner */}
-                {selectedItem.reason && (
+                {/* Reason banner — skip for types with dedicated detail components */}
+                {selectedItem.reason && !['grouping_anomaly', 'duplicate_document'].includes(selectedItem.item_type) && (
                   <div className="triage-reason-banner">
                     <strong>Flagged for review:</strong> {selectedItem.reason}
                   </div>
                 )}
 
-                {/* Item info card */}
+                {/* Item info card — skip for types with dedicated detail components */}
+                {!['grouping_anomaly', 'duplicate_document'].includes(selectedItem.item_type) && (
                 <Card title="Item details">
                   <div className="triage-detail-info">
                     <div className="triage-detail-row">
@@ -642,15 +644,30 @@ export default function TriageQueue() {
                     )}
                   </div>
                 </Card>
+                )}
 
                 {/* Type-specific detail views */}
-                {selectedItem.item_type === 'duplicate_document' && selectedItem.metadata?.duplicate_pair_id ? (
+                {selectedItem.item_type === 'grouping_anomaly' ? (
+                  <StatementGroupingDetail
+                    seriesId={selectedItem.target_id}
+                    triageItemId={selectedItem.id}
+                    reason={selectedItem.reason}
+                    onResolved={(action) => {
+                      setToast({ message: `Series ${action} completed.`, tone: 'success' });
+                      void loadData();
+                      // Auto-advance to next item
+                      const currentIdx = items.findIndex(i => i.id === selectedItem.id);
+                      const next = items[currentIdx + 1] || items[currentIdx - 1];
+                      setSelectedId(next?.id ?? null);
+                    }}
+                  />
+                ) : selectedItem.item_type === 'duplicate_document' && selectedItem.metadata?.duplicate_pair_id ? (
                   <DuplicateDetail
                     pairId={selectedItem.metadata.duplicate_pair_id as string}
                     onResolved={() => void loadData()}
                   />
                 ) : (
-                  /* Metadata dump — placeholder for specific detail views (#834, #829, #831) */
+                  /* Metadata dump — placeholder for specific detail views (#834, #831) */
                   <Card title="Item metadata">
                     <div className="triage-metadata-dump">
                       {selectedItem.metadata ? (
