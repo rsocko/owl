@@ -171,7 +171,8 @@ def _migrate_missing_columns(engine):
     SQLAlchemy's ``create_all`` only creates tables — it never alters them.
     We inspect the live schema and issue ALTER TABLE for anything missing.
     """
-    from sqlalchemy import inspect as sa_inspect, text
+    from sqlalchemy import text
+    from sqlalchemy import inspect as sa_inspect
 
     inspector = sa_inspect(engine)
 
