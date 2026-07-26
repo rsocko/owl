@@ -159,6 +159,27 @@ export function ConfidenceBar({ label, pct }: { label: string; pct: number }) {
   );
 }
 
+export function riskTone(score: number): 'low' | 'medium' | 'high' | 'critical' {
+  if (score >= 75) return 'critical';
+  if (score >= 50) return 'high';
+  if (score >= 25) return 'medium';
+  return 'low';
+}
+
+export function RiskScoreBar({ label = 'Risk Score', score }: { label?: string; score: number }) {
+  const tone = riskTone(score);
+  const toneClass = tone === 'critical' || tone === 'high' ? 'low' : tone === 'medium' ? 'medium' : 'high';
+  return (
+    <div className="confidence-row">
+      <div className="confidence-label">{label}</div>
+      <div className="confidence-bar-bg">
+        <div className={`confidence-bar-fill ${toneClass}`} style={{ width: `${Math.min(100, Math.max(0, score))}%` }} />
+      </div>
+      <div className="confidence-pct">{score}</div>
+    </div>
+  );
+}
+
 export function LoadingState({ label = 'Loading…' }: { label?: string }) {
   return (
     <div className="loading-state">
@@ -175,7 +196,7 @@ export function LoadingState({ label = 'Loading…' }: { label?: string }) {
  * - "table": a table header + rows
  * - "default": generic content block
  */
-export function SkeletonLoader({ variant = 'default', rows = 5 }: { variant?: 'stat-grid' | 'cards' | 'table' | 'default'; rows?: number }) {
+export function SkeletonLoader({ variant = 'default', rows = 5 }: { variant?: 'stat-grid' | 'cards' | 'table' | 'detail-panel' | 'default'; rows?: number }) {
   if (variant === 'stat-grid') {
     return (
       <div className="skeleton-grid stat-grid">
@@ -223,6 +244,26 @@ export function SkeletonLoader({ variant = 'default', rows = 5 }: { variant?: 's
             <div className="skeleton-line" style={{ width: `${60 + (i % 3) * 10}%` }} />
           </div>
         ))}
+      </div>
+    );
+  }
+
+  if (variant === 'detail-panel') {
+    return (
+      <div className="skeleton-detail-panel">
+        <div className="skeleton-line skeleton-line-lg" style={{ width: '70%' }} />
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+          <div className="skeleton-line" style={{ width: '80px', height: '24px', marginBottom: 0 }} />
+          <div className="skeleton-line" style={{ width: '80px', height: '24px', marginBottom: 0 }} />
+          <div className="skeleton-line" style={{ width: '100px', height: '24px', marginBottom: 0 }} />
+        </div>
+        <div className="skeleton-line" style={{ height: '160px', marginBottom: '16px' }} />
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="skeleton-line" style={{ width: `${85 - i * 5}%` }} />
+        ))}
+        <div style={{ marginTop: '12px' }}>
+          <div className="skeleton-line" style={{ width: '100%', height: '7px' }} />
+        </div>
       </div>
     );
   }
