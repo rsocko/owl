@@ -203,8 +203,32 @@ function scoreBadgeTone(score?: number | null): 'success' | 'warning' | 'danger'
   return tone === 'high' ? 'success' : tone === 'medium' ? 'warning' : 'danger';
 }
 
-export default function EobDashboard() {
+export interface EobDashboardProps {
+  /** When true, skip page header/breadcrumb (rendered by EobWorkspace). */
+  embedded?: boolean;
+  /** Navigate to match review in workspace context. */
+  onNavigateMatch?: (matchId: number) => void;
+  /** Navigate to unmatched tab in workspace context. */
+  onNavigateUnmatched?: () => void;
+}
+
+export default function EobDashboard({
+  embedded = false,
+  onNavigateMatch,
+  onNavigateUnmatched,
+}: EobDashboardProps = {}) {
   const navigate = useNavigate();
+
+  const goToMatch = useCallback((matchId: number) => {
+    if (onNavigateMatch) onNavigateMatch(matchId);
+    else navigate(`/eob/matches/${matchId}`);
+  }, [navigate, onNavigateMatch]);
+
+  const goToUnmatched = useCallback(() => {
+    if (onNavigateUnmatched) onNavigateUnmatched();
+    else navigate('/eob/unmatched');
+  }, [navigate, onNavigateUnmatched]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
@@ -428,7 +452,7 @@ export default function EobDashboard() {
   if (loading) {
     return (
       <>
-        <PageHeader title="EOB Matching" desc="Run the classification and matching pipeline for Explanation of Benefits documents." />
+        {!embedded && <PageHeader title="EOB Matching" desc="Run the classification and matching pipeline for Explanation of Benefits documents." />}
         <SkeletonLoader variant="stat-grid" />
         <div className="section"><SkeletonLoader variant="cards" /></div>
       </>
@@ -438,7 +462,7 @@ export default function EobDashboard() {
   if (error) {
     return (
       <>
-        <PageHeader title="EOB Matching" desc="Run the classification and matching pipeline for Explanation of Benefits documents." />
+        {!embedded && <PageHeader title="EOB Matching" desc="Run the classification and matching pipeline for Explanation of Benefits documents." />}
         <ErrorState message={error} onRetry={() => void loadDashboard()} />
       </>
     );
@@ -448,27 +472,52 @@ export default function EobDashboard() {
 
   return (
     <>
-      <PageHeader
-        title="EOB Matching"
-        desc={
-          <div className="eob-meta-row">
-            <span>Review candidate EOB ↔ bill matches, rerun the matcher, and work the unmatched queue.</span>
-            <Badge tone={check?.read_only ? 'warning' : 'success'}>
-              {check?.read_only ? 'Read-only mode' : 'Paperless writeback enabled'}
-            </Badge>
-            {lastSyncedAt && (
-              <span className="eob-table-secondary">Last synced: {formatDateTime(lastSyncedAt)}</span>
-            )}
-          </div>
-        }
-        actions={
-          <div className="btn-group">
+      {!embedded && (
+        <PageHeader
+          title="EOB Matching"
+          desc={
+            <div className="eob-meta-row">
+              <span>Review candidate EOB ↔ bill matches, rerun the matcher, and work the unmatched queue.</span>
+              <Badge tone={check?.read_only ? 'warning' : 'success'}>
+                {check?.read_only ? 'Read-only mode' : 'Paperless writeback enabled'}
+              </Badge>
+              {lastSyncedAt && (
+                <span className="eob-table-secondary">Last synced: {formatDateTime(lastSyncedAt)}</span>
+              )}
+            </div>
+          }
+          actions={
+            <div className="btn-group">
+              <Button variant="ghost" onClick={() => void loadDashboard()}>
+                🔄 Sync
+              </Button>
+              <Button variant="ghost" onClick={goToUnmatched}>
+                Unmatched queue
+                <Badge tone={unmatched.length ? 'warning' : 'muted'}>{unmatched.length}</Badge>
+              </Button>
+              <Button variant="primary" onClick={() => void handleRun()} disabled={isRunning}>
+                {isRunning ? 'Running…' : 'Run pipeline'}
+              </Button>
+              <Button onClick={() => void handleClassify()} disabled={isClassifying}>
+                {isClassifying ? 'Classifying…' : 'Classify recent docs'}
+              </Button>
+            </div>
+          }
+        />
+      )}
+
+      {/* Inline action bar when embedded */}
+      {embedded && (
+        <div className="eob-meta-row" style={{ marginBottom: 8 }}>
+          <Badge tone={check?.read_only ? 'warning' : 'success'}>
+            {check?.read_only ? 'Read-only mode' : 'Paperless writeback enabled'}
+          </Badge>
+          {lastSyncedAt && (
+            <span className="eob-table-secondary">Last synced: {formatDateTime(lastSyncedAt)}</span>
+          )}
+          <div className="btn-group" style={{ marginLeft: 'auto' }}>
             <Button variant="ghost" onClick={() => void loadDashboard()}>
               🔄 Sync
-            </Button>
-            <Button variant="ghost" onClick={() => navigate('/eob/unmatched')}>
-              Unmatched queue
-              <Badge tone={unmatched.length ? 'warning' : 'muted'}>{unmatched.length}</Badge>
             </Button>
             <Button variant="primary" onClick={() => void handleRun()} disabled={isRunning}>
               {isRunning ? 'Running…' : 'Run pipeline'}
@@ -477,8 +526,8 @@ export default function EobDashboard() {
               {isClassifying ? 'Classifying…' : 'Classify recent docs'}
             </Button>
           </div>
-        }
-      />
+        </div>
+      )}
 
       <div className="eob-page-stack">
         <StatGrid>
@@ -650,7 +699,7 @@ export default function EobDashboard() {
                     {alert.description && <div className="eob-alert-body">{alert.description}</div>}
                     <div className="eob-alert-actions">
                       {matchId && (
-                        <Button size="sm" variant="primary" onClick={() => navigate(`/eob/matches/${matchId}`)}>
+                        <Button size="sm" variant="primary" onClick={() => goToMatch(Number(matchId))}>
                           Review Match →
                         </Button>
                       )}
@@ -756,7 +805,7 @@ export default function EobDashboard() {
           actions={
             <div className="eob-actions-end">
               <span className="text-muted">Top scores first</span>
-              <Button size="sm" onClick={() => navigate('/eob/unmatched')}>
+              <Button size="sm" onClick={goToUnmatched}>
                 Review unmatched
               </Button>
             </div>
@@ -818,8 +867,7 @@ export default function EobDashboard() {
                   key: 'action',
                   header: '',
                   render: (match) => (
-                    <Button size="sm" variant="ghost" onClick={() => navigate(`/eob/matches/${match.id}`)}>
-                      Review →
+                    <Button size="sm" variant="ghost" onClick={() => goToMatch(match.id)}>                      Review →
                     </Button>
                   ),
                   width: '110px',
@@ -884,14 +932,14 @@ export default function EobDashboard() {
               <div className="eob-qs-label">Unmatched EOBs</div>
               <div className="eob-qs-count">{unmatched.length}</div>
             </div>
-            <span className="eob-qs-link" onClick={() => navigate('/eob/unmatched')}>View →</span>
+            <span className="eob-qs-link" onClick={goToUnmatched}>View →</span>
           </div>
           <div className="eob-qs-card">
             <div>
               <div className="eob-qs-label">Pending Bills</div>
               <div className="eob-qs-count">{unmatchedBillsCount}</div>
             </div>
-            <span className="eob-qs-link" onClick={() => navigate('/eob/unmatched')}>View →</span>
+            <span className="eob-qs-link" onClick={goToUnmatched}>View →</span>
           </div>
         </div>
       </div>
