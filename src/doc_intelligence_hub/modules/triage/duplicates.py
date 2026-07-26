@@ -344,13 +344,14 @@ def scan_all_duplicates() -> dict[str, Any]:
     all_doc_ids: list[int] = []
 
     try:
-        all_doc_ids.extend(row[0] for row in eob_session.query(EOBRecord.document_id).all())
-        existing_doc_ids = set(all_doc_ids)
-        all_doc_ids.extend(
-            row[0]
-            for row in eob_session.query(BillRecord.document_id).all()
-            if row[0] not in existing_doc_ids
-        )
+        # Use a set to deduplicate — a document_id may have multiple rows
+        # from different processing runs
+        unique_doc_ids: set[int] = set()
+        for row in eob_session.query(EOBRecord.document_id).all():
+            unique_doc_ids.add(row[0])
+        for row in eob_session.query(BillRecord.document_id).all():
+            unique_doc_ids.add(row[0])
+        all_doc_ids = list(unique_doc_ids)
     finally:
         eob_session.close()
 
@@ -372,6 +373,8 @@ def scan_all_duplicates() -> dict[str, Any]:
             continue
 
         for doc_b_id in all_doc_ids[i + 1 :]:
+            if doc_b_id == doc_a_id:
+                continue
             meta_b = meta_cache.get(doc_b_id)
             if not meta_b:
                 continue

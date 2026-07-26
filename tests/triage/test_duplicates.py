@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from doc_intelligence_hub.modules.triage.database import create_duplicate_pair
 from doc_intelligence_hub.modules.triage.duplicates import (
     DUPLICATE_THRESHOLD,
     WEIGHTS,
@@ -201,3 +204,15 @@ class TestScoreDocuments:
     def test_breakdown_has_all_signals(self):
         _, breakdown = score_documents({}, {})
         assert set(breakdown.keys()) == set(WEIGHTS.keys())
+
+
+class TestCreateDuplicatePairValidation:
+    def test_rejects_self_referencing_pair(self):
+        """create_duplicate_pair must reject pairs where both IDs are the same document."""
+        with pytest.raises(ValueError, match="same"):
+            create_duplicate_pair(
+                doc_a_id=9679,
+                doc_b_id=9679,
+                similarity_score=1.0,
+                breakdown={"invoice_number": 1.0},
+            )

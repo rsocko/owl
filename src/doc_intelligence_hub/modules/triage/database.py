@@ -607,6 +607,9 @@ def create_duplicate_pair(
     """Create a new duplicate pair record."""
     import json
 
+    if doc_a_id == doc_b_id:
+        raise ValueError(f"Cannot create duplicate pair: doc_a_id and doc_b_id are the same ({doc_a_id})")
+
     session = get_session()
     try:
         dup = DocumentDuplicate(
