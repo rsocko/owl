@@ -68,7 +68,7 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 | **#870** Insights page — trends/charts | **#828** Analysis Engine & Insights | #870 is the UI; #828 is engine + UI. Insights UI is in both. | Keep both — #828 is backend engine, #870 is frontend. Add cross-references. |
 | **#834** EOB Match Review UI (design) | **#882, #878, #871, #874, #873** (doc-hub-ui) | #834 is the epic; the 5 issues are specific feature gaps | Keep all — #834 is the parent epic. Add "Part of #834" to each sub-issue. |
 | **#832** Unified Triage Queue UI | **#868** Bulk actions in Triage Queue | #868 is a specific feature within #832 | Keep both — #868 is a sub-task of #832. |
-| **#831** Orphan Management UI | **#826** Triage view of docs with nothing to do | #826 is a vague idea that #831 fully encompasses | Close #826 — #831 covers the "what to do with docs that have no action" use case |
+| **#831** Orphan Management UI | **#826** Triage view of docs with nothing to do | #826 is a vague idea that #831 fully encompasses | ✅ #826 closed |
 | **#160** Paperless-Enhanced OCR (umbrella) | **#736-#740** OCR sub-issues | #160 is the original idea; #736-740 are the decomposed tasks | Keep all — #160 is the umbrella. Already cross-referenced. |
 
 ### 🟢 NOT DUPLICATES (appear similar but distinct)
@@ -81,7 +81,7 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 
 ### Recommended Cleanup Actions
 1. ~~**Close #833** → reference #869 (Rules Config duplicate)~~ ✅ Done
-2. **Close #826** → reference #831 (Orphan management covers this) — ⚠️ still open
+2. ~~**Close #826** → reference #831 (Orphan management covers this)~~ ✅ Done
 3. **Add parent/child references** to #834 for issues #882, #878, #871, #874, #873
 4. **Cross-reference #870 ↔ #828** (frontend vs backend)
 5. **Cross-reference #832 ↔ #868** (parent ↔ sub-task)
@@ -320,7 +320,7 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 | Total DI-related issues tracked | ~57 (including 5 new + #935, #847) |
 | Issues completed (closed on GitHub) | ~42 |
 | Issues still open | ~15 |
-| Likely duplicates closed | 1 of 2 (#833 closed; #826 still open) |
+| Likely duplicates closed | 2 of 2 (#833, #826 both closed) |
 | Issues needing cross-references | ~8 pairs |
 | Phases of work | 7 (0-6 + future) |
 | **Phase 0** | ✅ Complete |
@@ -354,4 +354,4 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 - #768, #765, #780
 
 **Deferred:** #876 (keyboard shortcuts)
-**Cleanup needed:** #826 (close as duplicate of #831)
+**Cleanup:** All duplicate issues closed ✅
