@@ -6,7 +6,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.api.routers import make_paperless_client
@@ -60,7 +60,7 @@ class MatchUpdateRequest(BaseModel):
 
 
 class BulkUpdateRequest(BaseModel):
-    ids: list[str] = Field(..., min_length=1, description="EOBRecord IDs to update")
+    ids: list[str] = Field(..., min_length=1, max_length=500, description="EOBRecord IDs to update")
     action: str = Field(..., pattern=r"^(mark_orphan|mark_paid)$")
 
 
@@ -760,7 +760,10 @@ async def bulk_update_eobs(body: BulkUpdateRequest):
     init_db()
     db = get_db_session()
     try:
-        int_ids = [int(i) for i in body.ids]
+        try:
+            int_ids = [int(i) for i in body.ids]
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail="All IDs must be valid integers.")
         updated = (
             db.query(EOBRecord)
             .filter(EOBRecord.id.in_(int_ids))
