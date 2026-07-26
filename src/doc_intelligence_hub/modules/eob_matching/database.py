@@ -128,6 +128,19 @@ class MatchRecord(Base):
     )
 
 
+class MatchEvent(Base):
+    """Audit log entry tracking match lifecycle transitions."""
+
+    __tablename__ = "match_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    match_id = Column(Integer, nullable=False, index=True)
+    event_type = Column(String, nullable=False)  # auto_matched, flagged, reviewed, confirmed, rejected, reset
+    actor = Column(String, nullable=False, default="system")  # "system" or "user"
+    detail = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
+
+
 # ------------------------------------------------------------------
 # Engine / session helpers
 # ------------------------------------------------------------------
@@ -215,3 +228,33 @@ def pending_matches(session: Session) -> list[MatchRecord]:
 
 def confirmed_matches(session: Session) -> list[MatchRecord]:
     return session.query(MatchRecord).filter_by(status="confirmed").all()
+
+
+def add_match_event(
+    session: Session,
+    match_id: int,
+    event_type: str,
+    actor: str = "system",
+    detail: str | None = None,
+) -> MatchEvent:
+    """Record a lifecycle event for a match."""
+    event = MatchEvent(
+        match_id=match_id,
+        event_type=event_type,
+        actor=actor,
+        detail=detail,
+    )
+    session.add(event)
+    session.commit()
+    session.refresh(event)
+    return event
+
+
+def get_match_events(session: Session, match_id: int) -> list[MatchEvent]:
+    """Return all events for a match, oldest first."""
+    return (
+        session.query(MatchEvent)
+        .filter_by(match_id=match_id)
+        .order_by(MatchEvent.created_at.asc())
+        .all()
+    )

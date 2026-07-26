@@ -42,6 +42,19 @@ interface EobMatchesResponse {
   matches?: EobMatch[];
 }
 
+interface MatchHistoryEvent {
+  id: number;
+  event_type: string;
+  actor: string;
+  detail?: string | null;
+  created_at?: string | null;
+}
+
+interface MatchHistoryResponse {
+  match_id: number;
+  events: MatchHistoryEvent[];
+}
+
 type MatchStatus = 'confirmed' | 'rejected' | 'candidate';
 type ToastState = { message: string; tone: 'success' | 'error' } | null;
 
@@ -102,6 +115,28 @@ function scoreBadgeTone(score?: number | null): 'success' | 'warning' | 'danger'
   return tone === 'high' ? 'success' : tone === 'medium' ? 'warning' : 'danger';
 }
 
+function eventDotTone(eventType: string): 'info' | 'success' | 'danger' | 'muted' {
+  switch (eventType) {
+    case 'auto_matched': return 'info';
+    case 'confirmed': return 'success';
+    case 'rejected': return 'danger';
+    case 'flagged': return 'muted';
+    case 'reset': return 'muted';
+    default: return 'muted';
+  }
+}
+
+function eventLabel(eventType: string): string {
+  switch (eventType) {
+    case 'auto_matched': return 'Auto-matched';
+    case 'flagged': return 'Flagged for review';
+    case 'confirmed': return 'Confirmed';
+    case 'rejected': return 'Rejected';
+    case 'reset': return 'Reset to candidate';
+    default: return eventType;
+  }
+}
+
 export default function EobMatchReview() {
   const navigate = useNavigate();
   const { matchId } = useParams();
@@ -112,6 +147,7 @@ export default function EobMatchReview() {
   const [savingStatus, setSavingStatus] = useState<MatchStatus | null>(null);
   const [match, setMatch] = useState<EobMatch | null>(null);
   const [alternatives, setAlternatives] = useState<EobMatch[]>([]);
+  const [historyEvents, setHistoryEvents] = useState<MatchHistoryEvent[]>([]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -146,6 +182,14 @@ export default function EobMatchReview() {
           .filter((item) => item.id !== currentMatch.id && item.run_id === currentMatch.run_id)
           .slice(0, 3),
       );
+
+      // Fetch match history timeline
+      try {
+        const historyResponse = (await endpoints.eob.matchHistory(matchId)) as MatchHistoryResponse;
+        setHistoryEvents(historyResponse.events ?? []);
+      } catch {
+        setHistoryEvents([]);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load match details.');
     } finally {
@@ -521,23 +565,43 @@ export default function EobMatchReview() {
 
           <Card title="Match history & notes">
             <div className="eob-card-stack">
-              <div className="eob-history-list">
-                <div className="eob-history-item">
-                  <span className="eob-history-dot info" />
-                  <div>
-                    <div className="eob-field-value">Candidate created</div>
-                    <div className="eob-field-note">{formatDateTime(match.created_at)}</div>
-                  </div>
-                </div>
-                <div className="eob-history-item">
-                  <span className={`eob-history-dot ${match.status === 'confirmed' ? 'success' : match.status === 'rejected' ? 'danger' : 'muted'}`} />
-                  <div>
-                    <div className="eob-field-value">{statusLabel(match.status)}</div>
-                    <div className="eob-field-note">
-                      {match.confirmed_at ? formatDateTime(match.confirmed_at) : 'Awaiting reviewer action'}
+              <div className="eob-timeline">
+                {historyEvents.length > 0 ? (
+                  historyEvents.map((event) => (
+                    <div key={event.id} className="eob-timeline-item">
+                      <div className="eob-timeline-track">
+                        <span className={`eob-history-dot ${eventDotTone(event.event_type)}`} />
+                        <span className="eob-timeline-line" />
+                      </div>
+                      <div className="eob-timeline-content">
+                        <div className="eob-field-value">{eventLabel(event.event_type)}</div>
+                        {event.detail && <div className="eob-field-note">{event.detail}</div>}
+                        <div className="eob-field-note">
+                          {event.actor === 'user' ? '👤 Reviewer' : '⚙️ System'} · {formatDateTime(event.created_at)}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="eob-history-list">
+                    <div className="eob-history-item">
+                      <span className="eob-history-dot info" />
+                      <div>
+                        <div className="eob-field-value">Candidate created</div>
+                        <div className="eob-field-note">{formatDateTime(match.created_at)}</div>
+                      </div>
+                    </div>
+                    <div className="eob-history-item">
+                      <span className={`eob-history-dot ${match.status === 'confirmed' ? 'success' : match.status === 'rejected' ? 'danger' : 'muted'}`} />
+                      <div>
+                        <div className="eob-field-value">{statusLabel(match.status)}</div>
+                        <div className="eob-field-note">
+                          {match.confirmed_at ? formatDateTime(match.confirmed_at) : 'Awaiting reviewer action'}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
 
               <div className="eob-note-box">
