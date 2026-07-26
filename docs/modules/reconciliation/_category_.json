@@ -1,0 +1,9 @@
+{
+  "label": "Reconciliation",
+  "position": 5,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "description": "Generalized document matching engine — multi-recipe reconciliation across bills, receipts, orders, and more."
+  }
+}
