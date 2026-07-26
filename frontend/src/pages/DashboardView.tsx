@@ -157,12 +157,15 @@ export default function DashboardView() {
         title="Dashboard"
         desc="Triage overview, match rate trends, and recent activity."
         actions={
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Link to="/corrections"><Button>📜 Correction History</Button></Link>
-            <Button onClick={() => void loadDashboard()} disabled={loading}>Refresh</Button>
-          </div>
+          <Button onClick={() => void loadDashboard()} disabled={loading}>Refresh</Button>
         }
       />
+
+      {/* View switcher (matching mockup tab bar) */}
+      <div className="dv-view-tabs">
+        <Link to="/dashboard-view" className="dv-view-tab active">📊 Dashboard</Link>
+        <Link to="/corrections" className="dv-view-tab">📜 Correction History</Link>
+      </div>
 
       {/* Stats row */}
       <StatGrid>

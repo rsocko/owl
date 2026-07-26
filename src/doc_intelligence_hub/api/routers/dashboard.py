@@ -10,7 +10,6 @@ Endpoints:
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -26,8 +25,6 @@ from doc_intelligence_hub.modules.triage.database import (
     undo_correction_event,
     upsert_notification_config,
 )
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/triage", tags=["triage"])
 

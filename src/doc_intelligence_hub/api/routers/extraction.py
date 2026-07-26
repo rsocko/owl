@@ -11,13 +11,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.api.routers import make_paperless_client
 from doc_intelligence_hub.core.extractors.account_numbers import (
     ACCOUNT_PATTERNS,
-    ExtractionResult,
     extract_account_numbers,
     extract_from_document,
     pick_best_account_identifier,
@@ -143,7 +142,7 @@ async def backfill(body: BackfillRequest, request: Request) -> dict[str, Any]:
                     doc_ids = [d["id"] for d in data["results"][:body.limit]]
         except Exception as exc:
             logger.warning("Could not fetch document list for backfill: %s", exc)
-            raise HTTPException(status_code=503, detail=f"Could not fetch documents: {exc}")
+            raise HTTPException(status_code=503, detail="Could not fetch document list from Paperless")
 
     results: list[dict[str, Any]] = []
     extracted_count = 0
