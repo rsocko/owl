@@ -5,6 +5,7 @@ Mirrors the pattern used by the Action Queue module (SQLAlchemy ORM + init_db).
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import UTC, datetime
 from typing import Optional
 
@@ -126,6 +127,10 @@ class MatchRecord(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     confirmed_at = Column(DateTime, nullable=True)
     notes = Column(String, nullable=True)
+    # Payment tracking
+    payment_status = Column(String, default="unpaid")  # unpaid, partial, paid, overpaid
+    paid_amount = Column(Float, default=0.0)
+    paid_date = Column(DateTime, nullable=True)
     user_status = Column(String, default="unreviewed")  # unreviewed, confirmed, rejected, override
     reviewed_at = Column(DateTime, nullable=True)
     user_notes = Column(Text, nullable=True)
@@ -133,6 +138,20 @@ class MatchRecord(Base):
     __table_args__ = (
         UniqueConstraint("eob_document_id", "bill_document_id", "run_id", name="uq_match_pair_run"),
     )
+
+
+class PaymentRecord(Base):
+    """Individual payment recorded against a confirmed match."""
+
+    __tablename__ = "payments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    match_id = Column(Integer, nullable=False, index=True)
+    amount = Column(Float, nullable=False)
+    paid_date = Column(DateTime, nullable=True)
+    method = Column(String, nullable=True)  # e.g. check, online, insurance
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
 
 
 class MatchEvent(Base):
@@ -228,6 +247,9 @@ def _migrate_missing_columns(engine):
             ("linked_in_paperless", "INTEGER DEFAULT 0"),
             ("confirmed_at", "DATETIME"),
             ("notes", "TEXT"),
+            ("payment_status", "TEXT DEFAULT 'unpaid'"),
+            ("paid_amount", "REAL DEFAULT 0.0"),
+            ("paid_date", "DATETIME"),
             ("user_status", "TEXT DEFAULT 'unreviewed'"),
             ("reviewed_at", "DATETIME"),
             ("user_notes", "TEXT"),
@@ -357,6 +379,7 @@ def get_match_events(session: Session, match_id: int) -> list[MatchEvent]:
 
 
 # ------------------------------------------------------------------
+# ------------------------------------------------------------------
 # Benchmark persistence helpers
 # ------------------------------------------------------------------
 
@@ -434,3 +457,137 @@ def get_previous_benchmark_results(
     if previous is None:
         return []
     return get_benchmark_results(session, previous.id)
+
+
+# ------------------------------------------------------------------
+# Payment helpers
+# ------------------------------------------------------------------
+
+
+def record_payment(
+    session: Session,
+    match_id: int,
+    amount: float,
+    paid_date: datetime | None = None,
+    method: str | None = None,
+    notes: str | None = None,
+) -> PaymentRecord:
+    """Record a payment against a match and update the match's payment totals."""
+    payment = PaymentRecord(
+        match_id=match_id,
+        amount=amount,
+        paid_date=paid_date or datetime.now(UTC),
+        method=method,
+        notes=notes,
+    )
+    session.add(payment)
+
+    # Update match aggregate
+    match = session.query(MatchRecord).filter_by(id=match_id).first()
+    if match:
+        match.paid_amount = (match.paid_amount or 0.0) + amount
+        match.paid_date = payment.paid_date
+        match.payment_status = _compute_payment_status(session, match)
+
+    add_match_event(
+        session,
+        match_id,
+        event_type="payment_recorded",
+        actor="user",
+        detail=f"Payment of ${amount:.2f} recorded" + (f" via {method}" if method else ""),
+    )
+    # Note: add_match_event commits; refresh payment after
+    session.refresh(payment)
+    return payment
+
+
+def _compute_payment_status(session: Session, match: MatchRecord) -> str:
+    """Derive payment_status by comparing paid_amount to the linked bill's balance_due."""
+    bill = (
+        session.query(BillRecord)
+        .filter_by(document_id=match.bill_document_id)
+        .order_by(BillRecord.id.desc())
+        .first()
+    )
+    balance = _bill_balance(bill)
+    paid = match.paid_amount or 0.0
+
+    if paid <= 0:
+        return "unpaid"
+    if balance is None:
+        # No bill or no amount info — treat any positive payment as "paid"
+        return "paid"
+    if paid < balance:
+        return "partial"
+    if paid > balance:
+        return "overpaid"
+    return "paid"
+
+
+def _bill_balance(bill: BillRecord | None) -> float | None:
+    """Extract the authoritative balance from a bill, distinguishing 0 from unknown."""
+    if bill is None:
+        return None
+    if bill.balance_due is not None:
+        return bill.balance_due
+    if bill.total_amount is not None:
+        return bill.total_amount
+    return None
+
+
+def get_payments_for_match(session: Session, match_id: int) -> list[PaymentRecord]:
+    """Return all payments for a match, oldest first."""
+    return (
+        session.query(PaymentRecord)
+        .filter_by(match_id=match_id)
+        .order_by(PaymentRecord.created_at.asc())
+        .all()
+    )
+
+
+def payment_summary(session: Session) -> dict:
+    """Aggregate payment stats across all confirmed matches."""
+    confirmed = (
+        session.query(MatchRecord)
+        .filter_by(status="confirmed")
+        .all()
+    )
+    if not confirmed:
+        return {
+            "total_billed": 0.0,
+            "total_due": 0.0,
+            "total_paid": 0.0,
+            "unpaid_count": 0,
+            "partial_count": 0,
+            "paid_count": 0,
+            "overpaid_count": 0,
+        }
+
+    total_paid = sum(m.paid_amount or 0.0 for m in confirmed)
+
+    # Batch-load linked bills, keeping latest per document_id
+    bill_doc_ids = {m.bill_document_id for m in confirmed}
+    bills = session.query(BillRecord).filter(BillRecord.document_id.in_(bill_doc_ids)).all()
+    bill_map: dict[int, BillRecord] = {}
+    for b in bills:
+        bill_map[b.document_id] = b
+
+    total_billed = 0.0
+    total_outstanding = 0.0
+    for m in confirmed:
+        bill = bill_map.get(m.bill_document_id)
+        balance = _bill_balance(bill)
+        if balance is not None:
+            total_billed += balance
+            total_outstanding += max(balance - (m.paid_amount or 0.0), 0.0)
+
+    status_counts = Counter(m.payment_status or "unpaid" for m in confirmed)
+    return {
+        "total_billed": total_billed,
+        "total_due": total_outstanding,
+        "total_paid": total_paid,
+        "unpaid_count": status_counts.get("unpaid", 0),
+        "partial_count": status_counts.get("partial", 0),
+        "paid_count": status_counts.get("paid", 0),
+        "overpaid_count": status_counts.get("overpaid", 0),
+    }

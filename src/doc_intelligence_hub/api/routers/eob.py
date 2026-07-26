@@ -19,15 +19,19 @@ from doc_intelligence_hub.modules.eob_matching.database import (
     MatchEvent,
     MatchRecord,
     MatchingRun,
+    PaymentRecord,
     add_match_event,
     get_benchmark_results,
     get_benchmark_run,
     get_match_events,
+    get_payments_for_match,
     get_previous_benchmark_results,
     get_session as get_db_session,
     init_db,
     last_successful_run,
     latest_benchmark_runs,
+    payment_summary,
+    record_payment,
     store_benchmark_result,
     store_benchmark_run,
 )
@@ -35,7 +39,7 @@ from doc_intelligence_hub.modules.eob_matching.enricher import EOBEnricher
 from doc_intelligence_hub.modules.eob_matching.extractor import extract_bill, extract_eob
 from doc_intelligence_hub.modules.eob_matching.llm_extractor import extract_bill_llm, extract_eob_llm
 from doc_intelligence_hub.modules.eob_matching.matcher import match_documents
-from doc_intelligence_hub.modules.eob_matching.models import DocumentType
+from doc_intelligence_hub.modules.eob_matching.models import DocumentType, PaymentRequest
 
 router = APIRouter(prefix="/api/eob", tags=["eob-matching"])
 
@@ -254,6 +258,9 @@ def _serialize_match(
             "procedures": m.breakdown_procedures,
         },
         "status": m.status,
+        "payment_status": m.payment_status or "unpaid",
+        "paid_amount": m.paid_amount or 0.0,
+        "paid_date": m.paid_date.isoformat() if m.paid_date else None,
         "linked_in_paperless": bool(m.linked_in_paperless),
         "eob_preview_url": f"{base_url}/documents/{m.eob_document_id}/details" if base_url else None,
         "bill_preview_url": f"{base_url}/documents/{m.bill_document_id}/details" if base_url else None,
@@ -1682,6 +1689,115 @@ async def bulk_update_eobs(body: BulkUpdateRequest):
     except Exception as exc:
         db.rollback()
         raise exc
+    finally:
+        db.close()
+
+
+# ------------------------------------------------------------------
+# ------------------------------------------------------------------
+# Payment tracking endpoints
+# ------------------------------------------------------------------
+
+
+@router.post("/matches/{match_id}/pay")
+async def pay_match(match_id: int, body: PaymentRequest) -> dict[str, Any]:
+    """Record a payment against a confirmed match."""
+    init_db()
+    db = get_db_session()
+    try:
+        match = db.query(MatchRecord).filter_by(id=match_id).first()
+        if not match:
+            raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
+        if match.status != "confirmed":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Match must be confirmed before recording payment (current status: {match.status})",
+            )
+
+        paid_date = None
+        if body.paid_date:
+            from dateutil.parser import parse as parse_date
+            try:
+                paid_date = parse_date(body.paid_date)
+            except (ValueError, TypeError):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid paid_date format: '{body.paid_date}'. Use ISO 8601 (e.g. 2024-03-15).",
+                )
+
+        payment = record_payment(
+            db,
+            match_id=match_id,
+            amount=body.amount,
+            paid_date=paid_date,
+            method=body.method,
+            notes=body.notes,
+        )
+
+        # Reload match for updated payment fields
+        db.refresh(match)
+        return {
+            "status": "ok",
+            "payment": {
+                "id": payment.id,
+                "match_id": payment.match_id,
+                "amount": payment.amount,
+                "paid_date": payment.paid_date.isoformat() if payment.paid_date else None,
+                "method": payment.method,
+                "notes": payment.notes,
+                "created_at": payment.created_at.isoformat() if payment.created_at else None,
+            },
+            "match_payment_status": match.payment_status,
+            "match_paid_amount": match.paid_amount,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while recording the payment.")
+    finally:
+        db.close()
+
+
+@router.get("/matches/{match_id}/payments")
+async def list_match_payments(match_id: int) -> dict[str, Any]:
+    """List all payments recorded against a match."""
+    init_db()
+    db = get_db_session()
+    try:
+        match = db.query(MatchRecord).filter_by(id=match_id).first()
+        if not match:
+            raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
+
+        payments = get_payments_for_match(db, match_id)
+        return {
+            "match_id": match_id,
+            "payment_status": match.payment_status or "unpaid",
+            "paid_amount": match.paid_amount or 0.0,
+            "payments": [
+                {
+                    "id": p.id,
+                    "amount": p.amount,
+                    "paid_date": p.paid_date.isoformat() if p.paid_date else None,
+                    "method": p.method,
+                    "notes": p.notes,
+                    "created_at": p.created_at.isoformat() if p.created_at else None,
+                }
+                for p in payments
+            ],
+        }
+    finally:
+        db.close()
+
+
+@router.get("/payments/summary")
+async def get_payment_summary() -> dict[str, Any]:
+    """Aggregate payment statistics across all confirmed matches."""
+    init_db()
+    db = get_db_session()
+    try:
+        summary = payment_summary(db)
+        return {"status": "ok", **summary}
     finally:
         db.close()
 

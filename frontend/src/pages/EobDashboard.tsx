@@ -217,6 +217,15 @@ export default function EobDashboard() {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [alertBusyId, setAlertBusyId] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [paymentSummary, setPaymentSummary] = useState<{
+    total_billed: number;
+    total_due: number;
+    total_paid: number;
+    unpaid_count: number;
+    partial_count: number;
+    paid_count: number;
+    overpaid_count: number;
+  } | null>(null);
   const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
   const [coverageTab, setCoverageTab] = useState<'insurance_company' | 'provider' | 'month'>('insurance_company');
 
@@ -253,6 +262,17 @@ export default function EobDashboard() {
       }
       const latestRun = runsRes.runs?.[0] ?? resultsRes?.run;
       setLastSyncedAt(latestRun?.finished_at ?? latestRun?.started_at ?? null);
+
+      // Fetch payment summary separately so dashboard still works if it fails
+      try {
+        const paymentSummaryRes = await endpoints.eob.paymentSummary() as {
+          total_billed: number; total_due: number; total_paid: number;
+          unpaid_count: number; partial_count: number; paid_count: number; overpaid_count: number;
+        };
+        setPaymentSummary(paymentSummaryRes);
+      } catch {
+        setPaymentSummary(null);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load EOB dashboard.';
       setError(message);
@@ -484,9 +504,15 @@ export default function EobDashboard() {
           />
           <StatCard
             title="Total due"
-            metric={formatCurrency(totalDue || null) === '—' ? '$0' : formatCurrency(totalDue)}
-            desc={`Across ${unmatched.length} unmatched bill${unmatched.length === 1 ? '' : 's'}`}
-            status={{ label: totalDue > 0 ? 'Outstanding' : 'Clear', tone: totalDue > 0 ? 'warning' : 'success' }}
+            metric={formatCurrency((paymentSummary?.total_due ?? totalDue) || null) === '—' ? '$0' : formatCurrency(paymentSummary?.total_due ?? totalDue)}
+            desc={paymentSummary ? `${paymentSummary.unpaid_count + paymentSummary.partial_count} unpaid confirmed match${paymentSummary.unpaid_count + paymentSummary.partial_count === 1 ? '' : 'es'}` : `Across ${unmatched.length} unmatched bill${unmatched.length === 1 ? '' : 's'}`}
+            status={{ label: (paymentSummary?.total_due ?? totalDue) > 0 ? 'Outstanding' : 'Clear', tone: (paymentSummary?.total_due ?? totalDue) > 0 ? 'warning' : 'success' }}
+          />
+          <StatCard
+            title="Total paid"
+            metric={formatCurrency(paymentSummary?.total_paid || null) === '—' ? '$0' : formatCurrency(paymentSummary?.total_paid ?? 0)}
+            desc={`${paymentSummary?.paid_count ?? 0} fully paid match${(paymentSummary?.paid_count ?? 0) === 1 ? '' : 'es'}`}
+            status={{ label: (paymentSummary?.paid_count ?? 0) > 0 ? 'Payments recorded' : 'None yet', tone: (paymentSummary?.paid_count ?? 0) > 0 ? 'success' : 'muted' }}
           />
           <StatCard
             title="Alerts"
