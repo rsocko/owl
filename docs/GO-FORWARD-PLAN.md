@@ -186,7 +186,6 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 |----------|-------|-------------|
 | P0 | #887 | Fix Statement Discovery bug |
 | P0 | #839 | Run EOB Matching LIVE — validate integration |
-| P0 | #795 | Use Bifrost virtual key (unblocks LLM in prod) |
 | — | — | Deploy to homelab, validate Paperless connectivity |
 
 **Exit Criteria:** Statement Tracker + EOB Matching both running against live Paperless, producing real results.
@@ -273,6 +272,7 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 |----------|-------|-------------|
 | P5 | #836 | Migrate DocIntel to its own repo |
 | P5 | #815 | Coordinate pipeline with Tagvico |
+| P5 | #795 | Use Bifrost virtual key (hardening — LLM auth already working) |
 | P5 | #816 | Evaluate Copilot SDK as AI provider |
 | P5 | #865 | DocType/Tag review |
 | P5 | #843 | Insurance coverage analysis |
@@ -321,4 +321,4 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 | Estimated timeline (Phases 0-4) | 10 weeks |
 | Estimated timeline (all phases) | 16+ weeks |
 | Quick Wins (can ship this week) | 5 issues |
-| Critical path blockers | #887 (bug), #839 (live validation), #795 (auth) |
+| Critical path blockers | #887 (bug), #839 (live validation) |
