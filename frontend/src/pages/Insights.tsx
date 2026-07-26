@@ -3,11 +3,11 @@ import { Badge, ErrorState, PageHeader, SkeletonLoader, StatCard, StatGrid, Toas
 import { endpoints } from '../lib/api';
 import '../styles/insights.css';
 
-/* ── Types ── */
+/* ── Types (exported for testing) ── */
 
-type ToastState = { message: string; tone: 'success' | 'error' };
+export type ToastState = { message: string; tone: 'success' | 'error' };
 
-type InsightItem = {
+export type InsightItem = {
   id: string | number;
   insight_type?: string | null;
   severity?: string | null;
@@ -23,7 +23,7 @@ type InsightItem = {
   metadata?: Record<string, unknown> | null;
 };
 
-type InsightEvidence = {
+export type InsightEvidence = {
   current_value?: number | null;
   previous_value?: number | null;
   average_value?: number | null;
@@ -36,25 +36,25 @@ type InsightEvidence = {
   trend_description?: string | null;
 };
 
-type HistoryPoint = { label: string; value: number; is_current?: boolean };
-type MoMCategory = { name: string; previous: number; current: number; change: number };
-type ComplianceItem = { name: string; status: string; detail?: string };
-type HighlightItem = { text: string; tone?: string; value?: string };
+export type HistoryPoint = { label: string; value: number; is_current?: boolean };
+export type MoMCategory = { name: string; previous: number; current: number; change: number };
+export type ComplianceItem = { name: string; status: string; detail?: string };
+export type HighlightItem = { text: string; tone?: string; value?: string };
 
-type InsightSummary = {
+export type InsightSummary = {
   total?: number;
   by_type?: Record<string, number>;
   by_severity?: Record<string, number>;
   new_count?: number;
 };
 
-type InsightsListResponse = {
+export type InsightsListResponse = {
   insights?: InsightItem[];
   total?: number;
 };
 
 /* Fallback types for alerts API */
-type AlertItem = {
+export type AlertItem = {
   id: number | string;
   alert_type?: string | null;
   severity?: string | null;
@@ -67,38 +67,38 @@ type AlertItem = {
   metadata?: Record<string, unknown> | null;
 };
 
-type AlertSummary = {
+export type AlertSummary = {
   total?: number;
   unacknowledged?: number;
   by_severity?: Record<string, number>;
   by_module?: Record<string, number>;
 };
 
-/* ── Helpers ── */
+/* ── Helpers (exported for testing) ── */
 
-function getErrorMessage(error: unknown) {
+export function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Something went wrong.';
 }
 
-function formatDate(value?: string | null) {
+export function formatDate(value?: string | null) {
   if (!value) return '—';
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function formatCurrency(value?: number | null) {
+export function formatCurrency(value?: number | null) {
   if (value == null) return '—';
   return value.toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-function changePctLabel(pct?: number | null): { text: string; tone: 'up' | 'down' | 'flat' } {
+export function changePctLabel(pct?: number | null): { text: string; tone: 'up' | 'down' | 'flat' } {
   if (pct == null || Math.abs(pct) < 1) return { text: '— 0%', tone: 'flat' };
   const arrow = pct > 0 ? '▲' : '▼';
   const sign = pct > 0 ? '+' : '';
   return { text: `${arrow} ${sign}${Math.round(pct)}%`, tone: pct > 0 ? 'up' : 'down' };
 }
 
-function insightIcon(type?: string | null): string {
+export function insightIcon(type?: string | null): string {
   switch (type) {
     case 'spend_summary': case 'anomaly': return '📊';
     case 'trend': return '📈';
@@ -108,7 +108,7 @@ function insightIcon(type?: string | null): string {
   }
 }
 
-function insightTypeTab(type?: string | null): string {
+export function insightTypeTab(type?: string | null): string {
   switch (type) {
     case 'spend_summary': case 'anomaly': case 'new_category': return 'anomalies';
     case 'trend': return 'trends';
@@ -118,7 +118,7 @@ function insightTypeTab(type?: string | null): string {
 }
 
 /** Convert an alert to an insight shape for the fallback path */
-function alertToInsight(alert: AlertItem): InsightItem {
+export function alertToInsight(alert: AlertItem): InsightItem {
   return {
     id: alert.id,
     insight_type: alert.alert_type ?? alert.module ?? 'alert',
@@ -240,7 +240,7 @@ function Highlights({ items }: { items: HighlightItem[] }) {
     <div className="highlights">
       {items.map((item, i) => (
         <div key={i} className="highlight-item">
-          <span className={`highlight-dot ${item.tone ?? 'neutral'}`} />
+          <span className={`highlight-dot ${['up', 'down', 'new', 'neutral'].includes(item.tone ?? '') ? item.tone : 'neutral'}`} />
           <span className="highlight-text">{item.text}</span>
           {item.value && <span className="highlight-value">{item.value}</span>}
         </div>
@@ -263,8 +263,6 @@ function InsightCardComponent({
   const ev = insight.evidence;
   const isNew = insight.status === 'new' || (!insight.acknowledged_at && !insight.archived_at);
   const isArchived = insight.status === 'archived' || Boolean(insight.archived_at);
-  const isViewed = !isNew && !isArchived;
-
   const badgeClass = isNew ? 'new' : isArchived ? 'archived' : 'viewed';
   const badgeLabel = isNew
     ? (ev?.change_pct != null && Math.abs(ev.change_pct) >= 10 ? changePctLabel(ev.change_pct).text : 'New')
@@ -362,7 +360,7 @@ function InsightCardComponent({
           <button
             className="insight-btn"
             onClick={() => onAcknowledge(insight.id)}
-            disabled={busyAction === `ack:${insight.id}`}
+            disabled={busyAction !== null}
           >
             {busyAction === `ack:${insight.id}` ? 'Saving…' : 'Acknowledge'}
           </button>
@@ -371,7 +369,7 @@ function InsightCardComponent({
           <button
             className="insight-btn"
             onClick={() => onArchive(insight.id)}
-            disabled={busyAction === `archive:${insight.id}`}
+            disabled={busyAction !== null}
           >
             {busyAction === `archive:${insight.id}` ? 'Saving…' : 'Archive'}
           </button>
@@ -431,6 +429,7 @@ export default function Insights() {
       } catch {
         // Fallback to alerts API
         const alertParams = new URLSearchParams({ limit: '100', resolved: 'false' });
+        if (params.has('date_from')) alertParams.set('date_from', params.get('date_from')!);
         const [alertSummary, alertList] = await Promise.all([
           endpoints.alerts.summary() as Promise<AlertSummary>,
           endpoints.alerts.list(alertParams.toString()) as Promise<{ alerts?: AlertItem[]; total?: number }>,
