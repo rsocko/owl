@@ -66,6 +66,7 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         "amount": a.amount,
         "urgency": a.urgency,
         "confidence": a.confidence,
+        "risk_score": a.risk_score,
         "status": a.status,
         "correspondent": a.correspondent,
         "ai_reasoning": a.ai_reasoning,

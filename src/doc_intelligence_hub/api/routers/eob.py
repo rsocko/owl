@@ -14,8 +14,11 @@ from doc_intelligence_hub.modules.eob_matching.classifier import classify_docume
 from doc_intelligence_hub.modules.eob_matching.database import (
     BillRecord,
     EOBRecord,
+    MatchEvent,
     MatchRecord,
     MatchingRun,
+    add_match_event,
+    get_match_events,
     get_session as get_db_session,
     init_db,
 )
@@ -312,7 +315,7 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
 
         # Persist match records
         for match in matches:
-            db.add(MatchRecord(
+            match_rec = MatchRecord(
                 run_id=run_record.id,
                 eob_document_id=int(match.eob_id),
                 bill_document_id=int(match.bill_id),
@@ -324,7 +327,22 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
                 breakdown_amount=match.breakdown.amount,
                 breakdown_procedures=match.breakdown.procedures,
                 status="candidate",
+            )
+            db.add(match_rec)
+            db.flush()  # populate match_rec.id
+            db.add(MatchEvent(
+                match_id=match_rec.id,
+                event_type="auto_matched",
+                actor="system",
+                detail=f"Auto-matched with {match.confidence.value} confidence ({match.score:.0f}%)",
             ))
+            if match.confidence.value in ("LOW", "MEDIUM"):
+                db.add(MatchEvent(
+                    match_id=match_rec.id,
+                    event_type="flagged",
+                    actor="system",
+                    detail=f"Flagged for review — {match.confidence.value.lower()} confidence",
+                ))
         db.commit()
 
         # Step 4: Write to Paperless (if enabled)
@@ -522,6 +540,13 @@ async def update_match(
         match.status = body.status
         if body.notes is not None:
             match.notes = body.notes
+        event_type_map = {"confirmed": "confirmed", "rejected": "rejected", "candidate": "reset"}
+        db.add(MatchEvent(
+            match_id=match_id,
+            event_type=event_type_map.get(body.status, body.status),
+            actor="user",
+            detail=f"Manually {body.status} by reviewer",
+        ))
         if body.status == "confirmed":
             match.confirmed_at = datetime.now(UTC)
 
@@ -546,6 +571,30 @@ async def update_match(
 
         paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
         return _serialize_match(match, paperless_url)
+    finally:
+        db.close()
+
+
+@router.get("/matches/{match_id}/history")
+async def match_history(match_id: int) -> dict[str, Any]:
+    """Return the audit-trail timeline for a single match."""
+    init_db()
+    db = get_db_session()
+    try:
+        events = get_match_events(db, match_id)
+        return {
+            "match_id": match_id,
+            "events": [
+                {
+                    "id": e.id,
+                    "event_type": e.event_type,
+                    "actor": e.actor,
+                    "detail": e.detail,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                }
+                for e in events
+            ],
+        }
     finally:
         db.close()
 
