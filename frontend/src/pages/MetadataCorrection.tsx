@@ -463,11 +463,11 @@ export default function MetadataCorrection() {
                   )}
 
                   {/* Source region info */}
-                  {correction?.source_region && (
+                  {correction?.source_region ? (
                     <div className="meta-source-region">
                       📐 Source region: {JSON.stringify(correction.source_region)}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               );
             })}
