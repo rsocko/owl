@@ -713,6 +713,7 @@ def _resolve_triage_item(triage_item_id: str, action: str, match_id: int) -> Non
             return
         if item.get("status") != "pending":
             return
+
         resolve_queue_item(triage_item_id, action, {"match_id": match_id})
     except Exception:
         pass  # Non-fatal: triage integration is best-effort
