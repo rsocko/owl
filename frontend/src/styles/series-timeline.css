@@ -1,0 +1,300 @@
+/* Series Timeline — horizontal document timeline visualization */
+
+/* ── Timeline Container ── */
+.st-root {
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 4px;
+  padding-top: 4px;
+}
+
+.st-root.st-compact {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* ── Legend ── */
+.st-legend {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: var(--muted, #6b7280);
+  flex-wrap: wrap;
+}
+
+.st-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.st-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.st-legend-gap {
+  background: transparent !important;
+  border: 2px dashed var(--danger, #e74c3c);
+}
+
+/* ── Month axis ── */
+.st-month-axis {
+  display: flex;
+  padding-left: 140px;
+  margin-bottom: 6px;
+}
+
+.st-compact .st-month-axis {
+  padding-left: 0;
+}
+
+.st-month-label {
+  flex: 1;
+  text-align: center;
+  font-size: 10px;
+  color: var(--muted, #6b7280);
+  min-width: 36px;
+}
+
+/* ── Timeline rows ── */
+.st-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.st-compact .st-row {
+  margin-bottom: 4px;
+}
+
+.st-row-label {
+  width: 140px;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.st-compact .st-row-label {
+  display: none;
+}
+
+.st-row-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Track (the bar) ── */
+.st-track {
+  flex: 1;
+  height: 38px;
+  position: relative;
+  background: #f8f9fc;
+  border-radius: 6px;
+  border: 1px solid var(--border, #e0e3ea);
+  min-width: 200px;
+}
+
+.st-compact .st-track {
+  height: 28px;
+  min-width: 120px;
+}
+
+/* ── Document markers ── */
+.st-doc {
+  position: absolute;
+  top: 4px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  z-index: 1;
+}
+
+.st-compact .st-doc {
+  top: 2px;
+  width: 22px;
+  height: 22px;
+  font-size: 9px;
+}
+
+.st-doc:hover {
+  transform: scale(1.18);
+  z-index: 3;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.st-doc.st-selected {
+  outline: 2px solid var(--text, #1a1d2e);
+  outline-offset: 1px;
+  z-index: 2;
+}
+
+.st-doc.st-gap {
+  background: transparent !important;
+  border: 2px dashed var(--danger, #e74c3c);
+  color: var(--danger, #e74c3c);
+  cursor: default;
+}
+
+/* ── Hover tooltip ── */
+.st-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text, #1a1d2e);
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  z-index: 10;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.st-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--text, #1a1d2e);
+}
+
+.st-tooltip-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.st-tooltip-meta {
+  color: #a0a7b4;
+  font-size: 10px;
+}
+
+/* ── Account badges (used in doc list) ── */
+.st-account-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  letter-spacing: 0.2px;
+}
+
+.st-account-badge-letter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 800;
+  color: #fff;
+}
+
+/* ── "No documents" empty state ── */
+.st-empty {
+  text-align: center;
+  padding: 16px;
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+}
+
+/* ── Split preview side-by-side layout ── */
+.st-split-timelines {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  align-items: start;
+  margin-top: 8px;
+}
+
+.st-split-timelines-arrow {
+  font-size: 20px;
+  color: var(--muted, #6b7280);
+  align-self: center;
+  text-align: center;
+  font-weight: 700;
+}
+
+.st-split-timeline-panel {
+  min-width: 0;
+}
+
+.st-split-timeline-label {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── Merge timelines ── */
+.st-merge-timelines {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.st-merge-timeline-panel {
+  border: 1px solid var(--border, #e0e3ea);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.st-merge-timeline-label {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.st-merge-merged-preview {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.st-merge-merged-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e40af;
+  margin-bottom: 8px;
+}
+
+/* ── Duplicate period warning in merge ── */
+.st-doc.st-duplicate {
+  outline: 2px solid var(--danger, #e74c3c);
+  outline-offset: 1px;
+}

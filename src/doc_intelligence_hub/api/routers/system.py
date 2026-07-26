@@ -217,15 +217,26 @@ async def document_metadata(request: Request, document_id: int) -> dict[str, Any
     client = make_paperless_client(request, timeout=15.0)
     doc = await client.get_document(document_id)
     content = await client.get_document_content(document_id)
+
+    # Build Paperless deep link
+    paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
+    paperless_doc_url = f"{paperless_url}/documents/{document_id}/details" if paperless_url else None
+
     return {
         "id": doc["id"],
         "title": doc.get("title", ""),
+        "original_file_name": doc.get("original_file_name", doc.get("title", "")),
         "correspondent": doc.get("correspondent"),
         "tags": doc.get("tags", []),
+        "page_count": doc.get("page_count"),
         "created": doc.get("created"),
         "added": doc.get("added"),
-        "content": content[:3000],  # First 3000 chars for preview
+        "content": content[:3000],
         "content_length": len(content),
+        "paperless_url": paperless_doc_url,
+        "thumbnail_url": f"/api/statements/documents/{document_id}/thumb",
+        "preview_url": f"/api/statements/documents/{document_id}/preview",
+        "download_url": f"/api/documents/{document_id}/download",
     }
 
 
