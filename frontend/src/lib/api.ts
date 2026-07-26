@@ -87,6 +87,8 @@ export const endpoints = {
     matchDetail: (matchId: string) => api.get(`/api/eob/matches/${matchId}/detail`),
     recordDetail: (docId: string) => api.get(`/api/eob/records/${docId}`),
     unmatched: () => api.get('/api/eob/unmatched'),
+    bulkUpdate: (body: { ids: string[]; action: 'mark_orphan' | 'mark_paid' }) =>
+      api.post('/api/eob/bulk-update', body),
     purgeStale: () => api.post('/api/eob/purge-stale'),
     benchmark: (body?: unknown) => api.post('/api/eob/benchmark', body),
   },

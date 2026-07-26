@@ -69,6 +69,7 @@ class EOBRecord(Base):
     total_plan_pays = Column(Float, nullable=True)
     total_patient_responsibility = Column(Float, nullable=True)
     services_json = Column(Text, nullable=True)
+    status = Column(String, default="unmatched")  # unmatched, orphan, paid
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     last_processed_at = Column(DateTime, nullable=True)
 
@@ -190,6 +191,7 @@ def _migrate_missing_columns(engine):
             ("notes", "TEXT"),
         ],
         "eob_records": [
+            ("status", "TEXT DEFAULT 'unmatched'"),
             ("last_processed_at", "DATETIME"),
         ],
         "bill_records": [
