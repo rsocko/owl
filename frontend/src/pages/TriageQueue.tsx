@@ -145,7 +145,6 @@ export default function TriageQueue() {
   const [toast, setToast] = useState<ToastState>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [populating, setPopulating] = useState(false);
-  const undoTimerRef = useRef<number | null>(null);
 
   // ------------------------------------------------------------------
   // Data loading

@@ -2,20 +2,20 @@
 
 Endpoints:
     GET    /api/triage/queue           — List queue items (with filters)
+    POST   /api/triage/queue/populate  — Trigger queue population scan
     GET    /api/triage/queue/{id}      — Single item detail
     POST   /api/triage/queue/{id}/resolve — Resolve item
     POST   /api/triage/queue/{id}/defer   — Defer item
     POST   /api/triage/queue/{id}/dismiss — Dismiss item
     POST   /api/triage/queue/{id}/undo    — Undo resolution
     GET    /api/triage/stats           — Counts by type and status
-    POST   /api/triage/queue/populate  — Trigger queue population scan
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.modules.triage.database import (
@@ -29,6 +29,11 @@ from doc_intelligence_hub.modules.triage.database import (
 )
 
 router = APIRouter(prefix="/api/triage", tags=["triage"])
+
+# Valid enum values for input validation
+_VALID_ITEM_TYPES = {"eob_match_review", "grouping_anomaly", "orphan_document"}
+_VALID_STATUSES = {"pending", "deferred", "resolved", "dismissed"}
+_VALID_SORTS = {"priority", "created_at", "type"}
 
 
 # ------------------------------------------------------------------
@@ -52,21 +57,39 @@ class DeferRequest(BaseModel):
 
 @router.get("/queue")
 async def list_queue(
-    type: str | None = None,
-    status: str | None = None,
-    sort: str = "priority",
-    limit: int = 50,
-    offset: int = 0,
+    type: str | None = Query(default=None, description="Filter by item type"),
+    status: str | None = Query(default=None, description="Filter by status"),
+    sort: str = Query(default="priority", description="Sort field"),
+    limit: int = Query(default=50, ge=1, le=200, description="Max items to return"),
+    offset: int = Query(default=0, ge=0, description="Pagination offset"),
 ) -> dict[str, Any]:
     """List triage queue items with optional filters."""
+    if type and type not in _VALID_ITEM_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid type '{type}'. Must be one of: {', '.join(sorted(_VALID_ITEM_TYPES))}")
+    if status and status not in _VALID_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid status '{status}'. Must be one of: {', '.join(sorted(_VALID_STATUSES))}")
+    if sort not in _VALID_SORTS:
+        raise HTTPException(status_code=400, detail=f"Invalid sort '{sort}'. Must be one of: {', '.join(sorted(_VALID_SORTS))}")
+
     items = list_queue_items(
         item_type=type,
         status=status,
         sort=sort,
-        limit=min(limit, 200),
+        limit=limit,
         offset=offset,
     )
     return {"items": items, "count": len(items), "offset": offset, "limit": limit}
+
+
+# NOTE: /queue/populate MUST be registered BEFORE /queue/{item_id} to avoid
+# FastAPI matching "populate" as an item_id path parameter.
+@router.post("/queue/populate")
+async def populate() -> dict[str, Any]:
+    """Trigger a queue population scan to auto-flag items for triage."""
+    from doc_intelligence_hub.modules.triage.populate import populate_queue
+
+    result = populate_queue()
+    return result
 
 
 @router.get("/queue/{item_id}")
@@ -119,12 +142,3 @@ async def undo_item(item_id: str) -> dict[str, Any]:
 async def stats() -> dict[str, Any]:
     """Get queue statistics — counts by type and status."""
     return get_queue_stats()
-
-
-@router.post("/queue/populate")
-async def populate() -> dict[str, Any]:
-    """Trigger a queue population scan to auto-flag items for triage."""
-    from doc_intelligence_hub.modules.triage.populate import populate_queue
-
-    result = populate_queue()
-    return result
