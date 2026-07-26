@@ -787,3 +787,74 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* Active filter pills (UX-02) */
+.eob-active-filters {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.eob-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  background: var(--accent-subtle, rgba(56, 132, 255, 0.1));
+  color: var(--accent, #3884ff);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.eob-filter-pill-clear {
+  all: unset;
+  cursor: pointer;
+  font-size: 0.7rem;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+.eob-filter-pill-clear:hover {
+  opacity: 1;
+}
+
+.eob-filter-pill-clear:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent, #3884ff);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.eob-filter-clear-all {
+  all: unset;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-decoration: underline;
+}
+
+.eob-filter-clear-all:hover {
+  color: var(--accent);
+}
+
+.eob-filter-clear-all:focus-visible {
+  color: var(--accent);
+  outline: 2px solid var(--accent, #3884ff);
+  outline-offset: 2px;
+}
+
+/* Undo toast positioning */
+.undo-toast {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Workspace tab container */
+.eob-workspace-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}

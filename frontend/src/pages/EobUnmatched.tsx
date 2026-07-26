@@ -17,6 +17,7 @@ import {
 } from '../components/ui';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
+import ConfirmModal from '../components/ConfirmModal';
 import '../styles/eob-pages.css';
 
 interface UnmatchedEobItem {
@@ -50,7 +51,6 @@ interface EobMatchesResponse {
 }
 
 type TabKey = 'all' | 'eobs' | 'bills' | 'orphaned';
-type TypeFilter = 'all' | 'eob' | 'bill';
 type AgeFilter = 'any' | 'under7' | '7to30' | 'over30';
 type SortKey = 'newest' | 'oldest' | 'amount-desc' | 'amount-asc';
 
@@ -103,12 +103,21 @@ function inferDocType(item: UnmatchedEobItem): 'eob' | 'bill' {
   return item.patient_responsibility != null ? 'eob' : 'bill';
 }
 
-export default function EobUnmatched() {
+export interface EobUnmatchedProps {
+  /** When true, skip page header (rendered by EobWorkspace). */
+  embedded?: boolean;
+  /** Navigate to match review in workspace context. */
+  onNavigateMatch?: (matchId: number) => void;
+}
+
+export default function EobUnmatched({
+  embedded = false,
+  onNavigateMatch,
+}: EobUnmatchedProps = {}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<UnmatchedEobItem[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>('all');
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [ageFilter, setAgeFilter] = useState<AgeFilter>('any');
   const [sortKey, setSortKey] = useState<SortKey>('newest');
   const [searchQuery, setSearchQuery] = useState('');
@@ -116,6 +125,7 @@ export default function EobUnmatched() {
   const [suggestedMatches, setSuggestedMatches] = useState<SuggestedMatch[]>([]);
   const [toast, setToast] = useState<{ message: string; tone?: 'success' | 'error' } | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [pendingBulkAction, setPendingBulkAction] = useState<'mark_orphan' | null>(null);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
@@ -142,14 +152,10 @@ export default function EobUnmatched() {
   const filteredItems = useMemo(() => {
     let result = items;
 
-    // Tab filter
+    // Tab filter (sole document-type filter per UX-02)
     if (activeTab === 'eobs') result = result.filter((item) => inferDocType(item) === 'eob');
     else if (activeTab === 'bills') result = result.filter((item) => inferDocType(item) === 'bill');
     else if (activeTab === 'orphaned') result = result.filter((item) => item.orphaned === true);
-
-    // Type dropdown filter
-    if (typeFilter === 'eob') result = result.filter((item) => inferDocType(item) === 'eob');
-    else if (typeFilter === 'bill') result = result.filter((item) => inferDocType(item) === 'bill');
 
     // Age dropdown filter
     if (ageFilter !== 'any') {
@@ -198,7 +204,7 @@ export default function EobUnmatched() {
     });
 
     return result;
-  }, [items, activeTab, typeFilter, ageFilter, sortKey, searchQuery]);
+  }, [items, activeTab, ageFilter, sortKey, searchQuery]);
 
   const tabCounts = useMemo(() => ({
     all: items.length,
@@ -274,7 +280,7 @@ export default function EobUnmatched() {
   if (loading) {
     return (
       <>
-        <PageHeader title="Unmatched Documents" desc="EOB and bill documents that do not yet have a confirmed match." />
+        {!embedded && <PageHeader title="Unmatched Documents" desc="EOB and bill documents that do not yet have a confirmed match." />}
         <SkeletonLoader variant="table" rows={6} />
       </>
     );
@@ -283,7 +289,7 @@ export default function EobUnmatched() {
   if (error) {
     return (
       <>
-        <PageHeader title="Unmatched Documents" desc="EOB and bill documents that do not yet have a confirmed match." />
+        {!embedded && <PageHeader title="Unmatched Documents" desc="EOB and bill documents that do not yet have a confirmed match." />}
         <ErrorState message={error} onRetry={() => void loadItems()} />
       </>
     );
@@ -291,22 +297,33 @@ export default function EobUnmatched() {
 
   return (
     <>
-      <PageHeader
-        title="Unmatched Documents"
-        desc={
-          <div className="eob-meta-row">
-            <Link to="/eob" className="eob-link">
-              ← Back to dashboard
-            </Link>
-            <span>These documents have no confirmed claim/bill link yet.</span>
-          </div>
-        }
-        actions={
-          <div className="btn-group">
+      {!embedded && (
+        <PageHeader
+          title="Unmatched Documents"
+          desc={
+            <div className="eob-meta-row">
+              <Link to="/eob" className="eob-link">
+                ← Back to dashboard
+              </Link>
+              <span>These documents have no confirmed claim/bill link yet.</span>
+            </div>
+          }
+          actions={
+            <div className="btn-group">
+              <Button onClick={() => void loadItems()}>Refresh</Button>
+            </div>
+          }
+        />
+      )}
+
+      {embedded && (
+        <div className="eob-meta-row" style={{ marginBottom: 8 }}>
+          <span className="eob-table-secondary">These documents have no confirmed claim/bill link yet.</span>
+          <div style={{ marginLeft: 'auto' }}>
             <Button onClick={() => void loadItems()}>Refresh</Button>
           </div>
-        }
-      />
+        </div>
+      )}
 
       <div className="eob-page-stack">
         <StatGrid>
@@ -329,6 +346,18 @@ export default function EobUnmatched() {
           />
         </StatGrid>
 
+        {/* Tabs — sole document-type filter (UX-02: removed overlapping type dropdown) */}
+        <Tabs
+          active={activeTab}
+          onChange={(key) => setActiveTab(key as TabKey)}
+          tabs={[
+            { key: 'all', label: `All (${tabCounts.all})` },
+            { key: 'eobs', label: `EOBs (${tabCounts.eobs})` },
+            { key: 'bills', label: `Bills (${tabCounts.bills})` },
+            { key: 'orphaned', label: `Orphaned (${tabCounts.orphaned})` },
+          ]}
+        />
+
         {/* Search & Filter Bar */}
         <Card title="Search & filters">
           <div className="eob-card-stack">
@@ -340,14 +369,6 @@ export default function EobUnmatched() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
-              <div className="eob-filter-group">
-                <span className="eob-filter-label">Type:</span>
-                <select className="eob-select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}>
-                  <option value="all">All Documents</option>
-                  <option value="eob">EOBs Only</option>
-                  <option value="bill">Bills Only</option>
-                </select>
-              </div>
               <div className="eob-filter-group">
                 <span className="eob-filter-label">Age:</span>
                 <select className="eob-select" value={ageFilter} onChange={(e) => setAgeFilter(e.target.value as AgeFilter)}>
@@ -367,20 +388,49 @@ export default function EobUnmatched() {
                 </select>
               </div>
             </div>
+
+            {/* Active filter pills (UX-02) */}
+            {(activeTab !== 'all' || ageFilter !== 'any' || searchQuery.trim() || sortKey !== 'newest') && (
+              <div className="eob-active-filters">
+                {activeTab !== 'all' && (
+                  <span className="eob-filter-pill">
+                    {activeTab === 'eobs' ? 'EOBs' : activeTab === 'bills' ? 'Bills' : 'Orphaned'}
+                    <button className="eob-filter-pill-clear" onClick={() => setActiveTab('all')} aria-label="Clear tab filter">✕</button>
+                  </span>
+                )}
+                {ageFilter !== 'any' && (
+                  <span className="eob-filter-pill">
+                    {ageFilter === 'under7' ? '< 7 days' : ageFilter === '7to30' ? '7–30 days' : '> 30 days'}
+                    <button className="eob-filter-pill-clear" onClick={() => setAgeFilter('any')} aria-label="Clear age filter">✕</button>
+                  </span>
+                )}
+                {searchQuery.trim() && (
+                  <span className="eob-filter-pill">
+                    Search: "{searchQuery.trim()}"
+                    <button className="eob-filter-pill-clear" onClick={() => setSearchQuery('')} aria-label="Clear search">✕</button>
+                  </span>
+                )}
+                {sortKey !== 'newest' && (
+                  <span className="eob-filter-pill">
+                    {sortKey === 'oldest' ? 'Oldest first' : sortKey === 'amount-desc' ? 'Amount ↓' : 'Amount ↑'}
+                    <button className="eob-filter-pill-clear" onClick={() => setSortKey('newest')} aria-label="Clear sort">✕</button>
+                  </span>
+                )}
+                <button
+                  className="eob-filter-clear-all"
+                  onClick={() => {
+                    setActiveTab('all');
+                    setAgeFilter('any');
+                    setSearchQuery('');
+                    setSortKey('newest');
+                  }}
+                >
+                  Clear all filters
+                </button>
+              </div>
+            )}
           </div>
         </Card>
-
-        {/* Tabs */}
-        <Tabs
-          active={activeTab}
-          onChange={(key) => setActiveTab(key as TabKey)}
-          tabs={[
-            { key: 'all', label: `All (${tabCounts.all})` },
-            { key: 'eobs', label: `EOBs (${tabCounts.eobs})` },
-            { key: 'bills', label: `Bills (${tabCounts.bills})` },
-            { key: 'orphaned', label: `Orphaned (${tabCounts.orphaned})` },
-          ]}
-        />
 
         <Card title="Documents waiting for manual match">
           {filteredItems.length ? (
@@ -477,7 +527,7 @@ export default function EobUnmatched() {
                     <span>{selectedIds.size} selected</span>
                   </div>
                   <div className="eob-bulk-bar-right">
-                    <Button size="sm" variant="ghost" disabled={busyKey !== null} onClick={() => void bulkUpdate('mark_orphan')}>
+                    <Button size="sm" variant="ghost" disabled={busyKey !== null} onClick={() => setPendingBulkAction('mark_orphan')}>
                       Mark as Orphan
                     </Button>
                     <Button size="sm" variant="ghost" disabled={busyKey !== null} onClick={() => void bulkUpdate('mark_paid')}>
@@ -536,9 +586,13 @@ export default function EobUnmatched() {
                       {diff > 0 ? `Amount differs by ${formatCurrency(diff)}` : 'Dates / provider close'}
                     </div>
                     <div className="eob-suggested-actions">
-                      <Link to={`/eob/matches/${sm.id}`}>
-                        <Button size="sm" variant="ghost">Review →</Button>
-                      </Link>
+                      {onNavigateMatch ? (
+                        <Button size="sm" variant="ghost" onClick={() => onNavigateMatch(sm.id)}>Review →</Button>
+                      ) : (
+                        <Link to={`/eob/matches/${sm.id}`}>
+                          <Button size="sm" variant="ghost">Review →</Button>
+                        </Link>
+                      )}
                     </div>
                   </div>
                 );
@@ -564,6 +618,26 @@ export default function EobUnmatched() {
       </div>
 
       {toast && <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />}
+
+      {/* Bulk orphan confirmation modal (destructive per UX-03) */}
+      <ConfirmModal
+        open={pendingBulkAction === 'mark_orphan'}
+        title="Mark documents as orphan?"
+        description={
+          <>
+            This will mark <strong>{selectedIds.size} document{selectedIds.size === 1 ? '' : 's'}</strong> as orphaned.
+            Orphaned documents are removed from the matching queue and may require manual intervention to restore.
+          </>
+        }
+        confirmLabel={`Mark ${selectedIds.size} as orphan`}
+        confirmVariant="danger"
+        busy={busyKey === 'bulk-mark_orphan'}
+        onConfirm={() => {
+          setPendingBulkAction(null);
+          void bulkUpdate('mark_orphan');
+        }}
+        onCancel={() => setPendingBulkAction(null)}
+      />
     </>
   );
 }
