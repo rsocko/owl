@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import (
     Column,
@@ -17,7 +17,6 @@ from sqlalchemy import (
     Text,
     create_engine,
     func,
-    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -36,12 +35,12 @@ class TriageQueueItem(Base):
     __tablename__ = "triage_queue"
 
     id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex[:12])
-    item_type = Column(String, nullable=False)  # 'eob_match_review', 'grouping_anomaly', 'orphan_document'
+    item_type = Column(String, nullable=False, index=True)  # 'eob_match_review', 'grouping_anomaly', 'orphan_document'
     priority = Column(Integer, default=50)  # 0-100, higher = more urgent
-    status = Column(String, default="pending")  # 'pending', 'deferred', 'resolved', 'dismissed'
+    status = Column(String, default="pending", index=True)  # 'pending', 'deferred', 'resolved', 'dismissed'
     source = Column(String, nullable=False)  # 'auto_flag', 'user_request', 'scheduled_scan'
     target_type = Column(String, nullable=False)  # 'eob_match', 'statement_series', 'document'
-    target_id = Column(String, nullable=False)
+    target_id = Column(String, nullable=False, index=True)
     reason = Column(Text, nullable=True)
     metadata_json = Column("metadata", Text, nullable=True)  # JSON blob
     deferred_until = Column(DateTime, nullable=True)
@@ -75,6 +74,11 @@ def set_db_url(url: str) -> None:
     global _db_url, _engine
     _db_url = url
     _engine = None
+
+
+def configure(url: str) -> None:
+    """Configure the database URL (alias for set_db_url, matching EOB module pattern)."""
+    set_db_url(url)
 
 
 def get_engine():
