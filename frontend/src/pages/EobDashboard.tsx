@@ -191,6 +191,14 @@ export default function EobDashboard() {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [alertBusyId, setAlertBusyId] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [paymentSummary, setPaymentSummary] = useState<{
+    total_due: number;
+    total_paid: number;
+    unpaid_count: number;
+    partial_count: number;
+    paid_count: number;
+    overpaid_count: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -202,13 +210,17 @@ export default function EobDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [resultsRes, runsRes, matchesRes, unmatchedRes, checkRes, alertsRes] = await Promise.all([
+      const [resultsRes, runsRes, matchesRes, unmatchedRes, checkRes, alertsRes, paymentSummaryRes] = await Promise.all([
         endpoints.eob.results() as Promise<EobResultsResponse>,
         endpoints.eob.runs() as Promise<EobRunsResponse>,
         endpoints.eob.matches('limit=8') as Promise<EobMatchesResponse>,
         endpoints.eob.unmatched() as Promise<EobUnmatchedItem[]>,
         endpoints.eob.check() as Promise<EobCheckResponse>,
         endpoints.alerts.list('module=eob&resolved=false&limit=5') as Promise<AlertsResponse>,
+        endpoints.eob.paymentSummary() as Promise<{
+          total_due: number; total_paid: number;
+          unpaid_count: number; partial_count: number; paid_count: number; overpaid_count: number;
+        }>,
       ]);
       setResults(resultsRes);
       setRuns(runsRes.runs ?? []);
@@ -216,6 +228,7 @@ export default function EobDashboard() {
       setUnmatched(Array.isArray(unmatchedRes) ? unmatchedRes : []);
       setCheck(checkRes);
       setAlerts(Array.isArray(alertsRes.alerts) ? alertsRes.alerts : []);
+      setPaymentSummary(paymentSummaryRes);
       const latestRun = runsRes.runs?.[0] ?? resultsRes?.run;
       setLastSyncedAt(latestRun?.finished_at ?? latestRun?.started_at ?? null);
     } catch (err) {
@@ -449,9 +462,15 @@ export default function EobDashboard() {
           />
           <StatCard
             title="Total due"
-            metric={formatCurrency(totalDue || null) === '—' ? '$0' : formatCurrency(totalDue)}
-            desc={`Across ${unmatched.length} unmatched bill${unmatched.length === 1 ? '' : 's'}`}
-            status={{ label: totalDue > 0 ? 'Outstanding' : 'Clear', tone: totalDue > 0 ? 'warning' : 'success' }}
+            metric={formatCurrency((paymentSummary?.total_due ?? totalDue) || null) === '—' ? '$0' : formatCurrency(paymentSummary?.total_due ?? totalDue)}
+            desc={paymentSummary ? `${paymentSummary.unpaid_count + paymentSummary.partial_count} unpaid confirmed match${paymentSummary.unpaid_count + paymentSummary.partial_count === 1 ? '' : 'es'}` : `Across ${unmatched.length} unmatched bill${unmatched.length === 1 ? '' : 's'}`}
+            status={{ label: (paymentSummary?.total_due ?? totalDue) > 0 ? 'Outstanding' : 'Clear', tone: (paymentSummary?.total_due ?? totalDue) > 0 ? 'warning' : 'success' }}
+          />
+          <StatCard
+            title="Total paid"
+            metric={formatCurrency(paymentSummary?.total_paid || null) === '—' ? '$0' : formatCurrency(paymentSummary?.total_paid ?? 0)}
+            desc={`${paymentSummary?.paid_count ?? 0} fully paid match${(paymentSummary?.paid_count ?? 0) === 1 ? '' : 'es'}`}
+            status={{ label: (paymentSummary?.paid_count ?? 0) > 0 ? 'Payments recorded' : 'None yet', tone: (paymentSummary?.paid_count ?? 0) > 0 ? 'success' : 'muted' }}
           />
           <StatCard
             title="Alerts"

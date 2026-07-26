@@ -18,6 +18,13 @@ class MatchConfidence(str, Enum):
     LOW = "LOW"
 
 
+class PaymentStatus(str, Enum):
+    UNPAID = "unpaid"
+    PARTIAL = "partial"
+    PAID = "paid"
+    OVERPAID = "overpaid"
+
+
 class ClassificationResult(BaseModel):
     type: DocumentType
     confidence_score: float = 0.0
@@ -79,3 +86,22 @@ class MatchResult(BaseModel):
     confidence: MatchConfidence
     breakdown: MatchBreakdown
     matched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    payment_status: PaymentStatus = PaymentStatus.UNPAID
+    paid_amount: float = 0.0
+    paid_date: datetime | None = None
+
+
+class PaymentRequest(BaseModel):
+    amount: float = Field(..., gt=0, description="Payment amount in dollars")
+    paid_date: str | None = Field(default=None, description="Payment date (ISO format). Defaults to now.")
+    method: str | None = Field(default=None, description="Payment method (e.g. check, online, insurance)")
+    notes: str | None = Field(default=None, description="Optional notes about this payment")
+
+
+class PaymentSummaryResponse(BaseModel):
+    total_due: float = 0.0
+    total_paid: float = 0.0
+    unpaid_count: int = 0
+    partial_count: int = 0
+    paid_count: int = 0
+    overpaid_count: int = 0
