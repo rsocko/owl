@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # Safety
     write_to_paperless: bool = Field(default=True)
-    rate_limit_delay: float = Field(default=1.0)
+    rate_limit_delay: float = Field(default=0.25)
 
     # Timeouts
     llm_timeout_seconds: float = Field(default=60.0)
