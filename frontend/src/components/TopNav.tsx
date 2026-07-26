@@ -3,10 +3,12 @@ import { useTheme } from '../hooks/useTheme';
 
 const NAV_LINKS: { to: string; label: string }[] = [
   { to: '/', label: 'Overview' },
+  { to: '/dashboard-view', label: 'Dashboard' },
   { to: '/statements', label: 'Statements' },
   { to: '/eob', label: 'EOB Matching' },
   { to: '/action-queue', label: 'Action Queue' },
   { to: '/triage', label: 'Triage' },
+  { to: '/corrections', label: 'Corrections' },
   { to: '/insights', label: 'Insights' },
   { to: '/history', label: 'History' },
   { to: '/orphans', label: 'Orphans & Dupes' },

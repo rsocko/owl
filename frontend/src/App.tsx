@@ -1,6 +1,8 @@
 import { HashRouter, Route, Routes } from 'react-router-dom';
 import { TopNav } from './components/TopNav';
 import OverviewDashboard from './pages/OverviewDashboard';
+import DashboardView from './pages/DashboardView';
+import CorrectionHistory from './pages/CorrectionHistory';
 import Statements from './pages/Statements';
 import StatementSeriesDetail from './pages/StatementSeriesDetail';
 import EobDashboard from './pages/EobDashboard';
@@ -25,6 +27,8 @@ function App() {
         <main className="app-main">
           <Routes>
             <Route path="/" element={<OverviewDashboard />} />
+            <Route path="/dashboard-view" element={<DashboardView />} />
+            <Route path="/corrections" element={<CorrectionHistory />} />
             <Route path="/statements" element={<Statements />} />
             <Route path="/statements/:seriesId" element={<StatementSeriesDetail />} />
             <Route path="/eob" element={<EobDashboard />} />

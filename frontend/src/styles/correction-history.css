@@ -1,0 +1,161 @@
+/* Correction History — chronological events with diffs and sync badges */
+
+.ch-integration-note {
+  background: var(--bg-accent, #eef6ff);
+  border: 1px solid var(--border-accent, #bfdbfe);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 0.82rem;
+  color: var(--text-accent, #1e40af);
+  line-height: 1.5;
+}
+
+.ch-integration-note code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.78rem;
+}
+
+/* List of entries */
+.ch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ch-entry {
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.ch-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.ch-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.ch-icon.match { background: #d1fae5; }
+.ch-icon.reject { background: #fde8e8; }
+.ch-icon.merge { background: #ede9fe; }
+.ch-icon.meta { background: #dbeafe; }
+.ch-icon.orphan { background: #fef3c7; }
+.ch-icon.split { background: #fce7f3; }
+
+.ch-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  flex: 1;
+}
+
+.ch-time {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.ch-body {
+  margin-left: 42px;
+}
+
+.ch-detail {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+
+/* Before/after diff */
+.ch-diff {
+  background: var(--bg-subtle, #f8f9fc);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.75rem;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  margin-bottom: 6px;
+}
+
+.ch-diff-row {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  flex-wrap: wrap;
+}
+
+.ch-diff-label {
+  width: 90px;
+  font-weight: 600;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.ch-diff-old {
+  color: var(--danger, #e74c3c);
+  text-decoration: line-through;
+}
+
+.ch-diff-new {
+  color: var(--success, #2ecc71);
+  font-weight: 600;
+}
+
+.ch-diff-arrow {
+  color: var(--text-muted);
+}
+
+/* Sync status badges */
+.ch-sync-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.ch-sync-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.ch-sync-badge.synced { background: #d1fae5; color: #065f46; }
+.ch-sync-badge.pending { background: #fef3c7; color: #92400e; }
+.ch-sync-badge.audit { background: #dbeafe; color: #1e40af; }
+
+.ch-sync-time {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+/* Undo button */
+.ch-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+}
+
+.ch-undo {
+  font-size: 0.72rem;
+  color: var(--accent, #3498db);
+  cursor: pointer;
+  font-weight: 600;
+  border: none;
+  background: none;
+  text-decoration: underline;
+  padding: 0;
+}
+.ch-undo:hover { opacity: 0.8; }
+.ch-undo:disabled { opacity: 0.5; cursor: not-allowed; }

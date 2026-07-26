@@ -208,4 +208,20 @@ export const endpoints = {
     writeback: (docId: string | number) => api.post(`/api/metadata/${docId}/writeback`),
     corrections: (params?: string) => api.get(`/api/metadata/corrections${params ? `?${params}` : ''}`),
   },
+  dashboard: {
+    get: () => api.get('/api/triage/dashboard'),
+    corrections: (params?: string) => api.get(`/api/triage/corrections${params ? `?${params}` : ''}`),
+    undoCorrection: (eventId: string) => api.post(`/api/triage/corrections/${eventId}/undo`),
+    notificationConfig: () => api.get('/api/triage/notifications/config'),
+    updateNotificationConfig: (body: { channel: string; enabled: boolean; config?: unknown }) =>
+      api.put('/api/triage/notifications/config', body),
+  },
+  extraction: {
+    patterns: () => api.get('/api/extraction/account-numbers/patterns'),
+    extractText: (body: { text: string }) => api.post('/api/extraction/account-numbers/extract-text', body),
+    extractDocument: (body: { document_id: number; write_to_paperless?: boolean }) =>
+      api.post('/api/extraction/account-numbers/extract', body),
+    backfill: (body: { document_ids?: number[]; write_to_paperless?: boolean; limit?: number }) =>
+      api.post('/api/extraction/account-numbers/backfill', body),
+  },
 };
