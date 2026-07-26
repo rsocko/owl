@@ -99,6 +99,7 @@ class PaymentRequest(BaseModel):
 
 
 class PaymentSummaryResponse(BaseModel):
+    total_billed: float = 0.0
     total_due: float = 0.0
     total_paid: float = 0.0
     unpaid_count: int = 0

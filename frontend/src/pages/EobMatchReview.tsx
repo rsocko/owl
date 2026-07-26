@@ -659,7 +659,7 @@ export default function EobMatchReview() {
                 {match.paid_date && <span>Last payment: {formatDateTime(match.paid_date)}</span>}
               </div>
 
-              {(match.payment_status || 'unpaid') !== 'paid' && (
+              {!['paid', 'overpaid'].includes((match.payment_status || 'unpaid').toLowerCase()) && (
                 <div className="eob-note-box" style={{ marginTop: 8 }}>
                   <div className="eob-field-label">Record a payment</div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
@@ -698,7 +698,7 @@ export default function EobMatchReview() {
                       onClick={() => void handleRecordPayment()}
                       disabled={isRecordingPayment || !payAmount}
                     >
-                      {isRecordingPayment ? 'Saving…' : '✓ Mark as Paid'}
+                      {isRecordingPayment ? 'Saving…' : '✓ Record payment'}
                     </Button>
                   </div>
                 </div>
