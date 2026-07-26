@@ -36,6 +36,7 @@ interface EobMatch {
   created_at?: string | null;
   confirmed_at?: string | null;
   flag_reason?: string | null;
+  notes?: string | null;
 }
 
 interface EobMatchesResponse {
@@ -227,7 +228,7 @@ export default function EobMatchReview() {
       if (!matchId) return;
       setSavingStatus(status);
       try {
-        await endpoints.eob.updateMatch(matchId, { status });
+        await endpoints.eob.updateMatch(matchId, { status, notes: notes.trim() || null });
         setToast({
           message:
             status === 'confirmed'
@@ -237,6 +238,7 @@ export default function EobMatchReview() {
                 : 'Match returned to candidate status.',
           tone: 'success',
         });
+        setNotes('');
         await loadMatch();
       } catch (err) {
         setToast({
@@ -247,7 +249,7 @@ export default function EobMatchReview() {
         setSavingStatus(null);
       }
     },
-    [loadMatch, matchId],
+    [loadMatch, matchId, notes],
   );
 
   const handleRelink = useCallback(() => {
@@ -600,6 +602,12 @@ export default function EobMatchReview() {
                         </div>
                       </div>
                     </div>
+                      {match.notes && (
+                        <div className="eob-field-note" style={{ marginTop: 4, fontStyle: 'italic' }}>
+                          &ldquo;{match.notes}&rdquo;
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -610,10 +618,10 @@ export default function EobMatchReview() {
                   className="eob-notes-input"
                   value={notes}
                   onChange={(event) => setNotes(event.target.value)}
-                  placeholder="Capture context for your decision. Notes stay local until a backend notes field exists."
+                  placeholder="Add context about this match decision (e.g., 'Bill includes $6 lab draw fee not on EOB — confirmed correct match')"
                 />
                 <div className="eob-field-note">
-                  Notes are UI-only for now because the PATCH endpoint currently accepts only a status payload.
+                  Notes are saved with your confirm / reject action.
                 </div>
               </div>
             </div>
