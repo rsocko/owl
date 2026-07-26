@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from doc_intelligence_hub.api.routers import make_paperless_client
+from doc_intelligence_hub.api.routers import make_paperless_client, raise_api_error
 from doc_intelligence_hub.modules.eob_matching.classifier import classify_document
 from doc_intelligence_hub.modules.eob_matching.database import (
     BenchmarkModelResult,
@@ -19,8 +19,6 @@ from doc_intelligence_hub.modules.eob_matching.database import (
     MatchEvent,
     MatchRecord,
     MatchingRun,
-    PaymentRecord,
-    add_match_event,
     get_benchmark_results,
     get_benchmark_run,
     get_match_events,
@@ -36,8 +34,10 @@ from doc_intelligence_hub.modules.eob_matching.database import (
     store_benchmark_run,
 )
 from doc_intelligence_hub.modules.eob_matching.enricher import EOBEnricher
-from doc_intelligence_hub.modules.eob_matching.extractor import extract_bill, extract_eob
-from doc_intelligence_hub.modules.eob_matching.llm_extractor import extract_bill_llm, extract_eob_llm
+from doc_intelligence_hub.modules.eob_matching.llm_extractor import (
+    extract_bill_llm,
+    extract_eob_llm,
+)
 from doc_intelligence_hub.modules.eob_matching.matcher import match_documents
 from doc_intelligence_hub.modules.eob_matching.models import DocumentType, PaymentRequest
 
@@ -73,25 +73,33 @@ class RunRequest(ClassifyRequest):
 
 class MatchUpdateRequest(BaseModel):
     status: str = Field(..., pattern=r"^(confirmed|rejected|candidate)$")
-    notes: str | None = Field(default=None, description="Optional reviewer notes for this match decision")
+    notes: str | None = Field(
+        default=None, description="Optional reviewer notes for this match decision"
+    )
 
 
 class MatchConfirmRequest(BaseModel):
     notes: str | None = Field(default=None, description="Optional reviewer notes")
-    triage_item_id: str | None = Field(default=None, description="If provided, also resolve this triage queue item")
+    triage_item_id: str | None = Field(
+        default=None, description="If provided, also resolve this triage queue item"
+    )
 
 
 class MatchRejectRequest(BaseModel):
     reason: str | None = Field(default=None, description="Rejection reason")
     reassign_to: int | None = Field(default=None, description="Alternative match ID to reassign to")
-    triage_item_id: str | None = Field(default=None, description="If provided, also resolve this triage queue item")
+    triage_item_id: str | None = Field(
+        default=None, description="If provided, also resolve this triage queue item"
+    )
 
 
 class ManualMatchRequest(BaseModel):
     eob_doc_id: int = Field(..., description="EOB document ID")
     bill_doc_id: int = Field(..., description="Bill document ID")
     notes: str | None = Field(default=None, description="Optional notes")
-    triage_item_id: str | None = Field(default=None, description="If provided, also resolve this triage queue item")
+    triage_item_id: str | None = Field(
+        default=None, description="If provided, also resolve this triage queue item"
+    )
 
 
 class BulkUpdateRequest(BaseModel):
@@ -141,7 +149,9 @@ async def _load_documents(
 
 def _summarize_classifications(classifications: list[dict[str, Any]]) -> dict[str, int]:
     counts = Counter(item["classification"]["type"] for item in classifications)
-    return {document_type.value: counts.get(document_type.value, 0) for document_type in DocumentType}
+    return {
+        document_type.value: counts.get(document_type.value, 0) for document_type in DocumentType
+    }
 
 
 def _serialize_run(run: MatchingRun) -> dict[str, Any]:
@@ -262,8 +272,12 @@ def _serialize_match(
         "paid_amount": m.paid_amount or 0.0,
         "paid_date": m.paid_date.isoformat() if m.paid_date else None,
         "linked_in_paperless": bool(m.linked_in_paperless),
-        "eob_preview_url": f"{base_url}/documents/{m.eob_document_id}/details" if base_url else None,
-        "bill_preview_url": f"{base_url}/documents/{m.bill_document_id}/details" if base_url else None,
+        "eob_preview_url": f"{base_url}/documents/{m.eob_document_id}/details"
+        if base_url
+        else None,
+        "bill_preview_url": f"{base_url}/documents/{m.bill_document_id}/details"
+        if base_url
+        else None,
         "created_at": m.created_at.isoformat() if m.created_at else None,
         "confirmed_at": m.confirmed_at.isoformat() if m.confirmed_at else None,
         "notes": m.notes,
@@ -390,7 +404,11 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
             }
 
     # Determine write mode
-    write_enabled = body.write_to_paperless if body.write_to_paperless is not None else _is_write_enabled(request)
+    write_enabled = (
+        body.write_to_paperless
+        if body.write_to_paperless is not None
+        else _is_write_enabled(request)
+    )
 
     # Create run record
     run_record = MatchingRun(
@@ -434,25 +452,31 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
                     item["extracted"] = extracted.model_dump(mode="json")
 
                 # Persist EOB record
-                db.add(EOBRecord(
-                    document_id=document["id"],
-                    run_id=run_record.id,
-                    title=document.get("title"),
-                    classification_score=classification.confidence_score,
-                    insurance_company=extracted.insurance_company,
-                    policy_number=extracted.policy_number,
-                    patient_name=extracted.patient_name,
-                    claim_number=extracted.claim_number,
-                    date_of_service=str(extracted.date_of_service) if extracted.date_of_service else None,
-                    provider_name=extracted.provider_name,
-                    total_billed=extracted.total_billed,
-                    total_allowed=extracted.total_allowed,
-                    total_plan_pays=extracted.total_plan_pays,
-                    total_patient_responsibility=extracted.total_patient_responsibility,
-                    services_json=json.dumps(
-                        [s.model_dump(mode="json") for s in extracted.services]
-                    ) if extracted.services else None,
-                ))
+                db.add(
+                    EOBRecord(
+                        document_id=document["id"],
+                        run_id=run_record.id,
+                        title=document.get("title"),
+                        classification_score=classification.confidence_score,
+                        insurance_company=extracted.insurance_company,
+                        policy_number=extracted.policy_number,
+                        patient_name=extracted.patient_name,
+                        claim_number=extracted.claim_number,
+                        date_of_service=str(extracted.date_of_service)
+                        if extracted.date_of_service
+                        else None,
+                        provider_name=extracted.provider_name,
+                        total_billed=extracted.total_billed,
+                        total_allowed=extracted.total_allowed,
+                        total_plan_pays=extracted.total_plan_pays,
+                        total_patient_responsibility=extracted.total_patient_responsibility,
+                        services_json=json.dumps(
+                            [s.model_dump(mode="json") for s in extracted.services]
+                        )
+                        if extracted.services
+                        else None,
+                    )
+                )
 
             elif classification.type == DocumentType.BILL:
                 extracted = await extract_bill_llm(content, document_id=str(document["id"]))
@@ -461,23 +485,29 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
                     item["extracted"] = extracted.model_dump(mode="json")
 
                 # Persist Bill record
-                db.add(BillRecord(
-                    document_id=document["id"],
-                    run_id=run_record.id,
-                    title=document.get("title"),
-                    classification_score=classification.confidence_score,
-                    provider_name=extracted.provider_name,
-                    patient_name=extracted.patient_name,
-                    invoice_number=extracted.invoice_number,
-                    date_of_service=str(extracted.date_of_service) if extracted.date_of_service else None,
-                    due_date=str(extracted.due_date) if extracted.due_date else None,
-                    total_amount=extracted.total_amount,
-                    balance_due=extracted.balance_due,
-                    payment_status=extracted.payment_status,
-                    services_json=json.dumps(
-                        [s.model_dump(mode="json") for s in extracted.services]
-                    ) if extracted.services else None,
-                ))
+                db.add(
+                    BillRecord(
+                        document_id=document["id"],
+                        run_id=run_record.id,
+                        title=document.get("title"),
+                        classification_score=classification.confidence_score,
+                        provider_name=extracted.provider_name,
+                        patient_name=extracted.patient_name,
+                        invoice_number=extracted.invoice_number,
+                        date_of_service=str(extracted.date_of_service)
+                        if extracted.date_of_service
+                        else None,
+                        due_date=str(extracted.due_date) if extracted.due_date else None,
+                        total_amount=extracted.total_amount,
+                        balance_due=extracted.balance_due,
+                        payment_status=extracted.payment_status,
+                        services_json=json.dumps(
+                            [s.model_dump(mode="json") for s in extracted.services]
+                        )
+                        if extracted.services
+                        else None,
+                    )
+                )
 
             classified_documents.append(item)
 
@@ -509,19 +539,23 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
             )
             db.add(match_rec)
             db.flush()  # populate match_rec.id
-            db.add(MatchEvent(
-                match_id=match_rec.id,
-                event_type="auto_matched",
-                actor="system",
-                detail=f"Auto-matched with {match.confidence.value} confidence ({match.score:.0f}%)",
-            ))
-            if match.confidence.value in ("LOW", "MEDIUM"):
-                db.add(MatchEvent(
+            db.add(
+                MatchEvent(
                     match_id=match_rec.id,
-                    event_type="flagged",
+                    event_type="auto_matched",
                     actor="system",
-                    detail=f"Flagged for review — {match.confidence.value.lower()} confidence",
-                ))
+                    detail=f"Auto-matched with {match.confidence.value} confidence ({match.score:.0f}%)",
+                )
+            )
+            if match.confidence.value in ("LOW", "MEDIUM"):
+                db.add(
+                    MatchEvent(
+                        match_id=match_rec.id,
+                        event_type="flagged",
+                        actor="system",
+                        detail=f"Flagged for review — {match.confidence.value.lower()} confidence",
+                    )
+                )
         db.commit()
 
         # Step 4: Write to Paperless (if enabled)
@@ -612,8 +646,6 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
         except Exception:
             pass  # Alert emission is best-effort
 
-        paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
-
         return {
             "status": "ok",
             "run_id": run_record.id,
@@ -628,13 +660,21 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
                 "medium_confidence": medium,
                 "low_confidence": low,
                 "linked_in_paperless": linked_count,
-                "unmatched_eobs": len([e for e in extracted_eobs if e.document_id not in matched_eob_ids]),
-                "unmatched_bills": len([b for b in extracted_bills if b.document_id not in matched_bill_ids]),
+                "unmatched_eobs": len(
+                    [e for e in extracted_eobs if e.document_id not in matched_eob_ids]
+                ),
+                "unmatched_bills": len(
+                    [b for b in extracted_bills if b.document_id not in matched_bill_ids]
+                ),
             },
             "classifications": classified_documents,
             "matches": [match.model_dump(mode="json") for match in matches],
-            "extracted_eobs": [e.model_dump(mode="json") for e in extracted_eobs] if body.verbose else [],
-            "extracted_bills": [b.model_dump(mode="json") for b in extracted_bills] if body.verbose else [],
+            "extracted_eobs": [e.model_dump(mode="json") for e in extracted_eobs]
+            if body.verbose
+            else [],
+            "extracted_bills": [b.model_dump(mode="json") for b in extracted_bills]
+            if body.verbose
+            else [],
         }
     except Exception as exc:
         # Emit failure alert for scheduled run monitoring
@@ -667,20 +707,13 @@ async def get_last_results(request: Request) -> dict[str, Any]:
     init_db()
     db = get_db_session()
     try:
-        run = (
-            db.query(MatchingRun)
-            .order_by(MatchingRun.started_at.desc())
-            .first()
-        )
+        run = db.query(MatchingRun).order_by(MatchingRun.started_at.desc()).first()
         if not run:
             return {"status": "idle", "message": "No EOB matching run has been executed yet."}
 
         paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
         match_records = (
-            db.query(MatchRecord)
-            .filter_by(run_id=run.id)
-            .order_by(MatchRecord.score.desc())
-            .all()
+            db.query(MatchRecord).filter_by(run_id=run.id).order_by(MatchRecord.score.desc()).all()
         )
 
         eob_map, bill_map = _batch_load_records(db, match_records, run_id=run.id)
@@ -779,8 +812,29 @@ async def get_match(request: Request, match_id: int) -> dict[str, Any]:
 
             raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
 
+        eob = (
+            (
+                db.query(EOBRecord)
+                .filter_by(document_id=match.eob_document_id)
+                .order_by(EOBRecord.id.desc())
+                .first()
+            )
+            if match.eob_document_id
+            else None
+        )
+        bill = (
+            (
+                db.query(BillRecord)
+                .filter_by(document_id=match.bill_document_id)
+                .order_by(BillRecord.id.desc())
+                .first()
+            )
+            if match.bill_document_id
+            else None
+        )
+
         paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
-        return _serialize_match(match, paperless_url)
+        return _serialize_match(match, paperless_url, eob=eob, bill=bill)
     finally:
         db.close()
 
@@ -802,18 +856,21 @@ async def update_match(
         match = db.query(MatchRecord).filter_by(id=match_id).first()
         if not match:
             from fastapi import HTTPException
+
             raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
 
         match.status = body.status
         if body.notes is not None:
             match.notes = body.notes
         event_type_map = {"confirmed": "confirmed", "rejected": "rejected", "candidate": "reset"}
-        db.add(MatchEvent(
-            match_id=match_id,
-            event_type=event_type_map.get(body.status, body.status),
-            actor="user",
-            detail=f"Manually {body.status} by reviewer",
-        ))
+        db.add(
+            MatchEvent(
+                match_id=match_id,
+                event_type=event_type_map.get(body.status, body.status),
+                actor="user",
+                detail=f"Manually {body.status} by reviewer",
+            )
+        )
         if body.status == "confirmed":
             match.confirmed_at = datetime.now(UTC)
 
@@ -903,7 +960,9 @@ async def get_record_detail(document_id: int) -> dict[str, Any]:
             .first()
         )
         if not eob and not bill:
-            raise HTTPException(status_code=404, detail=f"No records found for document {document_id}")
+            raise HTTPException(
+                status_code=404, detail=f"No records found for document {document_id}"
+            )
 
         result: dict[str, Any] = {"document_id": document_id}
         if eob:
@@ -957,7 +1016,9 @@ async def get_match_detail(request: Request, match_id: int) -> dict[str, Any]:
 
 
 class PurgeStaleRequest(BaseModel):
-    dry_run: bool = Field(default=False, description="If true, return stale records without deleting")
+    dry_run: bool = Field(
+        default=False, description="If true, return stale records without deleting"
+    )
 
 
 @router.post("/purge-stale")
@@ -1062,12 +1123,14 @@ async def confirm_match(
             match.notes = body.notes
             match.user_notes = body.notes
 
-        db.add(MatchEvent(
-            match_id=match_id,
-            event_type="confirmed",
-            actor="user",
-            detail=f"Match confirmed by reviewer{(': ' + body.notes) if body and body.notes else ''}",
-        ))
+        db.add(
+            MatchEvent(
+                match_id=match_id,
+                event_type="confirmed",
+                actor="user",
+                detail=f"Match confirmed by reviewer{(': ' + body.notes) if body and body.notes else ''}",
+            )
+        )
 
         # Write to Paperless if enabled
         if _is_write_enabled(request) and not match.linked_in_paperless:
@@ -1127,12 +1190,14 @@ async def reject_match(
         if body and body.reassign_to:
             detail_parts.append(f"Reassigned to match #{body.reassign_to}")
 
-        db.add(MatchEvent(
-            match_id=match_id,
-            event_type="rejected",
-            actor="user",
-            detail=". ".join(detail_parts),
-        ))
+        db.add(
+            MatchEvent(
+                match_id=match_id,
+                event_type="rejected",
+                actor="user",
+                detail=". ".join(detail_parts),
+            )
+        )
         db.commit()
 
         # Resolve triage item
@@ -1190,13 +1255,15 @@ async def create_manual_match(request: Request, body: ManualMatchRequest) -> dic
         db.add(match)
         db.flush()  # get match.id
 
-        db.add(MatchEvent(
-            match_id=match.id,
-            event_type="manual_match",
-            actor="user",
-            detail=f"Manual match created by user linking EOB {body.eob_doc_id} ↔ Bill {body.bill_doc_id}"
-            + (f": {body.notes}" if body.notes else ""),
-        ))
+        db.add(
+            MatchEvent(
+                match_id=match.id,
+                event_type="manual_match",
+                actor="user",
+                detail=f"Manual match created by user linking EOB {body.eob_doc_id} ↔ Bill {body.bill_doc_id}"
+                + (f": {body.notes}" if body.notes else ""),
+            )
+        )
 
         # Write to Paperless if enabled
         if _is_write_enabled(request) and not match.linked_in_paperless:
@@ -1253,8 +1320,7 @@ async def get_candidates(
             query = db.query(MatchRecord).filter(MatchRecord.bill_document_id == doc_id)
 
         candidates = (
-            query
-            .filter(MatchRecord.score > 50)
+            query.filter(MatchRecord.score > 50)
             .order_by(MatchRecord.score.desc())
             .limit(max(1, min(limit, 100)))
             .all()
@@ -1396,17 +1462,20 @@ async def run_model_benchmark(request: Request, body: BenchmarkRequest) -> dict[
                 db.commit()
 
             for model_result in results:
-                store_benchmark_result(db, BenchmarkModelResult(
-                    run_id=benchmark_run.id,
-                    model=model_result["model"],
-                    documents_tested=model_result["documents_tested"],
-                    avg_time_seconds=model_result["avg_time_seconds"],
-                    success_rate=model_result["success_rate"],
-                    avg_confidence=model_result["avg_confidence"],
-                    total_time_seconds=model_result["total_time_seconds"],
-                    estimated_cost_usd=model_result.get("estimated_cost_usd"),
-                    results_json=json.dumps(model_result.get("results", [])),
-                ))
+                store_benchmark_result(
+                    db,
+                    BenchmarkModelResult(
+                        run_id=benchmark_run.id,
+                        model=model_result["model"],
+                        documents_tested=model_result["documents_tested"],
+                        avg_time_seconds=model_result["avg_time_seconds"],
+                        success_rate=model_result["success_rate"],
+                        avg_confidence=model_result["avg_confidence"],
+                        total_time_seconds=model_result["total_time_seconds"],
+                        estimated_cost_usd=model_result.get("estimated_cost_usd"),
+                        results_json=json.dumps(model_result.get("results", [])),
+                    ),
+                )
 
             # Check for regressions
             previous = get_previous_benchmark_results(db, benchmark_run.id)
@@ -1475,25 +1544,27 @@ async def get_benchmark_history(
         result = []
         for run in runs:
             model_results = get_benchmark_results(db, run.id)
-            result.append({
-                "id": run.id,
-                "started_at": run.started_at.isoformat() if run.started_at else None,
-                "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-                "documents_tested": run.documents_tested,
-                "models_tested": run.models_tested,
-                "trigger": run.trigger,
-                "status": run.status,
-                "models": [
-                    {
-                        "model": r.model,
-                        "success_rate": r.success_rate,
-                        "avg_confidence": r.avg_confidence,
-                        "avg_time_seconds": r.avg_time_seconds,
-                        "estimated_cost_usd": r.estimated_cost_usd,
-                    }
-                    for r in model_results
-                ],
-            })
+            result.append(
+                {
+                    "id": run.id,
+                    "started_at": run.started_at.isoformat() if run.started_at else None,
+                    "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                    "documents_tested": run.documents_tested,
+                    "models_tested": run.models_tested,
+                    "trigger": run.trigger,
+                    "status": run.status,
+                    "models": [
+                        {
+                            "model": r.model,
+                            "success_rate": r.success_rate,
+                            "avg_confidence": r.avg_confidence,
+                            "avg_time_seconds": r.avg_time_seconds,
+                            "estimated_cost_usd": r.estimated_cost_usd,
+                        }
+                        for r in model_results
+                    ],
+                }
+            )
 
         return {"status": "ok", "runs": result}
     finally:
@@ -1599,7 +1670,9 @@ async def get_benchmark_trends(
 
 
 class DueDateCheckRequest(BaseModel):
-    due_soon_days: int = Field(default=7, ge=1, le=90, description="Days threshold for 'due soon' alerts")
+    due_soon_days: int = Field(
+        default=7, ge=1, le=90, description="Days threshold for 'due soon' alerts"
+    )
 
 
 @router.post("/check-due-dates")
@@ -1622,19 +1695,12 @@ async def check_due_dates(body: DueDateCheckRequest | None = None) -> dict[str, 
         latest_bill_ids = (
             db.query(func.max(BillRecord.id).label("id"))
             .filter(BillRecord.due_date.isnot(None))
-            .filter(
-                (BillRecord.payment_status.is_(None))
-                | (BillRecord.payment_status != "paid")
-            )
+            .filter((BillRecord.payment_status.is_(None)) | (BillRecord.payment_status != "paid"))
             .group_by(BillRecord.document_id)
             .subquery()
         )
 
-        bills = (
-            db.query(BillRecord)
-            .filter(BillRecord.id.in_(db.query(latest_bill_ids.c.id)))
-            .all()
-        )
+        bills = db.query(BillRecord).filter(BillRecord.id.in_(db.query(latest_bill_ids.c.id))).all()
 
         bill_dicts = [
             {
@@ -1717,6 +1783,7 @@ async def pay_match(match_id: int, body: PaymentRequest) -> dict[str, Any]:
         paid_date = None
         if body.paid_date:
             from dateutil.parser import parse as parse_date
+
             try:
                 paid_date = parse_date(body.paid_date)
             except (ValueError, TypeError):
@@ -1754,7 +1821,9 @@ async def pay_match(match_id: int, body: PaymentRequest) -> dict[str, Any]:
         raise
     except Exception:
         db.rollback()
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while recording the payment.")
+        raise HTTPException(
+            status_code=500, detail="An unexpected error occurred while recording the payment."
+        )
     finally:
         db.close()
 
@@ -1823,11 +1892,7 @@ async def get_coverage_analysis(
     init_db()
     db = get_db_session()
     try:
-        eobs = (
-            db.query(EOBRecord)
-            .filter(EOBRecord.total_billed.isnot(None))
-            .all()
-        )
+        eobs = db.query(EOBRecord).filter(EOBRecord.total_billed.isnot(None)).all()
 
         # --- Overall totals ---
         total_billed = 0.0
@@ -1890,14 +1955,18 @@ async def get_coverage_analysis(
             for name, vals in sorted(buckets.items(), key=lambda x: -x[1]["total_billed"]):
                 billed = vals["total_billed"]
                 pct = round(vals["total_plan_pays"] / billed * 100, 1) if billed else 0.0
-                rows.append({
-                    "name": name,
-                    "count": int(vals["count"]),
-                    "total_billed": round(billed, 2),
-                    "total_plan_pays": round(vals["total_plan_pays"], 2),
-                    "total_patient_responsibility": round(vals["total_patient_responsibility"], 2),
-                    "coverage_pct": pct,
-                })
+                rows.append(
+                    {
+                        "name": name,
+                        "count": int(vals["count"]),
+                        "total_billed": round(billed, 2),
+                        "total_plan_pays": round(vals["total_plan_pays"], 2),
+                        "total_patient_responsibility": round(
+                            vals["total_patient_responsibility"], 2
+                        ),
+                        "coverage_pct": pct,
+                    }
+                )
             breakdowns[kind] = rows
 
         return {

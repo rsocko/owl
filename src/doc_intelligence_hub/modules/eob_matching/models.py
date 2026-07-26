@@ -93,8 +93,12 @@ class MatchResult(BaseModel):
 
 class PaymentRequest(BaseModel):
     amount: float = Field(..., gt=0, description="Payment amount in dollars")
-    paid_date: str | None = Field(default=None, description="Payment date (ISO format). Defaults to now.")
-    method: str | None = Field(default=None, description="Payment method (e.g. check, online, insurance)")
+    paid_date: str | None = Field(
+        default=None, description="Payment date (ISO format). Defaults to now."
+    )
+    method: str | None = Field(
+        default=None, description="Payment method (e.g. check, online, insurance)"
+    )
     notes: str | None = Field(default=None, description="Optional notes about this payment")
 
 

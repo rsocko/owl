@@ -16,7 +16,9 @@ def raise_api_error(
     message: str,
     details: dict[str, Any] | None = None,
 ) -> NoReturn:
-    raise HTTPException(status_code=status_code, detail={"code": code, "message": message, "details": details or {}})
+    raise HTTPException(
+        status_code=status_code, detail={"code": code, "message": message, "details": details or {}}
+    )
 
 
 def get_statement_config_path(request: Request) -> str:
@@ -43,8 +45,12 @@ def make_paperless_client(request: Request, *, timeout: float = 15.0) -> Paperle
     settings = request.app.state.hub_settings
     statement_config = get_loaded_statement_config(request)
 
-    base_url = settings.paperless_url or (statement_config.source.paperless_url if statement_config else None)
-    token = settings.resolved_paperless_token or (resolve_api_token(statement_config) if statement_config else None)
+    base_url = settings.paperless_url or (
+        statement_config.source.paperless_url if statement_config else None
+    )
+    token = settings.resolved_paperless_token or (
+        resolve_api_token(statement_config) if statement_config else None
+    )
     verify_ssl = statement_config.source.verify_ssl if statement_config else True
 
     if not base_url or not token:

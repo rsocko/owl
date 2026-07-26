@@ -1,108 +1,399 @@
-﻿import { useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, DataTable, ErrorState, FilterPills, PageHeader, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Badge, ErrorState, PageHeader, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
 import { endpoints } from '../lib/api';
+import '../styles/insights.css';
 
-type ToastState = {
-  message: string;
-  tone: 'success' | 'error';
+/* ── Types (exported for testing) ── */
+
+export type ToastState = { message: string; tone: 'success' | 'error' };
+
+export type InsightItem = {
+  id: string | number;
+  insight_type?: string | null;
+  severity?: string | null;
+  status?: string | null;
+  rule_id?: string | null;
+  series_id?: string | null;
+  title?: string | null;
+  description?: string | null;
+  generated_at?: string | null;
+  acknowledged_at?: string | null;
+  archived_at?: string | null;
+  evidence?: InsightEvidence | null;
+  metadata?: Record<string, unknown> | null;
 };
 
-type AlertItem = {
+export type InsightEvidence = {
+  current_value?: number | null;
+  previous_value?: number | null;
+  average_value?: number | null;
+  change_pct?: number | null;
+  change_amount?: number | null;
+  history?: HistoryPoint[];
+  categories?: MoMCategory[];
+  compliance_items?: ComplianceItem[];
+  highlights?: HighlightItem[];
+  trend_description?: string | null;
+};
+
+export type HistoryPoint = { label: string; value: number; is_current?: boolean };
+export type MoMCategory = { name: string; previous: number; current: number; change: number };
+export type ComplianceItem = { name: string; status: string; detail?: string };
+export type HighlightItem = { text: string; tone?: string; value?: string };
+
+export type InsightSummary = {
+  total?: number;
+  by_type?: Record<string, number>;
+  by_severity?: Record<string, number>;
+  new_count?: number;
+};
+
+export type InsightsListResponse = {
+  insights?: InsightItem[];
+  total?: number;
+};
+
+/* Fallback types for alerts API */
+export type AlertItem = {
   id: number | string;
   alert_type?: string | null;
   severity?: string | null;
   module?: string | null;
   title?: string | null;
   description?: string | null;
-  action_url?: string | null;
-  metadata?: Record<string, unknown> | null;
   created_at?: string | null;
   acknowledged_at?: string | null;
   resolved_at?: string | null;
+  metadata?: Record<string, unknown> | null;
 };
 
-type AlertsResponse = {
-  alerts?: AlertItem[];
-  total?: number;
-};
-
-type AlertSummary = {
+export type AlertSummary = {
   total?: number;
   unacknowledged?: number;
   by_severity?: Record<string, number>;
   by_module?: Record<string, number>;
 };
 
-const severityOptions = [
-  { key: 'all', label: 'All severities' },
-  { key: 'critical', label: 'Critical' },
-  { key: 'high', label: 'High' },
-  { key: 'medium', label: 'Medium' },
-  { key: 'low', label: 'Low' },
-  { key: 'info', label: 'Info' },
-];
+/* ── Helpers (exported for testing) ── */
 
-const statusOptions = [
-  { key: 'open', label: 'Open' },
-  { key: 'unacknowledged', label: 'Unacknowledged' },
-  { key: 'acknowledged', label: 'Acknowledged' },
-  { key: 'resolved', label: 'Resolved' },
-];
-
-const moduleOptions = [
-  { key: 'all', label: 'All modules' },
-  { key: 'statements', label: 'Statements' },
-  { key: 'eob', label: 'EOB matching' },
-  { key: 'action_queue', label: 'Action queue' },
-];
-
-function getErrorMessage(error: unknown) {
+export function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Something went wrong.';
 }
 
-function formatDateTime(value?: string | null) {
+export function formatDate(value?: string | null) {
   if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function toneForSeverity(severity?: string | null): 'danger' | 'warning' | 'muted' | 'info' {
-  switch ((severity ?? '').toLowerCase()) {
-    case 'critical':
-    case 'high':
-      return 'danger';
-    case 'medium':
-      return 'warning';
-    case 'info':
-      return 'info';
-    default:
-      return 'muted';
+export function formatCurrency(value?: number | null) {
+  if (value == null) return '—';
+  return value.toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+export function changePctLabel(pct?: number | null): { text: string; tone: 'up' | 'down' | 'flat' } {
+  if (pct == null || Math.abs(pct) < 1) return { text: '— 0%', tone: 'flat' };
+  const arrow = pct > 0 ? '▲' : '▼';
+  const sign = pct > 0 ? '+' : '';
+  return { text: `${arrow} ${sign}${Math.round(pct)}%`, tone: pct > 0 ? 'up' : 'down' };
+}
+
+export function insightIcon(type?: string | null): string {
+  switch (type) {
+    case 'spend_summary': case 'anomaly': return '📊';
+    case 'trend': return '📈';
+    case 'new_category': return '🆕';
+    case 'compliance': return '✅';
+    default: return '💡';
   }
 }
 
-function toneForStatus(alert: AlertItem): 'success' | 'info' | 'warning' {
-  if (alert.resolved_at) return 'success';
-  if (alert.acknowledged_at) return 'info';
-  return 'warning';
+export function insightTypeTab(type?: string | null): string {
+  switch (type) {
+    case 'spend_summary': case 'anomaly': case 'new_category': return 'anomalies';
+    case 'trend': return 'trends';
+    case 'compliance': return 'compliance';
+    default: return 'anomalies';
+  }
 }
 
-function statusLabel(alert: AlertItem) {
-  if (alert.resolved_at) return 'Resolved';
-  if (alert.acknowledged_at) return 'Acknowledged';
-  return 'Open';
+/** Convert an alert to an insight shape for the fallback path */
+export function alertToInsight(alert: AlertItem): InsightItem {
+  return {
+    id: alert.id,
+    insight_type: alert.alert_type ?? alert.module ?? 'alert',
+    severity: alert.severity,
+    status: alert.resolved_at ? 'archived' : alert.acknowledged_at ? 'viewed' : 'new',
+    title: alert.title,
+    description: alert.description,
+    generated_at: alert.created_at,
+    acknowledged_at: alert.acknowledged_at,
+    archived_at: alert.resolved_at,
+    metadata: alert.metadata,
+    evidence: null,
+  };
 }
+
+/* ── Tab definitions ── */
+const TAB_KEYS = ['all', 'anomalies', 'trends', 'compliance'] as const;
+type TabKey = (typeof TAB_KEYS)[number];
+
+const TIME_RANGES = [
+  { key: '3m', label: 'Last 3 months' },
+  { key: '6m', label: 'Last 6 months' },
+  { key: '12m', label: 'Last 12 months' },
+  { key: 'all', label: 'All time' },
+];
+
+/* ── Sub-components ── */
+
+function MiniBarChart({ history }: { history: HistoryPoint[] }) {
+  if (!history || history.length === 0) return null;
+  const max = Math.max(...history.map((h) => h.value), 1);
+  return (
+    <div className="chart-container">
+      <div className="chart-bars">
+        {history.map((point, i) => {
+          const pct = Math.round((point.value / max) * 100);
+          const isLast = i === history.length - 1;
+          const isCurrent = point.is_current || isLast;
+          const isHigh = pct > 85;
+          const cls = isCurrent ? (isHigh ? 'spike' : 'current') : (isHigh ? 'high' : 'normal');
+          return (
+            <div key={i} className="chart-bar-wrap">
+              <div className={`chart-bar ${cls}`} style={{ height: `${Math.max(pct, 5)}%` }} />
+              <span className="chart-label">{point.label}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Sparkline({ history }: { history: HistoryPoint[] }) {
+  if (!history || history.length === 0) return null;
+  const max = Math.max(...history.map((h) => h.value), 1);
+  return (
+    <div className="trend-spark">
+      {history.map((point, i) => {
+        const h = Math.max(Math.round((point.value / max) * 24), 4);
+        const isLast = i === history.length - 1;
+        const isCurrent = point.is_current || isLast;
+        const cls = isCurrent ? 'current' : (h > 20 ? 'high' : '');
+        return <div key={i} className={`trend-spark-bar ${cls}`} style={{ height: `${h}px` }} />;
+      })}
+    </div>
+  );
+}
+
+function MoMTable({ categories }: { categories: MoMCategory[] }) {
+  if (!categories || categories.length === 0) return null;
+  return (
+    <table className="mom-table">
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th className="amount">Previous</th>
+          <th className="amount">Current</th>
+          <th className="change">Change</th>
+        </tr>
+      </thead>
+      <tbody>
+        {categories.map((cat, i) => {
+          const isHighlight = Math.abs(cat.change) > 100;
+          const changeTone = cat.change > 10 ? 'up' : cat.change < -10 ? 'down' : 'flat';
+          return (
+            <tr key={i} className={isHighlight ? 'row-highlight' : ''}>
+              <td>{cat.name}</td>
+              <td className="amount">{formatCurrency(cat.previous)}</td>
+              <td className="amount">{formatCurrency(cat.current)}</td>
+              <td className={`change ${changeTone}`}>
+                {cat.change > 0 ? '+' : ''}{formatCurrency(cat.change)}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function ComplianceRows({ items }: { items: ComplianceItem[] }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div>
+      {items.map((item, i) => (
+        <div key={i} className="compliance-row">
+          <span className="compliance-icon">{item.status === 'ok' ? '✅' : item.status === 'late' ? '⚠️' : '❌'}</span>
+          <span className="compliance-text">{item.name}</span>
+          {item.detail && <span className="compliance-detail">{item.detail}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Highlights({ items }: { items: HighlightItem[] }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="highlights">
+      {items.map((item, i) => (
+        <div key={i} className="highlight-item">
+          <span className={`highlight-dot ${['up', 'down', 'new', 'neutral'].includes(item.tone ?? '') ? item.tone : 'neutral'}`} />
+          <span className="highlight-text">{item.text}</span>
+          {item.value && <span className="highlight-value">{item.value}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function InsightCardComponent({
+  insight,
+  onAcknowledge,
+  onArchive,
+  busyAction,
+}: {
+  insight: InsightItem;
+  onAcknowledge: (id: string | number) => void;
+  onArchive: (id: string | number) => void;
+  busyAction: string | null;
+}) {
+  const ev = insight.evidence;
+  const isNew = insight.status === 'new' || (!insight.acknowledged_at && !insight.archived_at);
+  const isArchived = insight.status === 'archived' || Boolean(insight.archived_at);
+  const badgeClass = isNew ? 'new' : isArchived ? 'archived' : 'viewed';
+  const badgeLabel = isNew
+    ? (ev?.change_pct != null && Math.abs(ev.change_pct) >= 10 ? changePctLabel(ev.change_pct).text : 'New')
+    : isArchived ? 'Archived' : 'Viewed';
+
+  return (
+    <div className={`insight-card ${isNew ? 'new' : ''}`}>
+      {/* Header */}
+      <div className="insight-header">
+        <span className="insight-icon">{insightIcon(insight.insight_type)}</span>
+        <div className="insight-title-area">
+          <div className="insight-title">{insight.title ?? 'Untitled insight'}</div>
+          <div className="insight-subtitle">
+            {insight.rule_id && <>Rule: {insight.rule_id} · </>}
+            Generated {formatDate(insight.generated_at)}
+          </div>
+        </div>
+        <span className={`insight-badge ${isNew && ev?.change_pct != null && Math.abs(ev.change_pct) >= 10 ? 'warning' : badgeClass}`}>
+          {badgeLabel}
+        </span>
+      </div>
+
+      {/* Metrics row */}
+      {ev && (ev.current_value != null || ev.previous_value != null) && (
+        <div className="metrics-row">
+          {ev.current_value != null && (
+            <div>
+              <div className="metric-label">Current</div>
+              <div className={`metric-value ${ev.change_pct != null && ev.change_pct > 10 ? 'up' : ev.change_pct != null && ev.change_pct < -10 ? 'down' : 'neutral'}`}>
+                {formatCurrency(ev.current_value)}
+              </div>
+            </div>
+          )}
+          {ev.previous_value != null && (
+            <div>
+              <div className="metric-label">Previous</div>
+              <div className="metric-value neutral">{formatCurrency(ev.previous_value)}</div>
+            </div>
+          )}
+          {ev.average_value != null && (
+            <div>
+              <div className="metric-label">Average</div>
+              <div className="metric-value neutral">{formatCurrency(ev.average_value)}</div>
+            </div>
+          )}
+          {ev.change_pct != null && (
+            <div>
+              <div className="metric-label">Change</div>
+              <div className={`metric-change ${changePctLabel(ev.change_pct).tone}`}>
+                {changePctLabel(ev.change_pct).text}
+                {ev.change_amount != null && ` (${ev.change_amount > 0 ? '+' : ''}${formatCurrency(ev.change_amount)})`}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Mini bar chart */}
+      {ev?.history && ev.history.length > 2 && insight.insight_type !== 'trend' && (
+        <MiniBarChart history={ev.history} />
+      )}
+
+      {/* Sparkline for trend type */}
+      {ev?.history && ev.history.length > 0 && insight.insight_type === 'trend' && (
+        <div className="trend-row">
+          <Sparkline history={ev.history} />
+          {ev.trend_description && <div className="trend-info">{ev.trend_description}</div>}
+        </div>
+      )}
+
+      {/* MoM comparison table */}
+      {ev?.categories && <MoMTable categories={ev.categories} />}
+
+      {/* Compliance rows */}
+      {ev?.compliance_items && <ComplianceRows items={ev.compliance_items} />}
+
+      {/* Highlights */}
+      {ev?.highlights && <Highlights items={ev.highlights} />}
+
+      {/* Description fallback when no structured evidence */}
+      {!ev && insight.description && (
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: 14 }}>
+          {insight.description}
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="insight-actions">
+        {insight.series_id && (
+          <a href={`#/statements/${insight.series_id}`} className="insight-btn primary">
+            View Statement →
+          </a>
+        )}
+        {!insight.acknowledged_at && !isArchived && (
+          <button
+            className="insight-btn"
+            onClick={() => onAcknowledge(insight.id)}
+            disabled={busyAction !== null}
+          >
+            {busyAction === `ack:${insight.id}` ? 'Saving…' : 'Acknowledge'}
+          </button>
+        )}
+        {!isArchived && (
+          <button
+            className="insight-btn"
+            onClick={() => onArchive(insight.id)}
+            disabled={busyAction !== null}
+          >
+            {busyAction === `archive:${insight.id}` ? 'Saving…' : 'Archive'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Main page ── */
 
 export default function Insights() {
-  const [summary, setSummary] = useState<AlertSummary | null>(null);
-  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [insights, setInsights] = useState<InsightItem[]>([]);
+  const [summary, setSummary] = useState<InsightSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [cleaningUp, setCleaningUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [severityFilter, setSeverityFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('open');
-  const [moduleFilter, setModuleFilter] = useState('all');
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [usingFallback, setUsingFallback] = useState(false);
+
+  // Filters
+  const [activeTab, setActiveTab] = useState<TabKey>('all');
+  const [timeRange, setTimeRange] = useState('6m');
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -110,80 +401,144 @@ export default function Insights() {
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
-  const buildParams = () => {
-    const params = new URLSearchParams({ limit: '100' });
-    if (severityFilter !== 'all') params.set('severity', severityFilter);
-    if (moduleFilter !== 'all') params.set('module', moduleFilter);
-    if (statusFilter === 'resolved') {
-      params.set('resolved', 'true');
-    } else {
-      params.set('resolved', 'false');
-      if (statusFilter === 'acknowledged') params.set('acknowledged', 'true');
-      if (statusFilter === 'unacknowledged') params.set('acknowledged', 'false');
-    }
-    return params.toString();
-  };
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [summaryResponse, listResponse] = await Promise.all([
-        endpoints.alerts.summary() as Promise<AlertSummary>,
-        endpoints.alerts.list(buildParams()) as Promise<AlertsResponse>,
-      ]);
-      setSummary(summaryResponse);
-      setAlerts(Array.isArray(listResponse.alerts) ? listResponse.alerts : []);
+      // Try the new insights API first
+      const params = new URLSearchParams({ limit: '100' });
+      if (timeRange === '3m') {
+        const d = new Date(); d.setMonth(d.getMonth() - 3);
+        params.set('date_from', d.toISOString().split('T')[0]);
+      } else if (timeRange === '6m') {
+        const d = new Date(); d.setMonth(d.getMonth() - 6);
+        params.set('date_from', d.toISOString().split('T')[0]);
+      } else if (timeRange === '12m') {
+        const d = new Date(); d.setFullYear(d.getFullYear() - 1);
+        params.set('date_from', d.toISOString().split('T')[0]);
+      }
+
+      try {
+        const [summaryResp, listResp] = await Promise.all([
+          endpoints.insights.summary() as Promise<InsightSummary>,
+          endpoints.insights.list(params.toString()) as Promise<InsightsListResponse>,
+        ]);
+        setSummary(summaryResp);
+        setInsights(Array.isArray(listResp.insights) ? listResp.insights : []);
+        setUsingFallback(false);
+      } catch {
+        // Fallback to alerts API
+        const alertParams = new URLSearchParams({ limit: '100', resolved: 'false' });
+        if (params.has('date_from')) alertParams.set('date_from', params.get('date_from')!);
+        const [alertSummary, alertList] = await Promise.all([
+          endpoints.alerts.summary() as Promise<AlertSummary>,
+          endpoints.alerts.list(alertParams.toString()) as Promise<{ alerts?: AlertItem[]; total?: number }>,
+        ]);
+        const fallbackSummary: InsightSummary = {
+          total: alertSummary.total ?? 0,
+          new_count: alertSummary.unacknowledged ?? 0,
+          by_severity: alertSummary.by_severity,
+          by_type: alertSummary.by_module,
+        };
+        setSummary(fallbackSummary);
+        setInsights((alertList.alerts ?? []).map(alertToInsight));
+        setUsingFallback(true);
+      }
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
-  };
+  }, [timeRange]);
 
   useEffect(() => {
     void loadData();
-  }, [severityFilter, statusFilter, moduleFilter]);
+  }, [loadData]);
 
-  const criticalAndHigh = useMemo(() => {
-    return (summary?.by_severity?.critical ?? 0) + (summary?.by_severity?.high ?? 0);
-  }, [summary]);
+  // Client-side filtering
+  const filtered = useMemo(() => {
+    let items = insights;
+    if (activeTab !== 'all') {
+      items = items.filter((ins) => insightTypeTab(ins.insight_type) === activeTab);
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      items = items.filter(
+        (ins) =>
+          (ins.title ?? '').toLowerCase().includes(q) ||
+          (ins.description ?? '').toLowerCase().includes(q) ||
+          (ins.rule_id ?? '').toLowerCase().includes(q)
+      );
+    }
+    return items;
+  }, [insights, activeTab, search]);
 
-  const topModule = useMemo(() => {
-    const modules = Object.entries(summary?.by_module ?? {});
-    if (modules.length === 0) return '—';
-    const [name, count] = modules.sort((a, b) => b[1] - a[1])[0];
+  // Group by status
+  const groups = useMemo(() => {
+    const newItems: InsightItem[] = [];
+    const viewedItems: InsightItem[] = [];
+    const archivedItems: InsightItem[] = [];
+    for (const ins of filtered) {
+      if (ins.status === 'archived' || ins.archived_at) archivedItems.push(ins);
+      else if (ins.status === 'new' || (!ins.acknowledged_at && !ins.archived_at)) newItems.push(ins);
+      else viewedItems.push(ins);
+    }
+    return { newItems, viewedItems, archivedItems };
+  }, [filtered]);
+
+  // Tab counts
+  const tabCounts = useMemo(() => {
+    const counts: Record<TabKey, number> = { all: insights.length, anomalies: 0, trends: 0, compliance: 0 };
+    for (const ins of insights) {
+      const tab = insightTypeTab(ins.insight_type);
+      if (tab in counts) counts[tab as TabKey]++;
+    }
+    return counts;
+  }, [insights]);
+
+  // Summary stats
+  const newCount = summary?.new_count ?? groups.newItems.length;
+  const totalCount = summary?.total ?? insights.length;
+  const criticalCount = (summary?.by_severity?.critical ?? 0) + (summary?.by_severity?.high ?? 0);
+
+  const topType = useMemo(() => {
+    const entries = Object.entries(summary?.by_type ?? {});
+    if (entries.length === 0) return '—';
+    const [name, count] = entries.sort((a, b) => b[1] - a[1])[0];
     return `${name.replace('_', ' ')} (${count})`;
   }, [summary]);
 
-  const handleAction = async (kind: 'acknowledge' | 'resolve', alertId: number | string) => {
-    const key = `${kind}:${alertId}`;
-    setBusyId(key);
+  const handleAcknowledge = async (id: string | number) => {
+    setBusyAction(`ack:${id}`);
     try {
-      if (kind === 'acknowledge') {
-        await endpoints.alerts.acknowledge(String(alertId));
+      if (usingFallback) {
+        await endpoints.alerts.acknowledge(String(id));
       } else {
-        await endpoints.alerts.resolve(String(alertId));
+        await endpoints.insights.acknowledge(String(id));
       }
       await loadData();
-      setToast({ message: kind === 'acknowledge' ? 'Alert acknowledged.' : 'Alert resolved.', tone: 'success' });
+      setToast({ message: 'Insight acknowledged.', tone: 'success' });
     } catch (err) {
       setToast({ message: getErrorMessage(err), tone: 'error' });
     } finally {
-      setBusyId(null);
+      setBusyAction(null);
     }
   };
 
-  const handleCleanup = async () => {
-    setCleaningUp(true);
+  const handleArchive = async (id: string | number) => {
+    setBusyAction(`archive:${id}`);
     try {
-      await endpoints.alerts.cleanup();
+      if (usingFallback) {
+        await endpoints.alerts.resolve(String(id));
+      } else {
+        await endpoints.insights.archive(String(id));
+      }
       await loadData();
-      setToast({ message: 'Retention cleanup completed.', tone: 'success' });
+      setToast({ message: 'Insight archived.', tone: 'success' });
     } catch (err) {
       setToast({ message: getErrorMessage(err), tone: 'error' });
     } finally {
-      setCleaningUp(false);
+      setBusyAction(null);
     }
   };
 
@@ -191,15 +546,12 @@ export default function Insights() {
     <>
       <PageHeader
         title="Insights"
-        desc="Track alert volume, severity, and module health across statements, EOB matching, and the action queue."
+        desc="Trend charts, anomaly detection, and compliance tracking across all statement series."
         actions={
           <div className="btn-group">
-            <Button onClick={() => void loadData()} disabled={loading || cleaningUp}>
+            <button className="btn" onClick={() => void loadData()} disabled={loading}>
               Refresh
-            </Button>
-            <Button variant="primary" onClick={() => void handleCleanup()} disabled={loading || cleaningUp}>
-              {cleaningUp ? 'Cleaning…' : 'Run cleanup'}
-            </Button>
+            </button>
           </div>
         }
       />
@@ -207,114 +559,133 @@ export default function Insights() {
       {toast && <Toast message={toast.message} tone={toast.tone} />}
 
       {loading ? (
-        <><SkeletonLoader variant="stat-grid" /><div className="section"><SkeletonLoader variant="table" /></div></>
+        <>
+          <SkeletonLoader variant="stat-grid" />
+          <div className="section"><SkeletonLoader variant="cards" /></div>
+        </>
       ) : error ? (
         <ErrorState message={error} onRetry={() => void loadData()} />
       ) : (
         <>
+          {/* Stat cards */}
           <StatGrid>
-            <StatCard title="Open alerts" metric={summary?.total ?? 0} desc="Currently unresolved items in the unified feed." />
-            <StatCard title="Needs acknowledgement" metric={summary?.unacknowledged ?? 0} desc="Still unseen or untriaged by an operator." status={{ label: (summary?.unacknowledged ?? 0) > 0 ? 'Attention' : 'Clear', tone: (summary?.unacknowledged ?? 0) > 0 ? 'warning' : 'success' }} />
-            <StatCard title="Critical + high" metric={criticalAndHigh} desc="The highest-severity issues currently active." status={{ label: criticalAndHigh > 0 ? 'Escalated' : 'Stable', tone: criticalAndHigh > 0 ? 'danger' : 'success' }} />
-            <StatCard title="Busiest module" metric={topModule} desc="Module with the most unresolved alerts right now." />
+            <StatCard
+              title="Total insights"
+              metric={totalCount}
+              desc="Insights generated across all rules and series."
+            />
+            <StatCard
+              title="New"
+              metric={newCount}
+              desc="Unreviewed insights awaiting triage."
+              status={newCount > 0 ? { label: 'Attention', tone: 'warning' } : { label: 'Clear', tone: 'success' }}
+            />
+            <StatCard
+              title="Critical + High"
+              metric={criticalCount}
+              desc="Highest-severity findings currently active."
+              status={criticalCount > 0 ? { label: 'Escalated', tone: 'danger' } : { label: 'Stable', tone: 'success' }}
+            />
+            <StatCard
+              title="Top category"
+              metric={topType}
+              desc="Most frequent insight type."
+            />
           </StatGrid>
 
-          <div className="section" style={{ marginTop: 20 }}>
-            <Card title="Filter the alert feed">
-              <div style={{ display: 'grid', gap: 12 }}>
-                <div>
-                  <div className="section-title" style={{ marginBottom: 8 }}>Severity</div>
-                  <FilterPills options={severityOptions} active={severityFilter} onChange={setSeverityFilter} />
-                </div>
-                <div>
-                  <div className="section-title" style={{ marginBottom: 8 }}>Status</div>
-                  <FilterPills options={statusOptions} active={statusFilter} onChange={setStatusFilter} />
-                </div>
-                <div>
-                  <div className="section-title" style={{ marginBottom: 8 }}>Module</div>
-                  <FilterPills options={moduleOptions} active={moduleFilter} onChange={setModuleFilter} />
-                </div>
-              </div>
-            </Card>
+          {/* Filter bar */}
+          <div className="insights-filters" style={{ marginTop: 20 }}>
+            <div className="insights-filter-tabs">
+              {TAB_KEYS.map((key) => (
+                <button
+                  key={key}
+                  className={`insights-filter-tab ${activeTab === key ? 'active' : ''}`}
+                  onClick={() => setActiveTab(key)}
+                >
+                  {key === 'all' ? 'All' : key.charAt(0).toUpperCase() + key.slice(1)}
+                  {' '}({tabCounts[key]})
+                </button>
+              ))}
+            </div>
+            <div className="insights-filter-sep" />
+            <select
+              className="insights-filter-select"
+              value={timeRange}
+              onChange={(e) => setTimeRange(e.target.value)}
+            >
+              {TIME_RANGES.map((r) => (
+                <option key={r.key} value={r.key}>{r.label}</option>
+              ))}
+            </select>
+            <input
+              type="text"
+              className="insights-filter-search"
+              placeholder="🔍 Search insights..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
 
-          <div className="section">
-            <Card title="Alert feed" actions={<Badge tone="info">{alerts.length} rows</Badge>}>
-              <DataTable
-                rows={alerts}
-                rowKey={(row) => String(row.id)}
-                emptyLabel="No alerts match the current filters."
-                columns={[
-                  {
-                    key: 'severity',
-                    header: 'Severity',
-                    width: '120px',
-                    render: (row) => <Badge tone={toneForSeverity(row.severity)}>{row.severity ?? 'unknown'}</Badge>,
-                  },
-                  {
-                    key: 'title',
-                    header: 'Alert',
-                    render: (row) => (
-                      <div>
-                        <div style={{ fontWeight: 700 }}>{row.title ?? 'Untitled alert'}</div>
-                        <div className="text-muted" style={{ fontSize: '0.82rem', marginTop: 4 }}>{row.description ?? 'No description provided.'}</div>
-                        {row.action_url && (
-                          <a href={row.action_url} style={{ color: 'var(--accent)', fontSize: '0.78rem', marginTop: 6, display: 'inline-block' }}>
-                            Open related view ?
-                          </a>
-                        )}
-                      </div>
-                    ),
-                  },
-                  {
-                    key: 'module',
-                    header: 'Module',
-                    width: '130px',
-                    render: (row) => <Badge tone="info">{(row.module ?? 'unknown').replace('_', ' ')}</Badge>,
-                  },
-                  {
-                    key: 'status',
-                    header: 'Status',
-                    width: '130px',
-                    render: (row) => <Badge tone={toneForStatus(row)}>{statusLabel(row)}</Badge>,
-                  },
-                  {
-                    key: 'created',
-                    header: 'Created',
-                    width: '180px',
-                    render: (row) => formatDateTime(row.created_at),
-                  },
-                  {
-                    key: 'actions',
-                    header: 'Actions',
-                    width: '220px',
-                    render: (row) => (
-                      <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
-                        <Button
-                          size="sm"
-                          onClick={() => void handleAction('acknowledge', row.id)}
-                          disabled={Boolean(row.acknowledged_at || row.resolved_at || busyId !== null)}
-                        >
-                          {busyId === `acknowledge:${row.id}` ? 'Saving…' : 'Acknowledge'}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          onClick={() => void handleAction('resolve', row.id)}
-                          disabled={Boolean(row.resolved_at || busyId !== null)}
-                        >
-                          {busyId === `resolve:${row.id}` ? 'Saving…' : 'Resolve'}
-                        </Button>
-                      </div>
-                    ),
-                  },
-                ]}
-              />
-            </Card>
-          </div>
+          {/* Fallback notice */}
+          {usingFallback && (
+            <div style={{ marginBottom: 12 }}>
+              <Badge tone="info">Using alert feed — full insights API not yet available</Badge>
+            </div>
+          )}
+
+          {/* Insight cards grouped by status */}
+          {filtered.length === 0 ? (
+            <div className="insight-card" style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+              No insights match the current filters.
+            </div>
+          ) : (
+            <>
+              {groups.newItems.length > 0 && (
+                <>
+                  <div className="insights-section-divider">New ({groups.newItems.length})</div>
+                  {groups.newItems.map((ins) => (
+                    <InsightCardComponent
+                      key={ins.id}
+                      insight={ins}
+                      onAcknowledge={handleAcknowledge}
+                      onArchive={handleArchive}
+                      busyAction={busyAction}
+                    />
+                  ))}
+                </>
+              )}
+              {groups.viewedItems.length > 0 && (
+                <>
+                  <div className="insights-section-divider">Viewed ({groups.viewedItems.length})</div>
+                  {groups.viewedItems.map((ins) => (
+                    <InsightCardComponent
+                      key={ins.id}
+                      insight={ins}
+                      onAcknowledge={handleAcknowledge}
+                      onArchive={handleArchive}
+                      busyAction={busyAction}
+                    />
+                  ))}
+                </>
+              )}
+              {groups.archivedItems.length > 0 && (
+                <>
+                  <div className="insights-section-divider">Archived ({groups.archivedItems.length})</div>
+                  {groups.archivedItems.map((ins) => (
+                    <InsightCardComponent
+                      key={ins.id}
+                      insight={ins}
+                      onAcknowledge={handleAcknowledge}
+                      onArchive={handleArchive}
+                      busyAction={busyAction}
+                    />
+                  ))}
+                </>
+              )}
+            </>
+          )}
         </>
       )}
     </>
   );
 }
-

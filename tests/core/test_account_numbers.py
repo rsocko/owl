@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from doc_intelligence_hub.core.extractors.account_numbers import (
     ExtractionResult,
@@ -77,11 +76,7 @@ class TestExtractAccountNumbers:
         assert extract_account_numbers(text) == []
 
     def test_multiple_different_numbers(self):
-        text = (
-            "Account #****4321\n"
-            "Member ID: ABC9999999\n"
-            "Claim No. CLM-2024-0001"
-        )
+        text = "Account #****4321\nMember ID: ABC9999999\nClaim No. CLM-2024-0001"
         matches = extract_account_numbers(text)
         assert len(matches) >= 3
 

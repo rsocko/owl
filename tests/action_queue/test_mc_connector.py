@@ -42,20 +42,22 @@ def client(tmp_path):
 def seeded_client(client):
     db = get_session()
     try:
-        db.add(Action(
-            id=1,
-            document_id=42,
-            document_title="Electric Bill Jan 2026",
-            action_type="PAY",
-            title="Pay electric bill",
-            summary="Monthly electric bill due",
-            due_date=date(2026, 2, 15),
-            amount=125.50,
-            urgency="CRITICAL",
-            confidence=85,
-            status="pending",
-            correspondent="Power Co",
-        ))
+        db.add(
+            Action(
+                id=1,
+                document_id=42,
+                document_title="Electric Bill Jan 2026",
+                action_type="PAY",
+                title="Pay electric bill",
+                summary="Monthly electric bill due",
+                due_date=date(2026, 2, 15),
+                amount=125.50,
+                urgency="CRITICAL",
+                confidence=85,
+                status="pending",
+                correspondent="Power Co",
+            )
+        )
         db.commit()
     finally:
         db.close()

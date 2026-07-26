@@ -35,9 +35,13 @@ router = APIRouter(prefix="/api/triage", tags=["triage"])
 
 
 class NotificationConfigUpdate(BaseModel):
-    channel: str = Field(..., description="Channel name: 'email_digest', 'mc_alerts', or 'mc_badge'")
+    channel: str = Field(
+        ..., description="Channel name: 'email_digest', 'mc_alerts', or 'mc_badge'"
+    )
     enabled: bool = Field(default=True, description="Whether the channel is enabled")
-    config: dict[str, Any] | None = Field(default=None, description="Channel-specific configuration")
+    config: dict[str, Any] | None = Field(
+        default=None, description="Channel-specific configuration"
+    )
 
 
 # ------------------------------------------------------------------
@@ -59,7 +63,9 @@ async def dashboard() -> dict[str, Any]:
     # Compute extraction accuracy from corrections
     total_corrections = stats.get("total_corrections", 0)
     confirmed = stats.get("confirmed_corrections", 0)
-    extraction_accuracy = round((confirmed / total_corrections * 100) if total_corrections > 0 else 0)
+    extraction_accuracy = round(
+        (confirmed / total_corrections * 100) if total_corrections > 0 else 0
+    )
 
     return {
         "stats": {

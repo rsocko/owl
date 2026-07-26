@@ -127,7 +127,9 @@ async def get_provider_overrides(request: Request) -> dict[str, Any]:
 
 
 @router.post("/providers/{provider_key}/override")
-async def set_provider_override(request: Request, provider_key: str, body: dict[str, Any]) -> dict[str, Any]:
+async def set_provider_override(
+    request: Request, provider_key: str, body: dict[str, Any]
+) -> dict[str, Any]:
     config = load_statement_config_from_request(request)
     db = Database(config.runtime.database_path)
     try:
@@ -213,14 +215,16 @@ def _build_timeline(documents: list[dict]) -> list[dict]:
                 prev_date = date_type.fromisoformat(stmt_date_str)
             except (ValueError, TypeError):
                 pass
-        timeline.append({
-            "document_id": doc["document_id"],
-            "title": doc.get("title"),
-            "statement_date": stmt_date_str,
-            "period_label": doc.get("period_label"),
-            "account_hint": doc.get("account_hint"),
-            "gap_before_days": gap_days,
-        })
+        timeline.append(
+            {
+                "document_id": doc["document_id"],
+                "title": doc.get("title"),
+                "statement_date": stmt_date_str,
+                "period_label": doc.get("period_label"),
+                "account_hint": doc.get("account_hint"),
+                "gap_before_days": gap_days,
+            }
+        )
     return timeline
 
 
@@ -232,7 +236,10 @@ def _record_correction_event(
 ) -> None:
     """Record a correction event in the triage database."""
     try:
-        from doc_intelligence_hub.modules.triage.database import CorrectionEvent, get_session as get_triage_session
+        from doc_intelligence_hub.modules.triage.database import (
+            CorrectionEvent,
+            get_session as get_triage_session,
+        )
         import json
 
         session = get_triage_session()
@@ -251,12 +258,16 @@ def _record_correction_event(
         pass  # Don't fail the main operation if triage DB is unavailable
 
 
-def _resolve_triage_item_for_series(series_id: str, action: str, payload: dict | None = None) -> None:
+def _resolve_triage_item_for_series(
+    series_id: str, action: str, payload: dict | None = None
+) -> None:
     """Resolve any pending triage queue items targeting this series."""
     try:
-        from doc_intelligence_hub.modules.triage.database import get_session as get_triage_session, TriageQueueItem
+        from doc_intelligence_hub.modules.triage.database import (
+            get_session as get_triage_session,
+            TriageQueueItem,
+        )
         from datetime import datetime, UTC
-        import json
 
         session = get_triage_session()
         try:
@@ -311,10 +322,14 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
         anomaly_indicators: list[str] = []
         account_hints = {d.get("account_hint") for d in documents if d.get("account_hint")}
         if len(account_hints) > 1:
-            anomaly_indicators.append(f"Multiple account numbers detected: {', '.join(sorted(account_hints))}")
+            anomaly_indicators.append(
+                f"Multiple account numbers detected: {', '.join(sorted(account_hints))}"
+            )
         for entry in timeline:
             if entry.get("gap_before_days") and entry["gap_before_days"] > 60:
-                anomaly_indicators.append(f"Large gap of {entry['gap_before_days']} days before {entry.get('period_label', entry.get('statement_date', 'unknown'))}")
+                anomaly_indicators.append(
+                    f"Large gap of {entry['gap_before_days']} days before {entry.get('period_label', entry.get('statement_date', 'unknown'))}"
+                )
 
         return {
             "series": series,
@@ -344,7 +359,9 @@ async def get_series_timeline(request: Request, series_id: str) -> dict[str, Any
 
 
 @router.post("/series/{series_id}/split")
-async def split_series(request: Request, series_id: str, body: SplitSeriesRequest) -> dict[str, Any]:
+async def split_series(
+    request: Request, series_id: str, body: SplitSeriesRequest
+) -> dict[str, Any]:
     """Split documents from one series into a new series."""
     db = _get_db(request)
     try:
@@ -360,7 +377,9 @@ async def split_series(request: Request, series_id: str, body: SplitSeriesReques
         moving_docs = [d for d in all_docs if d["document_id"] in body.document_ids]
 
         if not moving_docs:
-            raise_api_error(400, "documents_not_found", "None of the specified documents belong to this series")
+            raise_api_error(
+                400, "documents_not_found", "None of the specified documents belong to this series"
+            )
 
         # Create new series
         new_id = uuid.uuid4().hex[:12]
@@ -379,18 +398,28 @@ async def split_series(request: Request, series_id: str, body: SplitSeriesReques
 
         # Record override
         override_id = uuid.uuid4().hex[:12]
-        db.save_series_override(override_id, series_id, "split_from", {
-            "new_series_id": new_id,
-            "new_series_name": body.new_series_name,
-            "document_ids": body.document_ids,
-            "account_identifier": body.account_identifier,
-        })
+        db.save_series_override(
+            override_id,
+            series_id,
+            "split_from",
+            {
+                "new_series_id": new_id,
+                "new_series_name": body.new_series_name,
+                "document_ids": body.document_ids,
+                "account_identifier": body.account_identifier,
+            },
+        )
 
         # Record correction event and resolve triage item
-        _record_correction_event("series_split", "statement_series", series_id, {
-            "new_series_id": new_id,
-            "document_ids": body.document_ids,
-        })
+        _record_correction_event(
+            "series_split",
+            "statement_series",
+            series_id,
+            {
+                "new_series_id": new_id,
+                "document_ids": body.document_ids,
+            },
+        )
         _resolve_triage_item_for_series(series_id, "split")
 
         return {
@@ -411,9 +440,13 @@ async def merge_series(request: Request, body: MergeSeriesRequest) -> dict[str, 
         target = db.get_series(body.target_series_id)
 
         if not source:
-            raise_api_error(404, "series_not_found", f"Source series '{body.source_series_id}' not found")
+            raise_api_error(
+                404, "series_not_found", f"Source series '{body.source_series_id}' not found"
+            )
         if not target:
-            raise_api_error(404, "series_not_found", f"Target series '{body.target_series_id}' not found")
+            raise_api_error(
+                404, "series_not_found", f"Target series '{body.target_series_id}' not found"
+            )
 
         # Move all source documents to target
         source_docs = db.get_series_documents(body.source_series_id)
@@ -422,11 +455,16 @@ async def merge_series(request: Request, body: MergeSeriesRequest) -> dict[str, 
 
         # Record override on target
         override_id = uuid.uuid4().hex[:12]
-        db.save_series_override(override_id, body.target_series_id, "merge_into", {
-            "merged_series_id": body.source_series_id,
-            "merged_series_name": source["name"],
-            "document_count": len(source_docs),
-        })
+        db.save_series_override(
+            override_id,
+            body.target_series_id,
+            "merge_into",
+            {
+                "merged_series_id": body.source_series_id,
+                "merged_series_name": source["name"],
+                "document_count": len(source_docs),
+            },
+        )
 
         # Delete source series
         db.delete_series(body.source_series_id)
@@ -435,10 +473,15 @@ async def merge_series(request: Request, body: MergeSeriesRequest) -> dict[str, 
         db.update_series(body.target_series_id, manually_curated=True)
 
         # Record correction event and resolve triage items for both series
-        _record_correction_event("series_merge", "statement_series", body.target_series_id, {
-            "source_series_id": body.source_series_id,
-            "source_series_name": source["name"],
-        })
+        _record_correction_event(
+            "series_merge",
+            "statement_series",
+            body.target_series_id,
+            {
+                "source_series_id": body.source_series_id,
+                "source_series_name": source["name"],
+            },
+        )
         _resolve_triage_item_for_series(body.source_series_id, "merge")
         _resolve_triage_item_for_series(body.target_series_id, "merge")
 
@@ -452,7 +495,9 @@ async def merge_series(request: Request, body: MergeSeriesRequest) -> dict[str, 
 
 
 @router.post("/series/{series_id}/reassign")
-async def reassign_document(request: Request, series_id: str, body: ReassignDocumentRequest) -> dict[str, Any]:
+async def reassign_document(
+    request: Request, series_id: str, body: ReassignDocumentRequest
+) -> dict[str, Any]:
     """Move a single document from one series to another."""
     db = _get_db(request)
     try:
@@ -462,13 +507,19 @@ async def reassign_document(request: Request, series_id: str, body: ReassignDocu
         if not source:
             raise_api_error(404, "series_not_found", f"Source series '{series_id}' not found")
         if not target:
-            raise_api_error(404, "series_not_found", f"Target series '{body.target_series_id}' not found")
+            raise_api_error(
+                404, "series_not_found", f"Target series '{body.target_series_id}' not found"
+            )
 
         # Get the document being moved
         all_docs = db.get_series_documents(series_id)
         doc = next((d for d in all_docs if d["document_id"] == body.document_id), None)
         if not doc:
-            raise_api_error(400, "document_not_found", f"Document '{body.document_id}' not in series '{series_id}'")
+            raise_api_error(
+                400,
+                "document_not_found",
+                f"Document '{body.document_id}' not in series '{series_id}'",
+            )
 
         # Move the document
         db.remove_documents_from_series(series_id, [body.document_id])
@@ -476,15 +527,25 @@ async def reassign_document(request: Request, series_id: str, body: ReassignDocu
 
         # Record override
         override_id = uuid.uuid4().hex[:12]
-        db.save_series_override(override_id, series_id, "remove_doc", {
-            "document_id": body.document_id,
-            "target_series_id": body.target_series_id,
-        })
+        db.save_series_override(
+            override_id,
+            series_id,
+            "remove_doc",
+            {
+                "document_id": body.document_id,
+                "target_series_id": body.target_series_id,
+            },
+        )
 
-        _record_correction_event("series_reassign", "statement_series", series_id, {
-            "document_id": body.document_id,
-            "target_series_id": body.target_series_id,
-        })
+        _record_correction_event(
+            "series_reassign",
+            "statement_series",
+            series_id,
+            {
+                "document_id": body.document_id,
+                "target_series_id": body.target_series_id,
+            },
+        )
 
         return {
             "status": "ok",
@@ -496,7 +557,9 @@ async def reassign_document(request: Request, series_id: str, body: ReassignDocu
 
 
 @router.post("/series/{series_id}/rename")
-async def rename_series(request: Request, series_id: str, body: RenameSeriesRequest) -> dict[str, Any]:
+async def rename_series(
+    request: Request, series_id: str, body: RenameSeriesRequest
+) -> dict[str, Any]:
     """Rename a series and/or set its account identifier."""
     db = _get_db(request)
     try:
@@ -514,16 +577,26 @@ async def rename_series(request: Request, series_id: str, body: RenameSeriesRequ
 
         # Record override
         override_id = uuid.uuid4().hex[:12]
-        db.save_series_override(override_id, series_id, "rename", {
-            "old_name": old_name,
-            "new_name": body.name,
-            "account_identifier": body.account_identifier,
-        })
+        db.save_series_override(
+            override_id,
+            series_id,
+            "rename",
+            {
+                "old_name": old_name,
+                "new_name": body.name,
+                "account_identifier": body.account_identifier,
+            },
+        )
 
-        _record_correction_event("series_rename", "statement_series", series_id, {
-            "old_name": old_name,
-            "new_name": body.name,
-        })
+        _record_correction_event(
+            "series_rename",
+            "statement_series",
+            series_id,
+            {
+                "old_name": old_name,
+                "new_name": body.name,
+            },
+        )
         # Note: rename does NOT resolve the triage item — the grouping issue
         # may still need a split or merge after renaming.
 

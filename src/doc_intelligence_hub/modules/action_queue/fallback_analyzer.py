@@ -71,9 +71,7 @@ _ARCHIVE_KEYWORDS = re.compile(
 _AMOUNT_PATTERN = re.compile(r"\$\s*([\d,]+\.?\d{0,2})")
 
 # Date extraction (simple patterns)
-_DATE_PATTERN = re.compile(
-    r"\b(\d{1,2})[/\-](\d{1,2})[/\-](20\d{2})\b"
-)
+_DATE_PATTERN = re.compile(r"\b(\d{1,2})[/\-](\d{1,2})[/\-](20\d{2})\b")
 
 
 class RuleBasedAnalyzer:
@@ -221,7 +219,9 @@ class RuleBasedAnalyzer:
     def _determine_urgency(self, text: str, due_date: Optional[date]) -> str:
         """Determine urgency from keywords and due date."""
         text_lower = text.lower()
-        if any(w in text_lower for w in ["final notice", "collection", "legal", "immediate", "overdue"]):
+        if any(
+            w in text_lower for w in ["final notice", "collection", "legal", "immediate", "overdue"]
+        ):
             return "CRITICAL"
         if due_date:
             days_until = (due_date - date.today()).days
@@ -236,7 +236,9 @@ class RuleBasedAnalyzer:
             return "HIGH"
         return "MEDIUM"
 
-    def _build_title(self, action_type: str, title: str, correspondent: str, amount: Optional[float]) -> str:
+    def _build_title(
+        self, action_type: str, title: str, correspondent: str, amount: Optional[float]
+    ) -> str:
         """Build a concise action title."""
         correspondent = str(correspondent) if correspondent else ""
         # If correspondent is just a numeric ID, prefer the title instead

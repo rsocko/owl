@@ -52,16 +52,24 @@ class CorrectFieldRequest(BaseModel):
     field_name: str = Field(..., description="Name of the extracted field")
     corrected_value: str = Field(..., description="The corrected value")
     original_value: str | None = Field(default=None, description="The original extracted value")
-    confidence: float | None = Field(default=None, description="Original extraction confidence 0-100")
-    source_region: dict | None = Field(default=None, description="Bounding box / OCR region coordinates")
+    confidence: float | None = Field(
+        default=None, description="Original extraction confidence 0-100"
+    )
+    source_region: dict | None = Field(
+        default=None, description="Bounding box / OCR region coordinates"
+    )
     notes: str | None = Field(default=None, description="Optional correction notes")
 
 
 class ConfirmFieldRequest(BaseModel):
     field_name: str = Field(..., description="Name of the extracted field to confirm")
     current_value: str | None = Field(default=None, description="Current value being confirmed")
-    confidence: float | None = Field(default=None, description="Original extraction confidence 0-100")
-    source_region: dict | None = Field(default=None, description="Bounding box / OCR region coordinates")
+    confidence: float | None = Field(
+        default=None, description="Original extraction confidence 0-100"
+    )
+    source_region: dict | None = Field(
+        default=None, description="Bounding box / OCR region coordinates"
+    )
 
 
 # ------------------------------------------------------------------
@@ -96,7 +104,9 @@ async def get_document_metadata(doc_id: int, request: Request) -> dict[str, Any]
     try:
         doc = await client.get_document(doc_id)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch document {doc_id} from Paperless: {exc}") from exc
+        raise HTTPException(
+            status_code=502, detail=f"Failed to fetch document {doc_id} from Paperless: {exc}"
+        ) from exc
 
     # Build extracted fields from Paperless custom fields
     custom_field_values = {cf["field"]: cf["value"] for cf in doc.get("custom_fields", [])}
@@ -118,12 +128,14 @@ async def get_document_metadata(doc_id: int, request: Request) -> dict[str, Any]
     extracted_fields: list[dict[str, Any]] = []
     for di_field, paperless_field in FIELD_TO_PAPERLESS.items():
         value = paperless_values.get(paperless_field)
-        extracted_fields.append({
-            "field_name": di_field,
-            "paperless_field": paperless_field,
-            "value": value,
-            "has_value": value is not None and value != "",
-        })
+        extracted_fields.append(
+            {
+                "field_name": di_field,
+                "paperless_field": paperless_field,
+                "value": value,
+                "has_value": value is not None and value != "",
+            }
+        )
 
     # Get corrections
     corrections = get_corrections_for_document(doc_id)

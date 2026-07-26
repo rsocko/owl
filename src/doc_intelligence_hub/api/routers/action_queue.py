@@ -36,7 +36,9 @@ def _sync_action_queue_settings(request: Request) -> None:
     elif statement_config and statement_config.source.paperless_url:
         action_queue_settings.paperless_url = statement_config.source.paperless_url
 
-    token = hub_settings.resolved_paperless_token or (resolve_api_token(statement_config) if statement_config else None)
+    token = hub_settings.resolved_paperless_token or (
+        resolve_api_token(statement_config) if statement_config else None
+    )
     if token:
         action_queue_settings.paperless_api_token = token
 
@@ -218,7 +220,9 @@ async def list_actions(
 
 
 @router.patch("/actions/{action_id}")
-async def update_action(request: Request, action_id: int, body: ActionUpdateRequest) -> dict[str, Any]:
+async def update_action(
+    request: Request, action_id: int, body: ActionUpdateRequest
+) -> dict[str, Any]:
     """Update an action's status (complete, dismiss, or re-open)."""
     _sync_action_queue_settings(request)
     init_db()
@@ -227,6 +231,7 @@ async def update_action(request: Request, action_id: int, body: ActionUpdateRequ
         action = db.query(Action).filter_by(id=action_id).first()
         if not action:
             from fastapi import HTTPException
+
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
         action.status = body.status
         if body.status == "completed":

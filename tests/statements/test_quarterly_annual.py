@@ -1,4 +1,4 @@
-﻿"""Tests for quarterly and annual pattern detection.
+"""Tests for quarterly and annual pattern detection.
 
 Validates that the detection engine correctly identifies non-monthly
 recurrence patterns using dedicated fixture data.
@@ -11,7 +11,11 @@ from pathlib import Path
 
 from doc_intelligence_hub.modules.statements.config import AnalysisConfig, load_config
 from doc_intelligence_hub.modules.statements.detector import discover_providers
-from doc_intelligence_hub.modules.statements.models import AnalysisPattern, DocumentRecord, ProviderCandidate
+from doc_intelligence_hub.modules.statements.models import (
+    AnalysisPattern,
+    DocumentRecord,
+    ProviderCandidate,
+)
 from doc_intelligence_hub.modules.statements.paperless import load_fixture_documents
 from doc_intelligence_hub.modules.statements.recommendations import build_recommendations
 
@@ -258,17 +262,47 @@ def test_quarterly_with_missing_quarter() -> None:
     """Quarterly detection should handle a gap (missing Q3)."""
     config = _default_analysis()
     documents = [
-        DocumentRecord(id=1, title="Bill Q1 2024", correspondent_id=50,
-                       correspondent_name="Water Co", created=date(2024, 1, 20), tags=["bill"]),
-        DocumentRecord(id=2, title="Bill Q2 2024", correspondent_id=50,
-                       correspondent_name="Water Co", created=date(2024, 4, 20), tags=["bill"]),
+        DocumentRecord(
+            id=1,
+            title="Bill Q1 2024",
+            correspondent_id=50,
+            correspondent_name="Water Co",
+            created=date(2024, 1, 20),
+            tags=["bill"],
+        ),
+        DocumentRecord(
+            id=2,
+            title="Bill Q2 2024",
+            correspondent_id=50,
+            correspondent_name="Water Co",
+            created=date(2024, 4, 20),
+            tags=["bill"],
+        ),
         # Q3 missing
-        DocumentRecord(id=3, title="Bill Q4 2024", correspondent_id=50,
-                       correspondent_name="Water Co", created=date(2024, 10, 20), tags=["bill"]),
-        DocumentRecord(id=4, title="Bill Q1 2025", correspondent_id=50,
-                       correspondent_name="Water Co", created=date(2025, 1, 20), tags=["bill"]),
-        DocumentRecord(id=5, title="Bill Q2 2025", correspondent_id=50,
-                       correspondent_name="Water Co", created=date(2025, 4, 20), tags=["bill"]),
+        DocumentRecord(
+            id=3,
+            title="Bill Q4 2024",
+            correspondent_id=50,
+            correspondent_name="Water Co",
+            created=date(2024, 10, 20),
+            tags=["bill"],
+        ),
+        DocumentRecord(
+            id=4,
+            title="Bill Q1 2025",
+            correspondent_id=50,
+            correspondent_name="Water Co",
+            created=date(2025, 1, 20),
+            tags=["bill"],
+        ),
+        DocumentRecord(
+            id=5,
+            title="Bill Q2 2025",
+            correspondent_id=50,
+            correspondent_name="Water Co",
+            created=date(2025, 4, 20),
+            tags=["bill"],
+        ),
     ]
 
     result = discover_providers(documents, config)

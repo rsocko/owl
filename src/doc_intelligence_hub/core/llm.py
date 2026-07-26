@@ -19,7 +19,6 @@ import json
 from typing import Any
 
 from openai import AsyncOpenAI
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -120,6 +119,7 @@ async def chat_completion(
     except Exception as e:
         # Log but don't crash — callers handle None gracefully
         import logging
+
         logging.getLogger(__name__).warning("LLM call failed: %s", e)
         return None
 

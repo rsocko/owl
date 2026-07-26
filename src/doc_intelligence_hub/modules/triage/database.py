@@ -37,9 +37,13 @@ class TriageQueueItem(Base):
     __tablename__ = "triage_queue"
 
     id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex[:12])
-    item_type = Column(String, nullable=False, index=True)  # 'eob_match_review', 'grouping_anomaly', 'orphan_document'
+    item_type = Column(
+        String, nullable=False, index=True
+    )  # 'eob_match_review', 'grouping_anomaly', 'orphan_document'
     priority = Column(Integer, default=50)  # 0-100, higher = more urgent
-    status = Column(String, default="pending", index=True)  # 'pending', 'deferred', 'resolved', 'dismissed'
+    status = Column(
+        String, default="pending", index=True
+    )  # 'pending', 'deferred', 'resolved', 'dismissed'
     source = Column(String, nullable=False)  # 'auto_flag', 'user_request', 'scheduled_scan'
     target_type = Column(String, nullable=False)  # 'eob_match', 'statement_series', 'document'
     target_id = Column(String, nullable=False, index=True)
@@ -61,7 +65,9 @@ class DocumentDuplicate(Base):
     doc_b_id = Column(Integer, nullable=False)
     similarity_score = Column(Float, nullable=False)
     breakdown_json = Column("breakdown", Text, nullable=True)  # JSON: per-signal scores
-    status = Column(String, default="pending")  # 'pending', 'true_duplicate', 'superseded', 'not_duplicate'
+    status = Column(
+        String, default="pending"
+    )  # 'pending', 'true_duplicate', 'superseded', 'not_duplicate'
     primary_doc_id = Column(Integer, nullable=True)
     resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
@@ -113,7 +119,9 @@ class ExtractionCorrection(Base):
     corrected_value = Column(Text, nullable=True)
     confidence = Column(Float, nullable=True)  # original extraction confidence 0-100
     correction_type = Column(String, nullable=False)  # 'confirmed', 'corrected', 'added'
-    source_region_json = Column("source_region", Text, nullable=True)  # bounding box / OCR region JSON
+    source_region_json = Column(
+        "source_region", Text, nullable=True
+    )  # bounding box / OCR region JSON
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     created_by = Column(String, default="user")
@@ -186,7 +194,9 @@ def list_queue_items(
         elif sort == "type":
             query = query.order_by(TriageQueueItem.item_type.asc(), TriageQueueItem.priority.desc())
         else:
-            query = query.order_by(TriageQueueItem.priority.desc(), TriageQueueItem.created_at.asc())
+            query = query.order_by(
+                TriageQueueItem.priority.desc(), TriageQueueItem.created_at.asc()
+            )
 
         items = query.offset(offset).limit(limit).all()
         return [_item_to_dict(item) for item in items]
@@ -204,7 +214,9 @@ def get_queue_item(item_id: str) -> dict[str, Any] | None:
         session.close()
 
 
-def resolve_queue_item(item_id: str, action: str, payload: dict | None = None) -> dict[str, Any] | None:
+def resolve_queue_item(
+    item_id: str, action: str, payload: dict | None = None
+) -> dict[str, Any] | None:
     """Resolve a triage queue item with the given action."""
     import json
 
@@ -342,22 +354,28 @@ def bulk_resolve_items(item_ids: list[str], action: str, payload: dict | None = 
 
     session = get_session()
     try:
-        items = session.query(TriageQueueItem).filter(
-            TriageQueueItem.id.in_(item_ids),
-            TriageQueueItem.status == "pending",
-        ).all()
+        items = (
+            session.query(TriageQueueItem)
+            .filter(
+                TriageQueueItem.id.in_(item_ids),
+                TriageQueueItem.status == "pending",
+            )
+            .all()
+        )
 
         now = datetime.now(UTC)
         for item in items:
             item.status = "resolved"
             item.resolved_at = now
             item.resolved_action = action
-            session.add(CorrectionEvent(
-                event_type=f"triage_{action}",
-                target_type=item.target_type,
-                target_id=item.target_id,
-                payload_json=json.dumps(payload or {}),
-            ))
+            session.add(
+                CorrectionEvent(
+                    event_type=f"triage_{action}",
+                    target_type=item.target_type,
+                    target_id=item.target_id,
+                    payload_json=json.dumps(payload or {}),
+                )
+            )
 
         session.commit()
         return len(items)
@@ -371,12 +389,18 @@ def bulk_defer_items(item_ids: list[str], until: str | None = None) -> int:
 
     session = get_session()
     try:
-        items = session.query(TriageQueueItem).filter(
-            TriageQueueItem.id.in_(item_ids),
-            TriageQueueItem.status == "pending",
-        ).all()
+        items = (
+            session.query(TriageQueueItem)
+            .filter(
+                TriageQueueItem.id.in_(item_ids),
+                TriageQueueItem.status == "pending",
+            )
+            .all()
+        )
 
-        defer_until = datetime.fromisoformat(until) if until else datetime.now(UTC) + timedelta(days=7)
+        defer_until = (
+            datetime.fromisoformat(until) if until else datetime.now(UTC) + timedelta(days=7)
+        )
         for item in items:
             item.status = "deferred"
             item.deferred_until = defer_until
@@ -391,10 +415,14 @@ def bulk_dismiss_items(item_ids: list[str]) -> int:
     """Dismiss multiple triage queue items in a single transaction. Returns count of affected items."""
     session = get_session()
     try:
-        items = session.query(TriageQueueItem).filter(
-            TriageQueueItem.id.in_(item_ids),
-            TriageQueueItem.status == "pending",
-        ).all()
+        items = (
+            session.query(TriageQueueItem)
+            .filter(
+                TriageQueueItem.id.in_(item_ids),
+                TriageQueueItem.status == "pending",
+            )
+            .all()
+        )
 
         now = datetime.now(UTC)
         for item in items:
@@ -415,10 +443,14 @@ def bulk_confirm_by_threshold(min_confidence: int) -> int:
     session = get_session()
     try:
         # Get all pending eob_match_review items
-        items = session.query(TriageQueueItem).filter(
-            TriageQueueItem.item_type == "eob_match_review",
-            TriageQueueItem.status == "pending",
-        ).all()
+        items = (
+            session.query(TriageQueueItem)
+            .filter(
+                TriageQueueItem.item_type == "eob_match_review",
+                TriageQueueItem.status == "pending",
+            )
+            .all()
+        )
 
         now = datetime.now(UTC)
         count = 0
@@ -436,12 +468,16 @@ def bulk_confirm_by_threshold(min_confidence: int) -> int:
                 item.status = "resolved"
                 item.resolved_at = now
                 item.resolved_action = "confirm"
-                session.add(CorrectionEvent(
-                    event_type="triage_bulk_confirm_threshold",
-                    target_type=item.target_type,
-                    target_id=item.target_id,
-                    payload_json=json.dumps({"min_confidence": min_confidence, "score_pct": score}),
-                ))
+                session.add(
+                    CorrectionEvent(
+                        event_type="triage_bulk_confirm_threshold",
+                        target_type=item.target_type,
+                        target_id=item.target_id,
+                        payload_json=json.dumps(
+                            {"min_confidence": min_confidence, "score_pct": score}
+                        ),
+                    )
+                )
                 count += 1
 
         session.commit()
@@ -610,12 +646,14 @@ def resolve_duplicate_pair(
             event_type=f"duplicate_{resolution}",
             target_type="document_duplicate",
             target_id=pair_id,
-            payload_json=json.dumps({
-                "resolution": resolution,
-                "primary_doc_id": primary_doc_id,
-                "doc_a_id": dup.doc_a_id,
-                "doc_b_id": dup.doc_b_id,
-            }),
+            payload_json=json.dumps(
+                {
+                    "resolution": resolution,
+                    "primary_doc_id": primary_doc_id,
+                    "doc_a_id": dup.doc_a_id,
+                    "doc_b_id": dup.doc_b_id,
+                }
+            ),
         )
         session.add(event)
         session.commit()
@@ -631,8 +669,14 @@ def find_existing_duplicate_pair(doc_a_id: int, doc_b_id: int) -> dict[str, Any]
         dup = (
             session.query(DocumentDuplicate)
             .filter(
-                ((DocumentDuplicate.doc_a_id == doc_a_id) & (DocumentDuplicate.doc_b_id == doc_b_id))
-                | ((DocumentDuplicate.doc_a_id == doc_b_id) & (DocumentDuplicate.doc_b_id == doc_a_id))
+                (
+                    (DocumentDuplicate.doc_a_id == doc_a_id)
+                    & (DocumentDuplicate.doc_b_id == doc_b_id)
+                )
+                | (
+                    (DocumentDuplicate.doc_a_id == doc_b_id)
+                    & (DocumentDuplicate.doc_b_id == doc_a_id)
+                )
             )
             .first()
         )
@@ -758,15 +802,17 @@ def get_dashboard_stats() -> dict[str, Any]:
         month_ago = now - timedelta(days=30)
 
         # Pending count
-        pending = session.query(TriageQueueItem).filter(
-            TriageQueueItem.status == "pending"
-        ).count()
+        pending = session.query(TriageQueueItem).filter(TriageQueueItem.status == "pending").count()
 
         # Triaged this month (resolved items)
-        triaged_this_month = session.query(TriageQueueItem).filter(
-            TriageQueueItem.status == "resolved",
-            TriageQueueItem.resolved_at >= month_ago,
-        ).count()
+        triaged_this_month = (
+            session.query(TriageQueueItem)
+            .filter(
+                TriageQueueItem.status == "resolved",
+                TriageQueueItem.resolved_at >= month_ago,
+            )
+            .count()
+        )
 
         # Queue breakdown by type (pending only)
         type_rows = (
@@ -786,14 +832,22 @@ def get_dashboard_stats() -> dict[str, Any]:
         by_status = {s: c for s, c in status_rows}
 
         # Correction events count (for accuracy calculation)
-        total_corrections = session.query(CorrectionEvent).filter(
-            CorrectionEvent.undone == 0,
-        ).count()
+        total_corrections = (
+            session.query(CorrectionEvent)
+            .filter(
+                CorrectionEvent.undone == 0,
+            )
+            .count()
+        )
 
-        confirmed_corrections = session.query(CorrectionEvent).filter(
-            CorrectionEvent.event_type.in_(["triage_confirm", "triage_bulk_confirm_threshold"]),
-            CorrectionEvent.undone == 0,
-        ).count()
+        confirmed_corrections = (
+            session.query(CorrectionEvent)
+            .filter(
+                CorrectionEvent.event_type.in_(["triage_confirm", "triage_bulk_confirm_threshold"]),
+                CorrectionEvent.undone == 0,
+            )
+            .count()
+        )
 
         return {
             "pending_count": pending,
@@ -828,16 +882,18 @@ def get_activity_feed(limit: int = 20) -> list[dict[str, Any]]:
                     payload = json.loads(e.payload_json)
                 except (json.JSONDecodeError, TypeError):
                     pass
-            result.append({
-                "id": e.id,
-                "event_type": e.event_type,
-                "target_type": e.target_type,
-                "target_id": e.target_id,
-                "payload": payload,
-                "paperless_synced": bool(e.paperless_synced),
-                "created_at": e.created_at.isoformat() if e.created_at else None,
-                "created_by": e.created_by,
-            })
+            result.append(
+                {
+                    "id": e.id,
+                    "event_type": e.event_type,
+                    "target_type": e.target_type,
+                    "target_id": e.target_id,
+                    "payload": payload,
+                    "paperless_synced": bool(e.paperless_synced),
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                    "created_by": e.created_by,
+                }
+            )
         return result
     finally:
         session.close()
@@ -860,10 +916,13 @@ def get_match_rate_trend(months: int = 6) -> list[dict[str, Any]]:
             session.query(CorrectionEvent.event_type, CorrectionEvent.created_at)
             .filter(
                 CorrectionEvent.created_at >= earliest,
-                CorrectionEvent.event_type.in_([
-                    "triage_confirm", "triage_reject",
-                    "triage_bulk_confirm_threshold",
-                ]),
+                CorrectionEvent.event_type.in_(
+                    [
+                        "triage_confirm",
+                        "triage_reject",
+                        "triage_bulk_confirm_threshold",
+                    ]
+                ),
                 CorrectionEvent.undone == 0,
             )
             .all()
@@ -891,12 +950,14 @@ def get_match_rate_trend(months: int = 6) -> list[dict[str, Any]]:
             total = buckets[i]["total"]
             confirmed = buckets[i]["confirmed"]
             rate = round((confirmed / total * 100) if total > 0 else 0)
-            trend.append({
-                "month": month_start.strftime("%b"),
-                "rate": rate,
-                "confirmed": confirmed,
-                "total": total,
-            })
+            trend.append(
+                {
+                    "month": month_start.strftime("%b"),
+                    "rate": rate,
+                    "confirmed": confirmed,
+                    "total": total,
+                }
+            )
         return trend
     finally:
         session.close()
@@ -926,7 +987,11 @@ def list_correction_events(
         if event_type:
             # Match related event types (e.g. triage_confirm also matches bulk_confirm_threshold)
             if event_type == "triage_confirm":
-                query = query.filter(CorrectionEvent.event_type.in_(["triage_confirm", "triage_bulk_confirm_threshold"]))
+                query = query.filter(
+                    CorrectionEvent.event_type.in_(
+                        ["triage_confirm", "triage_bulk_confirm_threshold"]
+                    )
+                )
             else:
                 query = query.filter(CorrectionEvent.event_type == event_type)
         if target_type:
@@ -942,19 +1007,23 @@ def list_correction_events(
                     payload = json.loads(e.payload_json)
                 except (json.JSONDecodeError, TypeError):
                     pass
-            result.append({
-                "id": e.id,
-                "event_type": e.event_type,
-                "target_type": e.target_type,
-                "target_id": e.target_id,
-                "payload": payload,
-                "paperless_synced": bool(e.paperless_synced),
-                "paperless_synced_at": e.paperless_synced_at.isoformat() if e.paperless_synced_at else None,
-                "undone": bool(e.undone),
-                "undone_at": e.undone_at.isoformat() if e.undone_at else None,
-                "created_at": e.created_at.isoformat() if e.created_at else None,
-                "created_by": e.created_by,
-            })
+            result.append(
+                {
+                    "id": e.id,
+                    "event_type": e.event_type,
+                    "target_type": e.target_type,
+                    "target_id": e.target_id,
+                    "payload": payload,
+                    "paperless_synced": bool(e.paperless_synced),
+                    "paperless_synced_at": e.paperless_synced_at.isoformat()
+                    if e.paperless_synced_at
+                    else None,
+                    "undone": bool(e.undone),
+                    "undone_at": e.undone_at.isoformat() if e.undone_at else None,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                    "created_by": e.created_by,
+                }
+            )
         return result
     finally:
         session.close()
@@ -1067,25 +1136,31 @@ def get_notification_configs() -> list[dict[str, Any]]:
                     config = json.loads(r.config_json)
                 except (json.JSONDecodeError, TypeError):
                     pass
-            result.append({
-                "id": r.id,
-                "channel": r.channel,
-                "enabled": bool(r.enabled),
-                "config": config,
-                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-            })
+            result.append(
+                {
+                    "id": r.id,
+                    "channel": r.channel,
+                    "enabled": bool(r.enabled),
+                    "config": config,
+                    "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+                }
+            )
         return result
     finally:
         session.close()
 
 
-def upsert_notification_config(channel: str, *, enabled: bool = True, config: dict | None = None) -> dict[str, Any]:
+def upsert_notification_config(
+    channel: str, *, enabled: bool = True, config: dict | None = None
+) -> dict[str, Any]:
     """Create or update a notification channel configuration."""
     import json
 
     session = get_session()
     try:
-        row = session.query(NotificationConfig).filter(NotificationConfig.channel == channel).first()
+        row = (
+            session.query(NotificationConfig).filter(NotificationConfig.channel == channel).first()
+        )
         if row:
             row.enabled = 1 if enabled else 0
             if config is not None:
@@ -1117,4 +1192,3 @@ def upsert_notification_config(channel: str, *, enabled: bool = True, config: di
         }
     finally:
         session.close()
-

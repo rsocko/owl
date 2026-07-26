@@ -5,8 +5,20 @@ from collections import Counter, defaultdict
 from datetime import date
 
 from doc_intelligence_hub.modules.statements.config import AnalysisConfig
-from doc_intelligence_hub.modules.statements.models import AnalysisPattern, DiscoveryDiagnosticEntry, DiscoveryDiagnosticResult, DiscoveryResult, DocumentRecord, ProviderCandidate
-from doc_intelligence_hub.modules.statements.utils import is_last_business_day, is_last_day_of_month, normalize_title, slugify
+from doc_intelligence_hub.modules.statements.models import (
+    AnalysisPattern,
+    DiscoveryDiagnosticEntry,
+    DiscoveryDiagnosticResult,
+    DiscoveryResult,
+    DocumentRecord,
+    ProviderCandidate,
+)
+from doc_intelligence_hub.modules.statements.utils import (
+    is_last_business_day,
+    is_last_day_of_month,
+    normalize_title,
+    slugify,
+)
 
 
 def discover_providers(documents: list[DocumentRecord], config: AnalysisConfig) -> DiscoveryResult:
@@ -16,13 +28,20 @@ def discover_providers(documents: list[DocumentRecord], config: AnalysisConfig) 
 
     providers: list[ProviderCandidate] = []
     for (correspondent_id, correspondent_name), provider_docs in grouped.items():
-        providers.extend(analyze_correspondent(correspondent_id, correspondent_name, provider_docs, config))
+        providers.extend(
+            analyze_correspondent(correspondent_id, correspondent_name, provider_docs, config)
+        )
 
-    providers.sort(key=lambda item: (item.provider_name.lower(), item.normalized_title, item.last_seen), reverse=False)
+    providers.sort(
+        key=lambda item: (item.provider_name.lower(), item.normalized_title, item.last_seen),
+        reverse=False,
+    )
     return DiscoveryResult(analyzed_documents=len(documents), providers=providers)
 
 
-def debug_discovery(documents: list[DocumentRecord], config: AnalysisConfig, limit: int = 20) -> DiscoveryDiagnosticResult:
+def debug_discovery(
+    documents: list[DocumentRecord], config: AnalysisConfig, limit: int = 20
+) -> DiscoveryDiagnosticResult:
     grouped: dict[tuple[int | None, str], list[DocumentRecord]] = defaultdict(list)
     for document in documents:
         grouped[(document.correspondent_id, document.correspondent_name)].append(document)
@@ -30,11 +49,20 @@ def debug_discovery(documents: list[DocumentRecord], config: AnalysisConfig, lim
     diagnostics: list[DiscoveryDiagnosticEntry] = []
     accepted_count = 0
     for (correspondent_id, correspondent_name), provider_docs in grouped.items():
-        current = _diagnose_correspondent(correspondent_id, correspondent_name, provider_docs, config)
+        current = _diagnose_correspondent(
+            correspondent_id, correspondent_name, provider_docs, config
+        )
         accepted_count += sum(1 for item in current if item.status == "accepted")
         diagnostics.extend(current)
 
-    diagnostics.sort(key=lambda item: (item.status != "accepted", -item.document_count, item.correspondent_name.lower(), item.normalized_title))
+    diagnostics.sort(
+        key=lambda item: (
+            item.status != "accepted",
+            -item.document_count,
+            item.correspondent_name.lower(),
+            item.normalized_title,
+        )
+    )
     return DiscoveryDiagnosticResult(
         analyzed_documents=len(documents),
         accepted_providers=accepted_count,
@@ -48,7 +76,9 @@ def analyze_correspondent(
     documents: list[DocumentRecord],
     config: AnalysisConfig,
 ) -> list[ProviderCandidate]:
-    statement_like_documents = [document for document in documents if _is_statement_like(document, config)]
+    statement_like_documents = [
+        document for document in documents if _is_statement_like(document, config)
+    ]
     if len(statement_like_documents) < config.min_documents_for_pattern:
         return []
 
@@ -76,7 +106,9 @@ def analyze_correspondent(
     if candidates:
         return candidates
 
-    candidate = analyze_group(correspondent_id, correspondent_name, statement_like_documents, config)
+    candidate = analyze_group(
+        correspondent_id, correspondent_name, statement_like_documents, config
+    )
     return [candidate] if candidate is not None else []
 
 
@@ -86,7 +118,9 @@ def _diagnose_correspondent(
     documents: list[DocumentRecord],
     config: AnalysisConfig,
 ) -> list[DiscoveryDiagnosticEntry]:
-    statement_like_documents = [document for document in documents if _is_statement_like(document, config)]
+    statement_like_documents = [
+        document for document in documents if _is_statement_like(document, config)
+    ]
     if not statement_like_documents:
         return []
 
@@ -97,7 +131,9 @@ def _diagnose_correspondent(
             grouped_by_title[normalized_title].append(document)
 
     return [
-        _build_diagnostic_entry(correspondent_id, correspondent_name, normalized_title, grouped_documents, config)
+        _build_diagnostic_entry(
+            correspondent_id, correspondent_name, normalized_title, grouped_documents, config
+        )
         for normalized_title, grouped_documents in grouped_by_title.items()
     ]
 
@@ -109,7 +145,9 @@ def analyze_group(
     config: AnalysisConfig,
     normalized_title_hint: str | None = None,
 ) -> ProviderCandidate | None:
-    eligible_documents = [document for document in documents if _is_statement_like(document, config)]
+    eligible_documents = [
+        document for document in documents if _is_statement_like(document, config)
+    ]
     if len(eligible_documents) < config.min_documents_for_pattern:
         return None
 
@@ -134,7 +172,9 @@ def analyze_group(
     if title_consistency < config.minimum_title_consistency:
         return None
 
-    pattern = _build_pattern(frequency, [document.created for document in ordered], config.default_grace_period_days)
+    pattern = _build_pattern(
+        frequency, [document.created for document in ordered], config.default_grace_period_days
+    )
     provider_name = correspondent_name.strip() if correspondent_name else ""
     if not provider_name or provider_name.lower() == "unknown":
         provider_name = dominant_pattern.title()
@@ -160,12 +200,21 @@ def _is_statement_like(document: DocumentRecord, config: AnalysisConfig) -> bool
     # Document type matching: keyword heuristics ALWAYS apply, and the configured
     # mapping can add additional types (e.g. types whose names don't contain a keyword).
     if document.document_type:
-        if any(keyword in document.document_type.lower() for keyword in ("statement", "bill", "invoice", "eob")):
+        if any(
+            keyword in document.document_type.lower()
+            for keyword in ("statement", "bill", "invoice", "eob")
+        ):
             return True
-        if config.enabled_document_type_names is not None and document.document_type in config.enabled_document_type_names:
+        if (
+            config.enabled_document_type_names is not None
+            and document.document_type in config.enabled_document_type_names
+        ):
             return True
     normalized = normalize_title(document.title)
-    return any(keyword in normalized for keyword in ("statement", "bill", "invoice", "eob", "explanation of benefits"))
+    return any(
+        keyword in normalized
+        for keyword in ("statement", "bill", "invoice", "eob", "explanation of benefits")
+    )
 
 
 def _classify_frequency(intervals: list[int], config: AnalysisConfig) -> str | None:

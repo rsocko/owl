@@ -26,6 +26,25 @@ import '../styles/eob-pages.css';
 // Types
 // ------------------------------------------------------------------
 
+interface EobDetails {
+  provider_name?: string | null;
+  patient_name?: string | null;
+  insurance_company?: string | null;
+  date_of_service?: string | null;
+  total_billed?: number | null;
+  total_patient_responsibility?: number | null;
+  claim_number?: string | null;
+}
+
+interface BillDetails {
+  provider_name?: string | null;
+  patient_name?: string | null;
+  date_of_service?: string | null;
+  total_amount?: number | null;
+  balance_due?: number | null;
+  invoice_number?: string | null;
+}
+
 interface EobMatch {
   id: number;
   run_id?: number | null;
@@ -54,6 +73,8 @@ interface EobMatch {
   user_status?: string | null;
   reviewed_at?: string | null;
   user_notes?: string | null;
+  eob_details?: EobDetails | null;
+  bill_details?: BillDetails | null;
 }
 
 interface MatchHistoryEvent {
@@ -383,6 +404,18 @@ export default function EobMatchDetail({
 
   const amountToneClass = (match?.breakdown?.amount ?? 0) >= 75 ? 'pass' : 'fail';
 
+  /** Configurable tolerance threshold for amount validation (dollars). */
+  const AMOUNT_TOLERANCE = 5;
+
+  const amountComparison = useMemo(() => {
+    const eobAmount = match?.eob_details?.total_patient_responsibility ?? null;
+    const billAmount = match?.bill_details?.balance_due ?? match?.bill_details?.total_amount ?? null;
+    if (eobAmount === null || billAmount === null) return null;
+    const difference = billAmount - eobAmount;
+    const pass = Math.abs(difference) <= AMOUNT_TOLERANCE;
+    return { eobAmount, billAmount, difference, pass };
+  }, [match]);
+
   // ---- Actions ----
 
   const handleConfirm = useCallback(async () => {
@@ -620,24 +653,61 @@ export default function EobMatchDetail({
         </Card>
 
         <Card title="Amount validation">
-          <div className={`eob-validation ${amountToneClass}`}>
-            <div className="eob-validation-icon">{amountToneClass === 'pass' ? '✓' : '⚠'}</div>
-            <div className="eob-card-stack">
-              <div className="eob-field-value">
-                {amountToneClass === 'pass' ? 'Amount signal is aligned' : 'Amount signal needs review'}
-              </div>
-              <div className="eob-field-note">
-                Amount similarity scored {formatPercent(match.breakdown?.amount)}. The matcher compares
-                EOB patient responsibility with bill balance/total due.
-              </div>
-              <div className="eob-meta-row">
-                <Badge tone={amountToneClass === 'pass' ? 'success' : 'danger'}>
-                  {amountToneClass === 'pass' ? 'Pass' : 'Mismatch risk'}
-                </Badge>
-                <span>Linked in Paperless: {match.linked_in_paperless ? 'Yes' : 'No'}</span>
+          {amountComparison ? (
+            <div className={`eob-validation ${amountComparison.pass ? 'pass' : 'fail'}`}>
+              <div className="eob-validation-icon">{amountComparison.pass ? '✓' : '⚠'}</div>
+              <div className="eob-card-stack">
+                <div className="eob-field-value">
+                  {amountComparison.pass
+                    ? 'Amount Validation: PASS'
+                    : 'Amount Validation: MISMATCH'}
+                </div>
+                <div className="eob-field-note">
+                  {amountComparison.pass
+                    ? 'Patient responsibility on EOB is within tolerance of the bill amount due.'
+                    : 'Patient responsibility on EOB does not match bill amount due.'}
+                </div>
+                <div className="eob-meta-row" style={{ gap: '16px', marginTop: 4 }}>
+                  <span>EOB Patient Resp: <strong>{formatCurrency(amountComparison.eobAmount)}</strong></span>
+                  <span>Bill Amount Due: <strong>{formatCurrency(amountComparison.billAmount)}</strong></span>
+                  <span>
+                    Difference:{' '}
+                    <strong style={{ color: amountComparison.pass ? undefined : 'var(--danger)' }}>
+                      {amountComparison.difference >= 0 ? '+' : ''}
+                      {formatCurrency(amountComparison.difference)}
+                    </strong>
+                  </span>
+                </div>
+                <div className="eob-meta-row" style={{ marginTop: 4 }}>
+                  <Badge tone={amountComparison.pass ? 'success' : 'danger'}>
+                    {amountComparison.pass ? 'Pass' : 'Mismatch risk'}
+                  </Badge>
+                  <span className="eob-field-note">
+                    Tolerance: ±{formatCurrency(AMOUNT_TOLERANCE)}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
+          ) : (
+            <div className={`eob-validation ${amountToneClass}`}>
+              <div className="eob-validation-icon">{amountToneClass === 'pass' ? '✓' : '⚠'}</div>
+              <div className="eob-card-stack">
+                <div className="eob-field-value">
+                  {amountToneClass === 'pass' ? 'Amount signal is aligned' : 'Amount signal needs review'}
+                </div>
+                <div className="eob-field-note">
+                  Amount similarity scored {formatPercent(match.breakdown?.amount)}. Dollar amounts
+                  are not available for direct comparison.
+                </div>
+                <div className="eob-meta-row">
+                  <Badge tone={amountToneClass === 'pass' ? 'success' : 'danger'}>
+                    {amountToneClass === 'pass' ? 'Pass' : 'Mismatch risk'}
+                  </Badge>
+                  <span>Linked in Paperless: {match.linked_in_paperless ? 'Yes' : 'No'}</span>
+                </div>
+              </div>
+            </div>
+          )}
         </Card>
       </div>
 
