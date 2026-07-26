@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from doc_intelligence_hub.api.routers import action_queue, admin, alerts, document_types, eob, mc_connector, statements, stats, system
+from doc_intelligence_hub.api.routers import action_queue, admin, alerts, document_types, eob, mc_connector, statements, stats, system, triage
 from doc_intelligence_hub.core.llm import get_llm_settings, validate_model_availability
 from doc_intelligence_hub.core.logging_config import configure_logging
 from doc_intelligence_hub.core.scheduler import HubScheduler
@@ -141,6 +141,15 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
         except Exception as exc:
             logger.warning("Could not initialize alerts DB: %s", exc)
 
+        # Initialize triage queue database
+        try:
+            from doc_intelligence_hub.modules.triage.database import init_db as triage_init_db
+
+            triage_init_db()
+            logger.info("Triage queue DB initialized.")
+        except Exception as exc:
+            logger.warning("Could not initialize triage DB: %s", exc)
+
         # Start the built-in job scheduler
         scheduler: HubScheduler = app.state.scheduler
         try:
@@ -169,6 +178,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
             {"name": "action-queue", "description": "Action Queue connectivity, dry-runs, and pipeline status."},
             {"name": "alerts", "description": "Unified alerts feed across all DI modules."},
             {"name": "admin", "description": "Admin configuration: scoring weights, schedules, and debugging."},
+            {"name": "triage", "description": "Triage queue for human review of automated decisions."},
             {"name": "stats", "description": "Aggregate statistics across all DI modules for MC integration."},
         ],
         lifespan=lifespan,
@@ -205,6 +215,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(document_types.router)
     app.include_router(stats.router)
     app.include_router(mc_connector.router)
+    app.include_router(triage.router)
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
