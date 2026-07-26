@@ -779,8 +779,21 @@ async def get_match(request: Request, match_id: int) -> dict[str, Any]:
 
             raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
 
+        eob = (
+            db.query(EOBRecord)
+            .filter_by(document_id=match.eob_document_id)
+            .order_by(EOBRecord.id.desc())
+            .first()
+        ) if match.eob_document_id else None
+        bill = (
+            db.query(BillRecord)
+            .filter_by(document_id=match.bill_document_id)
+            .order_by(BillRecord.id.desc())
+            .first()
+        ) if match.bill_document_id else None
+
         paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
-        return _serialize_match(match, paperless_url)
+        return _serialize_match(match, paperless_url, eob=eob, bill=bill)
     finally:
         db.close()
 
