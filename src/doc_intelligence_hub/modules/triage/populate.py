@@ -20,6 +20,7 @@ from doc_intelligence_hub.modules.triage.database import (
     get_session as get_triage_session,
     TriageQueueItem,
 )
+from doc_intelligence_hub.core.alerts import emit_alert
 
 logger = logging.getLogger(__name__)
 
@@ -317,6 +318,16 @@ def _flag_orphan_documents() -> int:
             )
             created += 1
 
+            # Escalate overdue orphans to Mission Control via unified alerts
+            if orphan_status == "overdue":
+                _emit_orphan_escalation_alert(
+                    document_id=eob.document_id,
+                    document_type="eob",
+                    provider_name=eob.provider_name,
+                    age_days=age_days,
+                    amount=amount,
+                )
+
         # ── Flag orphan Bills ──
         all_bills = eob_session.query(BillRecord).all()
         for bill in all_bills:
@@ -361,6 +372,16 @@ def _flag_orphan_documents() -> int:
             )
             created += 1
 
+            # Escalate overdue orphans to Mission Control via unified alerts
+            if orphan_status == "overdue":
+                _emit_orphan_escalation_alert(
+                    document_id=bill.document_id,
+                    document_type="bill",
+                    provider_name=bill.provider_name,
+                    age_days=age_days,
+                    amount=bill.total_amount or bill.balance_due,
+                )
+
     finally:
         eob_session.close()
         triage_session.close()
@@ -400,6 +421,48 @@ def _reflag_expired_deferred_orphans() -> int:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+def _emit_orphan_escalation_alert(
+    *,
+    document_id: int,
+    document_type: str,
+    provider_name: str | None,
+    age_days: int,
+    amount: float | None,
+) -> None:
+    """Emit a high-severity alert for overdue orphan documents.
+
+    These alerts are surfaced via the unified /api/insights/alerts endpoint
+    and consumed by Mission Control's connector.
+    """
+    provider = provider_name or "Unknown"
+    doc_label = "EOB" if document_type == "eob" else "Bill"
+    amount_str = f" (${amount:,.2f})" if amount else ""
+
+    try:
+        emit_alert(
+            alert_type="orphan_overdue",
+            severity="high",
+            module="eob",
+            title=f"Overdue orphan {doc_label} from {provider}{amount_str}",
+            description=(
+                f"{doc_label} (doc #{document_id}) has been unmatched for {age_days} days "
+                f"and requires manual attention."
+            ),
+            action_url=f"/triage?filter=orphan_document&target=eob-{document_id}"
+            if document_type == "eob"
+            else f"/triage?filter=orphan_document&target=bill-{document_id}",
+            metadata={
+                "document_id": document_id,
+                "document_type": document_type,
+                "provider_name": provider,
+                "age_days": age_days,
+                "amount": amount,
+            },
+        )
+    except Exception:
+        logger.debug("Could not emit orphan escalation alert for doc #%s", document_id)
 
 
 def _document_age_days(created_at: Any, now: datetime) -> int:
