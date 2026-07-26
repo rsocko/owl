@@ -216,7 +216,7 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 | -------- | ----- | ------------------------------------------ | ---- |
 | P2       | #848  | Full EOB dashboard UI (replaces basic tab) | done |
 | P2       | #906  | EOB Dashboard inline alerts + quick stats  | done |
-| P2       | #882  | Amount validation pass/fail cards          |      |
+| P2       | #882  | Amount validation pass/fail cards          | done |
 | P2       | #874  | Alternative matches display                | done |
 | P2       | #884  | Unmatched filters + suggested matches      | done |
 | P2       | #903  | Unmatched view bulk actions                | done |
