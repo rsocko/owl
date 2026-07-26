@@ -1,13 +1,11 @@
-import { HashRouter, Route, Routes } from 'react-router-dom';
+import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { TopNav } from './components/TopNav';
 import OverviewDashboard from './pages/OverviewDashboard';
 import DashboardView from './pages/DashboardView';
 import CorrectionHistory from './pages/CorrectionHistory';
 import Statements from './pages/Statements';
 import StatementSeriesDetail from './pages/StatementSeriesDetail';
-import EobDashboard from './pages/EobDashboard';
-import EobMatchReview from './pages/EobMatchReview';
-import EobUnmatched from './pages/EobUnmatched';
+import EobWorkspace from './pages/EobWorkspace';
 import ActionQueue from './pages/ActionQueue';
 import TriageQueue from './pages/TriageQueue';
 import MetadataCorrection from './pages/MetadataCorrection';
@@ -18,6 +16,12 @@ import History from './pages/History';
 import OrphansDupes from './pages/OrphansDupes';
 import Settings from './pages/Settings';
 import NotFound from './pages/NotFound';
+
+/** Redirect legacy /eob/matches/:matchId to the unified workspace. */
+function EobMatchRedirect() {
+  const { matchId } = useParams();
+  return <Navigate to={`/eob?tab=review&matchId=${matchId}`} replace />;
+}
 
 function App() {
   return (
@@ -31,9 +35,11 @@ function App() {
             <Route path="/corrections" element={<CorrectionHistory />} />
             <Route path="/statements" element={<Statements />} />
             <Route path="/statements/:seriesId" element={<StatementSeriesDetail />} />
-            <Route path="/eob" element={<EobDashboard />} />
-            <Route path="/eob/matches/:matchId" element={<EobMatchReview />} />
-            <Route path="/eob/unmatched" element={<EobUnmatched />} />
+            <Route path="/eob" element={<EobWorkspace />} />
+            {/* Legacy routes redirect into the unified workspace */}
+            <Route path="/eob/matches/:matchId" element={<EobMatchRedirect />} />
+            <Route path="/eob/unmatched" element={<Navigate to="/eob?tab=unmatched" replace />} />
+            <Route path="/eob/manual-search" element={<ManualMatchSearch />} />
             <Route path="/action-queue" element={<ActionQueue />} />
             <Route path="/triage" element={<TriageQueue />} />
             <Route path="/triage/manual-search" element={<ManualMatchSearch />} />
