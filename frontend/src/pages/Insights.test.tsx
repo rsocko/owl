@@ -10,7 +10,7 @@ import Insights, {
   alertToInsight,
   getErrorMessage,
 } from './Insights';
-import type { AlertItem, InsightItem } from './Insights';
+import type { AlertItem } from './Insights';
 
 /* ================================================================
  * Unit tests for pure helper functions
