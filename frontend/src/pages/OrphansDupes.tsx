@@ -14,6 +14,7 @@ import {
   Tabs,
   Toast,
 } from '../components/ui';
+import DocumentPreview from '../components/DocumentPreview';
 import { endpoints } from '../lib/api';
 
 type ToastState = {
@@ -517,6 +518,16 @@ export default function OrphansDupes() {
               <div style={{ marginTop: 4, fontWeight: 600 }}>{selectedOrphan.detailValue}</div>
               <div className="text-muted" style={{ fontSize: '0.82rem', marginTop: 10 }}>Updated {selectedOrphan.ageLabel}</div>
             </div>
+
+            {/* Document preview for unmatched EOBs */}
+            {selectedOrphan.kind === 'unmatched_eob' && selectedOrphan.source && !Number.isNaN(Number((selectedOrphan.source as UnmatchedEob).id)) && (
+              <DocumentPreview
+                documentId={Number((selectedOrphan.source as UnmatchedEob).id)}
+                paperlessUrl={selectedOrphan.actionUrl}
+                variant="compact"
+                label="EOB"
+              />
+            )}
 
             <Card title={selectedOrphan.kind === 'missing_statement' ? 'Assign provider metadata' : 'Review notes'}>
               <div className="form-group">
