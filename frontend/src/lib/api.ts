@@ -140,4 +140,11 @@ export const endpoints = {
     stats: () => api.get('/api/triage/stats'),
     populate: () => api.post('/api/triage/queue/populate'),
   },
+  duplicates: {
+    list: (params?: string) => api.get(`/api/duplicates${params ? `?${params}` : ''}`),
+    get: (id: string) => api.get(`/api/duplicates/${id}`),
+    resolve: (id: string, body: { resolution: string; primary_doc_id?: number }) =>
+      api.post(`/api/duplicates/${id}/resolve`, body),
+    scan: () => api.post('/api/duplicates/scan'),
+  },
 };
