@@ -86,6 +86,29 @@ OWL is a standalone app with its own rich UI AND a headless API consumed by Miss
 - Portainer/dashboard service listings
 - Internal documentation and architecture diagrams
 
+## On Owl Puns and Sound Effects ("Hoo" / "Who")
+
+### Verdict: Skip it. The brand is stronger without.
+
+The temptation exists to work owl sounds into the UI -- "Hoo's watching your documents?" as a tagline, "Who" as a search placeholder, "Hoot" as a notification sound name, etc.
+
+**Why it doesn't work here:**
+
+- **Tone mismatch.** OWL's strength is *quiet competence* -- the owl that sees everything without making noise. The brand personality is calm, precise, watchful. Puns inject whimsy that undercuts the "I trust this system with my finances" feeling.
+- **Wears thin fast.** A pun is funny once. You'll see this UI daily. By week two, "Hoo wants to review 3 documents?" goes from cute to grating.
+- **Audience of one.** In a team product, playful copy builds culture. In a solo homelab tool, it's just you cringing at your past self.
+- **The name already does the work.** "OWL" and "Organize. Watch. Learn." carry all the personality needed. Adding sound puns is gilding the lily.
+
+**Where owl personality CAN show up (subtly):**
+
+- **Empty states** -- A minimal owl silhouette with "Nothing to watch" or "All clear" is fine. It's visual, not punny.
+- **Error/404 page** -- A confused owl illustration is charming without being a pun.
+- **Favicon/icon** -- Owl eyes or silhouette as the app icon. Strong, silent, recognizable.
+- **Alert severity names** (internal only) -- If you wanted "hoot" as an alert level name in code/config, that's developer-facing and harmless. But don't surface it in UI copy.
+- **Commit messages / changelogs** -- Occasional owl emoji or light reference in developer-facing text is fine. It's ephemeral.
+
+**The guiding principle:** The owl metaphor should be *felt* (dark palette, amber alert glow, watchful icon) rather than *stated* (puns, sound effects, forced wordplay). Show, don't tell.
+
 ## Decision Date
 
 July 2026. Revisit only if another bird-themed service name creates ecosystem confusion.
