@@ -1,3 +1,9 @@
+---
+title: "UI Flow Diagrams"
+sidebar_label: UI Flows
+sidebar_position: 6
+---
+
 # OWL UI Flow Diagrams — Current State vs Future State
 
 This document presents visual diagrams of the OWL (Document Intelligence Hub) navigation hierarchy and user flows, comparing the **current state** (with identified problems) against a **proposed future state** (with improvements).

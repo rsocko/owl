@@ -1,3 +1,9 @@
+---
+title: "OWL Branding Rationale"
+sidebar_label: Branding
+sidebar_position: 5
+---
+
 # OWL — Branding Rationale
 
 > **Decision: OWL** — `service-005.example.invalid`

@@ -1,3 +1,9 @@
+---
+title: "OWL Feature Roadmap"
+sidebar_label: Roadmap
+sidebar_position: 8
+---
+
 # OWL Feature Roadmap
 
 *OWL = Organize. Watch. Learn. — Document Intelligence Hub*
