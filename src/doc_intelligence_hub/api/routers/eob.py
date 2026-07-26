@@ -74,6 +74,7 @@ class ManualMatchRequest(BaseModel):
     eob_doc_id: int = Field(..., description="EOB document ID")
     bill_doc_id: int = Field(..., description="Bill document ID")
     notes: str | None = Field(default=None, description="Optional notes")
+    triage_item_id: str | None = Field(default=None, description="If provided, also resolve this triage queue item")
 
 
 # ------------------------------------------------------------------
@@ -830,14 +831,83 @@ async def reject_match(
 
 
 @router.post("/matches/manual")
-async def create_manual_match(body: ManualMatchRequest) -> dict[str, Any]:
-    """Create a manual EOB↔Bill match — placeholder for future implementation (#877)."""
+async def create_manual_match(request: Request, body: ManualMatchRequest) -> dict[str, Any]:
+    """Create a manual EOB↔Bill match — user-driven re-link (#877)."""
     from fastapi import HTTPException
 
-    raise HTTPException(
-        status_code=501,
-        detail="Manual match creation is not yet implemented. See #877.",
-    )
+    init_db()
+    db = get_db_session()
+    try:
+        # Check for existing confirmed match between these two documents
+        existing = (
+            db.query(MatchRecord)
+            .filter_by(eob_document_id=body.eob_doc_id, bill_document_id=body.bill_doc_id)
+            .filter(MatchRecord.status == "confirmed")
+            .first()
+        )
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A confirmed match already exists between EOB {body.eob_doc_id} and Bill {body.bill_doc_id} (match #{existing.id}).",
+            )
+
+        now = datetime.now(UTC)
+        match = MatchRecord(
+            eob_document_id=body.eob_doc_id,
+            bill_document_id=body.bill_doc_id,
+            score=100.0,
+            confidence="MANUAL",
+            breakdown_date=0.0,
+            breakdown_provider=0.0,
+            breakdown_patient=0.0,
+            breakdown_amount=0.0,
+            breakdown_procedures=0.0,
+            status="confirmed",
+            user_status="manual",
+            confirmed_at=now,
+            reviewed_at=now,
+            notes=body.notes,
+            user_notes=body.notes,
+        )
+        db.add(match)
+        db.flush()  # get match.id
+
+        db.add(MatchEvent(
+            match_id=match.id,
+            event_type="manual_match",
+            actor="user",
+            detail=f"Manual match created by user linking EOB {body.eob_doc_id} ↔ Bill {body.bill_doc_id}"
+            + (f": {body.notes}" if body.notes else ""),
+        ))
+
+        # Write to Paperless if enabled
+        if _is_write_enabled(request) and not match.linked_in_paperless:
+            try:
+                client = make_paperless_client(request, timeout=30.0)
+                enricher = EOBEnricher(client)
+                await enricher.link_match(
+                    eob_document_id=match.eob_document_id,
+                    bill_document_id=match.bill_document_id,
+                    score=match.score,
+                    confidence=match.confidence,
+                )
+                match.linked_in_paperless = 1
+            except Exception:
+                pass  # Non-fatal
+
+        db.commit()
+
+        # Resolve triage item if provided
+        if body.triage_item_id:
+            _resolve_triage_item(body.triage_item_id, "manual_match", match.id)
+
+        paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
+        return {
+            "status": "ok",
+            "match": _serialize_match(match, paperless_url),
+        }
+    finally:
+        db.close()
 
 
 @router.get("/candidates/{doc_id}")

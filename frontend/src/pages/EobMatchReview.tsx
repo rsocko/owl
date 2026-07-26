@@ -21,11 +21,6 @@ export default function EobMatchReview() {
     navigate('/eob');
   }, [navigate]);
 
-  const handleRelink = useCallback(() => {
-    const params = new URLSearchParams({ matchId: String(numericMatchId) });
-    navigate(`/triage/manual-search?${params.toString()}`);
-  }, [numericMatchId, navigate]);
-
   if (!matchId || Number.isNaN(numericMatchId)) {
     return (
       <PageHeader
@@ -52,7 +47,6 @@ export default function EobMatchReview() {
       <EobMatchDetail
         matchId={numericMatchId}
         onSkip={handleSkip}
-        onRelink={handleRelink}
       />
     </>
   );
