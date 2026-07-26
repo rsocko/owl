@@ -224,6 +224,82 @@ These features span multiple services (DI Hub + Mission Control + Monarch + exte
 
 ---
 
+## Reconciliation Engine (Generalized Document Matching)
+
+### ✅ Today (Built)
+
+- EOB ↔ Bill matching (5-factor weighted scoring, configurable weights, payment lifecycle)
+- Full classifier → extractor → scorer → lifecycle pipeline (hardcoded to medical)
+- Rich review UI with confidence breakdowns, amount validation, match history
+
+### 🔮 Future: Generalized Reconciliation Engine
+
+The Reconciliation Engine generalizes the proven EOB matching pattern into a recipe-driven system supporting arbitrary document matching scenarios.
+
+#### Phase 1: Foundation + Receipt ↔ Bill (Priority: HIGH)
+
+| Feature | Priority | Effort | Dependencies |
+|---------|----------|--------|--------------|
+| Extract generic interfaces from `eob_matching/` (RecipeBase, ScoringEngine, LifecycleFSM) | HIGH | M | — |
+| Migrate EOB matcher to `EobBillRecipe` plugin (backward compatible) | HIGH | M | Generic interfaces |
+| Receipt ↔ Bill recipe: classifier, extractor, scorer | HIGH | M | Generic interfaces |
+| Double-payment detection (two receipts → same bill) | HIGH | S | Receipt↔Bill recipe |
+| Payment due date alerting (unmatched bills past due) | HIGH | S | Receipt↔Bill recipe |
+| `/api/reconciliation/*` endpoints (recipes, matches, review, stats) | HIGH | M | Engine core |
+| Reconciliation Dashboard UI (all recipes, review queue, activity feed) | HIGH | M | API endpoints |
+| Receipt ↔ Bill matching UI view | HIGH | M | API endpoints |
+
+**Estimated Phase 1 effort: ~6 weeks**
+
+#### Phase 2: Order Lifecycle (Priority: MEDIUM)
+
+| Feature | Priority | Effort | Dependencies |
+|---------|----------|--------|--------------|
+| Order ↔ Invoice ↔ Shipping recipe (3-way matching) | MEDIUM | L | Phase 1 complete |
+| Extend scoring engine for N-way match groups | MEDIUM | M | Phase 1 complete |
+| Mission Control package tracking integration | MEDIUM | S | MC connector |
+| Item-level reconciliation (line item comparison) | MEDIUM | M | Order recipe |
+| Order lifecycle timeline UI | MEDIUM | M | API endpoints |
+
+**Estimated Phase 2 effort: ~4 weeks**
+
+#### Phase 3: Insurance & Contracts (Priority: MEDIUM)
+
+| Feature | Priority | Effort | Dependencies |
+|---------|----------|--------|--------------|
+| Insurance Policy ↔ Premium ↔ Payment recipe | MEDIUM | L | Phase 1 complete |
+| Rate change detection (premium ≠ policy terms) | MEDIUM | M | Insurance recipe |
+| Contract ↔ Recurring Bills recipe | LOW | M | Phase 1 complete |
+| Variance trending (bills creeping above contract) | LOW | M | Contract recipe |
+| Integration with Statement Tracking (recurring patterns) | MEDIUM | S | Both modules |
+
+**Estimated Phase 3 effort: ~4 weeks**
+
+#### Phase 4: Bank Statement Vision (Priority: FUTURE)
+
+| Feature | Priority | Effort | Dependencies |
+|---------|----------|--------|--------------|
+| Bank statement table extraction (line items) | FUTURE | XL | Azure DI or specialized model |
+| Merchant name normalization dictionary | FUTURE | L | — |
+| Line-item ↔ document matching (high volume) | FUTURE | XL | Table extraction |
+| Monarch Bridge integration (transaction import) | FUTURE | L | Monarch connector (#768) |
+| Full reconciliation dashboard (unmatched drill-down) | FUTURE | L | All above |
+
+**Estimated Phase 4 effort: 60+ hours (gated on table extraction capability)**
+
+#### Phased Rollout Summary
+
+| Phase | Scope | Priority | Estimated Effort |
+|-------|-------|----------|-----------------|
+| **Phase 1** | Engine foundation + Receipt↔Bill | HIGH | ~6 weeks |
+| **Phase 2** | Order lifecycle (3-way matching) | MEDIUM | ~4 weeks |
+| **Phase 3** | Insurance + Contracts | MEDIUM | ~4 weeks |
+| **Phase 4** | Bank statement reconciliation | FUTURE | 60+ hrs |
+
+**Decision gate:** Phase 2+ proceeds only after Phase 1 proves the generalized engine works reliably in production with the Receipt↔Bill recipe.
+
+---
+
 ## Summary
 
 | Feature Area | Today Status | Open Future Items |
@@ -231,10 +307,11 @@ These features span multiple services (DI Hub + Mission Control + Monarch + exte
 | Action Queue | ✅ Full pipeline, live | 4 items |
 | Statement Tracking | ✅ Full pipeline, live | 2 items |
 | EOB/Medical Matching | ✅ Full pipeline, live + rich UI | 3 items |
+| Reconciliation Engine | 📋 Design complete | 4 phases (20+ items) |
 | Unified Alerts & Insights | ✅ Full system, charts, rules | 3 items |
 | OCR Quality System | 📋 Design only (6 docs) | 6 items (60+ hrs) |
 | Triage & Correction | ✅ Complete workflow | 3 items |
 | Infrastructure & Platform | ✅ Production-deployed | 7 items |
 | Cross-Platform | 🔮 Not started | 3 items |
 
-**Phases 0–4 complete.** Phase 5 (Infrastructure & Integration) is next. Phase 6 (OCR) is gated on need. Phase 7 (Cross-Platform) is long-term vision.
+**Phases 0–4 complete.** Phase 5 (Infrastructure & Integration) is next. Phase 5.5 (Reconciliation Engine) generalizes matching. Phase 6 (OCR) is gated on need. Phase 7 (Cross-Platform) is long-term vision.
