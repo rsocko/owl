@@ -386,15 +386,24 @@ export default function TriageQueue() {
       const tag = target?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
 
+      // Escape closes modals first, then deselects
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (pendingBulkAction) { setPendingBulkAction(null); return; }
+        if (pendingThreshold) { setPendingThreshold(false); return; }
+        setSelectedId(null);
+        return;
+      }
+
+      // Suppress all other shortcuts while a modal is open
+      if (pendingBulkAction || pendingThreshold) return;
+
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         moveSelection(1);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         moveSelection(-1);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        setSelectedId(null);
       } else if (e.key.toLowerCase() === 'y' && selectedId) {
         e.preventDefault();
         void handleResolve(selectedId, 'confirm');
@@ -419,7 +428,7 @@ export default function TriageQueue() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [items, selectedId]);
+  }, [items, selectedId, pendingBulkAction, pendingThreshold]);
 
   // ------------------------------------------------------------------
   // Derived counts
@@ -517,8 +526,8 @@ export default function TriageQueue() {
               </div>
             ) : (
               <>
-                {/* Bulk action bar */}
-                {checkedIds.size > 0 && (
+                {/* Bulk action bar — only for pending items (bulk ops target pending status) */}
+                {checkedIds.size > 0 && statusFilter === 'pending' && (
                   <div className="triage-bulk-bar">
                     <span>
                       {checkedIds.size} selected
@@ -550,14 +559,18 @@ export default function TriageQueue() {
 
                 {/* Select-all + populate */}
                 <div className="triage-list-toolbar">
-                  <label className="triage-select-all">
-                    <input
-                      type="checkbox"
-                      checked={items.length > 0 && items.every((i) => checkedIds.has(i.id))}
-                      onChange={selectAllVisible}
-                    />
-                    <span>Select visible</span>
-                  </label>
+                  {statusFilter === 'pending' ? (
+                    <label className="triage-select-all">
+                      <input
+                        type="checkbox"
+                        checked={items.length > 0 && items.every((i) => checkedIds.has(i.id))}
+                        onChange={selectAllVisible}
+                      />
+                      <span>Select visible</span>
+                    </label>
+                  ) : (
+                    <span />
+                  )}
                   <Button size="sm" onClick={() => void handlePopulate()} disabled={populating}>
                     {populating ? 'Scanning…' : '🔄 Populate'}
                   </Button>
@@ -586,12 +599,14 @@ export default function TriageQueue() {
                         onClick={() => setSelectedId(item.id)}
                       >
                         <div className="triage-item-top">
-                          <input
-                            type="checkbox"
-                            checked={checkedIds.has(item.id)}
-                            onChange={(e) => toggleCheck(item.id, e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey)}
-                            onClick={(e) => e.stopPropagation()}
-                          />
+                          {statusFilter === 'pending' && (
+                            <input
+                              type="checkbox"
+                              checked={checkedIds.has(item.id)}
+                              onChange={(e) => toggleCheck(item.id, e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          )}
                           <Badge tone={typeBadgeTone(item.item_type)}>{typeLabel(item.item_type)}</Badge>
                           {item.metadata && typeof item.metadata.score_pct === 'number' && (
                             <span className={`triage-score ${item.metadata.score_pct >= 85 ? 'high' : item.metadata.score_pct >= 70 ? 'medium' : 'low'}`}>
@@ -732,7 +747,7 @@ export default function TriageQueue() {
       {/* Confirmation modal for destructive bulk actions */}
       {pendingBulkAction && (
         <div className="triage-modal-overlay" onClick={() => setPendingBulkAction(null)}>
-          <div className="triage-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="triage-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="triage-modal-title">
               Confirm bulk {pendingBulkAction.action}
             </div>
@@ -758,7 +773,7 @@ export default function TriageQueue() {
       {/* Confirmation modal for threshold auto-confirm */}
       {pendingThreshold && (
         <div className="triage-modal-overlay" onClick={() => setPendingThreshold(false)}>
-          <div className="triage-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="triage-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="triage-modal-title">
               Auto-confirm matches ≥ {thresholdPct}%
             </div>
