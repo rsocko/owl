@@ -128,4 +128,16 @@ export const endpoints = {
     preview: (id: string) => `/api/documents/${id}/metadata`,
     download: (id: string) => `/api/documents/${id}/download`,
   },
+  triage: {
+    queue: (params?: string) => api.get(`/api/triage/queue${params ? `?${params}` : ''}`),
+    item: (id: string) => api.get(`/api/triage/queue/${id}`),
+    resolve: (id: string, body: { action: string; payload?: unknown }) =>
+      api.post(`/api/triage/queue/${id}/resolve`, body),
+    defer: (id: string, body?: { until?: string }) =>
+      api.post(`/api/triage/queue/${id}/defer`, body),
+    dismiss: (id: string) => api.post(`/api/triage/queue/${id}/dismiss`),
+    undo: (id: string) => api.post(`/api/triage/queue/${id}/undo`),
+    stats: () => api.get('/api/triage/stats'),
+    populate: () => api.post('/api/triage/queue/populate'),
+  },
 };
