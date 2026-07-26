@@ -41,6 +41,9 @@ interface EobMatch {
     procedures?: number | null;
   } | null;
   status?: string | null;
+  payment_status?: string | null;
+  paid_amount?: number | null;
+  paid_date?: string | null;
   linked_in_paperless?: boolean | null;
   eob_preview_url?: string | null;
   bill_preview_url?: string | null;
@@ -70,6 +73,22 @@ interface CandidatesResponse {
   doc_id: number;
   candidates: EobMatch[];
   count: number;
+}
+
+interface PaymentItem {
+  id: number;
+  amount: number;
+  paid_date?: string | null;
+  method?: string | null;
+  notes?: string | null;
+  created_at?: string | null;
+}
+
+interface MatchPaymentsResponse {
+  match_id: number;
+  payment_status: string;
+  paid_amount: number;
+  payments: PaymentItem[];
 }
 
 type ToastState = { message: string; tone: 'success' | 'error' } | null;
@@ -156,6 +175,7 @@ function eventDotTone(eventType: string): 'info' | 'success' | 'danger' | 'muted
     case 'auto_matched':
       return 'info';
     case 'confirmed':
+    case 'payment_recorded':
       return 'success';
     case 'rejected':
       return 'danger';
@@ -180,9 +200,35 @@ function eventLabel(eventType: string): string {
       return 'Rejected';
     case 'reset':
       return 'Reset to candidate';
+    case 'payment_recorded':
+      return 'Payment recorded';
     default:
       return eventType;
   }
+}
+
+function paymentStatusLabel(status?: string | null): string {
+  switch ((status || '').toLowerCase()) {
+    case 'paid': return 'Paid';
+    case 'partial': return 'Partially paid';
+    case 'overpaid': return 'Overpaid';
+    case 'unpaid': return 'Unpaid';
+    default: return status || 'Unpaid';
+  }
+}
+
+function paymentStatusTone(status?: string | null): 'success' | 'warning' | 'danger' | 'muted' {
+  switch ((status || '').toLowerCase()) {
+    case 'paid': return 'success';
+    case 'partial': return 'warning';
+    case 'overpaid': return 'danger';
+    default: return 'muted';
+  }
+}
+
+function formatCurrency(value?: number | null) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
 // ------------------------------------------------------------------
@@ -205,6 +251,11 @@ export default function EobMatchDetail({
   const [match, setMatch] = useState<EobMatch | null>(null);
   const [alternatives, setAlternatives] = useState<EobMatch[]>([]);
   const [historyEvents, setHistoryEvents] = useState<MatchHistoryEvent[]>([]);
+  const [payments, setPayments] = useState<PaymentItem[]>([]);
+  const [payAmount, setPayAmount] = useState('');
+  const [payMethod, setPayMethod] = useState('');
+  const [payNotes, setPayNotes] = useState('');
+  const [isRecordingPayment, setIsRecordingPayment] = useState(false);
 
   // Guard against stale requests when matchId changes rapidly
   const loadGenRef = useRef(0);
@@ -279,6 +330,22 @@ export default function EobMatchDetail({
       } catch {
         if (gen !== loadGenRef.current) return;
         setHistoryEvents([]);
+      }
+
+      // Fetch payments for confirmed matches
+      if ((currentMatch.status || '').toLowerCase() === 'confirmed') {
+        try {
+          const paymentsRes = (await endpoints.eob.matchPayments(
+            String(matchId),
+          )) as MatchPaymentsResponse;
+          if (gen !== loadGenRef.current) return;
+          setPayments(paymentsRes.payments ?? []);
+        } catch {
+          if (gen !== loadGenRef.current) return;
+          setPayments([]);
+        }
+      } else {
+        setPayments([]);
       }
     } catch (err) {
       if (gen !== loadGenRef.current) return;
@@ -368,6 +435,32 @@ export default function EobMatchDetail({
     onSkip?.();
   }, [onSkip]);
 
+  const handleRecordPayment = useCallback(async () => {
+    if (!matchId || isRecordingPayment) return;
+    const amount = parseFloat(payAmount);
+    if (Number.isNaN(amount) || amount <= 0) {
+      setToast({ message: 'Please enter a valid payment amount.', tone: 'error' });
+      return;
+    }
+    setIsRecordingPayment(true);
+    try {
+      await endpoints.eob.payMatch(String(matchId), {
+        amount,
+        method: payMethod.trim() || null,
+        notes: payNotes.trim() || null,
+      });
+      setToast({ message: `Payment of ${formatCurrency(amount)} recorded.`, tone: 'success' });
+      setPayAmount('');
+      setPayMethod('');
+      setPayNotes('');
+      await loadMatch();
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Failed to record payment.', tone: 'error' });
+    } finally {
+      setIsRecordingPayment(false);
+    }
+  }, [matchId, payAmount, payMethod, payNotes, isRecordingPayment, loadMatch]);
+
   // ---- Keyboard shortcuts ----
 
   useEffect(() => {
@@ -427,6 +520,9 @@ export default function EobMatchDetail({
           </div>
           <div className="eob-meta-row">
             <Badge tone={statusTone(match.status)}>{statusLabel(match.status)}</Badge>
+            {(match.status || '').toLowerCase() === 'confirmed' && (
+              <Badge tone={paymentStatusTone(match.payment_status)}>{paymentStatusLabel(match.payment_status)}</Badge>
+            )}
             <Badge tone={scoreBadgeTone(match.score)}>
               {formatPercent(match.score)} overall · {(match.confidence || 'candidate').toUpperCase()}
             </Badge>
@@ -657,6 +753,83 @@ export default function EobMatchDetail({
           )}
         </Card>
       </div>
+
+      {/* Payment tracking — visible only for confirmed matches */}
+      {(match.status || '').toLowerCase() === 'confirmed' && (
+        <Card title="Payment tracking">
+          <div className="eob-card-stack">
+            <div className="eob-meta-row" style={{ gap: 12 }}>
+              <Badge tone={paymentStatusTone(match.payment_status)}>
+                {paymentStatusLabel(match.payment_status)}
+              </Badge>
+              <span>Paid: {formatCurrency(match.paid_amount)}</span>
+              {match.paid_date && <span>Last payment: {formatDateTime(match.paid_date)}</span>}
+            </div>
+
+            {!['paid', 'overpaid'].includes((match.payment_status || 'unpaid').toLowerCase()) && (
+              <div className="eob-note-box" style={{ marginTop: 8 }}>
+                <div className="eob-field-label">Record a payment</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+                  <input
+                    type="number"
+                    className="eob-notes-input"
+                    style={{ width: 120, padding: '6px 8px' }}
+                    placeholder="Amount"
+                    value={payAmount}
+                    onChange={(e) => setPayAmount(e.target.value)}
+                    min="0.01"
+                    step="0.01"
+                  />
+                  <select
+                    className="eob-notes-input"
+                    style={{ width: 140, padding: '6px 8px' }}
+                    value={payMethod}
+                    onChange={(e) => setPayMethod(e.target.value)}
+                  >
+                    <option value="">Method…</option>
+                    <option value="check">Check</option>
+                    <option value="online">Online</option>
+                    <option value="insurance">Insurance</option>
+                    <option value="cash">Cash</option>
+                    <option value="other">Other</option>
+                  </select>
+                  <input
+                    className="eob-notes-input"
+                    style={{ flex: 1, minWidth: 120, padding: '6px 8px' }}
+                    placeholder="Notes (optional)"
+                    value={payNotes}
+                    onChange={(e) => setPayNotes(e.target.value)}
+                  />
+                  <Button
+                    variant="success"
+                    onClick={() => void handleRecordPayment()}
+                    disabled={isRecordingPayment || !payAmount}
+                  >
+                    {isRecordingPayment ? 'Saving…' : '✓ Record payment'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {payments.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div className="eob-field-label">Payment history</div>
+                <div className="eob-card-stack" style={{ marginTop: 4 }}>
+                  {payments.map((p) => (
+                    <div key={p.id} className="eob-compare-row">
+                      <div className="eob-field-value">{formatCurrency(p.amount)}</div>
+                      <div className="eob-field-note">
+                        {p.method ? `via ${p.method}` : ''} {p.paid_date ? `on ${formatDateTime(p.paid_date)}` : ''}
+                        {p.notes ? ` — ${p.notes}` : ''}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
 
       {/* Alternative candidates + Match history */}
       <div className="eob-grid-2">
