@@ -58,8 +58,10 @@ def cli(ctx, db_url):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed extraction results")
 @click.option("--write-to-paperless", is_flag=True, envvar="WRITE_TO_PAPERLESS",
               help="Write match results back to Paperless custom fields")
+@click.option("--skip-processed/--no-skip-processed", default=True,
+              help="Skip documents that were successfully extracted in a prior run (default: enabled)")
 @click.pass_context
-def run(ctx, paperless_url, paperless_token, tag, correspondent, document_type, created_after, created_before, limit, output, verbose, write_to_paperless):
+def run(ctx, paperless_url, paperless_token, tag, correspondent, document_type, created_after, created_before, limit, output, verbose, write_to_paperless, skip_processed):
     """Run the full pipeline: fetch → classify → extract → match → store.
 
     Results are persisted to SQLite. Use --write-to-paperless to also
@@ -84,6 +86,7 @@ def run(ctx, paperless_url, paperless_token, tag, correspondent, document_type, 
         output_path=output,
         verbose=verbose,
         write_to_paperless=write_to_paperless,
+        skip_processed=skip_processed,
     ))
 
 
@@ -244,6 +247,111 @@ def benchmark(models, paperless_url, paperless_token, tag, document_type, create
 
 
 @cli.command()
+@click.option("--dry-run", is_flag=True, help="Report duplicates without removing them")
+@click.pass_context
+def dedup(ctx, dry_run):
+    """Remove duplicate records from prior runs.
+
+    Finds duplicate EOB/Bill records (same document_id across multiple run_ids),
+    keeps the most recent (highest run_id), and removes older duplicates.
+    Also consolidates duplicate match records (same EOB↔Bill pair across runs).
+    """
+    _init_database(ctx.obj.get("db_url"))
+
+    from doc_intelligence_hub.modules.eob_matching.database import (
+        EOBRecord, BillRecord, MatchRecord,
+        get_session as get_db_session,
+    )
+    from sqlalchemy import func
+
+    db = get_db_session()
+
+    console.print(Panel("[bold]EOB Matching — Cross-Run Deduplication[/bold]"
+                        + (" [dim](dry run)[/dim]" if dry_run else ""), style="blue"))
+    console.print()
+
+    # --- Deduplicate EOBRecords ---
+    dup_eobs = (
+        db.query(EOBRecord.document_id)
+        .group_by(EOBRecord.document_id)
+        .having(func.count(EOBRecord.id) > 1)
+        .all()
+    )
+    eob_removed = 0
+    for (doc_id,) in dup_eobs:
+        records = (
+            db.query(EOBRecord)
+            .filter_by(document_id=doc_id)
+            .order_by(EOBRecord.run_id.desc())
+            .all()
+        )
+        # Keep the first (most recent run_id), remove the rest
+        for old in records[1:]:
+            if not dry_run:
+                db.delete(old)
+            eob_removed += 1
+
+    # --- Deduplicate BillRecords ---
+    dup_bills = (
+        db.query(BillRecord.document_id)
+        .group_by(BillRecord.document_id)
+        .having(func.count(BillRecord.id) > 1)
+        .all()
+    )
+    bill_removed = 0
+    for (doc_id,) in dup_bills:
+        records = (
+            db.query(BillRecord)
+            .filter_by(document_id=doc_id)
+            .order_by(BillRecord.run_id.desc())
+            .all()
+        )
+        for old in records[1:]:
+            if not dry_run:
+                db.delete(old)
+            bill_removed += 1
+
+    # --- Deduplicate MatchRecords ---
+    dup_matches = (
+        db.query(MatchRecord.eob_document_id, MatchRecord.bill_document_id)
+        .group_by(MatchRecord.eob_document_id, MatchRecord.bill_document_id)
+        .having(func.count(MatchRecord.id) > 1)
+        .all()
+    )
+    match_removed = 0
+    for eob_doc_id, bill_doc_id in dup_matches:
+        records = (
+            db.query(MatchRecord)
+            .filter_by(eob_document_id=eob_doc_id, bill_document_id=bill_doc_id)
+            .order_by(MatchRecord.run_id.desc())
+            .all()
+        )
+        # Keep the most recent, preferring confirmed status
+        records.sort(key=lambda r: (r.status == "confirmed", r.run_id or 0), reverse=True)
+        for old in records[1:]:
+            if not dry_run:
+                db.delete(old)
+            match_removed += 1
+
+    if not dry_run:
+        db.commit()
+    db.close()
+
+    action = "Would remove" if dry_run else "Removed"
+    console.print(f"  EOB records:   {action} {eob_removed} duplicate(s) across {len(dup_eobs)} document(s)")
+    console.print(f"  Bill records:  {action} {bill_removed} duplicate(s) across {len(dup_bills)} document(s)")
+    console.print(f"  Match records: {action} {match_removed} duplicate(s) across {len(dup_matches)} pair(s)")
+
+    total = eob_removed + bill_removed + match_removed
+    if total == 0:
+        console.print("\n  [green]No duplicates found — database is clean.[/green]")
+    elif dry_run:
+        console.print(f"\n  [yellow]Run without --dry-run to remove {total} duplicate(s).[/yellow]")
+    else:
+        console.print(f"\n  [green]✓ Cleaned up {total} duplicate record(s).[/green]")
+
+
+@cli.command()
 @click.option("--last", type=int, default=10, help="Number of recent runs to show")
 @click.pass_context
 def status(ctx, last):
@@ -399,6 +507,7 @@ async def _run_pipeline(
     output_path: str | None,
     verbose: bool,
     write_to_paperless: bool = False,
+    skip_processed: bool = True,
 ):
     """Full pipeline: fetch → classify → extract → match → store."""
     from doc_intelligence_hub.modules.eob_matching.database import (
@@ -470,6 +579,22 @@ async def _run_pipeline(
 
     # Step 3: Extract
     console.print("[bold]Step 3:[/bold] Extracting structured data...")
+
+    # Skip documents already processed in prior runs
+    if skip_processed:
+        existing_eob_doc_ids = {r.document_id for r in db.query(EOBRecord.document_id).all()}
+        existing_bill_doc_ids = {r.document_id for r in db.query(BillRecord.document_id).all()}
+
+        original_eob_count = len(eob_docs)
+        original_bill_count = len(bill_docs)
+        eob_docs = [(doc, cls) for doc, cls in eob_docs if doc["id"] not in existing_eob_doc_ids]
+        bill_docs = [(doc, cls) for doc, cls in bill_docs if doc["id"] not in existing_bill_doc_ids]
+
+        skipped_eobs = original_eob_count - len(eob_docs)
+        skipped_bills = original_bill_count - len(bill_docs)
+        if skipped_eobs or skipped_bills:
+            console.print(f"  [dim]Skipped {skipped_eobs} EOBs and {skipped_bills} bills (already processed)[/dim]")
+
     extracted_eobs = []
     extracted_bills = []
 
@@ -537,8 +662,18 @@ async def _run_pipeline(
     console.print("[bold]Step 4:[/bold] Running matching engine...")
     matches = match_documents(extracted_eobs, extracted_bills)
 
-    # Persist match records
+    # Persist match records (skip pairs already confirmed in a prior run)
+    skipped_matches = 0
     for match in matches:
+        existing = db.query(MatchRecord).filter_by(
+            eob_document_id=int(match.eob_id),
+            bill_document_id=int(match.bill_id),
+            status="confirmed",
+        ).first()
+        if existing:
+            skipped_matches += 1
+            continue
+
         store_match(db, MatchRecord(
             run_id=run_record.id,
             eob_document_id=int(match.eob_id),
@@ -552,6 +687,9 @@ async def _run_pipeline(
             breakdown_procedures=match.breakdown.procedures,
             status="candidate",
         ))
+
+    if skipped_matches:
+        console.print(f"  [dim]Skipped {skipped_matches} match(es) already confirmed in prior runs[/dim]")
 
     if not matches:
         console.print("  [yellow]No matches found.[/yellow]")
