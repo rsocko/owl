@@ -146,6 +146,7 @@ export default function EobMatchReview() {
   const [toast, setToast] = useState<ToastState>(null);
   const [notes, setNotes] = useState('');
   const [savingStatus, setSavingStatus] = useState<MatchStatus | null>(null);
+  const [swappingAltId, setSwappingAltId] = useState<number | null>(null);
   const [match, setMatch] = useState<EobMatch | null>(null);
   const [alternatives, setAlternatives] = useState<EobMatch[]>([]);
   const [historyEvents, setHistoryEvents] = useState<MatchHistoryEvent[]>([]);
@@ -250,6 +251,24 @@ export default function EobMatchReview() {
       }
     },
     [loadMatch, matchId, notes],
+  );
+
+  const handleSwapAlternative = useCallback(
+    async (altId: number) => {
+      if (!matchId || swappingAltId !== null) return;
+      setSwappingAltId(altId);
+      try {
+        await endpoints.eob.updateMatch(matchId, { status: 'rejected', notes: `Swapped in favor of Match #${altId}` });
+        await endpoints.eob.updateMatch(String(altId), { status: 'confirmed', notes: `Selected as replacement for Match #${matchId}` });
+        setToast({ message: `Swapped to Match #${altId}. Redirecting…`, tone: 'success' });
+        setTimeout(() => navigate(`/eob/matches/${altId}`), 1200);
+      } catch (err) {
+        setToast({ message: err instanceof Error ? err.message : 'Unable to swap match.', tone: 'error' });
+      } finally {
+        setSwappingAltId(null);
+      }
+    },
+    [matchId, swappingAltId, navigate],
   );
 
   const handleRelink = useCallback(() => {
@@ -541,21 +560,51 @@ export default function EobMatchReview() {
           <Card title="Alternative candidates">
             {alternatives.length ? (
               <div className="eob-card-stack">
-                {alternatives.map((item) => (
-                  <div key={item.id} className="eob-alt-row">
-                    <div>
-                      <div className="eob-field-value">
-                        Match #{item.id}: EOB #{item.eob_document_id ?? '—'} ↔ Bill #{item.bill_document_id ?? '—'}
+                {alternatives.map((item) => {
+                  const altScore = Math.round(item.score ?? 0);
+                  const altTone = altScore >= 75 ? 'success' : altScore >= 50 ? 'warning' : 'danger';
+                  return (
+                    <div key={item.id} className="eob-alt-card">
+                      <div className="eob-alt-card-header">
+                        <div>
+                          <div className="eob-field-value">
+                            Match #{item.id}: EOB #{item.eob_document_id ?? '—'} ↔ Bill #{item.bill_document_id ?? '—'}
+                          </div>
+                          <div className="eob-field-note">
+                            Status {statusLabel(item.status)} · Run #{item.run_id ?? '—'}
+                          </div>
+                        </div>
+                        <Badge tone={altTone}>{formatPercent(item.score)}</Badge>
                       </div>
-                      <div className="eob-field-note">
-                        Score {formatPercent(item.score)} · Status {statusLabel(item.status)}
+                      {item.breakdown && (
+                        <div className="eob-alt-factors">
+                          {(['date', 'provider', 'patient', 'amount'] as const).map((factor) => {
+                            const val = Math.round(item.breakdown?.[factor] ?? 0);
+                            return (
+                              <div key={factor} className="eob-alt-factor">
+                                <span className="eob-alt-factor-label">{factor}</span>
+                                <ConfidenceBar label="" pct={val} />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <div className="eob-alt-card-actions">
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          disabled={swappingAltId !== null}
+                          onClick={() => void handleSwapAlternative(item.id)}
+                        >
+                          {swappingAltId === item.id ? 'Swapping…' : 'Select This Instead'}
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => navigate(`/eob/matches/${item.id}`)}>
+                          Review →
+                        </Button>
                       </div>
                     </div>
-                    <Button size="sm" variant="ghost" onClick={() => navigate(`/eob/matches/${item.id}`)}>
-                      Open →
-                    </Button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <EmptyState
