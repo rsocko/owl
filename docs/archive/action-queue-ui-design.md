@@ -3,6 +3,8 @@ title: "Action Queue UI Design (Archived)"
 sidebar_label: AQ UI Design
 sidebar_position: 3
 draft: true
+mockups:
+  - "[triage-unified.html](../../../mockups/triage-correction/triage-unified.html)"
 ---
 
 :::note

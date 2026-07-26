@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Intelligence — Order Lifecycle Tracking</title>
+  <style>
+    :root {
+      --bg: #f5f6fa;
+      --card: #ffffff;
+      --border: #e0e3ea;
+      --text: #1a1d2e;
+      --muted: #6b7280;
+      --accent: #3498db;
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+      --purple: #8b5cf6;
+      --teal: #14b8a6;
+      --indigo: #6366f1;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    .topnav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: 48px; gap: 24px; }
+    .topnav-brand { font-weight: 800; font-size: 15px; color: var(--accent); }
+    .topnav-links { display: flex; gap: 4px; }
+    .topnav-link { padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--muted); text-decoration: none; }
+    .topnav-link.active { color: var(--accent); background: #eef6ff; }
+
+    .page { max-width: 1200px; margin: 0 auto; padding: 20px 24px; }
+    .page-header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+    .back-link { color: var(--accent); font-weight: 600; font-size: 13px; text-decoration: none; }
+    .page-title { font-size: 18px; font-weight: 800; flex: 1; }
+
+    /* ── Stats ── */
+    .stats-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
+    .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; text-align: center; }
+    .stat-value { font-size: 24px; font-weight: 800; }
+    .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; margin-top: 2px; }
+
+    /* ── Order Cards ── */
+    .order-list { display: flex; flex-direction: column; gap: 14px; }
+    .order-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+    .order-card.highlight { border-color: var(--warning); border-width: 2px; }
+
+    .order-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .order-title { font-size: 15px; font-weight: 700; }
+    .order-meta { font-size: 12px; color: var(--muted); }
+    .order-state { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+    .order-state.complete { background: #d1fae5; color: #065f46; }
+    .order-state.shipped { background: #e0e7ff; color: #3730a3; }
+    .order-state.invoiced { background: #fef3c7; color: #92400e; }
+    .order-state.ordered { background: #f3f4f6; color: var(--muted); }
+    .order-state.mismatch { background: #fef2f2; color: #991b1b; }
+
+    /* ── Timeline ── */
+    .order-timeline { display: flex; align-items: flex-start; gap: 0; margin-bottom: 16px; position: relative; }
+    .timeline-step { flex: 1; text-align: center; position: relative; }
+    .timeline-step::before { content: ''; position: absolute; top: 14px; left: 0; right: 0; height: 3px; background: var(--border); z-index: 0; }
+    .timeline-step:first-child::before { left: 50%; }
+    .timeline-step:last-child::before { right: 50%; }
+    .timeline-dot { width: 28px; height: 28px; border-radius: 50%; margin: 0 auto 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; position: relative; z-index: 1; border: 3px solid var(--border); background: var(--card); }
+    .timeline-dot.done { background: var(--success); border-color: var(--success); color: #fff; }
+    .timeline-dot.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .timeline-dot.alert { background: var(--danger); border-color: var(--danger); color: #fff; }
+    .timeline-dot.pending { background: var(--card); border-color: var(--border); color: var(--muted); }
+    .timeline-label { font-size: 11px; font-weight: 600; color: var(--muted); }
+    .timeline-date { font-size: 10px; color: var(--muted); margin-top: 1px; }
+    .timeline-step.done .timeline-label { color: var(--success); }
+    .timeline-step.active .timeline-label { color: var(--accent); }
+    .timeline-step.alert .timeline-label { color: var(--danger); }
+
+    /* ── Documents Grid ── */
+    .docs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .doc-slot { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: #f8f9fc; }
+    .doc-slot.linked { border-color: var(--success); background: #f0fdf4; }
+    .doc-slot.missing { border-style: dashed; background: #fafafa; }
+    .doc-slot.mismatch { border-color: var(--danger); background: #fef2f2; }
+    .doc-slot-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .doc-slot-icon { font-size: 14px; }
+    .doc-slot-type { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+    .doc-slot-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    .doc-slot-detail { font-size: 11px; color: var(--muted); }
+    .doc-slot-detail strong { color: var(--text); }
+    .doc-slot-badge { display: inline-block; padding: 2px 6px; border-radius: 6px; font-size: 10px; font-weight: 700; margin-top: 4px; }
+    .doc-slot-badge.matched { background: #d1fae5; color: #065f46; }
+    .doc-slot-badge.warning { background: #fef3c7; color: #92400e; }
+    .doc-slot-badge.missing { background: #f3f4f6; color: var(--muted); }
+
+    /* ── Amount Comparison ── */
+    .amount-comparison { margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 12px; display: flex; align-items: center; gap: 16px; }
+    .amount-comparison.pass { background: #d1fae5; border: 1px solid #a7f3d0; }
+    .amount-comparison.fail { background: #fef2f2; border: 1px solid #fecaca; }
+    .amount-comparison .icon { font-size: 16px; }
+    .amount-comparison .values { display: flex; gap: 20px; flex: 1; }
+    .amount-comparison .values span { font-weight: 600; }
+
+    /* ── Section title ── */
+    .section-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  </style>
+</head>
+<body>
+
+<nav class="topnav">
+  <span class="topnav-brand">🦉 OWL</span>
+  <div class="topnav-links">
+    <a href="#" class="topnav-link">Dashboard</a>
+    <a href="#" class="topnav-link">Action Queue</a>
+    <a href="#" class="topnav-link">Statements</a>
+    <a href="#" class="topnav-link active">Reconciliation</a>
+    <a href="#" class="topnav-link">Alerts</a>
+    <a href="#" class="topnav-link">Triage</a>
+  </div>
+</nav>
+
+<div class="page">
+
+  <div class="page-header">
+    <a href="#" class="back-link">← Reconciliation</a>
+    <h1 class="page-title">📦 Order Lifecycle Tracking</h1>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-value" style="color: var(--success);">5</div>
+      <div class="stat-label">Complete</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" style="color: var(--accent);">2</div>
+      <div class="stat-label">In Transit</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" style="color: var(--warning);">1</div>
+      <div class="stat-label">Awaiting Invoice</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" style="color: var(--danger);">1</div>
+      <div class="stat-label">Amount Mismatch</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">$1,247</div>
+      <div class="stat-label">Total Orders</div>
+    </div>
+  </div>
+
+  <div class="order-list">
+
+    <!-- Order 1: Complete (all 3 docs matched) -->
+    <div class="order-card">
+      <div class="order-header">
+        <div>
+          <div class="order-title">Amazon — Wireless Headphones</div>
+          <div class="order-meta">ORD-2026-4488 · $79.99 · Ordered Jun 28</div>
+        </div>
+        <span class="order-state complete">✅ Complete</span>
+      </div>
+      <div class="order-timeline">
+        <div class="timeline-step done">
+          <div class="timeline-dot done">✓</div>
+          <div class="timeline-label">Ordered</div>
+          <div class="timeline-date">Jun 28</div>
+        </div>
+        <div class="timeline-step done">
+          <div class="timeline-dot done">✓</div>
+          <div class="timeline-label">Invoiced</div>
+          <div class="timeline-date">Jun 28</div>
+        </div>
+        <div class="timeline-step done">
+          <div class="timeline-dot done">✓</div>
+          <div class="timeline-label">Shipped</div>
+          <div class="timeline-date">Jun 29</div>
+        </div>
+        <div class="timeline-step done">
+          <div class="timeline-dot done">✓</div>
+          <div class="timeline-label">Delivered</div>
+          <div class="timeline-date">Jul 2</div>
+        </div>
+      </div>
+      <div class="docs-grid">
+        <div class="doc-slot linked">
+          <div class="doc-slot-header"><span class="doc-slot-icon">📋</span><span class="doc-slot-type">Order</span></div>
+          <div class="doc-slot-title">Amazon Order Confirmation</div>
+          <div class="doc-slot-detail">Total: <strong>$79.99</strong> · 1 item</div>
+          <span class="doc-slot-badge matched">✓ Linked</span>
+        </div>
+        <div class="doc-slot linked">
+          <div class="doc-slot-header"><span class="doc-slot-icon">🧾</span><span class="doc-slot-type">Invoice</span></div>
+          <div class="doc-slot-title">Amazon Charge $79.99</div>
+          <div class="doc-slot-detail">Charged: <strong>$79.99</strong> · Visa ****4521</div>
+          <span class="doc-slot-badge matched">✓ Linked</span>
+        </div>
+        <div class="doc-slot linked">
+          <div class="doc-slot-header"><span class="doc-slot-icon">📦</span><span class="doc-slot-type">Shipping</span></div>
+          <div class="doc-slot-title">UPS Tracking 1Z999AA1012</div>
+          <div class="doc-slot-detail">Delivered: <strong>Jul 2</strong> · Front door</div>
+          <span class="doc-slot-badge matched">✓ Linked</span>
+        </div>
+      </div>
+      <div class="amount-comparison pass">
+        <span class="icon">✅</span>
+        <div class="values">
+          <span>Order: $79.99</span>
+          <span>Invoice: $79.99</span>
+          <span style="color: var(--success);">Match ✓</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Order 2: In Transit (shipped, no delivery) -->
+    <div class="order-card">
+      <div class="order-header">
+        <div>
+          <div class="order-title">Best Buy — USB-C Monitor</div>
+          <div class="order-meta">ORD-2026-4521 · $349.99 · Ordered Jul 18</div>
+        </div>
+        <span class="order-state shipped">📦 Shipped</span>
+      </div>
+      <div class="order-timeline">
+        <div class="timeline-step done">
+          <div class="timeline-dot done">✓</div>
+          <div class="timeline-label">Ordered</div>
+          <div class="timeline-date">Jul 18</div>
+        </div>
+        <div class="timeline-step done">
+          <div class="timeline-dot done">✓</div>
+          <div class="timeline-label">Invoiced</div>
+          <div class="timeline-date">Jul 18</div>
+        </div>
+        <div class="timeline-step active">
+          <div class="timeline-dot active">📦</div>
+          <div class="timeline-label">Shipped</div>
+          <div class="timeline-date">Jul 22</div>
+        </div>
+        <div class="timeline-step">
+          <div class="timeline-dot pending">4</div>
+          <div class="timeline-label">Delivered</div>
+          <div class="timeline-date">ETA Jul 28</div>
+        </div>
+      </div>
+      <div class="docs-grid">
+        <div class="doc-slot linked">
+          <div class="doc-slot-header"><span class="doc-slot-icon">📋</span><span class="doc-slot-type">Order</span></div>
+          <div class="doc-slot-title">Best Buy Order Confirmation</div>
+          <div class="doc-slot-detail">Total: <strong>$349.99</strong> · 1 item</div>
+          <span class="doc-slot-badge matched">✓ Linked</span>
+        </div>
+        <div class="doc-slot linked">
+          <div class="doc-slot-header"><span class="doc-slot-icon">🧾</span><span class="doc-slot-type">Invoice</span></div>
+          <div class="doc-slot-title">Best Buy Charge $349.99</div>
+          <div class="doc-slot-detail">Charged: <strong>$349.99</strong> · Amex ****1234</div>
+          <span class="doc-slot-badge matched">✓ Linked</span>
+        </div>
+        <div class="doc-slot linked">
+          <div class="doc-slot-header"><span class="doc-slot-icon">📦</span><span class="doc-slot-type">Shipping</span></div>
+          <div class="doc-slot-title">FedEx 7489274892748</div>
+          <div class="doc-slot-detail">Status: <strong>In Transit</strong> · ETA Jul 28</div>
+          <span class="doc-slot-badge matched">✓ Linked</span>
+        </div>
+      </div>
+      <div class="amount-comparison pass">
+        <span class="icon">✅</span>
+        <div class="values">
+          <span>Order: $349.99</span>
+          <span>Invoice: $349.99</span>
+          <span style="color: var(--success);">Match ✓</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Order 3: Amount Mismatch! -->
+    <div class="order-card highlight">
+      <div class="order-header">
+        <div>
+          <div class="order-title">Wayfair — Standing Desk</div>
+          <div class="order-meta">ORD-2026-4499 · $429.00 ordered vs $459.00 invoiced · Ordered Jul 10</div>
+        </div>
+        <span class="order-state mismatch">⚠️ Mismatch</span>
+      </div>
+      <div class="order-timeline">
+        <div class="timeline-step done">
+          <div class="timeline-dot done">✓</div>
+          <div class="timeline-label">Ordered</div>
+          <div class="timeline-date">Jul 10</div>
+        </div>
+        <div class="timeline-step alert">
+          <div class="timeline-dot alert">!</div>
+          <div class="timeline-label">Invoiced</div>
+          <div class="timeline-date">Jul 11</div>
+        </div>
+        <div class="timeline-step done">
+          <div class="timeline-dot done">✓</div>
+          <div class="timeline-label">Shipped</div>
+          <div class="timeline-date">Jul 14</div>
+        </div>
+        <div class="timeline-step done">
+          <div class="timeline-dot done">✓</div>
+          <div class="timeline-label">Delivered</div>
+          <div class="timeline-date">Jul 19</div>
+        </div>
+      </div>
+      <div class="docs-grid">
+        <div class="doc-slot linked">
+          <div class="doc-slot-header"><span class="doc-slot-icon">📋</span><span class="doc-slot-type">Order</span></div>
+          <div class="doc-slot-title">Wayfair Order Confirmation</div>
+          <div class="doc-slot-detail">Total: <strong>$429.00</strong> · Free shipping promo</div>
+          <span class="doc-slot-badge matched">✓ Linked</span>
+        </div>
+        <div class="doc-slot mismatch">
+          <div class="doc-slot-header"><span class="doc-slot-icon">🧾</span><span class="doc-slot-type">Invoice</span></div>
+          <div class="doc-slot-title">Wayfair Charge $459.00</div>
+          <div class="doc-slot-detail">Charged: <strong style="color: var(--danger);">$459.00</strong> · +$30 shipping?</div>
+          <span class="doc-slot-badge warning">⚠️ +$30.00</span>
+        </div>
+        <div class="doc-slot linked">
+          <div class="doc-slot-header"><span class="doc-slot-icon">📦</span><span class="doc-slot-type">Shipping</span></div>
+          <div class="doc-slot-title">FedEx Freight Delivery</div>
+          <div class="doc-slot-detail">Delivered: <strong>Jul 19</strong> · Signature obtained</div>
+          <span class="doc-slot-badge matched">✓ Linked</span>
+        </div>
+      </div>
+      <div class="amount-comparison fail">
+        <span class="icon">⚠️</span>
+        <div class="values">
+          <span>Order: $429.00</span>
+          <span>Invoice: $459.00</span>
+          <span style="color: var(--danger);">Difference: +$30.00</span>
+        </div>
+        <button style="border: none; border-radius: 6px; padding: 6px 12px; font-size: 11px; cursor: pointer; font-weight: 700; background: var(--danger); color: #fff;">Dispute →</button>
+      </div>
+    </div>
+
+    <!-- Order 4: Ordered only (waiting for invoice + shipping) -->
+    <div class="order-card">
+      <div class="order-header">
+        <div>
+          <div class="order-title">Apple — MagSafe Charger</div>
+          <div class="order-meta">ORD-2026-4530 · $39.00 · Ordered Jul 24</div>
+        </div>
+        <span class="order-state ordered">🕐 Ordered</span>
+      </div>
+      <div class="order-timeline">
+        <div class="timeline-step done">
+          <div class="timeline-dot done">✓</div>
+          <div class="timeline-label">Ordered</div>
+          <div class="timeline-date">Jul 24</div>
+        </div>
+        <div class="timeline-step">
+          <div class="timeline-dot pending">2</div>
+          <div class="timeline-label">Invoiced</div>
+          <div class="timeline-date">—</div>
+        </div>
+        <div class="timeline-step">
+          <div class="timeline-dot pending">3</div>
+          <div class="timeline-label">Shipped</div>
+          <div class="timeline-date">—</div>
+        </div>
+        <div class="timeline-step">
+          <div class="timeline-dot pending">4</div>
+          <div class="timeline-label">Delivered</div>
+          <div class="timeline-date">ETA Jul 30</div>
+        </div>
+      </div>
+      <div class="docs-grid">
+        <div class="doc-slot linked">
+          <div class="doc-slot-header"><span class="doc-slot-icon">📋</span><span class="doc-slot-type">Order</span></div>
+          <div class="doc-slot-title">Apple Store Order</div>
+          <div class="doc-slot-detail">Total: <strong>$39.00</strong> · 1 item</div>
+          <span class="doc-slot-badge matched">✓ Linked</span>
+        </div>
+        <div class="doc-slot missing">
+          <div class="doc-slot-header"><span class="doc-slot-icon">🧾</span><span class="doc-slot-type">Invoice</span></div>
+          <div class="doc-slot-title" style="color: var(--muted);">Awaiting charge...</div>
+          <div class="doc-slot-detail">Expected within a few days of order</div>
+          <span class="doc-slot-badge missing">⏳ Pending</span>
+        </div>
+        <div class="doc-slot missing">
+          <div class="doc-slot-header"><span class="doc-slot-icon">📦</span><span class="doc-slot-type">Shipping</span></div>
+          <div class="doc-slot-title" style="color: var(--muted);">Awaiting shipment...</div>
+          <div class="doc-slot-detail">ETA delivery: Jul 30</div>
+          <span class="doc-slot-badge missing">⏳ Pending</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+</body>
+</html>
