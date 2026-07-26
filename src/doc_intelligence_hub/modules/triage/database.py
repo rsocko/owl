@@ -13,6 +13,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
+    Index,
     Integer,
     String,
     Text,
@@ -76,6 +77,28 @@ class CorrectionEvent(Base):
     target_type = Column(String, nullable=False)
     target_id = Column(String, nullable=False)
     payload_json = Column("payload", Text, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    created_by = Column(String, default="user")
+
+
+class ExtractionCorrection(Base):
+    """Tracks field-level corrections and confirmations for extracted document metadata."""
+
+    __tablename__ = "extraction_corrections"
+    __table_args__ = (
+        Index("idx_corrections_field", "field_name", "correction_type"),
+        Index("idx_corrections_document", "document_id"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex[:12])
+    document_id = Column(Integer, nullable=False)
+    field_name = Column(String, nullable=False)
+    original_value = Column(Text, nullable=True)
+    corrected_value = Column(Text, nullable=True)
+    confidence = Column(Float, nullable=True)  # original extraction confidence 0-100
+    correction_type = Column(String, nullable=False)  # 'confirmed', 'corrected', 'added'
+    source_region_json = Column("source_region", Text, nullable=True)  # bounding box / OCR region JSON
+    notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     created_by = Column(String, default="user")
 
@@ -297,6 +320,120 @@ def create_queue_item(
         session.close()
 
 
+def bulk_resolve_items(item_ids: list[str], action: str, payload: dict | None = None) -> int:
+    """Resolve multiple triage queue items in a single transaction. Returns count of affected items."""
+    import json
+
+    session = get_session()
+    try:
+        items = session.query(TriageQueueItem).filter(
+            TriageQueueItem.id.in_(item_ids),
+            TriageQueueItem.status == "pending",
+        ).all()
+
+        now = datetime.now(UTC)
+        for item in items:
+            item.status = "resolved"
+            item.resolved_at = now
+            item.resolved_action = action
+            session.add(CorrectionEvent(
+                event_type=f"triage_{action}",
+                target_type=item.target_type,
+                target_id=item.target_id,
+                payload_json=json.dumps(payload or {}),
+            ))
+
+        session.commit()
+        return len(items)
+    finally:
+        session.close()
+
+
+def bulk_defer_items(item_ids: list[str], until: str | None = None) -> int:
+    """Defer multiple triage queue items in a single transaction. Returns count of affected items."""
+    from datetime import timedelta
+
+    session = get_session()
+    try:
+        items = session.query(TriageQueueItem).filter(
+            TriageQueueItem.id.in_(item_ids),
+            TriageQueueItem.status == "pending",
+        ).all()
+
+        defer_until = datetime.fromisoformat(until) if until else datetime.now(UTC) + timedelta(days=7)
+        for item in items:
+            item.status = "deferred"
+            item.deferred_until = defer_until
+
+        session.commit()
+        return len(items)
+    finally:
+        session.close()
+
+
+def bulk_dismiss_items(item_ids: list[str]) -> int:
+    """Dismiss multiple triage queue items in a single transaction. Returns count of affected items."""
+    session = get_session()
+    try:
+        items = session.query(TriageQueueItem).filter(
+            TriageQueueItem.id.in_(item_ids),
+            TriageQueueItem.status == "pending",
+        ).all()
+
+        now = datetime.now(UTC)
+        for item in items:
+            item.status = "dismissed"
+            item.resolved_at = now
+            item.resolved_action = "dismissed"
+
+        session.commit()
+        return len(items)
+    finally:
+        session.close()
+
+
+def bulk_confirm_by_threshold(min_confidence: int) -> int:
+    """Confirm all pending EOB match items with score_pct >= threshold. Returns count of affected items."""
+    import json
+
+    session = get_session()
+    try:
+        # Get all pending eob_match_review items
+        items = session.query(TriageQueueItem).filter(
+            TriageQueueItem.item_type == "eob_match_review",
+            TriageQueueItem.status == "pending",
+        ).all()
+
+        now = datetime.now(UTC)
+        count = 0
+        for item in items:
+            meta = {}
+            if item.metadata_json:
+                try:
+                    parsed = json.loads(item.metadata_json)
+                    if isinstance(parsed, dict):
+                        meta = parsed
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            score = meta.get("score_pct")
+            if isinstance(score, (int, float)) and score >= min_confidence:
+                item.status = "resolved"
+                item.resolved_at = now
+                item.resolved_action = "confirm"
+                session.add(CorrectionEvent(
+                    event_type="triage_bulk_confirm_threshold",
+                    target_type=item.target_type,
+                    target_id=item.target_id,
+                    payload_json=json.dumps({"min_confidence": min_confidence, "score_pct": score}),
+                ))
+                count += 1
+
+        session.commit()
+        return count
+    finally:
+        session.close()
+
+
 def undo_resolution(item_id: str) -> dict[str, Any] | None:
     """Undo a resolve/dismiss action — reset item back to pending."""
     session = get_session()
@@ -486,3 +623,106 @@ def find_existing_duplicate_pair(doc_a_id: int, doc_b_id: int) -> dict[str, Any]
         return _duplicate_to_dict(dup) if dup else None
     finally:
         session.close()
+
+
+def _correction_to_dict(c: ExtractionCorrection) -> dict[str, Any]:
+    """Convert an ExtractionCorrection to a plain dict for JSON serialization."""
+    import json
+
+    source_region = None
+    if c.source_region_json:
+        try:
+            source_region = json.loads(c.source_region_json)
+        except (json.JSONDecodeError, TypeError):
+            source_region = c.source_region_json
+
+    return {
+        "id": c.id,
+        "document_id": c.document_id,
+        "field_name": c.field_name,
+        "original_value": c.original_value,
+        "corrected_value": c.corrected_value,
+        "confidence": c.confidence,
+        "correction_type": c.correction_type,
+        "source_region": source_region,
+        "notes": c.notes,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+        "created_by": c.created_by,
+    }
+
+
+# ------------------------------------------------------------------
+# Extraction Correction CRUD
+# ------------------------------------------------------------------
+
+
+def create_extraction_correction(
+    *,
+    document_id: int,
+    field_name: str,
+    original_value: str | None = None,
+    corrected_value: str | None = None,
+    confidence: float | None = None,
+    correction_type: str,
+    source_region: dict | None = None,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """Create an extraction correction record."""
+    import json
+
+    session = get_session()
+    try:
+        correction = ExtractionCorrection(
+            document_id=document_id,
+            field_name=field_name,
+            original_value=original_value,
+            corrected_value=corrected_value,
+            confidence=confidence,
+            correction_type=correction_type,
+            source_region_json=json.dumps(source_region) if source_region else None,
+            notes=notes,
+        )
+        session.add(correction)
+        session.commit()
+        session.refresh(correction)
+        return _correction_to_dict(correction)
+    finally:
+        session.close()
+
+
+def get_corrections_for_document(document_id: int) -> list[dict[str, Any]]:
+    """Get all extraction corrections for a document, newest first."""
+    session = get_session()
+    try:
+        rows = (
+            session.query(ExtractionCorrection)
+            .filter(ExtractionCorrection.document_id == document_id)
+            .order_by(ExtractionCorrection.created_at.desc())
+            .all()
+        )
+        return [_correction_to_dict(c) for c in rows]
+    finally:
+        session.close()
+
+
+def list_recent_corrections(
+    *,
+    limit: int = 100,
+    offset: int = 0,
+    correction_type: str | None = None,
+    field_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """List recent extraction corrections for training data export."""
+    session = get_session()
+    try:
+        query = session.query(ExtractionCorrection)
+        if correction_type:
+            query = query.filter(ExtractionCorrection.correction_type == correction_type)
+        if field_name:
+            query = query.filter(ExtractionCorrection.field_name == field_name)
+        query = query.order_by(ExtractionCorrection.created_at.desc())
+        rows = query.offset(offset).limit(limit).all()
+        return [_correction_to_dict(c) for c in rows]
+    finally:
+        session.close()
+
