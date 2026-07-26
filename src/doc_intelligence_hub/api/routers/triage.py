@@ -13,16 +13,20 @@ Endpoints:
 
 from __future__ import annotations
 
-from typing import Any, Literal
+import json
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.modules.triage.database import (
+    CorrectionEvent,
     defer_queue_item,
     dismiss_queue_item,
     get_queue_item,
     get_queue_stats,
+    get_session as get_triage_session,
     list_queue_items,
     resolve_queue_item,
     undo_resolution,
@@ -34,6 +38,9 @@ router = APIRouter(prefix="/api/triage", tags=["triage"])
 _VALID_ITEM_TYPES = {"eob_match_review", "grouping_anomaly", "orphan_document"}
 _VALID_STATUSES = {"pending", "deferred", "resolved", "dismissed"}
 _VALID_SORTS = {"priority", "created_at", "type"}
+
+# Orphan deferral period (days)
+_ORPHAN_DEFER_DAYS = 30
 
 
 # ------------------------------------------------------------------
@@ -142,3 +149,102 @@ async def undo_item(item_id: str) -> dict[str, Any]:
 async def stats() -> dict[str, Any]:
     """Get queue statistics — counts by type and status."""
     return get_queue_stats()
+
+
+# ------------------------------------------------------------------
+# Orphan-specific action endpoints
+# ------------------------------------------------------------------
+
+
+def _get_orphan_item(item_id: str) -> dict[str, Any]:
+    """Retrieve a triage item and validate it is an orphan_document."""
+    item = get_queue_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
+    if item["item_type"] != "orphan_document":
+        raise HTTPException(status_code=400, detail=f"Item {item_id} is not an orphan_document (got {item['item_type']})")
+    return item
+
+
+@router.post("/orphans/{item_id}/find-match")
+async def orphan_find_match(item_id: str) -> dict[str, Any]:
+    """Return match search context for an orphan document so the UI can open the manual match flow."""
+    item = _get_orphan_item(item_id)
+    meta = item.get("metadata") or {}
+
+    return {
+        "item_id": item_id,
+        "document_id": meta.get("document_id"),
+        "document_type": meta.get("document_type"),
+        "provider_name": meta.get("provider_name"),
+        "patient_name": meta.get("patient_name"),
+        "date_of_service": meta.get("date_of_service"),
+        "amount": meta.get("amount"),
+        "search_hint": f"Find a matching {'bill' if meta.get('document_type') == 'eob' else 'EOB'} for this document",
+    }
+
+
+@router.post("/orphans/{item_id}/defer")
+async def orphan_defer(item_id: str) -> dict[str, Any]:
+    """Defer an orphan for 30 days with 'waiting for matching document' reason."""
+    _get_orphan_item(item_id)
+
+    until = (datetime.now(UTC) + timedelta(days=_ORPHAN_DEFER_DAYS)).isoformat()
+    result = defer_queue_item(item_id, until)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
+
+    # Record the correction event
+    session = get_triage_session()
+    try:
+        event = CorrectionEvent(
+            event_type="orphan_defer",
+            target_type="document",
+            target_id=result["target_id"],
+            payload_json=json.dumps({"reason": "waiting_for_match", "deferred_days": _ORPHAN_DEFER_DAYS}),
+        )
+        session.add(event)
+        session.commit()
+    finally:
+        session.close()
+
+    return result
+
+
+@router.post("/orphans/{item_id}/self-pay")
+async def orphan_self_pay(item_id: str) -> dict[str, Any]:
+    """Mark an orphan as self-pay / no bill expected."""
+    _get_orphan_item(item_id)
+    result = resolve_queue_item(item_id, "self_pay", {
+        "reason": "Self-pay or no bill expected",
+        "paperless_tags": ["no-bill-expected", "self-pay"],
+    })
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
+    return {**result, "paperless_tags": ["no-bill-expected", "self-pay"]}
+
+
+@router.post("/orphans/{item_id}/already-paid")
+async def orphan_already_paid(item_id: str) -> dict[str, Any]:
+    """Mark an orphan as already paid without requiring a bill document."""
+    _get_orphan_item(item_id)
+    result = resolve_queue_item(item_id, "already_paid", {
+        "reason": "Payment confirmed without bill document",
+        "paperless_tags": ["already-paid"],
+    })
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
+    return {**result, "paperless_tags": ["already-paid"]}
+
+
+@router.post("/orphans/{item_id}/not-medical")
+async def orphan_not_medical(item_id: str) -> dict[str, Any]:
+    """Mark an orphan as misclassified (not a medical document)."""
+    _get_orphan_item(item_id)
+    result = resolve_queue_item(item_id, "not_medical", {
+        "reason": "Document misclassified — not a medical document",
+        "paperless_tags": ["not-medical", "misclassified"],
+    })
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
+    return {**result, "paperless_tags": ["not-medical", "misclassified"]}
