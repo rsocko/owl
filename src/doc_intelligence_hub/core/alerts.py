@@ -82,7 +82,7 @@ def configure(database_url: str) -> None:
 # ------------------------------------------------------------------
 
 VALID_SEVERITIES = ("critical", "high", "medium", "low", "info")
-VALID_MODULES = ("statements", "eob", "action_queue")
+VALID_MODULES = ("statements", "eob", "action_queue", "analysis")
 
 
 def emit_alert(
