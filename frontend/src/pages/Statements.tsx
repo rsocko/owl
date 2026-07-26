@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, ProgressBanner, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
 import { useStreamingAction } from '../hooks/useStreamingAction';
 import { endpoints } from '../lib/api';
+import { getToastDuration } from '../lib/toast';
 import '../styles/statements.css';
 
 interface MissingStatement {
@@ -127,8 +128,10 @@ export default function Statements() {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timeoutId = window.setTimeout(() => setToast(null), 4000);
-    return () => window.clearTimeout(timeoutId);
+    const duration = getToastDuration(toast.tone);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), duration);
+    return () => window.clearTimeout(timeout);
   }, [toast]);
 
   // Show streaming errors as toasts
@@ -363,7 +366,7 @@ export default function Statements() {
         )}
       </div>
 
-      {toast ? <Toast message={toast.message} tone={toast.tone} /> : null}
+      {toast ? <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} /> : null}
     </>
   );
 }

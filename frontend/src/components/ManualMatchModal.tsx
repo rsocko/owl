@@ -8,6 +8,7 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge, Button, EmptyState, SkeletonLoader, Toast } from './ui';
 import { endpoints } from '../lib/api';
+import { getToastDuration } from '../lib/toast';
 import '../styles/manual-match-modal.css';
 
 // ------------------------------------------------------------------
@@ -185,7 +186,9 @@ export default function ManualMatchModal({
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timeout = window.setTimeout(() => setToast(null), 3200);
+    const duration = getToastDuration(toast.tone);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), duration);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
@@ -527,7 +530,7 @@ export default function ManualMatchModal({
         </div>
       </div>
 
-      {toast && <Toast message={toast.message} tone={toast.tone} />}
+      {toast && <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />}
     </>
   );
 }

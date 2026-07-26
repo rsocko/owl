@@ -16,6 +16,7 @@ import {
   Toast,
 } from '../components/ui';
 import { endpoints } from '../lib/api';
+import { getToastDuration } from '../lib/toast';
 import '../styles/action-queue.css';
 
 interface ActionQueueCheck {
@@ -191,7 +192,9 @@ export default function ActionQueue() {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timeout = window.setTimeout(() => setToast(null), 3000);
+    const duration = getToastDuration(toast.tone);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), duration);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
@@ -651,7 +654,7 @@ export default function ActionQueue() {
         </div>
       )}
 
-      {toast && <Toast message={toast.message} tone={toast.tone} />}
+      {toast && <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />}
     </>
   );
 }

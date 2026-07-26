@@ -16,6 +16,7 @@ import {
 } from '../components/ui';
 import DocumentPreview from '../components/DocumentPreview';
 import { endpoints } from '../lib/api';
+import { getToastDuration } from '../lib/toast';
 
 type ToastState = {
   message: string;
@@ -151,7 +152,9 @@ export default function OrphansDupes() {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timeout = window.setTimeout(() => setToast(null), 3200);
+    const duration = getToastDuration(toast.tone);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), duration);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
@@ -330,7 +333,7 @@ export default function OrphansDupes() {
         }
       />
 
-      {toast && <Toast message={toast.message} tone={toast.tone} />}
+      {toast && <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />}
 
       {loading ? (
         <SkeletonLoader variant="table" rows={6} />
@@ -644,4 +647,3 @@ export default function OrphansDupes() {
     </>
   );
 }
-

@@ -16,6 +16,7 @@ import {
   confidenceTone,
 } from '../components/ui';
 import { endpoints } from '../lib/api';
+import { getToastDuration } from '../lib/toast';
 import '../styles/eob-pages.css';
 
 interface AlertItem {
@@ -231,7 +232,9 @@ export default function EobDashboard() {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timeout = window.setTimeout(() => setToast(null), 3500);
+    const duration = getToastDuration(toast.tone);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), duration);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
@@ -893,7 +896,7 @@ export default function EobDashboard() {
         </div>
       </div>
 
-      {toast ? <Toast message={toast.message} tone={toast.tone} /> : null}
+      {toast ? <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} /> : null}
     </>
   );
 }

@@ -185,6 +185,33 @@
   flex-wrap: wrap;
 }
 
+/* Triage detail breadcrumb (UX-09) */
+.triage-detail-breadcrumb {
+  padding: 8px 0 12px;
+  font-size: 0.78rem;
+}
+
+.triage-breadcrumb-trail {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.triage-breadcrumb-sep {
+  margin: 0 6px;
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.triage-breadcrumb-segment {
+  color: var(--text-muted);
+}
+
+.triage-breadcrumb-current {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .triage-detail-title {
   font-size: 1.1rem;
   font-weight: 800;
