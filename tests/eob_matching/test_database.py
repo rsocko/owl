@@ -164,3 +164,162 @@ class TestMatchRecord:
         db.commit()
         assert len(pending_matches(db)) == 0
         assert len(confirmed_matches(db)) == 0
+
+    def test_match_has_payment_fields(self, db):
+        m = store_match(db, MatchRecord(
+            eob_document_id=1, bill_document_id=2,
+            score=85.0, confidence="HIGH",
+        ))
+        assert m.payment_status == "unpaid"
+        assert m.paid_amount == 0.0
+        assert m.paid_date is None
+
+
+class TestPaymentTracking:
+    def _make_confirmed_match(self, db, bill_balance=250.0):
+        """Helper to create a confirmed match with a linked bill."""
+        from doc_intelligence_hub.modules.eob_matching.database import PaymentRecord
+        store_bill(db, BillRecord(
+            document_id=100,
+            provider_name="City Hospital",
+            balance_due=bill_balance,
+            total_amount=bill_balance,
+            payment_status="unpaid",
+        ))
+        store_eob(db, EOBRecord(
+            document_id=42,
+            total_patient_responsibility=bill_balance,
+        ))
+        m = store_match(db, MatchRecord(
+            eob_document_id=42,
+            bill_document_id=100,
+            score=90.0,
+            confidence="HIGH",
+            status="confirmed",
+            confirmed_at=datetime.now(UTC),
+        ))
+        return m
+
+    def test_record_payment_updates_match(self, db):
+        from doc_intelligence_hub.modules.eob_matching.database import record_payment
+        m = self._make_confirmed_match(db, bill_balance=250.0)
+        payment = record_payment(db, match_id=m.id, amount=100.0, method="check")
+
+        assert payment.id is not None
+        assert payment.amount == 100.0
+        assert payment.method == "check"
+
+        db.refresh(m)
+        assert m.paid_amount == 100.0
+        assert m.payment_status == "partial"
+
+    def test_full_payment_marks_paid(self, db):
+        from doc_intelligence_hub.modules.eob_matching.database import record_payment
+        m = self._make_confirmed_match(db, bill_balance=200.0)
+        record_payment(db, match_id=m.id, amount=200.0)
+
+        db.refresh(m)
+        assert m.paid_amount == 200.0
+        assert m.payment_status == "paid"
+
+    def test_overpayment_detected(self, db):
+        from doc_intelligence_hub.modules.eob_matching.database import record_payment
+        m = self._make_confirmed_match(db, bill_balance=100.0)
+        record_payment(db, match_id=m.id, amount=150.0)
+
+        db.refresh(m)
+        assert m.paid_amount == 150.0
+        assert m.payment_status == "overpaid"
+
+    def test_multiple_payments_aggregate(self, db):
+        from doc_intelligence_hub.modules.eob_matching.database import record_payment, get_payments_for_match
+        m = self._make_confirmed_match(db, bill_balance=300.0)
+        record_payment(db, match_id=m.id, amount=100.0)
+        record_payment(db, match_id=m.id, amount=100.0)
+
+        db.refresh(m)
+        assert m.paid_amount == 200.0
+        assert m.payment_status == "partial"
+
+        payments = get_payments_for_match(db, m.id)
+        assert len(payments) == 2
+
+    def test_payment_summary(self, db):
+        from doc_intelligence_hub.modules.eob_matching.database import record_payment, payment_summary
+        m1 = self._make_confirmed_match(db, bill_balance=200.0)
+        # Create second confirmed match with different doc ids
+        store_bill(db, BillRecord(
+            document_id=200,
+            balance_due=300.0,
+            total_amount=300.0,
+        ))
+        m2 = store_match(db, MatchRecord(
+            eob_document_id=42,
+            bill_document_id=200,
+            score=85.0,
+            confidence="HIGH",
+            status="confirmed",
+            confirmed_at=datetime.now(UTC),
+        ))
+
+        record_payment(db, match_id=m1.id, amount=200.0)  # fully paid
+        record_payment(db, match_id=m2.id, amount=100.0)  # partial
+
+        summary = payment_summary(db)
+        assert summary["total_billed"] == 500.0  # 200 + 300
+        assert summary["total_due"] == 200.0  # (200-200) + (300-100) outstanding
+        assert summary["total_paid"] == 300.0  # 200 + 100
+        assert summary["paid_count"] == 1
+        assert summary["partial_count"] == 1
+
+    def test_payment_creates_match_event(self, db):
+        from doc_intelligence_hub.modules.eob_matching.database import record_payment, get_match_events
+        m = self._make_confirmed_match(db)
+        record_payment(db, match_id=m.id, amount=50.0, method="online")
+
+        events = get_match_events(db, m.id)
+        payment_events = [e for e in events if e.event_type == "payment_recorded"]
+        assert len(payment_events) == 1
+        assert "50.00" in payment_events[0].detail
+        assert "online" in payment_events[0].detail
+
+    def test_zero_balance_bill_any_payment_is_paid(self, db):
+        """When a bill has no balance info, any positive payment marks as paid."""
+        from doc_intelligence_hub.modules.eob_matching.database import record_payment
+        store_bill(db, BillRecord(
+            document_id=300,
+            provider_name="Unknown Clinic",
+            balance_due=None,
+            total_amount=None,
+        ))
+        m = store_match(db, MatchRecord(
+            eob_document_id=42,
+            bill_document_id=300,
+            score=80.0,
+            confidence="HIGH",
+            status="confirmed",
+            confirmed_at=datetime.now(UTC),
+        ))
+        record_payment(db, match_id=m.id, amount=50.0)
+        db.refresh(m)
+        assert m.payment_status == "paid"
+
+    def test_explicit_zero_balance_partial_is_overpaid(self, db):
+        """When bill balance is explicitly $0, any payment is overpaid."""
+        from doc_intelligence_hub.modules.eob_matching.database import record_payment
+        store_bill(db, BillRecord(
+            document_id=400,
+            balance_due=0.0,
+            total_amount=0.0,
+        ))
+        m = store_match(db, MatchRecord(
+            eob_document_id=42,
+            bill_document_id=400,
+            score=80.0,
+            confidence="HIGH",
+            status="confirmed",
+            confirmed_at=datetime.now(UTC),
+        ))
+        record_payment(db, match_id=m.id, amount=10.0)
+        db.refresh(m)
+        assert m.payment_status == "overpaid"
