@@ -19,7 +19,6 @@ from doc_intelligence_hub.modules.statements.models import (
 from doc_intelligence_hub.modules.statements.paperless import load_fixture_documents
 from doc_intelligence_hub.modules.statements.recommendations import build_recommendations
 
-
 FIXTURE_PATH = str(Path(__file__).parent / "fixtures" / "quarterly_annual_documents.json")
 
 
@@ -58,7 +57,7 @@ def test_discover_quarterly_provider_with_inline_data() -> None:
             tags=["statement"],
         )
         for year in [2024, 2025]
-        for q, i in zip(range(1, 5), range(year * 10, year * 10 + 4))
+        for q, i in zip(range(1, 5), range(year * 10, year * 10 + 4), strict=False)
     ]
 
     result = discover_providers(documents, config)

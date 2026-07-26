@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import uuid
 from datetime import date
 from typing import Any
@@ -93,7 +94,7 @@ async def discovery_run(request: Request) -> dict[str, Any]:
 
 
 @router.post("/recommendations/run")
-async def recommendations_run(request: Request, as_of: date = Query(...)) -> dict[str, Any]:
+async def recommendations_run(request: Request, as_of: date = Query(...)) -> dict[str, Any]:  # noqa: B008
     result = await run_recommendations(get_statement_config_path(request), as_of)
     return result.model_dump(mode="json")
 
@@ -108,7 +109,7 @@ async def discovery_stream(request: Request) -> StreamingResponse:
 
 
 @router.get("/recommendations/stream")
-async def recommendations_stream(request: Request, as_of: date = Query(...)) -> StreamingResponse:
+async def recommendations_stream(request: Request, as_of: date = Query(...)) -> StreamingResponse:  # noqa: B008
     return StreamingResponse(
         _recommendations_event_generator(get_statement_config_path(request), as_of),
         media_type="text/event-stream",
@@ -211,10 +212,8 @@ def _build_timeline(documents: list[dict]) -> list[dict]:
             except (ValueError, TypeError):
                 pass
         if stmt_date_str:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 prev_date = date_type.fromisoformat(stmt_date_str)
-            except (ValueError, TypeError):
-                pass
         timeline.append(
             {
                 "document_id": doc["document_id"],
@@ -236,11 +235,14 @@ def _record_correction_event(
 ) -> None:
     """Record a correction event in the triage database."""
     try:
+        import json
+
         from doc_intelligence_hub.modules.triage.database import (
             CorrectionEvent,
+        )
+        from doc_intelligence_hub.modules.triage.database import (
             get_session as get_triage_session,
         )
-        import json
 
         session = get_triage_session()
         try:
@@ -263,11 +265,14 @@ def _resolve_triage_item_for_series(
 ) -> None:
     """Resolve any pending triage queue items targeting this series."""
     try:
+        from datetime import UTC, datetime
+
         from doc_intelligence_hub.modules.triage.database import (
-            get_session as get_triage_session,
             TriageQueueItem,
         )
-        from datetime import datetime, UTC
+        from doc_intelligence_hub.modules.triage.database import (
+            get_session as get_triage_session,
+        )
 
         session = get_triage_session()
         try:
@@ -325,11 +330,11 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
             anomaly_indicators.append(
                 f"Multiple account numbers detected: {', '.join(sorted(account_hints))}"
             )
-        for entry in timeline:
-            if entry.get("gap_before_days") and entry["gap_before_days"] > 60:
-                anomaly_indicators.append(
-                    f"Large gap of {entry['gap_before_days']} days before {entry.get('period_label', entry.get('statement_date', 'unknown'))}"
-                )
+        anomaly_indicators.extend(
+            f"Large gap of {entry['gap_before_days']} days before {entry.get('period_label', entry.get('statement_date', 'unknown'))}"
+            for entry in timeline
+            if entry.get("gap_before_days") and entry["gap_before_days"] > 60
+        )
 
         return {
             "series": series,

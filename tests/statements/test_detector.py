@@ -1,5 +1,5 @@
-from pathlib import Path
 from datetime import date
+from pathlib import Path
 
 import httpx
 import pytest
@@ -10,6 +10,8 @@ from doc_intelligence_hub.modules.statements.models import DocumentRecord
 from doc_intelligence_hub.modules.statements.paperless import (
     fetch_paperless_documents,
     load_fixture_documents,
+)
+from doc_intelligence_hub.modules.statements.paperless import (
     test_paperless_connection as run_paperless_connection_test,
 )
 from doc_intelligence_hub.modules.statements.service import (

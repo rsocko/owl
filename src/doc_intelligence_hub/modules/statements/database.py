@@ -548,7 +548,7 @@ class Database:
         placeholders = ",".join("?" for _ in document_ids)
         conn.execute(
             f"DELETE FROM series_documents WHERE series_id = ? AND document_id IN ({placeholders})",
-            [series_id] + document_ids,
+            [series_id, *document_ids],
         )
         self._refresh_series_counts(series_id)
         conn.commit()

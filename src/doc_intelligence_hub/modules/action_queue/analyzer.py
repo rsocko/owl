@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Optional
 
 from doc_intelligence_hub.core.llm import (
     chat_json,
     get_llm_settings,
+)
+from doc_intelligence_hub.core.llm import (
     health_check as llm_health_check,
 )
 
@@ -98,7 +99,7 @@ class OllamaAnalyzer:
         self.model = settings.llm_model or llm_settings.model
         self.base_url = llm_settings.base_url
 
-    async def analyze_document(self, document: dict) -> Optional[dict]:
+    async def analyze_document(self, document: dict) -> dict | None:
         """Send document text to LLM and parse the structured response.
 
         Applies a configurable timeout (``settings.llm_timeout_seconds``). If the
@@ -152,7 +153,7 @@ class OllamaAnalyzer:
 
         return self._validate_response(data)
 
-    async def _call_with_timeout(self, prompt: str, doc_id, timeout: float) -> Optional[dict]:
+    async def _call_with_timeout(self, prompt: str, doc_id, timeout: float) -> dict | None:
         """Run a single LLM call bounded by ``timeout`` seconds, logging duration/outcome."""
         start = time.monotonic()
         try:
@@ -168,7 +169,7 @@ class OllamaAnalyzer:
             else:
                 logger.info("LLM call for doc_id=%s succeeded in %.2fs", doc_id, elapsed)
             return data
-        except asyncio.TimeoutError:
+        except TimeoutError:
             elapsed = time.monotonic() - start
             logger.warning(
                 "LLM call for doc_id=%s timed out after %.2fs (limit %.0fs)",
@@ -177,18 +178,16 @@ class OllamaAnalyzer:
                 timeout,
             )
             return None
-        except Exception as e:
+        except Exception:
             elapsed = time.monotonic() - start
-            logger.error(
-                "LLM call for doc_id=%s raised an exception after %.2fs: %s",
+            logger.exception(
+                "LLM call for doc_id=%s raised an exception after %.2fs",
                 doc_id,
                 elapsed,
-                e,
-                exc_info=True,
             )
             return None
 
-    def _validate_response(self, data: dict) -> Optional[dict]:
+    def _validate_response(self, data: dict) -> dict | None:
         """Validate and normalize the LLM response."""
         # Handle new multi-action format
         if "actions" in data and "document_assessment" in data:
@@ -200,7 +199,7 @@ class OllamaAnalyzer:
 
         return None
 
-    def _validate_multi_action(self, data: dict) -> Optional[dict]:
+    def _validate_multi_action(self, data: dict) -> dict | None:
         """Validate the multi-action response format."""
         assessment = data.get("document_assessment", {})
 

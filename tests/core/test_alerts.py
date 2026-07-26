@@ -8,13 +8,13 @@ import pytest
 
 from doc_intelligence_hub.core.alerts import (
     Alert,
+    check_eob_due_dates,
     cleanup_old_alerts,
     configure,
-    emit_alert,
     emit_action_queue_alerts,
+    emit_alert,
     emit_eob_alerts,
     emit_statement_alerts,
-    check_eob_due_dates,
     get_session,
     init_db,
 )

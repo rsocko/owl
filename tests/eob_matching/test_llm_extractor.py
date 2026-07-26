@@ -20,7 +20,6 @@ from doc_intelligence_hub.modules.eob_matching.models import (
     ServiceLine,
 )
 
-
 # ---------------------------------------------------------------------------
 # validate_eob_extraction tests
 # ---------------------------------------------------------------------------

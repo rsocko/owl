@@ -156,6 +156,8 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
         try:
             from doc_intelligence_hub.core.alerts import (
                 cleanup_old_alerts,
+            )
+            from doc_intelligence_hub.core.alerts import (
                 init_db as alerts_init_db,
             )
 

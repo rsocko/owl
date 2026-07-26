@@ -33,15 +33,15 @@ def db():
 
 
 def _create_sample_item(**overrides) -> dict:
-    defaults = dict(
-        item_type="eob_match_review",
-        source="auto_flag",
-        target_type="eob_match",
-        target_id="42",
-        reason="Low confidence match (55%)",
-        priority=70,
-        metadata={"score_pct": 55, "eob_document_id": 100, "bill_document_id": 200},
-    )
+    defaults = {
+        "item_type": "eob_match_review",
+        "source": "auto_flag",
+        "target_type": "eob_match",
+        "target_id": "42",
+        "reason": "Low confidence match (55%)",
+        "priority": 70,
+        "metadata": {"score_pct": 55, "eob_document_id": 100, "bill_document_id": 200},
+    }
     defaults.update(overrides)
     return create_queue_item(**defaults)
 

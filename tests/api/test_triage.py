@@ -8,7 +8,6 @@ from doc_intelligence_hub.modules.triage.database import (
     create_queue_item,
 )
 
-
 # ---------------------------------------------------------------------------
 # Seeding helper
 # ---------------------------------------------------------------------------

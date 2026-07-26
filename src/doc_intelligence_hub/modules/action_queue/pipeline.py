@@ -4,17 +4,18 @@ import asyncio
 import io
 import logging
 import time
-from datetime import datetime, date
-from typing import Any, Optional
+from datetime import date, datetime
+from typing import Any
 
 from rich.console import Console
 
-from .config import settings
-from .database import get_session, init_db, Action, ProcessingHistory
 from doc_intelligence_hub.core.paperless import PaperlessClient
+
 from .analyzer import OllamaAnalyzer
-from .fallback_analyzer import RuleBasedAnalyzer
+from .config import settings
+from .database import Action, ProcessingHistory, get_session, init_db
 from .enricher import PaperlessEnricher
+from .fallback_analyzer import RuleBasedAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ console = Console(file=io.StringIO(), force_terminal=False, highlight=False)
 # this module-level state at any `await` point during the run.
 # ---------------------------------------------------------------------------
 _progress: dict[str, Any] = {"current_step": "idle", "progress": None, "current_document": None}
-_progress_start: Optional[float] = None
+_progress_start: float | None = None
 
 
 def get_pipeline_progress() -> dict[str, Any]:
@@ -66,22 +67,22 @@ class Pipeline:
         self.analyzer = OllamaAnalyzer()
         self.fallback_analyzer = RuleBasedAnalyzer()
         self.enricher = PaperlessEnricher()
-        self._ollama_available: Optional[bool] = None
+        self._ollama_available: bool | None = None
         self._enrichment_available: bool = True
 
     async def run(
         self,
         force: bool = False,
-        limit: Optional[int] = None,
-        document_id: Optional[int] = None,
-        tag_override: Optional[str] = None,
-        saved_view_id: Optional[int] = None,
-        created_after: Optional[str] = None,
-        created_before: Optional[str] = None,
-        added_after: Optional[str] = None,
-        added_before: Optional[str] = None,
-        correspondent: Optional[str] = None,
-        document_type: Optional[str] = None,
+        limit: int | None = None,
+        document_id: int | None = None,
+        tag_override: str | None = None,
+        saved_view_id: int | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        added_after: str | None = None,
+        added_before: str | None = None,
+        correspondent: str | None = None,
+        document_type: str | None = None,
         dry_run: bool = False,
     ) -> dict:
         """Execute a full pipeline run.
@@ -151,7 +152,7 @@ class Pipeline:
         # small multiple of `limit` as a buffer rather than an unbounded set —
         # a large buffer (e.g. limit*10) defeats the point of a small limit
         # since it still has to be requested/paginated as a single page.
-        fetch_limit: Optional[int] = None
+        fetch_limit: int | None = None
         if limit is not None and not document_id:
             fetch_limit = limit if force else limit * 3
 
@@ -172,7 +173,7 @@ class Pipeline:
                 ),
                 timeout=settings.pipeline_fetch_timeout_seconds,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             fetch_duration = time.monotonic() - fetch_start
             console.print(
                 f"[red]✗[/red] Document fetch timed out after {settings.pipeline_fetch_timeout_seconds:.0f}s"
@@ -530,11 +531,10 @@ class Pipeline:
             except Exception as e:
                 # Isolate per-document failures so one bad document can't kill the whole run.
                 console.print(f"  [red]✗[/red] Unexpected error processing document {doc_id}: {e}")
-                logger.error(
+                logger.exception(
                     "doc_id=%s title=%r: unexpected error during processing — continuing to next document",
                     doc_id,
                     doc_title_short,
-                    exc_info=True,
                 )
                 stats["failed"] += 1
                 stats["errors"].append(
@@ -579,16 +579,16 @@ class Pipeline:
     async def _fetch_documents(
         self,
         *,
-        document_id: Optional[int],
-        saved_view_id: Optional[int],
-        tag_override: Optional[str],
-        created_after: Optional[str],
-        created_before: Optional[str],
-        added_after: Optional[str],
-        added_before: Optional[str],
-        correspondent: Optional[str],
-        document_type: Optional[str],
-        fetch_limit: Optional[int],
+        document_id: int | None,
+        saved_view_id: int | None,
+        tag_override: str | None,
+        created_after: str | None,
+        created_before: str | None,
+        added_after: str | None,
+        added_before: str | None,
+        correspondent: str | None,
+        document_type: str | None,
+        fetch_limit: int | None,
     ) -> list[dict]:
         """Fetch the candidate document set for this run, applying server-side
         filtering (tags/dates/correspondent) and — when possible — a limit so
@@ -699,8 +699,8 @@ class Pipeline:
         document_id: int,
         success: bool,
         disposition: str = "action_created",
-        error: str = None,
-        text_metrics: dict = None,
+        error: str | None = None,
+        text_metrics: dict[str, Any] | None = None,
     ):
         """Record processing attempt in history table."""
         metrics = text_metrics or {}
@@ -768,7 +768,7 @@ class Pipeline:
         }
 
     @staticmethod
-    def _parse_date(date_str: Optional[str]) -> Optional[date]:
+    def _parse_date(date_str: str | None) -> date | None:
         """Parse a date string, returning None on failure."""
         if not date_str:
             return None
@@ -782,16 +782,16 @@ class Pipeline:
 
 async def run_pipeline(
     force: bool = False,
-    limit: Optional[int] = None,
-    document_id: Optional[int] = None,
-    tag_override: Optional[str] = None,
-    saved_view_id: Optional[int] = None,
-    created_after: Optional[str] = None,
-    created_before: Optional[str] = None,
-    added_after: Optional[str] = None,
-    added_before: Optional[str] = None,
-    correspondent: Optional[str] = None,
-    document_type: Optional[str] = None,
+    limit: int | None = None,
+    document_id: int | None = None,
+    tag_override: str | None = None,
+    saved_view_id: int | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
+    added_after: str | None = None,
+    added_before: str | None = None,
+    correspondent: str | None = None,
+    document_type: str | None = None,
     dry_run: bool = False,
 ) -> dict:
     """Entry point for running the pipeline."""

@@ -14,12 +14,14 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from doc_intelligence_hub.modules.triage.database import (
-    create_queue_item,
-    get_session as get_triage_session,
-    TriageQueueItem,
-)
 from doc_intelligence_hub.core.alerts import emit_alert
+from doc_intelligence_hub.modules.triage.database import (
+    TriageQueueItem,
+    create_queue_item,
+)
+from doc_intelligence_hub.modules.triage.database import (
+    get_session as get_triage_session,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +91,8 @@ def _flag_low_confidence_matches() -> int:
     try:
         from doc_intelligence_hub.modules.eob_matching.database import (
             MatchRecord,
+        )
+        from doc_intelligence_hub.modules.eob_matching.database import (
             get_session as get_eob_session,
         )
     except ImportError:
@@ -168,6 +172,8 @@ def _flag_multi_candidate_matches() -> int:
     try:
         from doc_intelligence_hub.modules.eob_matching.database import (
             MatchRecord,
+        )
+        from doc_intelligence_hub.modules.eob_matching.database import (
             get_session as get_eob_session,
         )
     except ImportError:
@@ -249,9 +255,11 @@ def _flag_orphan_documents() -> int:
     """
     try:
         from doc_intelligence_hub.modules.eob_matching.database import (
-            EOBRecord,
             BillRecord,
+            EOBRecord,
             MatchRecord,
+        )
+        from doc_intelligence_hub.modules.eob_matching.database import (
             get_session as get_eob_session,
         )
     except ImportError:

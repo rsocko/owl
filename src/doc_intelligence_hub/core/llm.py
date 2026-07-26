@@ -157,8 +157,7 @@ def _parse_json_response(text: str) -> dict | None:
     if text.startswith("```"):
         lines = text.split("\n")
         text = "\n".join(lines[1:])
-        if text.endswith("```"):
-            text = text[:-3]
+        text = text.removesuffix("```")
         text = text.strip()
 
     try:
@@ -189,13 +188,8 @@ async def validate_model_availability() -> dict[str, Any]:
     import httpx
 
     settings = get_llm_settings()
-    # Strip /chat/completions or trailing path to get the base for /models
+    # Use the configured OpenAI-compatible base URL for the /models endpoint.
     models_url = settings.base_url.rstrip("/")
-    if models_url.endswith("/v1"):
-        models_url = models_url  # already at /v1 level
-    elif models_url.endswith("/openai/v1"):
-        models_url = models_url  # already at /openai/v1 level
-
     try:
         async with httpx.AsyncClient(timeout=10.0) as http:
             resp = await http.get(

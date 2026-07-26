@@ -1,7 +1,7 @@
 """Tests for the shared Paperless-ngx client."""
 
-import pytest
 import httpx
+import pytest
 
 from doc_intelligence_hub.core.paperless import PaperlessClient, load_fixture
 

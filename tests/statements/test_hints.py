@@ -235,8 +235,8 @@ provider_hints:
     config_file.write_text(config_content)
     # Create required fixture path
     (tmp_path / "tests" / "fixtures").mkdir(parents=True)
-    import shutil
     import pathlib
+    import shutil
 
     fixture_src = pathlib.Path(__file__).parent / "fixtures" / "paperless_documents.json"
     shutil.copy(fixture_src, tmp_path / "tests" / "fixtures" / "paperless_documents.json")

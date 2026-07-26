@@ -13,13 +13,21 @@ from fastapi import APIRouter, Request
 from doc_intelligence_hub.api.routers import get_loaded_statement_config
 from doc_intelligence_hub.modules.action_queue.database import (
     Action,
+)
+from doc_intelligence_hub.modules.action_queue.database import (
     get_session as get_aq_session,
+)
+from doc_intelligence_hub.modules.action_queue.database import (
     init_db as aq_init_db,
 )
 from doc_intelligence_hub.modules.eob_matching.database import (
     EOBRecord,
     MatchRecord,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
     get_session as get_eob_session,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
     init_db as eob_init_db,
 )
 from doc_intelligence_hub.modules.statements.database import Database as StatementsDB
@@ -80,8 +88,9 @@ async def mc_update_action(request: Request, action_id: str) -> dict[str, Any]:
 
     Accepts status values from MC: 'done' or 'dismissed'.
     """
-    from fastapi import HTTPException
     import json
+
+    from fastapi import HTTPException
 
     body_bytes = await request.body()
     body = json.loads(body_bytes) if body_bytes else {}
@@ -214,6 +223,8 @@ async def mc_triage_badge_count() -> dict[str, Any]:
     try:
         from doc_intelligence_hub.modules.triage.database import (
             get_queue_stats,
+        )
+        from doc_intelligence_hub.modules.triage.database import (
             init_db as triage_init_db,
         )
 
