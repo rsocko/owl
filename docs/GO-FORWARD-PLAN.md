@@ -58,7 +58,7 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 
 | Issue A | Issue B | Overlap | Recommendation |
 |---------|---------|---------|----------------|
-| **#869** Rules Config (doc-hub-ui) | **#833** Rules Configuration UI (design) | Same scope: full rule editor with LLM/n8n tabs | Keep #869 (more detailed from mockup comparison), close #833 with reference |
+| **#869** Rules Config (doc-hub-ui) | **#833** Rules Configuration UI (design) | Same scope: full rule editor with LLM/n8n tabs | ✅ #833 closed |
 | **#848** Build full dashboard UI | **#847** Historical trending + run history | #847 is a subset of #848's mockup scope | Keep both — #847 is a deliverable within #848; add parent reference |
 
 ### 🟡 SIGNIFICANT OVERLAP (recommend consolidation)
@@ -80,11 +80,12 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 | #829 (Statement Grouping Correction) | #902 (Timeline + split/merge) | #902 is the UI implementation detail; #829 is the design spec |
 
 ### Recommended Cleanup Actions
-1. **Close #833** → reference #869 (Rules Config duplicate)
+1. ~~**Close #833** → reference #869 (Rules Config duplicate)~~ ✅ Done
 2. **Close #826** → reference #831 (Orphan management covers this)
 3. **Add parent/child references** to #834 for issues #882, #878, #871, #874, #873
 4. **Cross-reference #870 ↔ #828** (frontend vs backend)
 5. **Cross-reference #832 ↔ #868** (parent ↔ sub-task)
+6. **Close remaining implemented issues** — #877, #872, #831, #830, #829, #834, #902 have merged PRs but are still open on GitHub
 
 ---
 
@@ -93,54 +94,54 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 ### Core Modules (Backend)
 | # | Title | Status |
 |---|-------|--------|
-| 839 | Run EOB Matching LIVE — validate integration | **CRITICAL — Phase 1 gate** |
-| 887 | Fix Statement Discovery | Bug fix |
-| 844 | EOB: Add --use-llm flag to CLI | Enhancement |
-| 845 | EOB: Cross-run document deduplication | Enhancement |
-| 846 | EOB: Set up scheduled execution (cron/Dockhand) | Infrastructure |
-| 849 | EOB: Automated benchmark scheduling | Enhancement |
-| 850 | EOB: Payment tracking integration | Feature |
-| 851 | EOB: Notification/alerting for new matches | Feature |
-| 852 | EOB: Include extraction details in API results | API |
-| 843 | EOB: Insurance coverage analysis | Feature |
+| 839 | Run EOB Matching LIVE — validate integration | ✅ Done |
+| 887 | Fix Statement Discovery | ✅ Done |
+| 844 | EOB: Add --use-llm flag to CLI | ✅ Done |
+| 845 | EOB: Cross-run document deduplication | ✅ Done |
+| 846 | EOB: Set up scheduled execution (cron/Dockhand) | Open |
+| 849 | EOB: Automated benchmark scheduling | Open |
+| 850 | EOB: Payment tracking integration | Open |
+| 851 | EOB: Notification/alerting for new matches | Open |
+| 852 | EOB: Include extraction details in API results | ✅ Done |
+| 843 | EOB: Insurance coverage analysis | Open |
 
 ### Doc Hub UI — Quick Wins
-| # | Title | Effort |
+| # | Title | Status |
 |---|-------|--------|
-| 876 | Keyboard shortcut hints panel | Quick Win |
-| 878 | Confidence factor narratives | Quick Win |
-| 871 | Match decision notes textarea | Quick Win |
-| 873 | Match history timeline | Quick Win |
-| 904 | Action Queue risk score + AI reasoning | Quick Win |
+| 876 | Keyboard shortcut hints panel | Deferred |
+| 878 | Confidence factor narratives | ✅ Done |
+| 871 | Match decision notes textarea | ✅ Done |
+| 873 | Match history timeline | ✅ Done |
+| 904 | Action Queue risk score + AI reasoning | ✅ Done |
 
 ### Doc Hub UI — Medium Effort
-| # | Title | Effort |
+| # | Title | Status |
 |---|-------|--------|
-| 882 | Amount validation pass/fail cards | Medium |
-| 884 | Unmatched view filters + suggested matches | Medium |
-| 883 | Loading skeletons matching card shapes | Medium |
-| 877 | Manual Match Search as modal overlay | Medium |
-| 874 | Alternative matches display | Medium |
-| 872 | Document preview links + Paperless integration | Medium |
-| 870 | Insights page — trend charts + sparklines | Medium |
-| 869 | Rules Config — full rule editor | Medium |
-| 868 | Bulk actions in Triage Queue | Medium |
-| 903 | Unmatched view bulk actions | Medium |
-| 902 | Statement series timeline + split/merge | Medium |
-| 906 | EOB Dashboard inline alerts + quick stats | Medium |
+| 882 | Amount validation pass/fail cards | Open |
+| 884 | Unmatched view filters + suggested matches | ✅ Done |
+| 883 | Loading skeletons matching card shapes | ✅ Done |
+| 877 | Manual Match Search as modal overlay | ✅ Done (PR #932) |
+| 874 | Alternative matches display | ✅ Done |
+| 872 | Document preview links + Paperless integration | ✅ Done (PR #930) |
+| 870 | Insights page — trend charts + sparklines | Open |
+| 869 | Rules Config — full rule editor | Open |
+| 868 | Bulk actions in Triage Queue | ✅ Done |
+| 903 | Unmatched view bulk actions | ✅ Done |
+| 902 | Statement series timeline + split/merge | ✅ Done (PR #929) |
+| 906 | EOB Dashboard inline alerts + quick stats | ✅ Done |
 
 ### Design / Triage System
-| # | Title | Scope |
-|---|-------|-------|
-| 832 | Unified Triage Queue UI | Design epic |
-| 834 | EOB ↔ Bill Match Review UI | Design epic |
-| 835 | Dashboard, Correction History + Account # | Design epic |
-| 831 | Orphan Document Management UI | Design epic |
-| 830 | Duplicate Detection & Merge UI | Design epic |
-| 829 | Statement Grouping Correction UI | Design epic |
-| 827 | Metadata Correction & Writeback UI | Design epic |
-| 828 | Analysis Engine & Insights System | Design epic |
-| 833 | Rules Configuration UI | **DUPLICATE — close** |
+| # | Title | Status |
+|---|-------|--------|
+| 832 | Unified Triage Queue UI | ✅ Done |
+| 834 | EOB ↔ Bill Match Review UI | ✅ Done (PR #927) |
+| 835 | Dashboard, Correction History + Account # | Open |
+| 831 | Orphan Document Management UI | ✅ Done (PR #933) |
+| 830 | Duplicate Detection & Merge UI | ✅ Done (PR #925) |
+| 829 | Statement Grouping Correction UI | ✅ Done (PR #928) |
+| 827 | Metadata Correction & Writeback UI | ✅ Done |
+| 828 | Analysis Engine & Insights System | Open |
+| 833 | Rules Configuration UI | **DUPLICATE — closed** |
 
 ### Design / UX
 | # | Title |
@@ -192,7 +193,7 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 
 ---
 
-### Phase 1: Quick Win UI Polish (Weeks 2-3) 🎨
+### Phase 1: Quick Win UI Polish (Weeks 2-3) 🎨 ✅ COMPLETE
 **Goal:** Tighten the existing UI with low-effort, high-impact improvements.
 
 | Priority | Issue | Effort                                 |       |
@@ -200,48 +201,48 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 | P1       | #876  | Keyboard shortcut hints                | defer |
 | P1       | #878  | Confidence factor narratives           | done  |
 | P1       | #871  | Match decision notes textarea          | done  |
-| P1       | #873  | Match history timeline                 |       |
-| P1       | #904  | Action Queue risk score + AI reasoning |       |
-| P1       | #883  | Loading skeletons                      |       |
+| P1       | #873  | Match history timeline                 | done  |
+| P1       | #904  | Action Queue risk score + AI reasoning | done  |
+| P1       | #883  | Loading skeletons                      | done  |
 
 **Exit Criteria:** Match review workflow feels polished; users can add notes, see narratives, use keyboard shortcuts.
 
 ---
 
-### Phase 2: EOB Matching Completion (Weeks 3-5) 🏥
+### Phase 2: EOB Matching Completion (Weeks 3-5) 🏥 ✅ NEARLY COMPLETE
 **Goal:** Complete the EOB matching loop end-to-end.
 
-| Priority | Issue | Description |
-|----------|-------|-------------|
-| P2 | #848 | Full EOB dashboard UI (replaces basic tab) |
-| P2 | #906 | EOB Dashboard inline alerts + quick stats |
-| P2 | #882 | Amount validation pass/fail cards |
-| P2 | #874 | Alternative matches display |
-| P2 | #884 | Unmatched filters + suggested matches |
-| P2 | #903 | Unmatched view bulk actions |
-| P2 | #852 | Include extraction details in API results |
-| P2 | #844 | Add --use-llm flag to CLI |
-| P2 | #845 | Cross-run document deduplication |
+| Priority | Issue | Description | |
+|----------|-------|-------------|---|
+| P2 | #848 | Full EOB dashboard UI (replaces basic tab) | done |
+| P2 | #906 | EOB Dashboard inline alerts + quick stats | done |
+| P2 | #882 | Amount validation pass/fail cards | |
+| P2 | #874 | Alternative matches display | done |
+| P2 | #884 | Unmatched filters + suggested matches | done |
+| P2 | #903 | Unmatched view bulk actions | done |
+| P2 | #852 | Include extraction details in API results | done |
+| P2 | #844 | Add --use-llm flag to CLI | done |
+| P2 | #845 | Cross-run document deduplication | done |
 
 **Exit Criteria:** EOB matching dashboard is fully functional with rich match review, unmatched management, and deduplication.
 
 ---
 
-### Phase 3: Triage & Correction System (Weeks 5-8) 🔧
+### Phase 3: Triage & Correction System (Weeks 5-8) 🔧 ✅ COMPLETE
 **Goal:** Build the human-in-the-loop correction workflows.
 
-| Priority | Issue | Description |
-|----------|-------|-------------|
-| P3 | #832 | Unified Triage Queue UI |
-| P3 | #868 | Triage Queue bulk actions |
-| P3 | #834 | EOB ↔ Bill Match Review UI |
-| P3 | #877 | Manual Match Search as modal |
-| P3 | #872 | Document preview links + Paperless |
-| P3 | #831 | Orphan Document Management |
-| P3 | #830 | Duplicate Detection & Merge |
-| P3 | #829 | Statement Grouping Correction |
-| P3 | #902 | Statement series timeline + split/merge |
-| P3 | #827 | Metadata Correction & Writeback |
+| Priority | Issue | Description | |
+|----------|-------|-------------|---|
+| P3 | #832 | Unified Triage Queue UI | done |
+| P3 | #868 | Triage Queue bulk actions | done |
+| P3 | #834 | EOB ↔ Bill Match Review UI | done |
+| P3 | #877 | Manual Match Search as modal | done |
+| P3 | #872 | Document preview links + Paperless | done |
+| P3 | #831 | Orphan Document Management | done |
+| P3 | #830 | Duplicate Detection & Merge | done |
+| P3 | #829 | Statement Grouping Correction | done |
+| P3 | #902 | Statement series timeline + split/merge | done |
+| P3 | #827 | Metadata Correction & Writeback | done |
 
 **Exit Criteria:** Users can triage all flagged items, correct groupings, manage orphans/duplicates, and write corrections back to Paperless.
 
@@ -314,11 +315,15 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 
 | Category | Count |
 |----------|-------|
-| Total DI-related open issues | ~55 (including 5 new) |
-| Likely duplicates to close | 2 (#833, #826) |
+| Total DI-related issues tracked | ~55 (including 5 new) |
+| Issues completed (closed or PR merged) | ~30 |
+| Likely duplicates closed | 1 of 2 (#833 closed; #826 still open) |
 | Issues needing cross-references | ~8 pairs |
 | Phases of work | 7 (0-6 + future) |
-| Estimated timeline (Phases 0-4) | 10 weeks |
-| Estimated timeline (all phases) | 16+ weeks |
-| Quick Wins (can ship this week) | 5 issues |
-| Critical path blockers | #887 (bug), #839 (live validation) |
+| **Phase 0** | ✅ Complete |
+| **Phase 1** | ✅ Complete (except #876 deferred) |
+| **Phase 2** | ✅ Nearly complete (8/9 done; #882 remaining) |
+| **Phase 3** | ✅ Complete (all 10 done) |
+| **Phase 4** | Not started |
+| **Phase 5-7** | Not started |
+| Critical path blockers | ~~#887 (bug), #839 (live validation)~~ Both resolved |
