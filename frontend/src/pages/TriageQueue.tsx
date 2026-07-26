@@ -12,6 +12,8 @@ import {
   Toast,
 } from '../components/ui';
 import EobMatchDetail from '../components/EobMatchDetail';
+import OrphanDetail from '../components/triage/OrphanDetail';
+import DocumentPreview from '../components/DocumentPreview';
 import { endpoints } from '../lib/api';
 import { StatementGroupingDetail } from '../components/triage/StatementGroupingDetail';
 import DuplicateDetail from './DuplicateDetail';
@@ -663,6 +665,21 @@ export default function TriageQueue() {
                     }
                   }}
                 />
+              ) : selectedItem.item_type === 'orphan_document' ? (
+                /* Orphan Document — rich detail component (#831) */
+                <OrphanDetail
+                  triageItem={selectedItem}
+                  onResolved={() => {
+                    void loadData();
+                  }}
+                  onSkip={() => {
+                    const currentIndex = items.findIndex((i) => i.id === selectedItem.id);
+                    const nextItem = items[currentIndex + 1] ?? items[0];
+                    if (nextItem && nextItem.id !== selectedItem.id) {
+                      setSelectedId(nextItem.id);
+                    }
+                  }}
+                />
               ) : (
                 <>
                 <div className="triage-detail-header">
@@ -758,6 +775,15 @@ export default function TriageQueue() {
                 </Card>
                 )}
 
+                {/* Document preview — show when target is a document */}
+                {selectedItem.target_type === 'document' && selectedItem.target_id && !Number.isNaN(Number(selectedItem.target_id)) && (
+                  <Card title="Document preview">
+                    <DocumentPreview
+                      documentId={Number(selectedItem.target_id)}
+                    />
+                  </Card>
+                )}
+
                 {/* Type-specific detail views */}
                 {selectedItem.item_type === 'grouping_anomaly' ? (
                   <StatementGroupingDetail
@@ -779,7 +805,7 @@ export default function TriageQueue() {
                     onResolved={() => void loadData()}
                   />
                 ) : (
-                  /* Metadata dump — placeholder for specific detail views (#834, #831) */
+                  /* Metadata dump — placeholder for remaining detail views */
                   <Card title="Item metadata">
                     <div className="triage-metadata-dump">
                       {selectedItem.metadata ? (
