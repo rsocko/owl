@@ -36,13 +36,14 @@ statement_tracker:
 
 eob_matching:
   run:
-    description: "Classify and match EOBs to medical bills"
-    cron: "0 10 * * 0"         # Weekly on Sunday at 10:00 AM
+    description: "Classify and match EOBs to medical bills (incremental)"
+    cron: "0 10 * * *"         # Daily at 10:00 AM (was weekly; --since-last-run makes daily efficient)
     endpoint: "/api/eob/run"
     method: POST
     body:
       limit: 200
       tags: ["medical"]
+      since_last_run: true
     limit: 200
     enabled: true
     timeout: 300

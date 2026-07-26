@@ -74,6 +74,18 @@ export const endpoints = {
     clearProviderOverride: (key: string) => api.delete(`/api/statements/providers/${key}/override`),
     documentPreview: (docId: string) => `/api/statements/documents/${docId}/preview`,
     documentThumb: (docId: string) => `/api/statements/documents/${docId}/thumb`,
+    // Series grouping
+    series: (params?: string) => api.get(`/api/statements/series${params ? `?${params}` : ''}`),
+    seriesDetail: (id: string) => api.get(`/api/statements/series/${id}`),
+    seriesTimeline: (id: string) => api.get(`/api/statements/series/${id}/timeline`),
+    seriesSplit: (id: string, body: { document_ids: string[]; new_series_name: string; account_identifier?: string }) =>
+      api.post(`/api/statements/series/${id}/split`, body),
+    seriesMerge: (body: { source_series_id: string; target_series_id: string }) =>
+      api.post('/api/statements/series/merge', body),
+    seriesReassign: (id: string, body: { document_id: string; target_series_id: string }) =>
+      api.post(`/api/statements/series/${id}/reassign`, body),
+    seriesRename: (id: string, body: { name?: string; account_identifier?: string }) =>
+      api.post(`/api/statements/series/${id}/rename`, body),
   },
   eob: {
     check: () => api.get('/api/eob/check'),
@@ -84,6 +96,12 @@ export const endpoints = {
     matches: (params?: string) => api.get(`/api/eob/matches${params ? `?${params}` : ''}`),
     updateMatch: (id: string, body: unknown) => api.patch(`/api/eob/matches/${id}`, body),
     matchHistory: (id: string) => api.get(`/api/eob/matches/${id}/history`),
+    getMatch: (id: string) => api.get(`/api/eob/matches/${id}`),
+    confirmMatch: (id: string, body?: unknown) => api.post(`/api/eob/matches/${id}/confirm`, body),
+    rejectMatch: (id: string, body?: unknown) => api.post(`/api/eob/matches/${id}/reject`, body),
+    manualMatch: (body: unknown) => api.post('/api/eob/matches/manual', body),
+    candidates: (docId: string, params?: string) =>
+      api.get(`/api/eob/candidates/${docId}${params ? `?${params}` : ''}`),
     matchDetail: (matchId: string) => api.get(`/api/eob/matches/${matchId}/detail`),
     recordDetail: (docId: string) => api.get(`/api/eob/records/${docId}`),
     unmatched: () => api.get('/api/eob/unmatched'),
@@ -130,9 +148,22 @@ export const endpoints = {
       update: (body: unknown) => api.put('/api/admin/document-type-mapping', body),
     },
   },
+  rules: {
+    list: () => api.get('/api/rules'),
+    get: (id: string) => api.get(`/api/rules/${id}`),
+    create: (body: unknown) => api.post('/api/rules', body),
+    update: (id: string, body: unknown) => api.put(`/api/rules/${id}`, body),
+    delete: (id: string) => api.delete(`/api/rules/${id}`),
+    toggle: (id: string, body: { enabled: boolean }) => api.patch(`/api/rules/${id}/toggle`, body),
+    test: (id: string, body: unknown) => api.post(`/api/rules/${id}/test`, body),
+  },
   documents: {
-    preview: (id: string) => `/api/documents/${id}/metadata`,
-    download: (id: string) => `/api/documents/${id}/download`,
+    metadata: (id: string | number) => api.get(`/api/documents/${id}/metadata`),
+    preview: (id: string | number) => `/api/documents/${id}/metadata`,
+    download: (id: string | number) => `/api/documents/${id}/download`,
+    thumbnailUrl: (id: string | number) => `/api/statements/documents/${id}/thumb`,
+    previewUrl: (id: string | number) => `/api/statements/documents/${id}/preview`,
+    downloadUrl: (id: string | number) => `/api/documents/${id}/download`,
   },
   triage: {
     queue: (params?: string) => api.get(`/api/triage/queue${params ? `?${params}` : ''}`),
@@ -149,6 +180,20 @@ export const endpoints = {
       api.post<{ affected: number }>('/api/triage/queue/bulk-confirm-threshold', body),
     stats: () => api.get('/api/triage/stats'),
     populate: () => api.post('/api/triage/queue/populate'),
+    orphans: {
+      findMatch: (id: string) => api.post(`/api/triage/orphans/${id}/find-match`),
+      defer: (id: string) => api.post(`/api/triage/orphans/${id}/defer`),
+      selfPay: (id: string) => api.post(`/api/triage/orphans/${id}/self-pay`),
+      alreadyPaid: (id: string) => api.post(`/api/triage/orphans/${id}/already-paid`),
+      notMedical: (id: string) => api.post(`/api/triage/orphans/${id}/not-medical`),
+    },
+  },
+  duplicates: {
+    list: (params?: string) => api.get(`/api/duplicates${params ? `?${params}` : ''}`),
+    get: (id: string) => api.get(`/api/duplicates/${id}`),
+    resolve: (id: string, body: { resolution: string; primary_doc_id?: number }) =>
+      api.post(`/api/duplicates/${id}/resolve`, body),
+    scan: () => api.post('/api/duplicates/scan'),
   },
   metadata: {
     get: (docId: string | number) => api.get(`/api/metadata/${docId}`),

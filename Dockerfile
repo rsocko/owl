@@ -65,14 +65,21 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install the pre-built wheel and gosu for privilege drop
+# Install the pre-built wheel, gosu for privilege drop, and supercronic for scheduled jobs
 COPY --from=builder /build/dist/*.whl /tmp/
+ENV SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-amd64 \
+    SUPERCRONIC_SHA1SUM=71b0d58cc53f6bd72cf2f293e09e294b79c666d8
 RUN pip install --no-cache-dir /tmp/*.whl && rm -rf /tmp/*.whl && \
-    apt-get update && apt-get install -y --no-install-recommends gosu && \
+    apt-get update && apt-get install -y --no-install-recommends gosu ***REMOVED*** && \
+    ***REMOVED*** -fsSLo /usr/local/bin/supercronic "$SUPERCRONIC_URL" && \
+    echo "$SUPERCRONIC_SHA1SUM /usr/local/bin/supercronic" | sha1sum -c - && \
+    chmod +x /usr/local/bin/supercronic && \
+    apt-get purge -y ***REMOVED*** && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy runtime config and entrypoint
+# Copy runtime config, scheduler crontab, and entrypoint
 COPY config/config.docker.yaml ./config/config.docker.yaml
+COPY config/crontab.eob-scheduler ./config/crontab.eob-scheduler
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
