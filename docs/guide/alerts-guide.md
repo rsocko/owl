@@ -2,11 +2,17 @@
 title: Unified Alerts Guide
 sidebar_label: Alerts
 sidebar_position: 5
+mockups:
+  - "[insights-tab.html](../../mockups/triage-correction/insights-tab.html)"
 ---
 
 # Unified Alerts — Cross-Module Alert Inbox
 
 The Alerts system provides a single feed of actionable notifications across all OWL modules. Alerts are consumed by Mission Control to surface urgent items in the household dashboard.
+
+:::info Interactive Mockup
+Preview the insights & alerts UI: [Insights Tab](../../mockups/triage-correction/insights-tab.html) — Alert feed with severity filters, acknowledgment flow, and trend charts.
+:::
 
 ## Alert Types
 

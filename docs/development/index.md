@@ -278,7 +278,7 @@ Make sure you have a `.env` file with `PAPERLESS_API_TOKEN` set â€” the hub won'
 
 ## Related Documentation
 
-- **[Architecture](../architecture/)** — System design, module boundaries, deployment topology
-- **[Getting Started](../getting-started/)** — Installation and first-run guide
-- **[User Guide](../guide/)** — End-user documentation for each module
-- **[Module Reference](../modules/)** — Deep-dive design docs per module
+- **[Architecture](../architecture/)** ï¿½ System design, module boundaries, deployment topology
+- **[Getting Started](../getting-started/)** ï¿½ Installation and first-run guide
+- **[User Guide](../guide/)** ï¿½ End-user documentation for each module
+- **[Module Reference](../modules/)** ï¿½ Deep-dive design docs per module

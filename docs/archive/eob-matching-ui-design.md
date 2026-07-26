@@ -3,6 +3,10 @@ title: "EOB UI Design (Archived)"
 sidebar_label: EOB UI Design
 sidebar_position: 5
 draft: true
+mockups:
+  - "[eob-match-review.html](../../../mockups/triage-correction/eob-match-review.html)"
+  - "[manual-match-search.html](../../../mockups/triage-correction/manual-match-search.html)"
+  - "[orphans-dupes-metadata.html](../../../mockups/triage-correction/orphans-dupes-metadata.html)"
 ---
 
 :::note
