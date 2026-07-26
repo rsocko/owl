@@ -248,21 +248,21 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 
 ---
 
-### Phase 4: Insights, Rules & Scheduling (Weeks 8-10) 📊
+### Phase 4: Insights, Rules & Scheduling (Weeks 8-10) 📊 ✅ COMPLETE
 **Goal:** Automated pipeline execution + analytics + configurable rules.
 
-| Priority | Issue | Description |
-|----------|-------|-------------|
-| P4 | #870 | Insights page — trend charts + sparklines |
-| P4 | #828 | Analysis Engine & Insights System |
-| P4 | #869 | Rules Config — full rule editor |
-| P4 | #835 | Dashboard + Correction History |
-| P4 | #846 | Scheduled execution (cron/Dockhand) |
-| P4 | #849 | Automated benchmark scheduling |
-| P4 | #851 | Notification/alerting |
-| P4 | #850 | Payment tracking integration |
+| Priority | Issue | Description | Status |
+|----------|-------|-------------|--------|
+| P4 | #869 | Rules Config — full rule editor | ✅ done (PR #936) |
+| P4 | #846 | Scheduled execution (cron/Dockhand) | ✅ done (PR #937) |
+| P4 | #850 | Payment tracking integration | ✅ done (PR #938) |
+| P4 | #849 | Automated benchmark scheduling | ✅ done (PR #943) |
+| P4 | #851 | Notification/alerting | ✅ done (PR #945) |
+| P4 | #828 | Analysis Engine & Insights System | ✅ done (PR #947) |
+| P4 | #835 | Dashboard + Correction History | ✅ done |
+| P4 | #870 | Insights page — trend charts + sparklines | ✅ done (PR #951) |
 
-**Exit Criteria:** System runs automatically on schedule, produces insights, and rules can be configured without code changes.
+**Exit Criteria:** ✅ All met — System runs automatically on schedule (cron/Dockhand + APScheduler for EOB matching, benchmarks, due-date checks, analysis rules), produces insights (3-tier analysis engine → Insights page with charts/sparklines/compliance), and rules can be configured without code changes (full rule editor UI + YAML config + API).
 
 ---
 
