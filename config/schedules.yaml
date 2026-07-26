@@ -59,3 +59,30 @@ action_queue:
     limit: 50
     enabled: true
     timeout: 180
+
+# ── Analysis Engine ──────────────────────────────────────────────
+
+analysis:
+  daily:
+    description: "Run daily analysis rules: orphan detection, bill aging, threshold checks"
+    cron: "0 2 * * *"          # Daily at 2:00 AM
+    endpoint: "/api/analysis/execute/scheduled/daily"
+    method: POST
+    enabled: true
+    timeout: 300
+
+  weekly:
+    description: "Run weekly analysis rules: LLM coverage analysis, n8n cross-reference"
+    cron: "0 3 * * 0"          # Weekly on Sunday at 3:00 AM
+    endpoint: "/api/analysis/execute/scheduled/weekly"
+    method: POST
+    enabled: true
+    timeout: 600
+
+  monthly:
+    description: "Run monthly analysis rules: spend comparison, match rate reporting"
+    cron: "0 4 1 * *"          # 1st of month at 4:00 AM
+    endpoint: "/api/analysis/execute/scheduled/monthly"
+    method: POST
+    enabled: true
+    timeout: 600
