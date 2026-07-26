@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { NavLink } from 'react-router-dom';
 import {
   Button,
   Card,
@@ -193,12 +192,6 @@ export default function CorrectionHistory() {
           <Button onClick={() => void loadCorrections(filter)} disabled={loading}>Refresh</Button>
         }
       />
-
-      {/* View switcher (matching mockup tab bar) */}
-      <div className="dv-view-tabs">
-        <NavLink to="/dashboard-view" className={({ isActive }) => `dv-view-tab${isActive ? ' active' : ''}`}>📊 Dashboard</NavLink>
-        <NavLink to="/corrections" className={({ isActive }) => `dv-view-tab${isActive ? ' active' : ''}`}>📜 Correction History</NavLink>
-      </div>
 
       <div className="ch-integration-note">
         <strong>📋 Dual History Sources:</strong> Corrections are tracked in both the DI{' '}
