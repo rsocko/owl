@@ -580,18 +580,22 @@ async def _run_pipeline(
     # Step 3: Extract
     console.print("[bold]Step 3:[/bold] Extracting structured data...")
 
+    # Track original classified counts before filtering
+    classified_eob_count = len(eob_docs)
+    classified_bill_count = len(bill_docs)
+    skipped_eobs = 0
+    skipped_bills = 0
+
     # Skip documents already processed in prior runs
     if skip_processed:
         existing_eob_doc_ids = {r.document_id for r in db.query(EOBRecord.document_id).all()}
         existing_bill_doc_ids = {r.document_id for r in db.query(BillRecord.document_id).all()}
 
-        original_eob_count = len(eob_docs)
-        original_bill_count = len(bill_docs)
         eob_docs = [(doc, cls) for doc, cls in eob_docs if doc["id"] not in existing_eob_doc_ids]
         bill_docs = [(doc, cls) for doc, cls in bill_docs if doc["id"] not in existing_bill_doc_ids]
 
-        skipped_eobs = original_eob_count - len(eob_docs)
-        skipped_bills = original_bill_count - len(bill_docs)
+        skipped_eobs = classified_eob_count - len(eob_docs)
+        skipped_bills = classified_bill_count - len(bill_docs)
         if skipped_eobs or skipped_bills:
             console.print(f"  [dim]Skipped {skipped_eobs} EOBs and {skipped_bills} bills (already processed)[/dim]")
 
@@ -620,6 +624,7 @@ async def _run_pipeline(
             total_plan_pays=extracted.total_plan_pays,
             total_patient_responsibility=extracted.total_patient_responsibility,
             services_json=json.dumps([s.model_dump(mode="json") for s in extracted.services]) if extracted.services else None,
+            last_processed_at=datetime.now(UTC),
         ))
 
         if verbose:
@@ -648,6 +653,7 @@ async def _run_pipeline(
             balance_due=extracted.balance_due,
             payment_status=extracted.payment_status,
             services_json=json.dumps([s.model_dump(mode="json") for s in extracted.services]) if extracted.services else None,
+            last_processed_at=datetime.now(UTC),
         ))
 
         if verbose:
@@ -664,6 +670,7 @@ async def _run_pipeline(
 
     # Persist match records (skip pairs already confirmed in a prior run)
     skipped_matches = 0
+    stored_matches = []
     for match in matches:
         existing = db.query(MatchRecord).filter_by(
             eob_document_id=int(match.eob_id),
@@ -674,6 +681,7 @@ async def _run_pipeline(
             skipped_matches += 1
             continue
 
+        stored_matches.append(match)
         store_match(db, MatchRecord(
             run_id=run_record.id,
             eob_document_id=int(match.eob_id),
@@ -730,15 +738,15 @@ async def _run_pipeline(
 
         console.print(table)
 
-    # Step 4b: Write to Paperless (optional)
-    if write_to_paperless and matches:
+    # Step 4b: Write to Paperless (optional — only for newly stored matches)
+    if write_to_paperless and stored_matches:
         from doc_intelligence_hub.modules.eob_matching.enricher import EOBEnricher
 
         console.print("\n[bold]Step 4b:[/bold] Writing match results to Paperless...")
         enricher = EOBEnricher(client)
         eob_lookup = {e.document_id: e for e in extracted_eobs}
         linked = 0
-        for match in matches:
+        for match in stored_matches:
             try:
                 eob_data = eob_lookup.get(match.eob_id)
                 patient_resp = eob_data.total_patient_responsibility if eob_data else None
@@ -753,21 +761,21 @@ async def _run_pipeline(
                 console.print(f"  [green]✓[/green] Linked EOB #{match.eob_id} ↔ Bill #{match.bill_id}")
             except Exception as e:
                 console.print(f"  [red]✗[/red] Failed to link #{match.eob_id} ↔ #{match.bill_id}: {e}")
-        console.print(f"  Linked {linked}/{len(matches)} matches in Paperless")
+        console.print(f"  Linked {linked}/{len(stored_matches)} matches in Paperless")
 
     # Step 5: Summary
     console.print()
-    high = sum(1 for m in matches if m.confidence == MatchConfidence.HIGH)
-    medium = sum(1 for m in matches if m.confidence == MatchConfidence.MEDIUM)
-    low = sum(1 for m in matches if m.confidence == MatchConfidence.LOW)
+    high = sum(1 for m in stored_matches if m.confidence == MatchConfidence.HIGH)
+    medium = sum(1 for m in stored_matches if m.confidence == MatchConfidence.MEDIUM)
+    low = sum(1 for m in stored_matches if m.confidence == MatchConfidence.LOW)
     unmatched_eobs = len(extracted_eobs) - len(set(m.eob_id for m in matches))
     unmatched_bills = len(extracted_bills) - len(set(m.bill_id for m in matches))
 
     # Update run record
     run_record.documents_scanned = len(documents)
-    run_record.eobs_found = len(eob_docs)
-    run_record.bills_found = len(bill_docs)
-    run_record.matches_found = len(matches)
+    run_record.eobs_found = classified_eob_count
+    run_record.bills_found = classified_bill_count
+    run_record.matches_found = len(stored_matches)
     run_record.high_confidence = high
     run_record.medium_confidence = medium
     run_record.low_confidence = low
@@ -778,11 +786,14 @@ async def _run_pipeline(
     console.print(Panel(
         f"[bold]Summary (Run #{run_record.id})[/bold]\n"
         f"  Documents scanned: {len(documents)}\n"
-        f"  Classified: {len(eob_docs)} EOBs, {len(bill_docs)} bills, {len(unknown_docs)} unknown\n"
-        f"  Matches: {high} high, {medium} medium, {low} low confidence\n"
+        f"  Classified: {classified_eob_count} EOBs, {classified_bill_count} bills, {len(unknown_docs)} unknown\n"
+        f"  Extracted: {len(extracted_eobs)} EOBs, {len(extracted_bills)} bills"
+        + (f" (skipped {skipped_eobs + skipped_bills} already processed)" if skip_processed and (skipped_eobs + skipped_bills) else "") + "\n"
+        f"  Matches: {high} high, {medium} medium, {low} low confidence"
+        + (f" (skipped {skipped_matches} already confirmed)" if skipped_matches else "") + "\n"
         f"  Unmatched: {unmatched_eobs} EOBs, {unmatched_bills} bills waiting\n"
         f"  Results persisted to database",
-        style="green" if matches else "yellow",
+        style="green" if stored_matches else "yellow",
     ))
 
     # Save output if requested
