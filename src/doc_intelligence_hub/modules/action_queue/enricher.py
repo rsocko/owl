@@ -134,6 +134,13 @@ class PaperlessEnricher:
                 opt_id = opt.get("id")
                 if label and opt_id is not None:
                     option_map[label] = opt_id
+        if options and not option_map:
+            logger.debug(
+                "Select field %r has %d options but none have IDs yet — "
+                "will fall back to label-based values",
+                field_name,
+                len(options),
+            )
         self._select_option_cache[field_name] = option_map
 
     def _resolve_select_value(self, field_name: str, label: str) -> int | str:
@@ -162,10 +169,6 @@ class PaperlessEnricher:
         """
         if not settings.write_to_paperless:
             return  # Safety: writes disabled via config
-
-        import asyncio
-
-        await asyncio.sleep(settings.rate_limit_delay)  # Be nice to Paperless
 
         field_ids = await self.get_field_ids()
         from datetime import date
@@ -217,6 +220,9 @@ class PaperlessEnricher:
         _add_field("Action Count", action_count)
 
         if custom_fields:
+            import asyncio
+
+            await asyncio.sleep(settings.rate_limit_delay)  # Rate-limit Paperless writes
             logger.info(
                 "Writing %d custom field(s) to Paperless document_id=%s: %s",
                 len(custom_fields),
