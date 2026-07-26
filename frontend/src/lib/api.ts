@@ -74,6 +74,18 @@ export const endpoints = {
     clearProviderOverride: (key: string) => api.delete(`/api/statements/providers/${key}/override`),
     documentPreview: (docId: string) => `/api/statements/documents/${docId}/preview`,
     documentThumb: (docId: string) => `/api/statements/documents/${docId}/thumb`,
+    // Series grouping
+    series: (params?: string) => api.get(`/api/statements/series${params ? `?${params}` : ''}`),
+    seriesDetail: (id: string) => api.get(`/api/statements/series/${id}`),
+    seriesTimeline: (id: string) => api.get(`/api/statements/series/${id}/timeline`),
+    seriesSplit: (id: string, body: { document_ids: string[]; new_series_name: string; account_identifier?: string }) =>
+      api.post(`/api/statements/series/${id}/split`, body),
+    seriesMerge: (body: { source_series_id: string; target_series_id: string }) =>
+      api.post('/api/statements/series/merge', body),
+    seriesReassign: (id: string, body: { document_id: string; target_series_id: string }) =>
+      api.post(`/api/statements/series/${id}/reassign`, body),
+    seriesRename: (id: string, body: { name?: string; account_identifier?: string }) =>
+      api.post(`/api/statements/series/${id}/rename`, body),
   },
   eob: {
     check: () => api.get('/api/eob/check'),
@@ -90,9 +102,15 @@ export const endpoints = {
     manualMatch: (body: unknown) => api.post('/api/eob/matches/manual', body),
     candidates: (docId: string, params?: string) =>
       api.get(`/api/eob/candidates/${docId}${params ? `?${params}` : ''}`),
+    matchDetail: (matchId: string) => api.get(`/api/eob/matches/${matchId}/detail`),
+    recordDetail: (docId: string) => api.get(`/api/eob/records/${docId}`),
     unmatched: () => api.get('/api/eob/unmatched'),
+    bulkUpdate: (body: { ids: string[]; action: 'mark_orphan' | 'mark_paid' }) =>
+      api.post('/api/eob/bulk-update', body),
     purgeStale: () => api.post('/api/eob/purge-stale'),
     benchmark: (body?: unknown) => api.post('/api/eob/benchmark', body),
+    coverage: (groupBy?: string) =>
+      api.get(`/api/eob/coverage${groupBy ? `?group_by=${groupBy}` : ''}`),
   },
   actionQueue: {
     check: () => api.get('/api/queue/check'),
@@ -130,6 +148,15 @@ export const endpoints = {
       update: (body: unknown) => api.put('/api/admin/document-type-mapping', body),
     },
   },
+  rules: {
+    list: () => api.get('/api/rules'),
+    get: (id: string) => api.get(`/api/rules/${id}`),
+    create: (body: unknown) => api.post('/api/rules', body),
+    update: (id: string, body: unknown) => api.put(`/api/rules/${id}`, body),
+    delete: (id: string) => api.delete(`/api/rules/${id}`),
+    toggle: (id: string, body: { enabled: boolean }) => api.patch(`/api/rules/${id}/toggle`, body),
+    test: (id: string, body: unknown) => api.post(`/api/rules/${id}/test`, body),
+  },
   documents: {
     metadata: (id: string | number) => api.get(`/api/documents/${id}/metadata`),
     preview: (id: string | number) => `/api/documents/${id}/metadata`,
@@ -147,6 +174,10 @@ export const endpoints = {
       api.post(`/api/triage/queue/${id}/defer`, body),
     dismiss: (id: string) => api.post(`/api/triage/queue/${id}/dismiss`),
     undo: (id: string) => api.post(`/api/triage/queue/${id}/undo`),
+    bulk: (body: { action: string; item_ids: string[]; payload?: unknown }) =>
+      api.post<{ affected: number }>('/api/triage/queue/bulk', body),
+    bulkConfirmThreshold: (body: { min_confidence: number }) =>
+      api.post<{ affected: number }>('/api/triage/queue/bulk-confirm-threshold', body),
     stats: () => api.get('/api/triage/stats'),
     populate: () => api.post('/api/triage/queue/populate'),
     orphans: {
@@ -156,5 +187,21 @@ export const endpoints = {
       alreadyPaid: (id: string) => api.post(`/api/triage/orphans/${id}/already-paid`),
       notMedical: (id: string) => api.post(`/api/triage/orphans/${id}/not-medical`),
     },
+  },
+  duplicates: {
+    list: (params?: string) => api.get(`/api/duplicates${params ? `?${params}` : ''}`),
+    get: (id: string) => api.get(`/api/duplicates/${id}`),
+    resolve: (id: string, body: { resolution: string; primary_doc_id?: number }) =>
+      api.post(`/api/duplicates/${id}/resolve`, body),
+    scan: () => api.post('/api/duplicates/scan'),
+  },
+  metadata: {
+    get: (docId: string | number) => api.get(`/api/metadata/${docId}`),
+    correct: (docId: string | number, body: { field_name: string; corrected_value: string; original_value?: string; confidence?: number; source_region?: unknown; notes?: string }) =>
+      api.post(`/api/metadata/${docId}/correct`, body),
+    confirm: (docId: string | number, body: { field_name: string; current_value?: string; confidence?: number; source_region?: unknown }) =>
+      api.post(`/api/metadata/${docId}/confirm`, body),
+    writeback: (docId: string | number) => api.post(`/api/metadata/${docId}/writeback`),
+    corrections: (params?: string) => api.get(`/api/metadata/corrections${params ? `?${params}` : ''}`),
   },
 };

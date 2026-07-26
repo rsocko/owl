@@ -41,10 +41,10 @@ DEFAULT_SCHEDULES: dict[str, dict[str, Any]] = {
         "enabled": True,
     },
     "eob_matching": {
-        "cron": "0 10 * * 0",
+        "cron": "0 10 * * *",
         "endpoint": "/api/eob/run",
         "method": "POST",
-        "body": {"limit": 200, "tags": ["medical"]},
+        "body": {"limit": 200, "tags": ["medical"], "since_last_run": True},
         "limit": 200,
         "enabled": True,
     },

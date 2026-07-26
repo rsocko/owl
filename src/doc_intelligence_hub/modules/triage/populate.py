@@ -35,7 +35,7 @@ def populate_queue() -> dict[str, Any]:
 
     Returns a summary of items created.
     """
-    stats = {"eob_low_confidence": 0, "eob_multi_candidate": 0, "orphan_documents": 0, "orphan_reflagged": 0, "skipped_existing": 0}
+    stats = {"eob_low_confidence": 0, "eob_multi_candidate": 0, "orphan_documents": 0, "orphan_reflagged": 0, "duplicate_documents": 0, "skipped_existing": 0}
 
     try:
         stats["eob_low_confidence"] = _flag_low_confidence_matches()
@@ -57,7 +57,12 @@ def populate_queue() -> dict[str, Any]:
     except Exception as exc:
         logger.warning("Could not re-flag deferred orphans: %s", exc)
 
-    total = stats["eob_low_confidence"] + stats["eob_multi_candidate"] + stats["orphan_documents"]
+    try:
+        stats["duplicate_documents"] = _flag_duplicate_documents()
+    except Exception as exc:
+        logger.warning("Could not flag duplicate documents: %s", exc)
+
+    total = stats["eob_low_confidence"] + stats["eob_multi_candidate"] + stats["orphan_documents"] + stats.get("duplicate_documents", 0)
     logger.info("Queue population complete: %d items created, %d re-flagged (%s)", total, stats["orphan_reflagged"], stats)
     return {"items_created": total, "items_reflagged": stats["orphan_reflagged"], "details": stats}
 
@@ -437,3 +442,18 @@ def _weakest_factor(match: Any) -> str | None:
     if not valid:
         return None
     return min(valid, key=lambda k: valid[k])
+
+
+def _flag_duplicate_documents() -> int:
+    """Run duplicate detection scan and return count of triage items created."""
+    try:
+        from doc_intelligence_hub.modules.triage.duplicates import scan_all_duplicates
+
+        result = scan_all_duplicates()
+        return result.get("triage_items_created", 0)
+    except ImportError:
+        logger.warning("Duplicates module not available, skipping duplicate flagging")
+        return 0
+    except Exception as exc:
+        logger.warning("Duplicate scan failed: %s", exc)
+        return 0

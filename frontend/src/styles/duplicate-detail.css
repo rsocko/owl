@@ -1,0 +1,177 @@
+/* ──────────────────────────────────────────────
+   Duplicate Detail — side-by-side comparison
+   ────────────────────────────────────────────── */
+
+.duplicate-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Overall similarity score banner */
+.duplicate-score-banner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  background: var(--surface-raised, #f8f9fa);
+  border: 1px solid var(--border, #e0e0e0);
+}
+
+.duplicate-score-banner .score-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.duplicate-score-banner .score-value.high { color: var(--red-600, #dc2626); }
+.duplicate-score-banner .score-value.medium { color: var(--amber-600, #d97706); }
+.duplicate-score-banner .score-value.low { color: var(--green-600, #16a34a); }
+
+.duplicate-score-banner .score-label {
+  font-size: 0.85rem;
+  color: var(--text-muted, #6b7280);
+}
+
+/* Side-by-side comparison */
+.duplicate-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.duplicate-doc-card {
+  border: 2px solid var(--border, #e0e0e0);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.duplicate-doc-card.primary {
+  border-color: var(--blue-500, #3b82f6);
+}
+
+.duplicate-doc-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface-raised, #f8f9fa);
+  border-bottom: 1px solid var(--border, #e0e0e0);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.duplicate-doc-card-header .doc-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.duplicate-doc-card-body {
+  padding: 0.75rem;
+}
+
+.duplicate-field-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border-light, #f0f0f0);
+  font-size: 0.85rem;
+}
+
+.duplicate-field-row:last-child {
+  border-bottom: none;
+}
+
+.duplicate-field-label {
+  color: var(--text-muted, #6b7280);
+  min-width: 100px;
+}
+
+.duplicate-field-value {
+  font-weight: 500;
+  text-align: right;
+}
+
+.duplicate-field-value.match {
+  color: var(--green-600, #16a34a);
+}
+
+.duplicate-field-value.mismatch {
+  color: var(--red-600, #dc2626);
+}
+
+/* Similarity breakdown */
+.duplicate-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.duplicate-breakdown .confidence-row {
+  font-size: 0.85rem;
+}
+
+/* Primary selector (radio buttons) */
+.duplicate-primary-selector {
+  display: flex;
+  gap: 1rem;
+  padding: 0.5rem 0;
+}
+
+.duplicate-primary-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border: 2px solid var(--border, #e0e0e0);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  font-size: 0.85rem;
+  flex: 1;
+}
+
+.duplicate-primary-option:hover {
+  border-color: var(--blue-400, #60a5fa);
+  background: var(--blue-50, #eff6ff);
+}
+
+.duplicate-primary-option.selected {
+  border-color: var(--blue-500, #3b82f6);
+  background: var(--blue-50, #eff6ff);
+}
+
+.duplicate-primary-option input[type="radio"] {
+  accent-color: var(--blue-500, #3b82f6);
+}
+
+/* Resolution action buttons */
+.duplicate-actions {
+  display: flex;
+  gap: 0.75rem;
+  padding-top: 0.5rem;
+}
+
+.duplicate-actions .btn {
+  flex: 1;
+  text-align: center;
+}
+
+.duplicate-resolution-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted, #6b7280);
+  padding: 0.25rem 0 0.5rem;
+}
+
+/* Responsive: stack on narrow viewports */
+@media (max-width: 768px) {
+  .duplicate-comparison {
+    grid-template-columns: 1fr;
+  }
+
+  .duplicate-actions {
+    flex-direction: column;
+  }
+}
