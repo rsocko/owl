@@ -28,6 +28,7 @@ class Action(Base):
     amount = Column(Float, nullable=True)
     urgency = Column(String, default="LOW")  # CRITICAL, HIGH, MEDIUM, LOW
     confidence = Column(Integer, default=0)
+    risk_score = Column(Integer, default=0)  # 0-100 composite risk score
     status = Column(String, default="pending", index=True)  # pending, completed, dismissed
     last_synced_status = Column(String, nullable=True)  # What we last wrote to Paperless
     correspondent = Column(String, nullable=True)

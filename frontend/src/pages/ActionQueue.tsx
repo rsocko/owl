@@ -9,6 +9,7 @@ import {
   ErrorState,
   FilterPills,
   PageHeader,
+  RiskScoreBar,
   SkeletonLoader,
   StatCard,
   StatGrid,
@@ -59,6 +60,7 @@ interface ActionItem {
   amount?: number | null;
   urgency?: string | null;
   confidence?: number | null;
+  risk_score?: number | null;
   status?: string | null;
   correspondent?: string | null;
   ai_reasoning?: string | null;
@@ -566,6 +568,10 @@ export default function ActionQueue() {
 
                   {selectedAction.confidence != null && (
                     <ConfidenceBar label="AI confidence" pct={selectedAction.confidence} />
+                  )}
+
+                  {selectedAction.risk_score != null && selectedAction.risk_score > 0 && (
+                    <RiskScoreBar label="Risk score" score={selectedAction.risk_score} />
                   )}
 
                   {selectedAction.ai_reasoning && (
