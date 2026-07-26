@@ -218,6 +218,15 @@ export default function EobUnmatched() {
     [items],
   );
 
+  // Clear stale selections when the visible set changes
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const visibleIds = new Set(filteredItems.map((item) => item.id));
+      const pruned = new Set([...prev].filter((id) => visibleIds.has(id)));
+      return pruned.size === prev.size ? prev : pruned;
+    });
+  }, [filteredItems]);
+
   const toggleSelection = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -246,13 +255,14 @@ export default function EobUnmatched() {
       setToast({ message: 'Select at least one document to use bulk actions.', tone: 'error' });
       return;
     }
+    const count = selectedIds.size;
     setBusyKey(`bulk-${action}`);
     try {
       await endpoints.eob.bulkUpdate({ ids: Array.from(selectedIds), action });
       setSelectedIds(new Set());
       await loadItems();
       const label = action === 'mark_orphan' ? 'orphan' : 'paid';
-      setToast({ message: `${selectedIds.size} document${selectedIds.size === 1 ? '' : 's'} marked as ${label}.` });
+      setToast({ message: `${count} document${count === 1 ? '' : 's'} marked as ${label}.` });
     } catch (err) {
       setToast({ message: err instanceof Error ? err.message : 'Bulk update failed.', tone: 'error' });
     } finally {
