@@ -11,7 +11,7 @@ sources:
   - "https://github.com/arturict/tagvico-ai/blob/main/services/copilotService.ts"
   - "https://github.com/arturict/tagvico-ai/blob/main/docs/providers/copilot.md"
 related:
-  - "[Tagvico Integration Plan](tagvico-integration-plan.md)"
+  - "[Tagvico Integration Plan](./tagvico-integration.md)"
   - "[DI Hub LLM Client](../src/doc_intelligence_hub/core/llm.py)"
 tracking:
   github_label: "copilot-sdk-provider"

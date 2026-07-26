@@ -942,7 +942,7 @@ CREATE INDEX idx_payment_due_date ON payment_tracking(due_date);
 
 ### UI Implementation Options
 
-See [UI-DESIGN.md](UI-DESIGN.md) for detailed specifications.
+See [UI-DESIGN.md](./ui-design.md) for detailed specifications.
 
 ---
 
@@ -1552,7 +1552,7 @@ This design document provides three implementation approaches with varying compl
 3. Migrate to **Hybrid approach** for production (Approach 3)
 4. Optionally add ML enhancements over time as needed
 
-See [TECHNOLOGY-STACK.md](TECHNOLOGY-STACK.md) for detailed technology recommendations and [QUICK-REFERENCE.md](../QUICK-REFERENCE.md) for implementation guide.
+See [TECHNOLOGY-STACK.md](./technology-stack.md) for detailed technology recommendations and [QUICK-REFERENCE.md](./quick-reference.md) for implementation guide.
 
 ---
 

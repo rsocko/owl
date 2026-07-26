@@ -469,12 +469,12 @@ docker exec ollama ollama list   # verify
 
 | Document | Purpose |
 |---------|---------|
-| [docs/OCR-QUALITY-DESIGN.md](docs/OCR-QUALITY-DESIGN.md) | Full architecture, component map, design decisions |
-| [docs/OCR-QUALITY-SCORING.md](docs/OCR-QUALITY-SCORING.md) | Scoring algorithm, code samples, SQLite schema |
-| [docs/OCR-REMEDIATION-ENGINE.md](docs/OCR-REMEDIATION-ENGINE.md) | Tier 1/2 engines, comparison gate, worker design |
-| [docs/OCR-N8N-WORKFLOW.md](docs/OCR-N8N-WORKFLOW.md) | n8n workflow node-by-node specification |
-| [docs/OCR-OLLAMA-INTEGRATION.md](docs/OCR-OLLAMA-INTEGRATION.md) | Prompt templates, decision logic, performance notes |
-| [docs/OCR-BASELINE-INVENTORY.md](docs/OCR-BASELINE-INVENTORY.md) | Phase 0 script spec + calibration guidance |
+| [OCR Quality Design](./ocr-quality-design.md) | Full architecture, component map, design decisions |
+| [OCR Quality Scoring](./ocr-quality-scoring.md) | Scoring algorithm, code samples, SQLite schema |
+| [OCR Remediation Engine](./ocr-remediation-engine.md) | Tier 1/2 engines, comparison gate, worker design |
+| [OCR n8n Workflow](./ocr-n8n-workflow.md) | n8n workflow node-by-node specification |
+| [OCR Ollama Integration](./ocr-ollama-integration.md) | Prompt templates, decision logic, performance notes |
+| [OCR Baseline Inventory](./ocr-baseline-inventory.md) | Phase 0 script spec + calibration guidance |
 
 ### Implementation Phases
 
@@ -491,9 +491,9 @@ docker exec ollama ollama list   # verify
 ## Useful Resources
 
 ### Documentation
-- [Full Design Doc](docs/DESIGN.md)
-- [Technology Stack](docs/TECHNOLOGY-STACK.md)
-- [UI Design](docs/UI-DESIGN.md)
+- [Full Design Doc](./design.md)
+- [Technology Stack](./technology-stack.md)
+- [UI Design](./ui-design.md)
 - [Paperless-NGX API](https://docs.paperless-ngx.com/api/)
 
 ### Community & Support

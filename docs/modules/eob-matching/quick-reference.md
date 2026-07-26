@@ -74,7 +74,7 @@ LOG_PATH=./logs/app.log
 
 #### Day 3: Paperless Setup
 
-Follow [SETUP-PAPERLESS.md](docs/SETUP-PAPERLESS.md):
+Follow [SETUP-PAPERLESS.md](./setup-paperless.md):
 
 1. Enable Paperless API
 2. Generate API token
@@ -413,13 +413,13 @@ docker run -d --name appsmith -p 8080:80 \
    - SQLite database (via REST API)
    - FastAPI backend
 
-5. Build pages following [UI-DESIGN.md](docs/UI-DESIGN.md):
+5. Build pages following [UI-DESIGN.md](./ui-design.md):
    - Overview Dashboard
    - Match Review
    - Unmatched Documents
    - Payment Tracking
 
-**See [UI-DESIGN.md](docs/UI-DESIGN.md) for detailed UI specifications.**
+**See [UI-DESIGN.md](./ui-design.md) for detailed UI specifications.**
 
 ---
 
@@ -479,7 +479,7 @@ docker run -d --name n8n -p 5678:5678 \
 5. **Condition**: Check for matches
 6. **Send Email**: Alert on high-value matches or errors
 
-**See [workflows/README.md](workflows/README.md) for n8n workflow JSON.**
+**See [workflows/README.md](./design.md) for n8n workflow JSON.**
 
 ---
 
@@ -585,11 +585,11 @@ After MVP is working:
 
 ## Resources
 
-- [Full Design Documentation](docs/DESIGN.md)
-- [Technology Stack](docs/TECHNOLOGY-STACK.md)
-- [UI Design Specifications](docs/UI-DESIGN.md)
-- [Paperless Setup Guide](docs/SETUP-PAPERLESS.md)
-- [Experiment Summary](SUMMARY.md)
+- [Full Design Documentation](./design.md)
+- [Technology Stack](./technology-stack.md)
+- [UI Design Specifications](./ui-design.md)
+- [Paperless Setup Guide](./setup-paperless.md)
+- [Experiment Summary](./summary.md)
 
 ---
 

@@ -736,7 +736,7 @@ After completing this setup:
 4. ✅ Integration test passed
 
 **Next:**
-- Proceed to [QUICK-REFERENCE.md](../QUICK-REFERENCE.md) for implementation guide
+- Proceed to [QUICK-REFERENCE.md](./quick-reference.md) for implementation guide
 - Set up n8n workflow automation
 - Implement document processing pipeline
 - Build dashboard UI

@@ -48,7 +48,7 @@ sidebar_position: 5
 
 **Status**: Accepted
 
-**Context**: Three approaches were evaluated (see [DESIGN.md](experiments/personal-automation/mission-control/DESIGN.md#10-implementation-approaches)). Need to balance time-to-value with long-term accuracy.
+**Context**: Three approaches were evaluated (see [DESIGN.md](./design.md#10-implementation-approaches)). Need to balance time-to-value with long-term accuracy.
 
 **Decision**: 
 1. Phase 1: Implement rule-based approach for MVP (2-3 weeks)

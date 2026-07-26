@@ -14,8 +14,8 @@ of the Document Intelligence Hub.
 Both the EOB Matching and Statement Tracking modules have their own SETUP-PAPERLESS.md guides.
 These will be consolidated into a single shared setup during the code implementation phase:
 
-- [EOB Matching Paperless Setup](../eob-matching/SETUP-PAPERLESS.md)
-- [Statement Tracking Paperless Setup](../statement-tracking/SETUP-PAPERLESS.md)
+- [EOB Matching Paperless Setup](../eob-matching/setup-paperless.md)
+- [Statement Tracking Paperless Setup](../statement-tracking/setup-paperless.md)
 
 ## Shared Design Principles
 

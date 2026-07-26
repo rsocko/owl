@@ -1,6 +1,6 @@
 ---
 title: OWL — Document Intelligence Hub
-sidebar_label: OWL Docs
+sidebar_label: Document Intelligence
 sidebar_position: 1
 ---
 

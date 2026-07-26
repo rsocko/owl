@@ -273,3 +273,12 @@ Make sure you have a `.env` file with `PAPERLESS_API_TOKEN` set â€” the hub won'
 - [ ] New endpoints documented in router docstrings
 - [ ] Config changes reflected in example files
 - [ ] Breaking API changes noted in PR description
+
+---
+
+## Related Documentation
+
+- **[Architecture](../architecture/)** — System design, module boundaries, deployment topology
+- **[Getting Started](../getting-started/)** — Installation and first-run guide
+- **[User Guide](../guide/)** — End-user documentation for each module
+- **[Module Reference](../modules/)** — Deep-dive design docs per module
