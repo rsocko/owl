@@ -135,7 +135,7 @@ async def backfill(body: BackfillRequest, request: Request) -> dict[str, Any]:
                 if inspect.iscoroutinefunction(get_fn):
                     data = await get_fn(f"/api/documents/?page_size={body.limit}&ordering=-id")
                 else:
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     data = await loop.run_in_executor(None, get_fn, f"/api/documents/?page_size={body.limit}&ordering=-id")
 
                 if isinstance(data, dict) and "results" in data:
@@ -178,13 +178,14 @@ async def backfill(body: BackfillRequest, request: Request) -> dict[str, Any]:
                 "error": result.error,
             })
         except Exception as exc:
+            logger.warning("Extraction failed for doc %d during backfill: %s", doc_id, exc)
             results.append({
                 "document_id": doc_id,
                 "success": False,
                 "account_numbers": [],
                 "best_identifier": None,
                 "written": False,
-                "error": str(exc),
+                "error": "Extraction failed for this document",
             })
 
     return {

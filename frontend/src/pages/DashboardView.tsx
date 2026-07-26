@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import {
   Badge,
   Button,
@@ -163,8 +163,8 @@ export default function DashboardView() {
 
       {/* View switcher (matching mockup tab bar) */}
       <div className="dv-view-tabs">
-        <Link to="/dashboard-view" className="dv-view-tab active">📊 Dashboard</Link>
-        <Link to="/corrections" className="dv-view-tab">📜 Correction History</Link>
+        <NavLink to="/dashboard-view" className={({ isActive }) => `dv-view-tab${isActive ? ' active' : ''}`}>📊 Dashboard</NavLink>
+        <NavLink to="/corrections" className={({ isActive }) => `dv-view-tab${isActive ? ' active' : ''}`}>📜 Correction History</NavLink>
       </div>
 
       {/* Stats row */}
