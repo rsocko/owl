@@ -1,8 +1,13 @@
 ---
-title: "Action Queue Summary"
-sidebar_label: Summary
-sidebar_position: 2
+title: "Action Queue Summary (Archived)"
+sidebar_label: AQ Summary
+sidebar_position: 1
+draft: true
 ---
+
+:::note
+This document is archived for historical reference. It may not reflect current implementation. The Action Queue module has been implemented with a different architecture (FastAPI + Ollama via Bifrost) than what was originally planned here.
+:::
 
 # Summary: Paperless-NGX Action Queue Agent
 

@@ -2,7 +2,28 @@
 title: "Action Queue Design"
 sidebar_label: Design
 sidebar_position: 1
+status: active
 ---
+
+:::warning Implementation Divergence
+This design document describes the **original architecture vision**. The actual implementation differs significantly:
+
+**Implemented (current):**
+- FastAPI REST API (`/api/queue/` endpoints)
+- Ollama LLM via Bifrost gateway for document analysis (single-prompt JSON extraction)
+- SQLite via SQLAlchemy (Actions + ProcessingHistory tables)
+- Rule-based fallback analyzer
+- Paperless-NGX integration with tag-based enrichment
+- CLI interface for pipeline execution
+
+**Not implemented (still planned in this doc):**
+- spaCy NER / DistilBERT classification (replaced by Ollama)
+- Separate classifier → extractor → intent pipeline stages (unified into single LLM call)
+- Streamlit/Vue.js dashboard (API-only currently)
+- Home Assistant integration
+- n8n orchestration
+- Feedback/retraining loop
+:::
 
 # Design Document: Paperless-NGX Action Queue Agent
 

@@ -1,8 +1,13 @@
 ---
-title: "Technology Stack"
-sidebar_label: Tech Stack
-sidebar_position: 4
+title: "Action Queue Technology Stack (Archived)"
+sidebar_label: AQ Tech Stack
+sidebar_position: 2
+draft: true
 ---
+
+:::note
+This document is archived for historical reference. It may not reflect current implementation. The Action Queue module now uses FastAPI, SQLite via SQLAlchemy, and Ollama via the Bifrost LLM gateway — not the spaCy/DistilBERT/Streamlit stack recommended here.
+:::
 
 # Technology Stack Recommendations
 
