@@ -69,6 +69,7 @@ class EOBRecord(Base):
     total_plan_pays = Column(Float, nullable=True)
     total_patient_responsibility = Column(Float, nullable=True)
     services_json = Column(Text, nullable=True)
+    status = Column(String, default="unmatched")  # unmatched, orphan, paid
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
     __table_args__ = (
@@ -186,6 +187,9 @@ def _migrate_missing_columns(engine):
             ("linked_in_paperless", "INTEGER DEFAULT 0"),
             ("confirmed_at", "DATETIME"),
             ("notes", "TEXT"),
+        ],
+        "eob_records": [
+            ("status", "TEXT DEFAULT 'unmatched'"),
         ],
     }
 

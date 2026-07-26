@@ -59,6 +59,11 @@ class MatchUpdateRequest(BaseModel):
     notes: str | None = Field(default=None, description="Optional reviewer notes for this match decision")
 
 
+class BulkUpdateRequest(BaseModel):
+    ids: list[str] = Field(..., min_length=1, description="EOBRecord IDs to update")
+    action: str = Field(..., pattern=r"^(mark_orphan|mark_paid)$")
+
+
 # ------------------------------------------------------------------
 # Internal helpers
 # ------------------------------------------------------------------
@@ -739,3 +744,32 @@ async def run_model_benchmark(request: Request, body: BenchmarkRequest) -> dict[
         "models_tested": len(body.models),
         "results": results,
     }
+
+
+# ------------------------------------------------------------------
+# Bulk update unmatched EOB status
+# ------------------------------------------------------------------
+
+
+@router.post("/bulk-update")
+async def bulk_update_eobs(body: BulkUpdateRequest):
+    """Bulk update EOB record statuses (mark as orphan or paid)."""
+    status_map = {"mark_orphan": "orphan", "mark_paid": "paid"}
+    new_status = status_map[body.action]
+
+    init_db()
+    db = get_db_session()
+    try:
+        int_ids = [int(i) for i in body.ids]
+        updated = (
+            db.query(EOBRecord)
+            .filter(EOBRecord.id.in_(int_ids))
+            .update({EOBRecord.status: new_status}, synchronize_session="fetch")
+        )
+        db.commit()
+        return {"status": "ok", "updated": updated, "new_status": new_status}
+    except Exception as exc:
+        db.rollback()
+        raise exc
+    finally:
+        db.close()

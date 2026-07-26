@@ -688,6 +688,18 @@
   border-top: 1px solid var(--border);
 }
 
+.eob-bulk-bar--floating {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  background: var(--card);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  margin-top: 12px;
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.08);
+}
+
 .eob-bulk-bar-left {
   display: flex;
   gap: 8px;
