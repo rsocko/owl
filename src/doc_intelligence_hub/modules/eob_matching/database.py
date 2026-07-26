@@ -122,6 +122,7 @@ class MatchRecord(Base):
     linked_in_paperless = Column(Integer, default=0)  # 1 = custom fields written
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     confirmed_at = Column(DateTime, nullable=True)
+    notes = Column(String, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("eob_document_id", "bill_document_id", "run_id", name="uq_match_pair_run"),
