@@ -3,14 +3,16 @@
 Auto-flagging rules:
 - EOB matches with confidence score < 70% → eob_match_review
 - EOB matches with multiple close candidates (similar scores) → eob_match_review
-- Unmatched documents older than 14 days → orphan_document
+- Orphan EOB with no bill after 30 days → orphan_document (waiting); 60 days → overdue
+- Orphan Bill with no EOB after 14 days → orphan_document (waiting); 45 days → overdue
+- Deferred orphan items whose defer period expired → re-flagged as pending
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from doc_intelligence_hub.modules.triage.database import (
@@ -18,8 +20,15 @@ from doc_intelligence_hub.modules.triage.database import (
     get_session as get_triage_session,
     TriageQueueItem,
 )
+from doc_intelligence_hub.core.alerts import emit_alert
 
 logger = logging.getLogger(__name__)
+
+# Orphan age thresholds (days)
+_EOB_WAITING_DAYS = 30
+_EOB_OVERDUE_DAYS = 60
+_BILL_WAITING_DAYS = 14
+_BILL_OVERDUE_DAYS = 45
 
 
 def populate_queue() -> dict[str, Any]:
@@ -27,7 +36,7 @@ def populate_queue() -> dict[str, Any]:
 
     Returns a summary of items created.
     """
-    stats = {"eob_low_confidence": 0, "eob_multi_candidate": 0, "orphan_documents": 0, "skipped_existing": 0}
+    stats = {"eob_low_confidence": 0, "eob_multi_candidate": 0, "orphan_documents": 0, "orphan_reflagged": 0, "duplicate_documents": 0, "skipped_existing": 0}
 
     try:
         stats["eob_low_confidence"] = _flag_low_confidence_matches()
@@ -44,9 +53,19 @@ def populate_queue() -> dict[str, Any]:
     except Exception as exc:
         logger.warning("Could not flag orphan documents: %s", exc)
 
-    total = stats["eob_low_confidence"] + stats["eob_multi_candidate"] + stats["orphan_documents"]
-    logger.info("Queue population complete: %d items created (%s)", total, stats)
-    return {"items_created": total, "details": stats}
+    try:
+        stats["orphan_reflagged"] = _reflag_expired_deferred_orphans()
+    except Exception as exc:
+        logger.warning("Could not re-flag deferred orphans: %s", exc)
+
+    try:
+        stats["duplicate_documents"] = _flag_duplicate_documents()
+    except Exception as exc:
+        logger.warning("Could not flag duplicate documents: %s", exc)
+
+    total = stats["eob_low_confidence"] + stats["eob_multi_candidate"] + stats["orphan_documents"] + stats.get("duplicate_documents", 0)
+    logger.info("Queue population complete: %d items created, %d re-flagged (%s)", total, stats["orphan_reflagged"], stats)
+    return {"items_created": total, "items_reflagged": stats["orphan_reflagged"], "details": stats}
 
 
 def _flag_low_confidence_matches() -> int:
@@ -207,7 +226,11 @@ def _flag_multi_candidate_matches() -> int:
 
 
 def _flag_orphan_documents() -> int:
-    """Flag unmatched documents as orphans in the triage queue."""
+    """Flag unmatched EOBs and Bills as orphans based on age thresholds.
+
+    EOB orphans: 30 days → waiting, 60 days → overdue
+    Bill orphans: 14 days → waiting, 45 days → overdue
+    """
     try:
         from doc_intelligence_hub.modules.eob_matching.database import (
             EOBRecord,
@@ -221,9 +244,10 @@ def _flag_orphan_documents() -> int:
     eob_session = get_eob_session()
     triage_session = get_triage_session()
     created = 0
+    now = datetime.now(UTC)
 
     try:
-        # Find EOBs with no match at all
+        # ── Collect IDs of documents that have any match candidate ──
         matched_eob_ids = {
             row[0]
             for row in eob_session.query(MatchRecord.eob_document_id)
@@ -231,9 +255,15 @@ def _flag_orphan_documents() -> int:
             .distinct()
             .all()
         }
+        matched_bill_ids = {
+            row[0]
+            for row in eob_session.query(MatchRecord.bill_document_id)
+            .filter(MatchRecord.status.in_(["candidate", "confirmed"]))
+            .distinct()
+            .all()
+        }
 
-        all_eobs = eob_session.query(EOBRecord).all()
-
+        # ── Existing triage items (avoid duplicates) ──
         existing_target_ids = set()
         existing = (
             triage_session.query(TriageQueueItem.target_id)
@@ -243,6 +273,8 @@ def _flag_orphan_documents() -> int:
         )
         existing_target_ids = {row[0] for row in existing}
 
+        # ── Flag orphan EOBs ──
+        all_eobs = eob_session.query(EOBRecord).all()
         for eob in all_eobs:
             if eob.document_id in matched_eob_ids:
                 continue
@@ -250,22 +282,105 @@ def _flag_orphan_documents() -> int:
             if target_id in existing_target_ids:
                 continue
 
+            age_days = _document_age_days(eob.created_at, now)
+            if age_days < _EOB_WAITING_DAYS:
+                continue  # Too new to flag
+
+            orphan_status = "overdue" if age_days >= _EOB_OVERDUE_DAYS else "waiting"
+            priority = 80 if orphan_status == "overdue" else 50
+
+            amount = eob.total_patient_responsibility or eob.total_billed
             create_queue_item(
                 item_type="orphan_document",
                 source="auto_flag",
                 target_type="document",
                 target_id=target_id,
-                reason="EOB document with no matching bill candidate found",
-                priority=40,
+                reason=(
+                    f"EOB with no matching bill — {age_days} days since received"
+                    if orphan_status == "waiting"
+                    else f"OVERDUE: EOB has been unmatched for {age_days} days (threshold: {_EOB_OVERDUE_DAYS}d)"
+                ),
+                priority=priority,
                 metadata={
                     "document_id": eob.document_id,
                     "document_type": "eob",
+                    "orphan_status": orphan_status,
                     "provider_name": eob.provider_name,
                     "patient_name": eob.patient_name,
                     "date_of_service": eob.date_of_service,
+                    "amount": amount,
+                    "insurance_company": eob.insurance_company,
+                    "document_age_days": age_days,
+                    "expected_match_window": _EOB_OVERDUE_DAYS,
+                    "waiting_threshold_days": _EOB_WAITING_DAYS,
+                    "overdue_threshold_days": _EOB_OVERDUE_DAYS,
                 },
             )
             created += 1
+
+            # Escalate overdue orphans to Mission Control via unified alerts
+            if orphan_status == "overdue":
+                _emit_orphan_escalation_alert(
+                    document_id=eob.document_id,
+                    document_type="eob",
+                    provider_name=eob.provider_name,
+                    age_days=age_days,
+                    amount=amount,
+                )
+
+        # ── Flag orphan Bills ──
+        all_bills = eob_session.query(BillRecord).all()
+        for bill in all_bills:
+            if bill.document_id in matched_bill_ids:
+                continue
+            target_id = f"bill-{bill.document_id}"
+            if target_id in existing_target_ids:
+                continue
+
+            age_days = _document_age_days(bill.created_at, now)
+            if age_days < _BILL_WAITING_DAYS:
+                continue
+
+            orphan_status = "overdue" if age_days >= _BILL_OVERDUE_DAYS else "waiting"
+            priority = 80 if orphan_status == "overdue" else 50
+
+            create_queue_item(
+                item_type="orphan_document",
+                source="auto_flag",
+                target_type="document",
+                target_id=target_id,
+                reason=(
+                    f"Bill with no matching EOB — {age_days} days since received"
+                    if orphan_status == "waiting"
+                    else f"OVERDUE: Bill has been unmatched for {age_days} days (threshold: {_BILL_OVERDUE_DAYS}d)"
+                ),
+                priority=priority,
+                metadata={
+                    "document_id": bill.document_id,
+                    "document_type": "bill",
+                    "orphan_status": orphan_status,
+                    "provider_name": bill.provider_name,
+                    "patient_name": bill.patient_name,
+                    "date_of_service": bill.date_of_service,
+                    "amount": bill.total_amount or bill.balance_due,
+                    "invoice_number": bill.invoice_number,
+                    "document_age_days": age_days,
+                    "expected_match_window": _BILL_OVERDUE_DAYS,
+                    "waiting_threshold_days": _BILL_WAITING_DAYS,
+                    "overdue_threshold_days": _BILL_OVERDUE_DAYS,
+                },
+            )
+            created += 1
+
+            # Escalate overdue orphans to Mission Control via unified alerts
+            if orphan_status == "overdue":
+                _emit_orphan_escalation_alert(
+                    document_id=bill.document_id,
+                    document_type="bill",
+                    provider_name=bill.provider_name,
+                    age_days=age_days,
+                    amount=bill.total_amount or bill.balance_due,
+                )
 
     finally:
         eob_session.close()
@@ -274,9 +389,94 @@ def _flag_orphan_documents() -> int:
     return created
 
 
+def _reflag_expired_deferred_orphans() -> int:
+    """Re-flag deferred orphan items whose defer period has expired."""
+    triage_session = get_triage_session()
+    now = datetime.now(UTC)
+    reflagged = 0
+
+    try:
+        expired = (
+            triage_session.query(TriageQueueItem)
+            .filter(TriageQueueItem.item_type == "orphan_document")
+            .filter(TriageQueueItem.status == "deferred")
+            .filter(TriageQueueItem.deferred_until <= now)
+            .all()
+        )
+
+        for item in expired:
+            item.status = "pending"
+            item.deferred_until = None
+            reflagged += 1
+
+        if reflagged:
+            triage_session.commit()
+
+    finally:
+        triage_session.close()
+
+    return reflagged
+
+
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+def _emit_orphan_escalation_alert(
+    *,
+    document_id: int,
+    document_type: str,
+    provider_name: str | None,
+    age_days: int,
+    amount: float | None,
+) -> None:
+    """Emit a high-severity alert for overdue orphan documents.
+
+    These alerts are surfaced via the unified /api/insights/alerts endpoint
+    and consumed by Mission Control's connector.
+    """
+    provider = provider_name or "Unknown"
+    doc_label = "EOB" if document_type == "eob" else "Bill"
+    amount_str = f" (${amount:,.2f})" if amount else ""
+
+    try:
+        emit_alert(
+            alert_type="orphan_overdue",
+            severity="high",
+            module="eob",
+            title=f"Overdue orphan {doc_label} from {provider}{amount_str}",
+            description=(
+                f"{doc_label} (doc #{document_id}) has been unmatched for {age_days} days "
+                f"and requires manual attention."
+            ),
+            action_url=f"/triage?filter=orphan_document&target=eob-{document_id}"
+            if document_type == "eob"
+            else f"/triage?filter=orphan_document&target=bill-{document_id}",
+            metadata={
+                "document_id": document_id,
+                "document_type": document_type,
+                "provider_name": provider,
+                "age_days": age_days,
+                "amount": amount,
+            },
+        )
+    except Exception:
+        logger.debug("Could not emit orphan escalation alert for doc #%s", document_id)
+
+
+def _document_age_days(created_at: Any, now: datetime) -> int:
+    """Calculate document age in days from its created_at timestamp."""
+    if created_at is None:
+        return 0
+    if isinstance(created_at, str):
+        try:
+            created_at = datetime.fromisoformat(created_at)
+        except (ValueError, TypeError):
+            return 0
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    return max(0, (now - created_at).days)
 
 
 def _priority_from_score(score_pct: float) -> int:
@@ -305,3 +505,18 @@ def _weakest_factor(match: Any) -> str | None:
     if not valid:
         return None
     return min(valid, key=lambda k: valid[k])
+
+
+def _flag_duplicate_documents() -> int:
+    """Run duplicate detection scan and return count of triage items created."""
+    try:
+        from doc_intelligence_hub.modules.triage.duplicates import scan_all_duplicates
+
+        result = scan_all_duplicates()
+        return result.get("triage_items_created", 0)
+    except ImportError:
+        logger.warning("Duplicates module not available, skipping duplicate flagging")
+        return 0
+    except Exception as exc:
+        logger.warning("Duplicate scan failed: %s", exc)
+        return 0

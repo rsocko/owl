@@ -41,10 +41,10 @@ DEFAULT_SCHEDULES: dict[str, dict[str, Any]] = {
         "enabled": True,
     },
     "eob_matching": {
-        "cron": "0 10 * * 0",
+        "cron": "0 10 * * *",
         "endpoint": "/api/eob/run",
         "method": "POST",
-        "body": {"limit": 200, "tags": ["medical"]},
+        "body": {"limit": 200, "tags": ["medical"], "since_last_run": True},
         "limit": 200,
         "enabled": True,
     },
@@ -64,6 +64,24 @@ DEFAULT_SCHEDULES: dict[str, dict[str, Any]] = {
         "cron": "0 4 1 * *",
         "endpoint": "/api/analysis/execute/scheduled/monthly",
         "method": "POST",
+        "enabled": True,
+    },
+    "eob_benchmark": {
+        "cron": "0 6 * * 1",
+        "endpoint": "/api/eob/benchmark",
+        "method": "POST",
+        "body": {
+            "models": ["phi3:mini", "gpt-4o-mini", "gpt-4o"],
+            "limit": 5,
+            "trigger": "scheduled",
+        },
+        "enabled": True,
+    },
+    "eob_due_date_check": {
+        "cron": "0 8 * * *",
+        "endpoint": "/api/eob/check-due-dates",
+        "method": "POST",
+        "body": {"due_soon_days": 7},
         "enabled": True,
     },
 }

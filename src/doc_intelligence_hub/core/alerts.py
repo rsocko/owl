@@ -213,6 +213,7 @@ def emit_eob_alerts(
     *,
     unmatched_eobs: list[dict[str, Any]] | None = None,
     low_confidence_matches: list[dict[str, Any]] | None = None,
+    high_confidence_matches: list[dict[str, Any]] | None = None,
 ) -> int:
     """Emit alerts from EOB matching results.
 
@@ -250,6 +251,119 @@ def emit_eob_alerts(
         )
         if alert:
             count += 1
+
+    for match in (high_confidence_matches or []):
+        eob_id = match.get("eob_document_id", "?")
+        bill_id = match.get("bill_document_id", "?")
+        score = match.get("score", "?")
+        alert = emit_alert(
+            alert_type="new_high_confidence_match",
+            severity="info",
+            module="eob",
+            title=f"New high-confidence match: EOB #{eob_id} ↔ Bill #{bill_id}",
+            description=f"Auto-matched with {score}% confidence — ready for review.",
+            action_url=f"/eob/matches?eob={eob_id}&bill={bill_id}",
+            metadata={
+                "eob_document_id": eob_id,
+                "bill_document_id": bill_id,
+                "score": score,
+                "confidence": "HIGH",
+            },
+        )
+        if alert:
+            count += 1
+
+    return count
+
+
+# Due-date alert thresholds
+_DUE_SOON_DAYS = 7
+
+
+def check_eob_due_dates(
+    bills: list[dict[str, Any]],
+    *,
+    due_soon_days: int = _DUE_SOON_DAYS,
+) -> int:
+    """Check bill due dates and emit alerts for approaching or overdue bills.
+
+    Args:
+        bills: List of bill dicts with keys: document_id, provider_name,
+               due_date (str YYYY-MM-DD or date), payment_status, balance_due.
+        due_soon_days: Number of days threshold for "due soon" alerts.
+
+    Returns:
+        Number of alerts emitted.
+    """
+    from datetime import date as date_type
+
+    today = datetime.now(UTC).date()
+    count = 0
+
+    for bill in bills:
+        # Skip paid bills
+        payment_status = (bill.get("payment_status") or "").lower()
+        if payment_status == "paid":
+            continue
+
+        due_date_raw = bill.get("due_date")
+        if not due_date_raw:
+            continue
+
+        try:
+            if isinstance(due_date_raw, str):
+                due = date_type.fromisoformat(due_date_raw)
+            else:
+                due = due_date_raw
+        except (ValueError, TypeError):
+            continue
+
+        days_until = (due - today).days
+        doc_id = bill.get("document_id", "?")
+        provider = bill.get("provider_name") or "Unknown"
+        balance = bill.get("balance_due")
+        balance_str = f" (${balance:.2f})" if balance is not None else ""
+
+        if days_until < 0:
+            # Overdue
+            days_late = abs(days_until)
+            alert = emit_alert(
+                alert_type="bill_overdue",
+                severity="high",
+                module="eob",
+                title=f"Bill overdue: {provider}{balance_str}",
+                description=f"Bill (doc #{doc_id}) was due {due.isoformat()}, now {days_late} day(s) late.",
+                action_url=f"/eob/bills/{doc_id}",
+                metadata={
+                    "document_id": doc_id,
+                    "provider_name": provider,
+                    "due_date": due.isoformat(),
+                    "days_late": days_late,
+                    "balance_due": balance,
+                },
+            )
+            if alert:
+                count += 1
+        elif days_until <= due_soon_days:
+            # Due soon
+            alert = emit_alert(
+                alert_type="bill_due_soon",
+                severity="medium",
+                module="eob",
+                title=f"Bill due soon: {provider}{balance_str}",
+                description=f"Bill (doc #{doc_id}) is due {due.isoformat()} ({days_until} day(s) remaining).",
+                action_url=f"/eob/bills/{doc_id}",
+                metadata={
+                    "document_id": doc_id,
+                    "provider_name": provider,
+                    "due_date": due.isoformat(),
+                    "days_until_due": days_until,
+                    "balance_due": balance,
+                },
+            )
+            if alert:
+                count += 1
+
     return count
 
 
@@ -334,6 +448,135 @@ def emit_action_queue_alerts(actions: list[dict[str, Any]]) -> int:
             )
             if alert:
                 count += 1
+    return count
+
+
+def emit_benchmark_alerts(
+    *,
+    current_results: list[dict[str, Any]],
+    previous_results: list[dict[str, Any]] | None = None,
+    success_rate_drop_threshold: float = 0.10,
+    confidence_drop_threshold: float = 0.10,
+    min_success_rate: float = 0.50,
+    min_confidence: float = 0.40,
+) -> int:
+    """Emit alerts from benchmark results, detecting regressions and low performance.
+
+    Args:
+        current_results: List of model result dicts with keys:
+            model, success_rate, avg_confidence, documents_tested.
+        previous_results: Optional list of prior run's model results for comparison.
+        success_rate_drop_threshold: Alert if success_rate drops by this amount (0.10 = 10pp).
+        confidence_drop_threshold: Alert if avg_confidence drops by this amount.
+        min_success_rate: Alert if any model's success_rate is below this.
+        min_confidence: Alert if any model's avg_confidence is below this.
+
+    Returns:
+        Number of alerts emitted.
+    """
+    count = 0
+    prev_by_model = {}
+    if previous_results:
+        prev_by_model = {r.get("model"): r for r in previous_results}
+
+    for result in current_results:
+        model = result.get("model", "unknown")
+        success_rate = result.get("success_rate", 0.0)
+        avg_confidence = result.get("avg_confidence", 0.0)
+        docs_tested = result.get("documents_tested", 0)
+
+        # Absolute threshold alerts
+        if success_rate < min_success_rate and docs_tested > 0:
+            alert = emit_alert(
+                alert_type="benchmark_low_success_rate",
+                severity="high",
+                module="eob",
+                title=f"Low benchmark success rate: {model}",
+                description=(
+                    f"Model {model} achieved only {success_rate:.0%} success rate "
+                    f"across {docs_tested} documents (threshold: {min_success_rate:.0%})."
+                ),
+                metadata={
+                    "model": model,
+                    "success_rate": success_rate,
+                    "threshold": min_success_rate,
+                    "documents_tested": docs_tested,
+                },
+            )
+            if alert:
+                count += 1
+
+        if avg_confidence < min_confidence and success_rate > 0:
+            alert = emit_alert(
+                alert_type="benchmark_low_confidence",
+                severity="medium",
+                module="eob",
+                title=f"Low benchmark confidence: {model}",
+                description=(
+                    f"Model {model} averaged {avg_confidence:.3f} confidence "
+                    f"(threshold: {min_confidence:.2f})."
+                ),
+                metadata={
+                    "model": model,
+                    "avg_confidence": avg_confidence,
+                    "threshold": min_confidence,
+                },
+            )
+            if alert:
+                count += 1
+
+        # Regression alerts (comparison with previous run)
+        prev = prev_by_model.get(model)
+        if prev is None:
+            continue
+
+        prev_success = prev.get("success_rate", 0.0)
+        prev_confidence = prev.get("avg_confidence", 0.0)
+
+        success_drop = prev_success - success_rate
+        if success_drop >= success_rate_drop_threshold and prev_success > 0:
+            alert = emit_alert(
+                alert_type="benchmark_regression_success_rate",
+                severity="high",
+                module="eob",
+                title=f"Benchmark regression: {model} success rate dropped",
+                description=(
+                    f"Model {model} success rate dropped from {prev_success:.0%} "
+                    f"to {success_rate:.0%} (Δ {success_drop:.0%})."
+                ),
+                metadata={
+                    "model": model,
+                    "previous_success_rate": prev_success,
+                    "current_success_rate": success_rate,
+                    "drop": round(success_drop, 4),
+                },
+                deduplicate=False,
+            )
+            if alert:
+                count += 1
+
+        confidence_drop = prev_confidence - avg_confidence
+        if confidence_drop >= confidence_drop_threshold and prev_confidence > 0:
+            alert = emit_alert(
+                alert_type="benchmark_regression_confidence",
+                severity="medium",
+                module="eob",
+                title=f"Benchmark regression: {model} confidence dropped",
+                description=(
+                    f"Model {model} avg confidence dropped from {prev_confidence:.3f} "
+                    f"to {avg_confidence:.3f} (Δ {confidence_drop:.3f})."
+                ),
+                metadata={
+                    "model": model,
+                    "previous_confidence": prev_confidence,
+                    "current_confidence": avg_confidence,
+                    "drop": round(confidence_drop, 4),
+                },
+                deduplicate=False,
+            )
+            if alert:
+                count += 1
+
     return count
 
 
