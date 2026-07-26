@@ -2,11 +2,17 @@
 title: Configuration Reference
 sidebar_label: Configuration
 sidebar_position: 6
+mockups:
+  - "[rules-config.html](../../mockups/triage-correction/rules-config.html)"
 ---
 
 # Configuration Reference
 
 OWL is configured through environment variables, YAML config files, and runtime admin API endpoints.
+
+:::info Interactive Mockup
+Preview the rules configuration UI: [Rules Config](../../mockups/triage-correction/rules-config.html) — YAML/visual rule editor with trigger conditions and thresholds.
+:::
 
 ## Environment Variables
 
