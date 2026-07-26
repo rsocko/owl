@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import {
   Button,
   Card,
@@ -171,6 +171,7 @@ export default function CorrectionHistory() {
   }, [toast]);
 
   const handleUndo = useCallback(async (eventId: string) => {
+    if (!window.confirm('Undo this correction? The triage item will be reverted to pending.')) return;
     setUndoingId(eventId);
     try {
       await endpoints.dashboard.undoCorrection(eventId);
@@ -195,8 +196,8 @@ export default function CorrectionHistory() {
 
       {/* View switcher (matching mockup tab bar) */}
       <div className="dv-view-tabs">
-        <Link to="/dashboard-view" className="dv-view-tab">📊 Dashboard</Link>
-        <Link to="/corrections" className="dv-view-tab active">📜 Correction History</Link>
+        <NavLink to="/dashboard-view" className={({ isActive }) => `dv-view-tab${isActive ? ' active' : ''}`}>📊 Dashboard</NavLink>
+        <NavLink to="/corrections" className={({ isActive }) => `dv-view-tab${isActive ? ' active' : ''}`}>📜 Correction History</NavLink>
       </div>
 
       <div className="ch-integration-note">
