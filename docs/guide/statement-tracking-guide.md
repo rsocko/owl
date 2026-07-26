@@ -2,11 +2,17 @@
 title: Statement Tracking User Guide
 sidebar_label: Statement Tracking
 sidebar_position: 3
+mockups:
+  - "[statement-series-detail.html](../../mockups/triage-correction/statement-series-detail.html)"
 ---
 
 # Statement Tracking — Never Miss a Recurring Statement
 
 The Statement Tracker analyzes your Paperless-ngx archive to identify recurring document providers (banks, credit cards, utilities, insurance) and alerts you when expected statements are overdue or missing.
+
+:::info Interactive Mockup
+Preview the statement series detail view: [Statement Series Detail](../../mockups/triage-correction/statement-series-detail.html) — Provider timeline, gap visualization, and override controls.
+:::
 
 ## How It Works
 
