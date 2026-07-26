@@ -16,6 +16,7 @@ from rich.panel import Panel
 from doc_intelligence_hub.core.paperless import PaperlessClient
 from doc_intelligence_hub.modules.eob_matching.classifier import classify_document
 from doc_intelligence_hub.modules.eob_matching.extractor import extract_eob, extract_bill
+from doc_intelligence_hub.modules.eob_matching.llm_extractor import extract_eob_llm, extract_bill_llm
 from doc_intelligence_hub.modules.eob_matching.matcher import match_documents
 from doc_intelligence_hub.modules.eob_matching.models import DocumentType, MatchConfidence
 
@@ -60,8 +61,10 @@ def cli(ctx, db_url):
               help="Write match results back to Paperless custom fields")
 @click.option("--skip-processed/--no-skip-processed", default=True,
               help="Skip documents that were successfully extracted in a prior run (default: enabled)")
+@click.option("--use-llm/--no-llm", default=None,
+              help="Use LLM extractor (default: auto-detect from LLM_BASE_URL)")
 @click.pass_context
-def run(ctx, paperless_url, paperless_token, tag, correspondent, document_type, created_after, created_before, limit, output, verbose, write_to_paperless, skip_processed):
+def run(ctx, paperless_url, paperless_token, tag, correspondent, document_type, created_after, created_before, limit, output, verbose, write_to_paperless, skip_processed, use_llm):
     """Run the full pipeline: fetch → classify → extract → match → store.
 
     Results are persisted to SQLite. Use --write-to-paperless to also
@@ -87,6 +90,7 @@ def run(ctx, paperless_url, paperless_token, tag, correspondent, document_type, 
         verbose=verbose,
         write_to_paperless=write_to_paperless,
         skip_processed=skip_processed,
+        use_llm=use_llm,
     ))
 
 
@@ -508,8 +512,13 @@ async def _run_pipeline(
     verbose: bool,
     write_to_paperless: bool = False,
     skip_processed: bool = True,
+    use_llm: bool | None = None,
 ):
     """Full pipeline: fetch → classify → extract → match → store."""
+    # Auto-detect LLM availability if not explicitly set
+    if use_llm is None:
+        use_llm = bool(os.environ.get("LLM_BASE_URL"))
+
     from doc_intelligence_hub.modules.eob_matching.database import (
         MatchingRun, EOBRecord, BillRecord, MatchRecord,
         get_session as get_db_session, store_run, store_eob, store_bill, store_match,
@@ -525,9 +534,11 @@ async def _run_pipeline(
     )
     store_run(db, run_record)
 
+    extractor_label = "[magenta]LLM extractor[/magenta]" if use_llm else "[dim]regex extractor[/dim]"
     console.print(Panel(
         f"[bold]EOB Matching Pipeline[/bold] (run #{run_record.id})"
-        + (" — [green]LIVE mode[/green]" if write_to_paperless else " — [dim]read-only[/dim]"),
+        + (" — [green]LIVE mode[/green]" if write_to_paperless else " — [dim]read-only[/dim]")
+        + f" — {extractor_label}",
         style="blue",
     ))
     console.print()
@@ -604,7 +615,7 @@ async def _run_pipeline(
 
     for doc, classification in eob_docs:
         content = doc.get("content", "")
-        extracted = extract_eob(content, document_id=str(doc["id"]))
+        extracted = extract_eob_llm(content, document_id=str(doc["id"])) if use_llm else extract_eob(content, document_id=str(doc["id"]))
         extracted_eobs.append(extracted)
 
         # Persist EOB record
@@ -635,7 +646,7 @@ async def _run_pipeline(
 
     for doc, classification in bill_docs:
         content = doc.get("content", "")
-        extracted = extract_bill(content, document_id=str(doc["id"]))
+        extracted = extract_bill_llm(content, document_id=str(doc["id"])) if use_llm else extract_bill(content, document_id=str(doc["id"]))
         extracted_bills.append(extracted)
 
         # Persist Bill record
