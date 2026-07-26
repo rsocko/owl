@@ -59,7 +59,7 @@ services:
     container_name: doc-intelligence-eob-matching
     restart: "no"
     entrypoint: ["/docker-entrypoint.sh", "eob-match"]
-    command: ["run", "--limit", "200", "--verbose"]
+    command: ["run", "--since-last-run", "--limit", "200", "--verbose"]
     environment:
       PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
@@ -99,6 +99,33 @@ services:
       - doc-intelligence
     profiles:
       - jobs
+
+  # EOB Matching Scheduler — runs eob-matching on a daily cron schedule
+  # Uses supercronic (lightweight cron for containers) to trigger the job.
+  # Enabled via the 'scheduled' profile: docker compose --profile scheduled up -d
+  eob-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    container_name: doc-intelligence-eob-scheduler
+    restart: unless-stopped
+    entrypoint: ["/docker-entrypoint.sh"]
+    command: ["supercronic", "/app/config/crontab.eob-scheduler"]
+    environment:
+      PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
+      PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
+      WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-false}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://service-001.example.invalid/openai/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-bifrost}
+      LLM_MODEL: ${LLM_MODEL:-azure/gpt-4o-mini}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+    volumes:
+      - hub-data:/app/data
+    networks:
+      - doc-intelligence
+    profiles:
+      - scheduled
 
 volumes:
   hub-data:
