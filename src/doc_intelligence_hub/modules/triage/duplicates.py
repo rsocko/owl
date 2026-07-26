@@ -323,11 +323,58 @@ def detect_duplicates(doc_id: int) -> list[dict[str, Any]]:
     return results
 
 
+def _cleanup_self_referencing_pairs() -> int:
+    """Remove any duplicate pairs where doc_a_id == doc_b_id (data from prior bug).
+
+    Also removes associated pending triage queue items.
+    Returns number of invalid pairs removed.
+    """
+    from doc_intelligence_hub.modules.triage.database import (
+        DocumentDuplicate,
+        TriageQueueItem,
+    )
+
+    session = get_triage_session()
+    try:
+        invalid_pairs = (
+            session.query(DocumentDuplicate)
+            .filter(DocumentDuplicate.doc_a_id == DocumentDuplicate.doc_b_id)
+            .all()
+        )
+        if not invalid_pairs:
+            return 0
+
+        invalid_ids = [p.id for p in invalid_pairs]
+        logger.info("Cleaning up %d self-referencing duplicate pairs", len(invalid_ids))
+
+        # Remove associated triage queue items
+        session.query(TriageQueueItem).filter(
+            TriageQueueItem.target_type == "document_duplicate",
+            TriageQueueItem.target_id.in_(invalid_ids),
+        ).delete(synchronize_session="fetch")
+
+        # Remove the invalid pairs
+        for pair in invalid_pairs:
+            session.delete(pair)
+
+        session.commit()
+        return len(invalid_ids)
+    except Exception:
+        session.rollback()
+        logger.exception("Failed to clean up self-referencing duplicate pairs")
+        return 0
+    finally:
+        session.close()
+
+
 def scan_all_duplicates() -> dict[str, Any]:
     """Full scan for duplicates across all documents. Creates DB records and triage items.
 
     Returns summary stats.
     """
+    # Clean up any self-referencing pairs from a prior bug
+    cleaned = _cleanup_self_referencing_pairs()
+
     try:
         from doc_intelligence_hub.modules.eob_matching.database import (
             BillRecord,
@@ -338,7 +385,7 @@ def scan_all_duplicates() -> dict[str, Any]:
         )
     except ImportError:
         logger.warning("EOB matching module not available, skipping duplicate scan")
-        return {"pairs_found": 0, "pairs_created": 0, "triage_items_created": 0}
+        return {"pairs_found": 0, "pairs_created": 0, "triage_items_created": 0, "cleaned_invalid": cleaned}
 
     eob_session = get_eob_session()
     all_doc_ids: list[int] = []
@@ -439,6 +486,7 @@ def scan_all_duplicates() -> dict[str, Any]:
         "pairs_found": pairs_found,
         "pairs_created": pairs_created,
         "triage_items_created": triage_created,
+        "cleaned_invalid": cleaned,
     }
 
 
