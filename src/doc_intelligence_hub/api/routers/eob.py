@@ -21,6 +21,7 @@ from doc_intelligence_hub.modules.eob_matching.database import (
     get_match_events,
     get_session as get_db_session,
     init_db,
+    last_successful_run,
 )
 from doc_intelligence_hub.modules.eob_matching.enricher import EOBEnricher
 from doc_intelligence_hub.modules.eob_matching.extractor import extract_bill, extract_eob
@@ -52,6 +53,10 @@ class ClassifyRequest(BaseModel):
 class RunRequest(ClassifyRequest):
     verbose: bool = False
     write_to_paperless: bool | None = None  # None = inherit from hub settings
+    since_last_run: bool = Field(
+        default=False,
+        description="Only process documents created since the last successful run. Mutually exclusive with created_after.",
+    )
 
 
 class MatchUpdateRequest(BaseModel):
@@ -324,6 +329,30 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
     init_db()
     db = get_db_session()
 
+    # Resolve since_last_run into a created_after filter
+    resolved_created_after = body.created_after
+    since_last_run_info: dict[str, Any] | None = None
+    if body.since_last_run:
+        if body.created_after:
+            raise HTTPException(
+                status_code=422,
+                detail="since_last_run and created_after are mutually exclusive.",
+            )
+        last_run = last_successful_run(db)
+        if last_run and last_run.finished_at:
+            resolved_created_after = last_run.finished_at.strftime("%Y-%m-%d")
+            since_last_run_info = {
+                "resolved_from_run_id": last_run.id,
+                "resolved_created_after": resolved_created_after,
+                "last_run_finished_at": last_run.finished_at.isoformat(),
+            }
+        else:
+            since_last_run_info = {
+                "resolved_from_run_id": None,
+                "resolved_created_after": None,
+                "note": "No prior successful run found — processing all documents.",
+            }
+
     # Determine write mode
     write_enabled = body.write_to_paperless if body.write_to_paperless is not None else _is_write_enabled(request)
 
@@ -344,7 +373,7 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
             tags=body.tags,
             correspondent=body.correspondent,
             document_type=body.document_type,
-            created_after=body.created_after,
+            created_after=resolved_created_after,
             created_before=body.created_before,
         )
 
@@ -528,6 +557,7 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
             "run_at": run_record.started_at.isoformat() if run_record.started_at else None,
             "write_to_paperless": write_enabled,
             "documents_scanned": len(documents),
+            "since_last_run": since_last_run_info,
             "summary": {
                 **_summarize_classifications(classified_documents),
                 "matches": len(matches),
@@ -543,6 +573,27 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
             "extracted_eobs": [e.model_dump(mode="json") for e in extracted_eobs] if body.verbose else [],
             "extracted_bills": [b.model_dump(mode="json") for b in extracted_bills] if body.verbose else [],
         }
+    except Exception as exc:
+        # Emit failure alert for scheduled run monitoring
+        try:
+            from doc_intelligence_hub.core.alerts import emit_alert
+
+            emit_alert(
+                alert_type="eob_run_failed",
+                severity="high",
+                module="eob",
+                title="EOB matching pipeline failed",
+                description=f"Run #{run_record.id} failed: {exc}",
+                metadata={
+                    "run_id": run_record.id,
+                    "error": str(exc),
+                    "since_last_run": body.since_last_run,
+                },
+            )
+        except Exception:
+            pass  # Alert emission is best-effort
+
+        raise
     finally:
         db.close()
 
