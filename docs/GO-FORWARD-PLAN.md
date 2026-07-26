@@ -182,11 +182,11 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 ### Phase 0: Stabilize & Validate (Week 1) ⚡
 **Goal:** Prove the system works end-to-end with real data.
 
-| Priority | Issue | Description |
-|----------|-------|-------------|
-| P0 | #887 | Fix Statement Discovery bug |
-| P0 | #839 | Run EOB Matching LIVE — validate integration |
-| — | — | Deploy to homelab, validate Paperless connectivity |
+| Priority | Issue | Description                                        |      |
+| -------- | ----- | -------------------------------------------------- | ---- |
+| P0       | #887  | Fix Statement Discovery bug                        | done |
+| P0       | #839  | Run EOB Matching LIVE — validate integration       | done |
+| —        | —     | Deploy to homelab, validate Paperless connectivity | done |
 
 **Exit Criteria:** Statement Tracker + EOB Matching both running against live Paperless, producing real results.
 
