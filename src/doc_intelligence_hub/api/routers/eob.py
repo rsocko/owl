@@ -53,6 +53,7 @@ class RunRequest(ClassifyRequest):
 
 class MatchUpdateRequest(BaseModel):
     status: str = Field(..., pattern=r"^(confirmed|rejected|candidate)$")
+    notes: str | None = Field(default=None, description="Optional reviewer notes for this match decision")
 
 
 # ------------------------------------------------------------------
@@ -139,6 +140,7 @@ def _serialize_match(m: MatchRecord, paperless_url: str = "") -> dict[str, Any]:
         "bill_preview_url": f"{base_url}/documents/{m.bill_document_id}/details" if base_url else None,
         "created_at": m.created_at.isoformat() if m.created_at else None,
         "confirmed_at": m.confirmed_at.isoformat() if m.confirmed_at else None,
+        "notes": m.notes,
     }
 
 
@@ -518,6 +520,8 @@ async def update_match(
             raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
 
         match.status = body.status
+        if body.notes is not None:
+            match.notes = body.notes
         if body.status == "confirmed":
             match.confirmed_at = datetime.now(UTC)
 
