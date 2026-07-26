@@ -102,6 +102,32 @@ interface EobCheckResponse {
   write_to_paperless?: boolean;
 }
 
+interface CoverageBreakdownRow {
+  name: string;
+  count: number;
+  total_billed: number;
+  total_plan_pays: number;
+  total_patient_responsibility: number;
+  coverage_pct: number;
+}
+
+interface CoverageSummary {
+  record_count: number;
+  total_billed: number;
+  total_allowed: number;
+  total_plan_pays: number;
+  total_patient_responsibility: number;
+  coverage_pct: number;
+}
+
+interface CoverageResponse {
+  status?: string;
+  summary?: CoverageSummary;
+  by_insurance_company?: CoverageBreakdownRow[];
+  by_provider?: CoverageBreakdownRow[];
+  by_month?: CoverageBreakdownRow[];
+}
+
 type ToastState = { message: string; tone: 'success' | 'error' } | null;
 
 function formatDateTime(value?: string | null) {
@@ -191,6 +217,8 @@ export default function EobDashboard() {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [alertBusyId, setAlertBusyId] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
+  const [coverageTab, setCoverageTab] = useState<'insurance_company' | 'provider' | 'month'>('insurance_company');
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -216,6 +244,13 @@ export default function EobDashboard() {
       setUnmatched(Array.isArray(unmatchedRes) ? unmatchedRes : []);
       setCheck(checkRes);
       setAlerts(Array.isArray(alertsRes.alerts) ? alertsRes.alerts : []);
+      // Coverage is supplementary — don't let it block the dashboard
+      try {
+        const coverageRes = await (endpoints.eob.coverage() as Promise<CoverageResponse>);
+        setCoverage(coverageRes);
+      } catch {
+        setCoverage(null);
+      }
       const latestRun = runsRes.runs?.[0] ?? resultsRes?.run;
       setLastSyncedAt(latestRun?.finished_at ?? latestRun?.started_at ?? null);
     } catch (err) {
@@ -465,6 +500,106 @@ export default function EobDashboard() {
             desc={lastRun?.finished_at ? `Finished ${formatDateTime(lastRun.finished_at)}` : 'Run the pipeline to refresh matches'}
           />
         </StatGrid>
+
+        {/* Coverage Analysis */}
+        {coverage?.summary && coverage.summary.record_count > 0 && (
+          <Card
+            title="Coverage Analysis"
+            actions={
+              <div className="btn-group">
+                {(['insurance_company', 'provider', 'month'] as const).map((tab) => (
+                  <Button
+                    key={tab}
+                    size="sm"
+                    variant={coverageTab === tab ? 'primary' : 'ghost'}
+                    onClick={() => setCoverageTab(tab)}
+                  >
+                    {tab === 'insurance_company' ? 'By insurer' : tab === 'provider' ? 'By provider' : 'By month'}
+                  </Button>
+                ))}
+              </div>
+            }
+          >
+            <StatGrid>
+              <StatCard
+                title="Total billed"
+                metric={formatCurrency(coverage.summary.total_billed)}
+                desc={`Across ${coverage.summary.record_count} EOB records`}
+              />
+              <StatCard
+                title="Insurance covered"
+                metric={formatCurrency(coverage.summary.total_plan_pays)}
+                desc={`${coverage.summary.coverage_pct}% of total billed`}
+                status={{
+                  label: coverage.summary.coverage_pct >= 70 ? 'Good' : coverage.summary.coverage_pct >= 40 ? 'Moderate' : 'Low',
+                  tone: coverage.summary.coverage_pct >= 70 ? 'success' : coverage.summary.coverage_pct >= 40 ? 'warning' : 'danger',
+                }}
+              />
+              <StatCard
+                title="Patient responsibility"
+                metric={formatCurrency(coverage.summary.total_patient_responsibility)}
+                desc="Total out-of-pocket across all EOBs"
+                status={{
+                  label: coverage.summary.total_patient_responsibility > 0 ? 'Outstanding' : 'Clear',
+                  tone: coverage.summary.total_patient_responsibility > 0 ? 'warning' : 'success',
+                }}
+              />
+            </StatGrid>
+            <div style={{ marginTop: 16 }}>
+              <DataTable<CoverageBreakdownRow>
+                rowKey={(row) => row.name}
+                rows={
+                  coverageTab === 'insurance_company'
+                    ? coverage.by_insurance_company ?? []
+                    : coverageTab === 'provider'
+                      ? coverage.by_provider ?? []
+                      : coverage.by_month ?? []
+                }
+                emptyLabel="No breakdown data available."
+                columns={[
+                  {
+                    key: 'name',
+                    header: coverageTab === 'insurance_company' ? 'Insurance company' : coverageTab === 'provider' ? 'Provider' : 'Month',
+                    render: (row) => (
+                      <div className="eob-table-primary">
+                        <strong>{row.name}</strong>
+                        <span className="eob-table-secondary">{row.count} record{row.count === 1 ? '' : 's'}</span>
+                      </div>
+                    ),
+                  },
+                  {
+                    key: 'billed',
+                    header: 'Total billed',
+                    width: '140px',
+                    render: (row) => formatCurrency(row.total_billed),
+                  },
+                  {
+                    key: 'plan_pays',
+                    header: 'Plan pays',
+                    width: '140px',
+                    render: (row) => formatCurrency(row.total_plan_pays),
+                  },
+                  {
+                    key: 'patient',
+                    header: 'Patient resp.',
+                    width: '140px',
+                    render: (row) => formatCurrency(row.total_patient_responsibility),
+                  },
+                  {
+                    key: 'coverage',
+                    header: 'Coverage %',
+                    width: '120px',
+                    render: (row) => (
+                      <Badge tone={row.coverage_pct >= 70 ? 'success' : row.coverage_pct >= 40 ? 'warning' : 'danger'}>
+                        {row.coverage_pct}%
+                      </Badge>
+                    ),
+                  },
+                ]}
+              />
+            </div>
+          </Card>
+        )}
 
         {/* Inline Alerts */}
         <section>
