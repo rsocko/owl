@@ -8,6 +8,7 @@ import EobMatchReview from './pages/EobMatchReview';
 import EobUnmatched from './pages/EobUnmatched';
 import ActionQueue from './pages/ActionQueue';
 import TriageQueue from './pages/TriageQueue';
+import MetadataCorrection from './pages/MetadataCorrection';
 import ManualMatchSearch from './pages/ManualMatchSearch';
 import RulesConfig from './pages/RulesConfig';
 import Insights from './pages/Insights';
@@ -32,6 +33,7 @@ function App() {
             <Route path="/action-queue" element={<ActionQueue />} />
             <Route path="/triage" element={<TriageQueue />} />
             <Route path="/triage/manual-search" element={<ManualMatchSearch />} />
+            <Route path="/metadata/:docId" element={<MetadataCorrection />} />
             <Route path="/rules" element={<RulesConfig />} />
             <Route path="/insights" element={<Insights />} />
             <Route path="/history" element={<History />} />

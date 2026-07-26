@@ -412,6 +412,105 @@
   margin-top: 8px;
 }
 
+/* ── Auto-confirm threshold bar ── */
+.triage-threshold-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.triage-auto-confirm-btn {
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1px dashed var(--success);
+  background: #f0fdf4;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #166534;
+  transition: background 0.15s;
+}
+
+.triage-auto-confirm-btn:hover:not(:disabled) {
+  background: #dcfce7;
+}
+
+.triage-auto-confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.triage-threshold-input {
+  width: 48px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  background: var(--card);
+  color: var(--text);
+}
+
+.triage-threshold-input::-webkit-inner-spin-button,
+.triage-threshold-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.triage-threshold-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* ── Confirmation modal ── */
+.triage-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.triage-modal {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 420px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.triage-modal-title {
+  font-size: 1rem;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.triage-modal-desc {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.triage-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ── Checked item highlight ── */
+.triage-item.checked {
+  background: var(--selected-bg);
+}
+
 /* ── Detail info rows ── */
 .triage-detail-info {
   display: grid;
@@ -498,4 +597,28 @@
   .triage-detail-panel {
     border-radius: var(--radius);
   }
+}
+
+/* ── Metadata correction link ── */
+.triage-metadata-link {
+  margin-top: 12px;
+  text-align: center;
+}
+
+.triage-metadata-link a {
+  display: inline-block;
+  padding: 8px 20px;
+  border-radius: 6px;
+  background: #eef6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.triage-metadata-link a:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
 }
