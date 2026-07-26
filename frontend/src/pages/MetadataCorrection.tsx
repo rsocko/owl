@@ -7,7 +7,6 @@ import {
   ConfidenceBar,
   EmptyState,
   ErrorState,
-  LoadingState,
   Modal,
   PageHeader,
   SkeletonLoader,
@@ -188,18 +187,14 @@ export default function MetadataCorrection() {
     return vals;
   }, [data, editValues]);
 
-  // Fields that have been corrected or have pending edits
+  // Fields that have saved corrections (exclude unsaved edits — writeback reads from DB)
   const pendingWritebacks = useMemo(() => {
     if (!data) return [];
     return data.extracted_fields.filter((f) => {
       const corr = data.latest_corrections[f.field_name];
-      return (
-        corr?.correction_type === 'corrected' ||
-        corr?.correction_type === 'added' ||
-        editValues[f.field_name] !== undefined
-      );
+      return corr?.correction_type === 'corrected' || corr?.correction_type === 'added';
     });
-  }, [data, editValues]);
+  }, [data]);
 
   // ------------------------------------------------------------------
   // Actions
@@ -209,7 +204,7 @@ export default function MetadataCorrection() {
     async (fieldName: string) => {
       if (!docId || !data) return;
       const newValue = editValues[fieldName];
-      if (!newValue) return;
+      if (newValue === undefined) return;
 
       const field = data.extracted_fields.find((f) => f.field_name === fieldName);
       const originalValue = field?.value ?? data.latest_corrections[fieldName]?.original_value ?? null;
@@ -242,13 +237,14 @@ export default function MetadataCorrection() {
   const handleConfirm = useCallback(
     async (fieldName: string) => {
       if (!docId || !data) return;
-      const field = data.extracted_fields.find((f) => f.field_name === fieldName);
+      // Use the current displayed value (which may be a prior correction)
+      const valueToConfirm = currentValues[fieldName] ?? undefined;
 
       setBusyField(fieldName);
       try {
         await endpoints.metadata.confirm(docId, {
           field_name: fieldName,
-          current_value: field?.value ?? undefined,
+          current_value: valueToConfirm,
           confidence: data.latest_corrections[fieldName]?.confidence ?? undefined,
         });
         setToast({ message: `${fieldLabel(fieldName)} confirmed`, tone: 'success' });
@@ -259,7 +255,7 @@ export default function MetadataCorrection() {
         setBusyField(null);
       }
     },
-    [docId, data, loadData],
+    [docId, data, currentValues, loadData],
   );
 
   const handleWriteback = useCallback(async () => {
@@ -403,7 +399,7 @@ export default function MetadataCorrection() {
                           size="sm"
                           variant="success"
                           onClick={() => void handleCorrect(field.field_name)}
-                          disabled={isBusy || !editValues[field.field_name]}
+                          disabled={isBusy || editValues[field.field_name] === undefined}
                         >
                           {isBusy ? '…' : '✓'}
                         </Button>
@@ -434,7 +430,7 @@ export default function MetadataCorrection() {
                           >
                             ✎
                           </button>
-                          {field.has_value && status !== 'confirmed' && (
+                          {(field.has_value || status === 'corrected') && status !== 'confirmed' && (
                             <button
                               className="meta-confirm-btn"
                               onClick={(e) => {
