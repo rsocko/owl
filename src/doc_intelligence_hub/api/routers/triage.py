@@ -39,6 +39,10 @@ from doc_intelligence_hub.modules.triage.database import (
 from doc_intelligence_hub.modules.triage.database import (
     get_session as get_triage_session,
 )
+from doc_intelligence_hub.modules.triage.paperless_sync import (
+    sync_all_pending,
+    sync_correction_to_paperless,
+)
 
 router = APIRouter(prefix="/api/triage", tags=["triage"])
 
@@ -286,6 +290,37 @@ async def orphan_defer(item_id: str) -> dict[str, Any]:
     return result
 
 
+@router.post("/paperless-sync")
+async def paperless_sync() -> dict[str, Any]:
+    """Manually trigger sync of all pending CorrectionEvents to Paperless."""
+    result = sync_all_pending()
+    return result
+
+
+def _sync_latest_correction(target_id: str) -> None:
+    """Find and sync the most recent CorrectionEvent for a given target."""
+    event_id = None
+    session = get_triage_session()
+    try:
+        event = (
+            session.query(CorrectionEvent)
+            .filter(
+                CorrectionEvent.target_id == target_id,
+                CorrectionEvent.paperless_synced == 0,
+                CorrectionEvent.undone == 0,
+            )
+            .order_by(CorrectionEvent.created_at.desc())
+            .first()
+        )
+        if event:
+            event_id = event.id
+    finally:
+        session.close()
+
+    if event_id:
+        sync_correction_to_paperless(event_id)
+
+
 @router.post("/orphans/{item_id}/self-pay")
 async def orphan_self_pay(item_id: str) -> dict[str, Any]:
     """Mark an orphan as self-pay / no bill expected."""
@@ -300,6 +335,7 @@ async def orphan_self_pay(item_id: str) -> dict[str, Any]:
     )
     if not result:
         raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
+    _sync_latest_correction(result["target_id"])
     return {**result, "paperless_tags": ["no-bill-expected", "self-pay"]}
 
 
@@ -317,6 +353,7 @@ async def orphan_already_paid(item_id: str) -> dict[str, Any]:
     )
     if not result:
         raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
+    _sync_latest_correction(result["target_id"])
     return {**result, "paperless_tags": ["already-paid"]}
 
 
@@ -334,4 +371,5 @@ async def orphan_not_medical(item_id: str) -> dict[str, Any]:
     )
     if not result:
         raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
+    _sync_latest_correction(result["target_id"])
     return {**result, "paperless_tags": ["not-medical", "misclassified"]}

@@ -8,6 +8,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Toast } from '../ui';
+import DocumentPreview from '../DocumentPreview';
+import ManualMatchModal from '../ManualMatchModal';
 import { endpoints } from '../../lib/api';
 import { getToastDuration } from '../../lib/toast';
 import '../../styles/orphan-detail.css';
@@ -79,6 +81,7 @@ function missingDocLabel(docType?: string | null): string {
 export default function OrphanDetail({ triageItem, onResolved, onSkip }: OrphanDetailProps) {
   const [toast, setToast] = useState<ToastState>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [matchModalOpen, setMatchModalOpen] = useState(false);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -121,8 +124,21 @@ export default function OrphanDetail({ triageItem, onResolved, onSkip }: OrphanD
     [onResolved],
   );
 
-  const handleFindMatch = () =>
-    handleAction('find-match', () => endpoints.triage.orphans.findMatch(triageItem.id), 'Match search context ready. Manual match search will open here when available (#877).');
+  const handleFindMatch = () => {
+    setMatchModalOpen(true);
+  };
+
+  const handleMatchCreated = async () => {
+    setMatchModalOpen(false);
+    // Resolve the triage item as manually linked
+    try {
+      await endpoints.triage.resolve(triageItem.id, { action: 'manual_link', payload: { reason: 'Matched via manual match search' } });
+      setToast({ message: 'Document matched and orphan resolved.', tone: 'success' });
+      onResolved?.();
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Match created but failed to resolve triage item.', tone: 'error' });
+    }
+  };
 
   const handleDefer = () =>
     handleAction('defer', () => endpoints.triage.orphans.defer(triageItem.id), `Deferred for 30 days — will re-flag if still unmatched.`);
@@ -290,10 +306,10 @@ export default function OrphanDetail({ triageItem, onResolved, onSkip }: OrphanD
           </div>
           <button
             className="orphan-action-btn primary"
-            onClick={() => void handleFindMatch()}
+            onClick={handleFindMatch}
             disabled={!isPending || busyAction !== null}
           >
-            {busyAction === 'find-match' ? 'Searching…' : 'Search'}
+            Search
           </button>
         </div>
 
@@ -358,11 +374,15 @@ export default function OrphanDetail({ triageItem, onResolved, onSkip }: OrphanD
         </div>
       </div>
 
-      {/* Document preview placeholder */}
-      <div className="orphan-preview-placeholder">
-        <div className="orphan-preview-placeholder-icon">📄</div>
-        Document preview will be available when the viewer component is integrated (#872)
-      </div>
+      {/* Document preview */}
+      {documentId != null && !Number.isNaN(Number(documentId)) && (
+        <div className="orphan-preview-section">
+          <DocumentPreview
+            documentId={Number(documentId)}
+            label={docTypeLabel(documentType)}
+          />
+        </div>
+      )}
 
       {/* Related documents placeholder */}
       <div className="orphan-related-card">
@@ -387,6 +407,15 @@ export default function OrphanDetail({ triageItem, onResolved, onSkip }: OrphanD
           <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />
         </div>
       )}
+
+      {/* Manual Match Modal */}
+      <ManualMatchModal
+        open={matchModalOpen}
+        onClose={() => setMatchModalOpen(false)}
+        sourceDocId={documentId != null ? Number(documentId) : undefined}
+        triageItemId={triageItem.id}
+        onMatchCreated={() => void handleMatchCreated()}
+      />
     </div>
   );
 }
