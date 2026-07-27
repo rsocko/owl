@@ -58,6 +58,8 @@ export function SplitSeriesFlow({
   series,
   documents,
   selectedDocIds,
+  onToggleDoc: _onToggleDoc,
+  onSelectAllByAccount,
   accounts,
   accountColorMap,
   suggestedSplitGroups,
