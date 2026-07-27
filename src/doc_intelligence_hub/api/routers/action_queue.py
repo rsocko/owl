@@ -11,6 +11,7 @@ from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer
 from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
 from doc_intelligence_hub.modules.action_queue.database import Action, get_session, init_db
 from doc_intelligence_hub.modules.action_queue.pipeline import get_pipeline_progress, run_pipeline
+from doc_intelligence_hub.modules.action_queue.risk_scoring import compute_risk_score, recalculate_risk_scores
 from doc_intelligence_hub.modules.statements.config import resolve_api_token
 
 router = APIRouter(prefix="/api/queue", tags=["action-queue"])
@@ -214,9 +215,14 @@ async def list_actions(
     init_db()
     db = get_session()
     try:
-        query = db.query(Action).order_by(Action.created_at.desc())
+        query = db.query(Action)
         if status:
             query = query.filter_by(status=status)
+        # Sort pending actions by risk_score (highest risk first), then by created_at
+        if status == "pending":
+            query = query.order_by(Action.risk_score.desc(), Action.created_at.desc())
+        else:
+            query = query.order_by(Action.created_at.desc())
         total = query.count()
         actions = query.offset(offset).limit(limit).all()
 
@@ -249,6 +255,14 @@ async def update_action(
             action.completed_at = datetime.utcnow()
         elif body.status == "pending":
             action.completed_at = None
+            # Recalculate risk score when reopening (due dates may have changed)
+            action.risk_score = compute_risk_score(
+                urgency=action.urgency or "LOW",
+                due_date=action.due_date,
+                amount=action.amount,
+                confidence=action.confidence or 0,
+                action_type=action.action_type or "REVIEW",
+            )
         db.commit()
         return _serialize_action(action)
     finally:
@@ -291,9 +305,39 @@ async def bulk_action(
                 action.completed_at = datetime.utcnow()
             elif target_status == "pending":
                 action.completed_at = None
+                # Recalculate risk score on reopen
+                action.risk_score = compute_risk_score(
+                    urgency=action.urgency or "LOW",
+                    due_date=action.due_date,
+                    amount=action.amount,
+                    confidence=action.confidence or 0,
+                    action_type=action.action_type or "REVIEW",
+                )
             affected += 1
 
         db.commit()
         return {"affected": affected, "action": body.action}
+    finally:
+        db.close()
+
+
+@router.post("/actions/recalculate-risk")
+async def recalculate_risk(request: Request) -> dict[str, Any]:
+    """Recalculate risk_score for all pending actions.
+
+    Use this to backfill scores for actions created before risk scoring
+    was implemented, or to refresh scores when due dates have shifted.
+    """
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        pending_actions = db.query(Action).filter_by(status="pending").all()
+        changed = recalculate_risk_scores(pending_actions)
+        db.commit()
+        return {
+            "total_pending": len(pending_actions),
+            "scores_updated": changed,
+        }
     finally:
         db.close()
