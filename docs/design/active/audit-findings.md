@@ -64,9 +64,9 @@ A combined UX and architecture audit of the OWL Document Intelligence Hub reveal
 
 - The Triage module's keyboard shortcut pattern (Y/N/S/D/X/F) is well-designed and should be the template for other queue-based views once discoverability is fixed
 - The alert infrastructure (`/api/insights/alerts`) is architecturally sound — the gap is purely in wiring, not design
-- OCR quality pipeline has extensive design documentation that can accelerate implementation once prioritized
+- OCR quality pipeline has extensive design documentation that can accelerate implementation once prioritized — see [OCR Quality Implementation Plan](../proposed/ocr-quality-implementation-plan.md)
 - The 12-link navigation problem will worsen as new modules are added; solving it now prevents compounding tech debt
-- Consider a plugin/module architecture for future document types rather than hardcoding each into the monolith
+- Consider a plugin/module architecture for future document types rather than hardcoding each into the monolith — see [Plugin Module Architecture design](../proposed/plugin-module-architecture.md)
 - WebSocket support for real-time queue updates would significantly improve multi-user coordination
 - The existing Triage bulk operations pattern is a good reference implementation for [ARCH-01](https://github.com/rsocko/ideation/issues/1010)
 
