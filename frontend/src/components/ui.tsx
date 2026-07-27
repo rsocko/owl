@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 
 export type Tone = 'ok' | 'warn' | 'err' | 'info' | 'muted' | 'success' | 'warning' | 'danger';
@@ -400,12 +400,21 @@ export function SidePanel({
 export function Toast({
   message,
   tone = 'success',
+  duration,
   onDismiss,
 }: {
   message: string;
   tone?: 'success' | 'error' | 'warning';
+  duration?: number;
   onDismiss?: () => void;
 }) {
+  useEffect(() => {
+    if (duration && onDismiss) {
+      const timer = setTimeout(onDismiss, duration);
+      return () => clearTimeout(timer);
+    }
+  }, [duration, onDismiss]);
+
   return (
     <div className={`toast ${tone}`}>
       <span className="toast-message">{message}</span>
