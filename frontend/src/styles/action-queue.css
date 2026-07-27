@@ -65,17 +65,21 @@
   right: 0;
   bottom: 0;
   z-index: 1600;
-  width: min(520px, 90vw);
+  width: min(700px, 90vw);
   background: var(--card);
   border-left: 1px solid var(--border);
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
   transform: translateX(100%);
-  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s ease;
   overflow-y: auto;
   padding: 24px;
   display: grid;
   gap: 16px;
   align-content: start;
+}
+
+.aq-drawer.expanded {
+  width: min(920px, 95vw);
 }
 
 .aq-drawer.open {
@@ -94,6 +98,12 @@
   margin: 0;
   font-size: 1rem;
   font-weight: 800;
+}
+
+.aq-drawer-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .aq-link-button {
@@ -270,8 +280,9 @@ a.aq-pdf-preview .aq-pdf-hint {
 
 .aq-thumb-img {
   width: 100%;
-  height: 180px;
-  object-fit: cover;
+  height: auto;
+  max-height: 480px;
+  object-fit: contain;
   object-position: top;
   display: block;
   background: var(--muted-bg);
@@ -340,6 +351,10 @@ a.aq-pdf-preview .aq-pdf-hint {
   }
 
   .aq-drawer {
+    width: 100vw;
+  }
+
+  .aq-drawer.expanded {
     width: 100vw;
   }
 }
