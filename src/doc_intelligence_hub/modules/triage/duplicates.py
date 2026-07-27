@@ -30,6 +30,7 @@ from doc_intelligence_hub.modules.triage.database import (
     create_duplicate_pair,
     create_queue_item,
     find_existing_duplicate_pair,
+    get_triage_setting,
     resolve_duplicate_pair,
 )
 from doc_intelligence_hub.modules.triage.database import (
@@ -490,6 +491,90 @@ def scan_all_duplicates() -> dict[str, Any]:
     }
 
 
+def on_document_ingested(document_id: int) -> dict[str, Any]:
+    """Hook called after a document is ingested. Runs duplicate detection if enabled.
+
+    Checks the ``duplicate_auto_detect`` triage setting. When the setting is
+    ``"true"`` (opt-in), scores the new document against all existing documents
+    and creates duplicate-pair / triage-queue records for matches above the
+    threshold. When the setting is absent or ``"false"``, this is a no-op.
+
+    Returns a summary dict with detection results or a ``skipped`` flag.
+    """
+    enabled = get_triage_setting("duplicate_auto_detect", "false")
+    if enabled != "true":
+        logger.debug(
+            "Auto-detect disabled, skipping duplicate check for doc %d", document_id
+        )
+        return {"document_id": document_id, "skipped": True, "reason": "auto_detect_disabled"}
+
+    logger.info("Auto-detecting duplicates for newly ingested doc %d", document_id)
+    matches = detect_duplicates(document_id)
+    if not matches:
+        return {"document_id": document_id, "skipped": False, "pairs_created": 0, "triage_items_created": 0}
+
+    meta_a = get_document_metadata(document_id)
+    pairs_created = 0
+    triage_created = 0
+
+    for match in matches:
+        other_id = match["doc_id"]
+
+        # Skip if pair already exists
+        existing = find_existing_duplicate_pair(document_id, other_id)
+        if existing:
+            continue
+
+        overall = match["similarity_score"]
+        breakdown = match["breakdown"]
+
+        pair = create_duplicate_pair(
+            doc_a_id=document_id,
+            doc_b_id=other_id,
+            similarity_score=overall,
+            breakdown=breakdown,
+        )
+        pairs_created += 1
+
+        provider_a = (meta_a or {}).get("provider") or (meta_a or {}).get("provider_name") or "Unknown"
+        meta_b = match.get("metadata", {})
+        provider_b = meta_b.get("provider") or meta_b.get("provider_name") or "Unknown"
+        score_pct = round(overall * 100, 1)
+
+        create_queue_item(
+            item_type="duplicate_document",
+            source="auto_flag",
+            target_type="document_duplicate",
+            target_id=pair["id"],
+            reason=f"Potential duplicate: {score_pct}% similar (docs #{document_id} & #{other_id})",
+            priority=_priority_from_similarity(overall),
+            metadata={
+                "duplicate_pair_id": pair["id"],
+                "doc_a_id": document_id,
+                "doc_b_id": other_id,
+                "similarity_score": overall,
+                "score_pct": score_pct,
+                "provider_a": provider_a,
+                "provider_b": provider_b,
+                "breakdown": breakdown,
+            },
+        )
+        triage_created += 1
+
+    logger.info(
+        "Auto-detect for doc %d: %d pairs created, %d triage items",
+        document_id,
+        pairs_created,
+        triage_created,
+    )
+    return {
+        "document_id": document_id,
+        "skipped": False,
+        "pairs_created": pairs_created,
+        "triage_items_created": triage_created,
+    }
+
+
 # ------------------------------------------------------------------
 # Merge / Resolve
 # ------------------------------------------------------------------
@@ -506,6 +591,7 @@ def merge_documents(
     2. Tag the archived doc in Paperless with `duplicate-of:{primary_id}`
     3. Transfer EOB match links to primary
     4. Resolve associated triage queue item
+    5. Verify primary document metadata is unchanged (defensive check)
 
     Args:
         pair_id: The duplicate pair ID
@@ -514,6 +600,9 @@ def merge_documents(
 
     Returns the resolved duplicate pair dict.
     """
+    # Snapshot primary document metadata before any merge operations
+    pre_merge_metadata = get_document_metadata(primary_doc_id)
+
     # Resolve the pair
     resolved = resolve_duplicate_pair(pair_id, relationship, primary_doc_id)
     if not resolved:
@@ -532,6 +621,9 @@ def merge_documents(
 
     # Resolve the triage queue item
     _resolve_triage_item(pair_id, relationship)
+
+    # Verify primary document metadata is unchanged after merge
+    _verify_primary_metadata(primary_doc_id, pre_merge_metadata)
 
     return resolved
 
@@ -710,3 +802,68 @@ def _resolve_triage_item(pair_id: str, resolution: str) -> None:
             session.commit()
     finally:
         session.close()
+
+
+def _verify_primary_metadata(
+    primary_doc_id: int, pre_merge_metadata: dict | None
+) -> None:
+    """Defensive check: verify that the primary document's metadata was not altered by the merge.
+
+    Compares a snapshot taken before the merge with a fresh read afterwards.
+    Logs a warning if any key metadata fields differ. This is intentionally
+    non-blocking — the merge result is not rolled back.
+    """
+    if pre_merge_metadata is None:
+        logger.debug(
+            "No pre-merge metadata snapshot for doc %d; skipping verification",
+            primary_doc_id,
+        )
+        return
+
+    post_merge_metadata = get_document_metadata(primary_doc_id)
+    if post_merge_metadata is None:
+        logger.warning(
+            "Could not fetch post-merge metadata for primary doc %d; "
+            "metadata preservation could not be verified",
+            primary_doc_id,
+        )
+        return
+
+    checked_fields = [
+        "title",
+        "provider",
+        "provider_name",
+        "amount",
+        "date_of_service",
+        "invoice_number",
+        "claim_number",
+        "content_hash",
+        "patient_name",
+    ]
+
+    changed_fields: list[str] = []
+    for field in checked_fields:
+        before = pre_merge_metadata.get(field)
+        after = post_merge_metadata.get(field)
+        if before != after:
+            changed_fields.append(field)
+            logger.warning(
+                "Primary doc %d metadata field '%s' changed during merge: %r -> %r",
+                primary_doc_id,
+                field,
+                before,
+                after,
+            )
+
+    if changed_fields:
+        logger.warning(
+            "Primary doc %d had %d metadata field(s) change during merge: %s. "
+            "This may indicate an unintended side-effect.",
+            primary_doc_id,
+            len(changed_fields),
+            ", ".join(changed_fields),
+        )
+    else:
+        logger.info(
+            "Primary doc %d metadata verified unchanged after merge", primary_doc_id
+        )

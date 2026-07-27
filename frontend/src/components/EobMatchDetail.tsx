@@ -29,22 +29,41 @@ import '../styles/eob-pages.css';
 // ------------------------------------------------------------------
 
 interface EobDetails {
+  id?: number | null;
+  document_id?: number | null;
+  run_id?: number | null;
+  title?: string | null;
+  classification_score?: number | null;
   provider_name?: string | null;
   patient_name?: string | null;
   insurance_company?: string | null;
+  policy_number?: string | null;
   date_of_service?: string | null;
   total_billed?: number | null;
+  total_allowed?: number | null;
+  total_plan_pays?: number | null;
   total_patient_responsibility?: number | null;
   claim_number?: string | null;
+  services_json?: string | null;
+  created_at?: string | null;
 }
 
 interface BillDetails {
+  id?: number | null;
+  document_id?: number | null;
+  run_id?: number | null;
+  title?: string | null;
+  classification_score?: number | null;
   provider_name?: string | null;
   patient_name?: string | null;
   date_of_service?: string | null;
+  due_date?: string | null;
   total_amount?: number | null;
   balance_due?: number | null;
   invoice_number?: string | null;
+  payment_status?: string | null;
+  services_json?: string | null;
+  created_at?: string | null;
 }
 
 interface EobMatch {

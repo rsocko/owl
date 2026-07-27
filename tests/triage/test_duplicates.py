@@ -1,10 +1,19 @@
-"""Tests for triage.duplicates — signal scorers, scoring, threshold logic."""
+"""Tests for triage.duplicates — signal scorers, scoring, threshold logic, and auto-detection."""
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
-from doc_intelligence_hub.modules.triage.database import create_duplicate_pair
+from doc_intelligence_hub.modules.triage.database import (
+    configure,
+    create_duplicate_pair,
+    get_all_triage_settings,
+    get_triage_setting,
+    init_db,
+    set_triage_setting,
+)
 from doc_intelligence_hub.modules.triage.duplicates import (
     DUPLICATE_THRESHOLD,
     WEIGHTS,
@@ -14,8 +23,18 @@ from doc_intelligence_hub.modules.triage.duplicates import (
     _score_invoice_number,
     _score_provider,
     _score_title,
+    _verify_primary_metadata,
+    on_document_ingested,
     score_documents,
 )
+
+
+@pytest.fixture()
+def db():
+    """Create an in-memory SQLite database for each test."""
+    configure("sqlite:///:memory:")
+    init_db()
+    yield
 
 
 class TestWeightsConfig:
@@ -216,3 +235,103 @@ class TestCreateDuplicatePairValidation:
                 similarity_score=1.0,
                 breakdown={"invoice_number": 1.0},
             )
+
+
+class TestTriageSettings:
+    """Tests for the triage_settings table and CRUD helpers."""
+
+    def test_get_default_when_unset(self, db):
+        assert get_triage_setting("nonexistent") is None
+        assert get_triage_setting("nonexistent", "fallback") == "fallback"
+
+    def test_set_and_get(self, db):
+        set_triage_setting("duplicate_auto_detect", "true")
+        assert get_triage_setting("duplicate_auto_detect") == "true"
+
+    def test_update_existing(self, db):
+        set_triage_setting("duplicate_auto_detect", "true")
+        set_triage_setting("duplicate_auto_detect", "false")
+        assert get_triage_setting("duplicate_auto_detect") == "false"
+
+    def test_get_all(self, db):
+        set_triage_setting("duplicate_auto_detect", "true")
+        set_triage_setting("other_key", "42")
+        all_settings = get_all_triage_settings()
+        assert all_settings == {"duplicate_auto_detect": "true", "other_key": "42"}
+
+
+class TestOnDocumentIngested:
+    """Tests for the auto-detection ingestion hook."""
+
+    def test_skips_when_disabled(self, db):
+        result = on_document_ingested(123)
+        assert result["skipped"] is True
+        assert result["reason"] == "auto_detect_disabled"
+
+    def test_skips_when_explicitly_false(self, db):
+        set_triage_setting("duplicate_auto_detect", "false")
+        result = on_document_ingested(123)
+        assert result["skipped"] is True
+
+    @patch("doc_intelligence_hub.modules.triage.duplicates.detect_duplicates", return_value=[])
+    @patch("doc_intelligence_hub.modules.triage.duplicates.get_document_metadata", return_value={"document_id": 123, "title": "Test"})
+    def test_runs_when_enabled_no_matches(self, mock_meta, mock_detect, db):
+        set_triage_setting("duplicate_auto_detect", "true")
+        result = on_document_ingested(123)
+        assert result["skipped"] is False
+        assert result["pairs_created"] == 0
+        mock_detect.assert_called_once_with(123)
+
+    @patch("doc_intelligence_hub.modules.triage.duplicates.detect_duplicates")
+    @patch("doc_intelligence_hub.modules.triage.duplicates.get_document_metadata")
+    def test_creates_pairs_when_matches_found(self, mock_meta, mock_detect, db):
+        mock_meta.return_value = {"document_id": 1, "title": "Test", "provider": "Dr. A"}
+        mock_detect.return_value = [
+            {
+                "doc_id": 2,
+                "similarity_score": 0.85,
+                "breakdown": {"invoice_number": 1.0},
+                "metadata": {"provider": "Dr. A"},
+            }
+        ]
+        set_triage_setting("duplicate_auto_detect", "true")
+        result = on_document_ingested(1)
+        assert result["skipped"] is False
+        assert result["pairs_created"] == 1
+        assert result["triage_items_created"] == 1
+
+
+class TestVerifyPrimaryMetadata:
+    """Tests for the _verify_primary_metadata defensive check."""
+
+    @patch("doc_intelligence_hub.modules.triage.duplicates.get_document_metadata")
+    def test_no_warning_when_unchanged(self, mock_meta, caplog):
+        pre = {"title": "Bill", "amount": 100, "provider": "Dr. X"}
+        mock_meta.return_value = {"title": "Bill", "amount": 100, "provider": "Dr. X"}
+        import logging
+        with caplog.at_level(logging.INFO):
+            _verify_primary_metadata(1, pre)
+        assert "verified unchanged" in caplog.text
+
+    @patch("doc_intelligence_hub.modules.triage.duplicates.get_document_metadata")
+    def test_warns_when_changed(self, mock_meta, caplog):
+        pre = {"title": "Bill", "amount": 100, "provider": "Dr. X"}
+        mock_meta.return_value = {"title": "Different Title", "amount": 100, "provider": "Dr. X"}
+        import logging
+        with caplog.at_level(logging.WARNING):
+            _verify_primary_metadata(1, pre)
+        assert "title" in caplog.text
+        assert "changed during merge" in caplog.text
+
+    def test_skips_when_no_pre_metadata(self, caplog):
+        import logging
+        with caplog.at_level(logging.DEBUG):
+            _verify_primary_metadata(1, None)
+        # Should not raise
+
+    @patch("doc_intelligence_hub.modules.triage.duplicates.get_document_metadata", return_value=None)
+    def test_warns_when_post_metadata_unavailable(self, mock_meta, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING):
+            _verify_primary_metadata(1, {"title": "Test"})
+        assert "could not be verified" in caplog.text
