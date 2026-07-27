@@ -251,6 +251,8 @@ def _migrate_missing_columns(engine):
             ("user_status", "TEXT DEFAULT 'unreviewed'"),
             ("reviewed_at", "DATETIME"),
             ("user_notes", "TEXT"),
+            ("error_type", "TEXT"),
+            ("error_details", "TEXT"),
         ],
         "eob_records": [
             ("status", "TEXT DEFAULT 'unmatched'"),
