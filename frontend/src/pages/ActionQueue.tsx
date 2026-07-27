@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Badge,
   Button,
@@ -167,6 +167,18 @@ export default function ActionQueue() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
 
+  // [ARCH-01] Bulk selection state
+  const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
+  const lastCheckedRef = useRef<number | null>(null);
+  const [pendingBulkAction, setPendingBulkAction] = useState<{ action: string; ids: number[] } | null>(null);
+
+  // [UX-10] Per-item loading state for bulk ops
+  const [processingIds, setProcessingIds] = useState<Set<number>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+
+  // [UX-07] Cache selected action so filter changes don't lose it
+  const [cachedAction, setCachedAction] = useState<ActionItem | null>(null);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -217,29 +229,89 @@ export default function ActionQueue() {
     });
   }, [actions, search]);
 
+  // [UX-07] Preserve selection across filter changes — cache the selected action
+  // When the selected item leaves the filtered set, show it from cache with a banner
+  const selectedInView = useMemo(
+    () => (selectedActionId !== null ? filteredActions.some((a) => a.id === selectedActionId) : false),
+    [filteredActions, selectedActionId],
+  );
+
   useEffect(() => {
     if (selectedActionId === null) return;
-    if (!filteredActions.some((action) => action.id === selectedActionId)) {
-      setSelectedActionId(null);
+    const found = filteredActions.find((a) => a.id === selectedActionId);
+    if (found) {
+      setCachedAction(found);
     }
+    // Don't clear cachedAction when item leaves view — that's the point of UX-07
   }, [filteredActions, selectedActionId]);
+
+  const selectedAction = useMemo(() => {
+    if (selectedActionId === null) return null;
+    // Prefer live data from current view, fall back to cache
+    return filteredActions.find((a) => a.id === selectedActionId) ?? cachedAction;
+  }, [filteredActions, selectedActionId, cachedAction]);
+
+  // [UX-15] Reset PDF viewer state on action selection change
+  useEffect(() => {
+    setPdfExpanded(false);
+  }, [selectedActionId]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && selectedActionId !== null) {
+      if (e.key === 'Escape') {
         const tag = (e.target as HTMLElement)?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-        setSelectedActionId(null);
+        if (pendingBulkAction) { setPendingBulkAction(null); return; }
+        if (selectedActionId !== null) setSelectedActionId(null);
       }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectedActionId]);
+  }, [selectedActionId, pendingBulkAction]);
 
-  const selectedAction = useMemo(
-    () => filteredActions.find((action) => action.id === selectedActionId) ?? null,
-    [filteredActions, selectedActionId],
-  );
+  // ------------------------------------------------------------------
+  // Selection helpers (ARCH-01)
+  // ------------------------------------------------------------------
+
+  const toggleCheck = (actionId: number, shiftKey = false) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+
+      if (shiftKey && lastCheckedRef.current !== null) {
+        const startIdx = filteredActions.findIndex((a) => a.id === lastCheckedRef.current);
+        const endIdx = filteredActions.findIndex((a) => a.id === actionId);
+        if (startIdx >= 0 && endIdx >= 0) {
+          const [lo, hi] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+          for (let i = lo; i <= hi; i++) {
+            next.add(filteredActions[i].id);
+          }
+          lastCheckedRef.current = actionId;
+          return next;
+        }
+      }
+
+      if (next.has(actionId)) {
+        next.delete(actionId);
+      } else {
+        next.add(actionId);
+      }
+      lastCheckedRef.current = actionId;
+      return next;
+    });
+  };
+
+  const selectAllVisible = () => {
+    const allChecked = filteredActions.length > 0 && filteredActions.every((a) => checkedIds.has(a.id));
+    if (allChecked) {
+      setCheckedIds(new Set());
+    } else {
+      setCheckedIds(new Set(filteredActions.map((a) => a.id)));
+    }
+  };
+
+  // ------------------------------------------------------------------
+  // Actions
+  // ------------------------------------------------------------------
 
   const runCheck = async (mode: 'health' | 'custom-fields') => {
     setBusyKey(mode);
@@ -280,6 +352,7 @@ export default function ActionQueue() {
 
   const updateAction = async (actionId: number, nextStatus: 'completed' | 'dismissed' | 'pending') => {
     setBusyKey(`action-${actionId}-${nextStatus}`);
+    setProcessingIds(new Set([actionId]));
     try {
       await endpoints.actionQueue.updateAction(String(actionId), { status: nextStatus, dry_run: false });
       await loadData();
@@ -291,15 +364,66 @@ export default function ActionQueue() {
       });
     } finally {
       setBusyKey(null);
+      setProcessingIds(new Set());
     }
+  };
+
+  // [ARCH-01] Bulk action handler
+  const handleBulkAction = async (action: 'complete' | 'dismiss' | 'reopen') => {
+    const ids = Array.from(checkedIds);
+    if (ids.length === 0) return;
+
+    // Destructive actions require confirmation
+    if (action === 'dismiss') {
+      setPendingBulkAction({ action, ids });
+      return;
+    }
+
+    await executeBulkAction(action, ids);
+  };
+
+  const executeBulkAction = async (action: string, ids: number[]) => {
+    setBusyKey(`bulk-${action}`);
+    // [UX-10] Mark all affected items as processing
+    setProcessingIds(new Set(ids));
+    setBulkProgress({ done: 0, total: ids.length });
+    try {
+      const result = await endpoints.actionQueue.bulk({ action, action_ids: ids });
+      setBulkProgress({ done: result.affected, total: ids.length });
+      setCheckedIds(new Set());
+      setToast({
+        message: `${result.affected} action${result.affected !== 1 ? 's' : ''} ${action}${action.endsWith('e') ? 'd' : 'ed'}.`,
+      });
+      await loadData();
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : `Bulk ${action} failed.`, tone: 'error' });
+    } finally {
+      setBusyKey(null);
+      setProcessingIds(new Set());
+      setBulkProgress(null);
+    }
+  };
+
+  const confirmPendingBulkAction = async () => {
+    if (!pendingBulkAction) return;
+    const { action, ids } = pendingBulkAction;
+    setPendingBulkAction(null);
+    await executeBulkAction(action, ids);
   };
 
   const handleClosePanel = useCallback(() => {
     setSelectedActionId(null);
+    setCachedAction(null);
   }, []);
 
   const counts = status?.database ?? {};
   const progress = status?.progress;
+
+  // [UX-06] Progress tracking: resolved today = completed + dismissed
+  const resolvedToday = (counts.completed ?? 0) + (counts.dismissed ?? 0);
+  const totalActions = counts.total ?? 0;
+  const pendingCount = counts.pending ?? 0;
+  const progressPct = totalActions > 0 ? Math.round((resolvedToday / totalActions) * 100) : 0;
 
   return (
     <>
@@ -325,7 +449,7 @@ export default function ActionQueue() {
       />
 
       <StatGrid>
-        <StatCard title="Pending" metric={counts.pending ?? 0} desc="Awaiting review or downstream completion." />
+        <StatCard title="Pending" metric={pendingCount} desc="Awaiting review or downstream completion." />
         <StatCard title="Completed" metric={counts.completed ?? 0} desc="Finished and written back." />
         <StatCard title="Dismissed" metric={counts.dismissed ?? 0} desc="Closed without further action." />
         <StatCard
@@ -339,15 +463,35 @@ export default function ActionQueue() {
         />
       </StatGrid>
 
+      {/* [UX-06] Progress indicator */}
+      {totalActions > 0 && (
+        <div className="aq-progress-section">
+          <div className="aq-progress-header">
+            <span className="aq-progress-label">
+              {pendingCount === 0
+                ? '🎉 Inbox zero — all actions resolved!'
+                : `${resolvedToday} of ${totalActions} resolved`}
+            </span>
+            <span className="aq-progress-pct">{progressPct}%</span>
+          </div>
+          <div className="aq-progress-track">
+            <div
+              className={`aq-progress-fill${pendingCount === 0 ? ' complete' : ''}`}
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       <div className="aq-toolbar">
         <FilterPills
           active={filter}
           onChange={(value) => setFilter(value as ActionFilter)}
           options={[
-            { key: 'pending', label: `Pending (${counts.pending ?? 0})` },
+            { key: 'pending', label: `Pending (${pendingCount})` },
             { key: 'completed', label: `Completed (${counts.completed ?? 0})` },
             { key: 'dismissed', label: `Dismissed (${counts.dismissed ?? 0})` },
-            { key: 'all', label: `All (${counts.total ?? 0})` },
+            { key: 'all', label: `All (${totalActions})` },
           ]}
         />
         <div className="aq-search">
@@ -360,6 +504,13 @@ export default function ActionQueue() {
         </div>
       </div>
 
+      {/* [UX-10] Bulk progress counter */}
+      {bulkProgress && (
+        <div className="aq-bulk-progress" role="status" aria-live="polite">
+          Processing {bulkProgress.done} of {bulkProgress.total}…
+        </div>
+      )}
+
       {loading ? (
         <><SkeletonLoader variant="stat-grid" /><div className="section"><SkeletonLoader variant="table" /></div></>
       ) : error ? (
@@ -367,11 +518,62 @@ export default function ActionQueue() {
       ) : (
         <div className="action-queue-layout">
           <Card title={`Pending actions (${filteredActions.length})`} className="aq-table-card">
+            {/* [ARCH-01] Bulk action bar */}
+            {checkedIds.size > 0 && (
+              <div className="aq-bulk-bar">
+                <span className="aq-bulk-count">
+                  {checkedIds.size} selected
+                  {(() => {
+                    const visibleIds = new Set(filteredActions.map((a) => a.id));
+                    const hiddenCount = Array.from(checkedIds).filter((id) => !visibleIds.has(id)).length;
+                    return hiddenCount > 0 ? ` (${hiddenCount} hidden by filter)` : '';
+                  })()}
+                </span>
+                <div className="btn-group">
+                  <Button variant="success" size="sm" onClick={() => void handleBulkAction('complete')} disabled={busyKey !== null}>
+                    Complete
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => void handleBulkAction('dismiss')} disabled={busyKey !== null}>
+                    Dismiss
+                  </Button>
+                  <Button size="sm" onClick={() => void handleBulkAction('reopen')} disabled={busyKey !== null}>
+                    Re-open
+                  </Button>
+                  <Button size="sm" onClick={() => setCheckedIds(new Set())} disabled={busyKey !== null}>
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* [ARCH-01] Select all toolbar */}
+            {filteredActions.length > 0 && (
+              <div className="aq-select-toolbar">
+                <label className="aq-select-all">
+                  <input
+                    type="checkbox"
+                    checked={filteredActions.length > 0 && filteredActions.every((a) => checkedIds.has(a.id))}
+                    onChange={selectAllVisible}
+                  />
+                  <span>Select visible ({filteredActions.length})</span>
+                </label>
+              </div>
+            )}
+
             {filteredActions.length === 0 ? (
-              <EmptyState
-                title="No actions match this view"
-                desc="Try a different status filter or rerun the pipeline to discover new actions."
-              />
+              pendingCount === 0 && filter === 'pending' ? (
+                /* [UX-06] Inbox zero celebration */
+                <EmptyState
+                  icon="🎉"
+                  title="Inbox zero!"
+                  desc="All actions have been resolved. Great job! Run the pipeline to discover new actions."
+                />
+              ) : (
+                <EmptyState
+                  title="No actions match this view"
+                  desc="Try a different status filter or rerun the pipeline to discover new actions."
+                />
+              )
             ) : (
               <DataTable<ActionItem>
                 rows={filteredActions}
@@ -379,14 +581,34 @@ export default function ActionQueue() {
                 emptyLabel="No actions found"
                 columns={[
                   {
+                    key: 'select',
+                    header: '',
+                    render: (row) => (
+                      <input
+                        type="checkbox"
+                        checked={checkedIds.has(row.id)}
+                        onChange={(e) => toggleCheck(row.id, e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey)}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`Select action ${row.id}`}
+                      />
+                    ),
+                    width: '40px',
+                  },
+                  {
                     key: 'item',
                     header: 'Action item',
                     render: (row) => {
                       const { tone } = dueMeta(row);
+                      const isProcessing = processingIds.has(row.id);
                       return (
-                        <button className="aq-link-button" onClick={() => { setSelectedActionId(row.id); setPdfExpanded(false); }}>
+                        <button className="aq-link-button" onClick={() => setSelectedActionId(row.id)}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span className={`aq-urgency-dot ${tone}`} />
+                            {/* [UX-10] Inline spinner for processing items */}
+                            {isProcessing ? (
+                              <span className="aq-spinner" aria-label="Processing" />
+                            ) : (
+                              <span className={`aq-urgency-dot ${tone}`} />
+                            )}
                             <div className={selectedActionId === row.id ? 'aq-row-title selected' : 'aq-row-title'}>
                               {row.title || row.document_title || `Action #${row.id}`}
                             </div>
@@ -491,6 +713,13 @@ export default function ActionQueue() {
                 }
               >
                 <div className="aq-detail-list" role="region" aria-live="polite" aria-label="Action detail panel">
+                  {/* [UX-07] Banner when selected item is not in the current filtered view */}
+                  {!selectedInView && (
+                    <div className="aq-out-of-view-banner" role="status">
+                      ⚠ This item is not in the current view. Change filters to see it in the list.
+                    </div>
+                  )}
+
                   <div>
                     <div className="aq-detail-title">{selectedAction.title || selectedAction.document_title || `Action #${selectedAction.id}`}</div>
                     <div className="text-muted">{selectedAction.summary || 'No summary provided.'}</div>
@@ -650,6 +879,32 @@ export default function ActionQueue() {
                   />
                 )}
             </Card>
+          </div>
+        </div>
+      )}
+
+      {/* [ARCH-01] Confirmation modal for destructive bulk actions */}
+      {pendingBulkAction && (
+        <div className="aq-modal-overlay" onClick={() => setPendingBulkAction(null)}>
+          <div className="aq-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="aq-modal-title">
+              Confirm bulk {pendingBulkAction.action}
+            </div>
+            <p className="aq-modal-desc">
+              Are you sure you want to <strong>{pendingBulkAction.action}</strong>{' '}
+              {pendingBulkAction.ids.length} action{pendingBulkAction.ids.length !== 1 ? 's' : ''}?
+              This action cannot be easily undone in bulk.
+            </p>
+            <div className="aq-modal-actions">
+              <Button size="sm" onClick={() => setPendingBulkAction(null)}>Cancel</Button>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => void confirmPendingBulkAction()}
+              >
+                {pendingBulkAction.action === 'dismiss' ? 'Dismiss' : pendingBulkAction.action} {pendingBulkAction.ids.length} actions
+              </Button>
+            </div>
           </div>
         </div>
       )}
