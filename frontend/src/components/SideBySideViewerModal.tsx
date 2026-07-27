@@ -2,13 +2,15 @@ import { useCallback, useEffect } from 'react';
 import { endpoints } from '../lib/api';
 import '../styles/document-preview.css';
 
-interface DocumentPane {
+export interface DocumentPane {
   documentId: number;
   title?: string;
   paperlessUrl?: string | null;
 }
 
-interface SideBySideViewerModalProps {
+export interface SideBySideViewerModalProps {
+  /** Modal heading — defaults to "Compare Documents" */
+  heading?: string;
   left: DocumentPane;
   right: DocumentPane;
   onClose: () => void;
@@ -16,9 +18,11 @@ interface SideBySideViewerModalProps {
 
 /**
  * Full-screen modal with two PDF previews side-by-side, each independently scrollable.
- * Designed for comparing EOB ↔ Bill documents during match review.
+ * Generic and reusable for any two-document comparison workflow
+ * (e.g. EOB ↔ Bill, Receipt ↔ Order, Statement ↔ Invoice).
  */
 export default function SideBySideViewerModal({
+  heading = 'Compare Documents',
   left,
   right,
   onClose,
@@ -54,7 +58,7 @@ export default function SideBySideViewerModal({
     <div className="doc-viewer-overlay" onClick={handleOverlayClick}>
       <div className="doc-sbs-container">
         <div className="doc-sbs-header">
-          <div className="doc-viewer-title">Compare Documents</div>
+          <div className="doc-viewer-title">{heading}</div>
           <button className="doc-viewer-close-btn" onClick={onClose} title="Close (Esc)">
             ✕
           </button>
