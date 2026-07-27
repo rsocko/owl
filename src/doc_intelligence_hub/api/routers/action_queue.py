@@ -366,3 +366,143 @@ async def recalculate_risk(request: Request) -> dict[str, Any]:
         }
     finally:
         db.close()
+
+
+class BackfillRequest(BaseModel):
+    status_filter: str | None = Field(
+        default=None,
+        pattern=r"^(pending|completed|dismissed)$",
+        description="Only backfill actions with this status (default: all unsynced)",
+    )
+    limit: int | None = Field(default=None, ge=1, le=500, description="Max actions to backfill")
+    dry_run: bool = Field(default=True, description="Preview what would be written without modifying Paperless")
+    force: bool = Field(default=False, description="Re-sync even if last_synced_status is already set")
+
+
+@router.post("/actions/backfill")
+async def backfill_paperless(request: Request, body: BackfillRequest) -> dict[str, Any]:
+    """Re-write action metadata to Paperless custom fields without re-running AI analysis.
+
+    Use this to fix Paperless after a bug in the enrichment step, or to sync
+    actions that were created while write_to_paperless was disabled.
+
+    This uses the action data already stored in DocIntel's database — no Ollama
+    call is made.
+    """
+    import asyncio
+    import logging
+
+    from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
+
+    _sync_action_queue_settings(request)
+
+    if not action_queue_settings.write_to_paperless and not body.dry_run:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=400,
+            detail="write_to_paperless is disabled in settings. Enable it or use dry_run mode.",
+        )
+
+    init_db()
+    db = get_session()
+    log = logging.getLogger(__name__)
+
+    try:
+        query = db.query(Action)
+
+        if body.status_filter:
+            query = query.filter_by(status=body.status_filter)
+
+        if not body.force:
+            # Only actions that were never successfully synced to Paperless
+            query = query.filter(
+                (Action.last_synced_status == None) | (Action.last_synced_status == "")  # noqa: E711
+            )
+
+        query = query.order_by(Action.created_at.asc())
+
+        if body.limit:
+            query = query.limit(body.limit)
+
+        actions_to_sync = query.all()
+
+        if body.dry_run:
+            return {
+                "dry_run": True,
+                "would_sync": len(actions_to_sync),
+                "actions": [
+                    {
+                        "id": a.id,
+                        "document_id": a.document_id,
+                        "document_title": a.document_title,
+                        "action_type": a.action_type,
+                        "status": a.status,
+                        "last_synced_status": a.last_synced_status,
+                    }
+                    for a in actions_to_sync
+                ],
+            }
+
+        # Live run — write to Paperless
+        enricher = PaperlessEnricher()
+        await enricher.ensure_custom_fields_exist()
+
+        synced = 0
+        failed = 0
+        errors: list[dict[str, Any]] = []
+
+        for action in actions_to_sync:
+            try:
+                # Reconstruct enrichment payload from stored action fields
+                enrichment_data = {
+                    "action_type": action.action_type,
+                    "urgency": action.urgency or "LOW",
+                    "due_date": action.due_date.isoformat() if action.due_date else None,
+                    "amount": action.amount,
+                    "summary": action.summary or "",
+                    "overall_confidence": action.confidence or 0,
+                }
+
+                # Count sibling actions for the same document
+                action_count = db.query(Action).filter_by(document_id=action.document_id).count()
+
+                await enricher.enrich_document(
+                    action.document_id, enrichment_data, action_count=action_count
+                )
+
+                # Also sync the current status (not just "pending")
+                if action.status != "pending":
+                    await enricher.sync_status(action.document_id, action.status)
+
+                action.last_synced_status = action.status
+                synced += 1
+                log.info(
+                    "Backfill: doc_id=%s action_id=%s synced to Paperless (status=%s)",
+                    action.document_id, action.id, action.status,
+                )
+            except Exception as exc:
+                failed += 1
+                errors.append({
+                    "action_id": action.id,
+                    "document_id": action.document_id,
+                    "error": str(exc),
+                })
+                log.warning(
+                    "Backfill: doc_id=%s action_id=%s failed: %s",
+                    action.document_id, action.id, exc,
+                )
+
+            # Brief pause to avoid hammering Paperless
+            await asyncio.sleep(0.1)
+
+        db.commit()
+
+        return {
+            "dry_run": False,
+            "total_candidates": len(actions_to_sync),
+            "synced": synced,
+            "failed": failed,
+            "errors": errors[:20],  # Cap error list to avoid huge responses
+        }
+    finally:
+        db.close()

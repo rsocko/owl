@@ -222,3 +222,86 @@ class TestBulkAction:
             json={"action": "complete", "action_ids": [99999]},
         )
         assert resp.status_code == 404
+
+
+class TestBackfill:
+    """Tests for POST /api/queue/actions/backfill."""
+
+    def test_backfill_dry_run(self, client, seed_actions):
+        """Dry run returns list of unsynced actions without modifying Paperless."""
+        resp = client.post(
+            "/api/queue/actions/backfill",
+            json={"dry_run": True},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["dry_run"] is True
+        assert "would_sync" in data
+        # All seed actions have last_synced_status=None, so all should be candidates
+        assert data["would_sync"] == 3
+        assert len(data["actions"]) == 3
+
+    def test_backfill_dry_run_with_status_filter(self, client, seed_actions):
+        """Status filter limits candidates to only that status."""
+        resp = client.post(
+            "/api/queue/actions/backfill",
+            json={"dry_run": True, "status_filter": "pending"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["would_sync"] == 2
+        for action in data["actions"]:
+            assert action["status"] == "pending"
+
+    def test_backfill_dry_run_with_limit(self, client, seed_actions):
+        """Limit caps the number of candidates."""
+        resp = client.post(
+            "/api/queue/actions/backfill",
+            json={"dry_run": True, "limit": 1},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["would_sync"] == 1
+
+    def test_backfill_live_run(self, client, seed_actions):
+        """Live backfill writes to Paperless and updates last_synced_status."""
+        from unittest.mock import AsyncMock, patch
+
+        mock_enricher = AsyncMock()
+        mock_enricher.ensure_custom_fields_exist = AsyncMock()
+        mock_enricher.enrich_document = AsyncMock()
+        mock_enricher.sync_status = AsyncMock()
+
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
+            return_value=mock_enricher,
+        ):
+            resp = client.post(
+                "/api/queue/actions/backfill",
+                json={"dry_run": False},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["dry_run"] is False
+            assert data["synced"] == 3
+            assert data["failed"] == 0
+
+        # Verify that running dry_run again shows 0 candidates (all now synced)
+        resp2 = client.post(
+            "/api/queue/actions/backfill",
+            json={"dry_run": True},
+        )
+        assert resp2.json()["would_sync"] == 0
+
+    def test_backfill_rejects_when_writes_disabled(self, client, seed_actions):
+        """Should return 400 when write_to_paperless is disabled and not dry_run."""
+        client.app.state.hub_settings.write_to_paperless = False
+        try:
+            resp = client.post(
+                "/api/queue/actions/backfill",
+                json={"dry_run": False},
+            )
+            assert resp.status_code == 400
+            assert "write_to_paperless" in resp.json()["error"]["message"]
+        finally:
+            client.app.state.hub_settings.write_to_paperless = True
