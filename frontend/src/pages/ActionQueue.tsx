@@ -119,6 +119,8 @@ function actionTypeTone(type: string) {
       return 'info' as const;
     case 'REVIEW':
       return 'danger' as const;
+    case 'TASK':
+      return 'info' as const;
     default:
       return 'muted' as const;
   }
@@ -361,6 +363,32 @@ export default function ActionQueue() {
     }
   };
 
+  const runBackfill = async (dryRun: boolean) => {
+    setBusyKey(dryRun ? 'backfill-dry' : 'backfill');
+    try {
+      const result = await endpoints.actionQueue.backfill({ dry_run: dryRun }) as Record<string, unknown>;
+      await loadData();
+      if (dryRun) {
+        const count = (result as { would_sync?: number }).would_sync ?? 0;
+        setToast({ message: `Backfill preview: ${count} action(s) would be synced to Paperless.` });
+      } else {
+        const synced = (result as { synced?: number }).synced ?? 0;
+        const failed = (result as { failed?: number }).failed ?? 0;
+        const msg = failed > 0
+          ? `Backfill complete: ${synced} synced, ${failed} failed.`
+          : `Backfill complete: ${synced} action(s) synced to Paperless.`;
+        setToast({ message: msg, tone: failed > 0 ? 'error' : 'success' });
+      }
+    } catch (err) {
+      setToast({
+        message: err instanceof Error ? err.message : 'Backfill failed.',
+        tone: 'error',
+      });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const updateAction = async (actionId: number, nextStatus: 'completed' | 'dismissed' | 'pending') => {
     setBusyKey(`action-${actionId}-${nextStatus}`);
     setProcessingIds(new Set([actionId]));
@@ -464,6 +492,12 @@ export default function ActionQueue() {
             </Button>
             <Button variant="primary" onClick={() => void runPipeline(false)} disabled={busyKey !== null}>
               Run pipeline
+            </Button>
+            <Button variant="ghost" onClick={() => void runBackfill(true)} disabled={busyKey !== null} title="Preview which actions would be re-synced to Paperless">
+              Backfill preview
+            </Button>
+            <Button onClick={() => void runBackfill(false)} disabled={busyKey !== null} title="Re-write action metadata to Paperless for actions that were never synced">
+              Backfill Paperless
             </Button>
           </div>
         }
