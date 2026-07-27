@@ -22,7 +22,7 @@ _RESPOND_KEYWORDS = re.compile(
     r"\b(respond|reply|action\s*required|rsvp|confirm|"
     r"please\s*call|contact\s*us|follow[\s-]?up|signature\s*required|"
     r"verification\s*needed|verify\s*your|update\s*your\s*information|"
-    r"appeal|dispute|grievance|authorization\s*required|"
+    r"authorization\s*required|"
     r"jury\s*duty|summons|subpoena|citation)\b",
     re.IGNORECASE,
 )
@@ -67,7 +67,26 @@ _ARCHIVE_KEYWORDS = re.compile(
 _TASK_KEYWORDS = re.compile(
     r"\b(create\s*(an?\s*)?account|register|enroll|activate|set\s*up|"
     r"log\s*in|go\s*online|download|install|update\s*your|"
-    r"cancel|opt[\s-]?out|unsubscribe|transfer|submit|complete\s*form)\b",
+    r"transfer|submit|complete\s*form)\b",
+    re.IGNORECASE,
+)
+_CANCEL_KEYWORDS = re.compile(
+    r"\b(cancel|cancellation|opt[\s-]?out|unsubscribe|terminate|"
+    r"discontinue|close\s*(my\s*)?account|end\s*service|"
+    r"stop\s*auto[\s-]?pay|withdrawal|do\s*not\s*renew)\b",
+    re.IGNORECASE,
+)
+_RENEW_KEYWORDS = re.compile(
+    r"\b(renew(al)?|subscription\s*(due|expir)|membership\s*(due|expir)|"
+    r"auto[\s-]?renew|annual\s*fee\s*due|license\s*renewal|"
+    r"re[\s-]?enroll|re[\s-]?register|reinstate|continuation)\b",
+    re.IGNORECASE,
+)
+_DISPUTE_KEYWORDS = re.compile(
+    r"\b(dispute|overcharge|error|discrepancy|incorrect|"
+    r"billing\s*error|wrong\s*amount|charge\s*back|"
+    r"appeal|grievance|challenge|protest|contest|"
+    r"not\s*authorized|fraud(ulent)?|unauthorized\s*charge)\b",
     re.IGNORECASE,
 )
 
@@ -163,6 +182,9 @@ class RuleBasedAnalyzer:
             "SIGN": len(_SIGN_KEYWORDS.findall(text)) * 18,
             "ARCHIVE": len(_ARCHIVE_KEYWORDS.findall(text)) * 8,
             "TASK": len(_TASK_KEYWORDS.findall(text)) * 15,
+            "CANCEL": len(_CANCEL_KEYWORDS.findall(text)) * 18,
+            "RENEW": len(_RENEW_KEYWORDS.findall(text)) * 17,
+            "DISPUTE": len(_DISPUTE_KEYWORDS.findall(text)) * 19,
         }
 
         # Boost from tags

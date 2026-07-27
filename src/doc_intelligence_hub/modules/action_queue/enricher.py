@@ -28,6 +28,9 @@ CUSTOM_FIELD_DEFINITIONS = [
                 {"label": "SCHEDULE"},
                 {"label": "SIGN"},
                 {"label": "ARCHIVE"},
+                {"label": "CANCEL"},
+                {"label": "RENEW"},
+                {"label": "DISPUTE"},
                 {"label": "TASK"},
             ]
         },
