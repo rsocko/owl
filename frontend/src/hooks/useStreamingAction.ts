@@ -30,7 +30,7 @@ export interface StreamingActionState {
  */
 export function useStreamingAction(): [
   StreamingActionState,
-  (url: string, onComplete?: () => void) => void,
+  (url: string, onComplete?: () => void, fetchInit?: RequestInit) => void,
   () => void,
 ] {
   const [running, setRunning] = useState(false);
@@ -46,7 +46,7 @@ export function useStreamingAction(): [
   }, []);
 
   const run = useCallback(
-    (url: string, onComplete?: () => void) => {
+    (url: string, onComplete?: () => void, fetchInit?: RequestInit) => {
       // Abort any previous run
       abortRef.current?.abort();
 
@@ -57,7 +57,7 @@ export function useStreamingAction(): [
       setError(null);
 
       // Use fetch + ReadableStream to consume SSE (avoids EventSource limitation of GET-only)
-      fetch(url, { signal: controller.signal })
+      fetch(url, { ...fetchInit, signal: controller.signal })
         .then(async (res) => {
           if (!res.ok) {
             throw new Error(`Request failed with status ${res.status}`);
