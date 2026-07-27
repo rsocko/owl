@@ -162,8 +162,9 @@ already been alerted in the `webhook_alert_state` table. This ensures:
 
 - The daily scheduled gap check won't fire the same webhook twice for the
   same missing statement.
-- When `POST /api/webhooks/statement-found` is called, the alert state is
-  cleared so future recommendation cycles won't try to alert again.
+- When `POST /api/webhooks/statement-found` is called, a resolved tombstone
+  is written so future recommendation cycles won't re-alert for that
+  provider and period.
 
 ## Example n8n Workflow
 

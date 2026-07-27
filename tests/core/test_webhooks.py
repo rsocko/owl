@@ -97,6 +97,15 @@ class TestWebhookDBAlertState:
         cleared = webhook_db.clear_alert_state("prov-1")
         assert cleared == 2
 
+    def test_found_tombstone_independent_of_missing(self, webhook_db: WebhookDB):
+        """A statement.found tombstone doesn't block statement.missing dedup check
+        (they're different event_types), but both can coexist."""
+        webhook_db.mark_alerted("prov-1", "2026-07-01", "statement.found")
+        # statement.missing for the same key/date is NOT yet alerted
+        assert not webhook_db.was_already_alerted("prov-1", "2026-07-01", "statement.missing")
+        # but statement.found IS
+        assert webhook_db.was_already_alerted("prov-1", "2026-07-01", "statement.found")
+
 
 # ---------------------------------------------------------------------------
 # WebhookDB delivery log tests
