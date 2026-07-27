@@ -7,6 +7,7 @@
 
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge, Button, EmptyState, SkeletonLoader, Toast } from './ui';
+import DocumentPreview from './DocumentPreview';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import '../styles/manual-match-modal.css';
@@ -53,6 +54,8 @@ interface SearchFilters {
   claimReference: string;
   amountSignal: string;
   createdAfter: string;
+  docType: '' | 'eob' | 'bill';
+  provider: string;
 }
 
 // ------------------------------------------------------------------
@@ -134,6 +137,8 @@ export default function ManualMatchModal({
     claimReference: sourceDocId ? String(sourceDocId) : '',
     amountSignal: '',
     createdAfter: '',
+    docType: '',
+    provider: '',
   });
 
   // ---- Load candidate matches when modal opens ----
@@ -146,11 +151,14 @@ export default function ManualMatchModal({
     setError(null);
     setLinkingId(null);
     setToast(null);
+    setExpandedPreviews(new Set());
     setFilters({
       query: sourceDocId ? String(sourceDocId) : '',
       claimReference: sourceDocId ? String(sourceDocId) : '',
       amountSignal: '',
       createdAfter: '',
+      docType: '',
+      provider: '',
     });
 
     const loadMatches = async () => {
@@ -170,8 +178,10 @@ export default function ManualMatchModal({
           : matches;
 
         const initialResults = docFiltered.length > 0 ? docFiltered : matches;
-        setResults(initialResults);
-        setSelectedId(initialResults[0]?.id ?? null);
+        // Sort by score descending so best match appears first (spread to avoid mutating state)
+        const sorted = [...initialResults].sort((a, b) => (valueToPercent(b.score) - valueToPercent(a.score)));
+        setResults(sorted);
+        setSelectedId(sorted[0]?.id ?? null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load candidate matches.');
       } finally {
@@ -214,6 +224,21 @@ export default function ManualMatchModal({
     };
   }, [open, onClose]);
 
+  // ---- Preview toggle state ----
+  const [expandedPreviews, setExpandedPreviews] = useState<Set<number>>(new Set());
+
+  const togglePreview = useCallback((id: number) => {
+    setExpandedPreviews((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
   // ---- Client-side filtering ----
 
   const applyFilters = useCallback(
@@ -225,6 +250,7 @@ export default function ManualMatchModal({
         const searchText = buildSearchText(match);
         const queryNeedle = nextFilters.query.trim().toLowerCase();
         const claimNeedle = nextFilters.claimReference.trim().toLowerCase();
+        const providerNeedle = nextFilters.provider.trim().toLowerCase();
 
         if (queryNeedle && !searchText.includes(queryNeedle)) return false;
         if (
@@ -235,6 +261,9 @@ export default function ManualMatchModal({
         ) {
           return false;
         }
+        if (providerNeedle && !searchText.includes(providerNeedle)) return false;
+        if (nextFilters.docType === 'eob' && match.eob_document_id == null) return false;
+        if (nextFilters.docType === 'bill' && match.bill_document_id == null) return false;
         if (typeof minAmountSignal === 'number' && !Number.isNaN(minAmountSignal) && valueToPercent(match.breakdown?.amount) < minAmountSignal) {
           return false;
         }
@@ -244,6 +273,9 @@ export default function ManualMatchModal({
         }
         return true;
       });
+
+      // Sort by score descending so best match appears first
+      filtered.sort((a, b) => (valueToPercent(b.score) - valueToPercent(a.score)));
 
       setResults(filtered);
       if (!filtered.some((match) => match.id === selectedId)) {
@@ -264,6 +296,8 @@ export default function ManualMatchModal({
       claimReference: sourceDocId ? String(sourceDocId) : '',
       amountSignal: '',
       createdAfter: '',
+      docType: '',
+      provider: '',
     };
     setFilters(cleared);
     applyFilters(cleared);
@@ -390,6 +424,27 @@ export default function ManualMatchModal({
                     </div>
                     <div className="mm-filter-row" style={{ marginTop: 8 }}>
                       <div className="form-group">
+                        <label htmlFor="mm-doc-type">Document type</label>
+                        <select
+                          id="mm-doc-type"
+                          value={filters.docType}
+                          onChange={(e) => setFilters((f) => ({ ...f, docType: e.target.value as SearchFilters['docType'] }))}
+                        >
+                          <option value="">All types</option>
+                          <option value="eob">EOB only</option>
+                          <option value="bill">Bill only</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label htmlFor="mm-provider">Provider / correspondent</label>
+                        <input
+                          id="mm-provider"
+                          value={filters.provider}
+                          onChange={(e) => setFilters((f) => ({ ...f, provider: e.target.value }))}
+                          placeholder="Filter by provider name"
+                        />
+                      </div>
+                      <div className="form-group">
                         <label htmlFor="mm-claim-ref">Claim / document ref</label>
                         <input
                           id="mm-claim-ref"
@@ -398,6 +453,8 @@ export default function ManualMatchModal({
                           placeholder="EOB/Bill ID"
                         />
                       </div>
+                    </div>
+                    <div className="mm-filter-row" style={{ marginTop: 8 }}>
                       <div className="form-group">
                         <label htmlFor="mm-amount">Min amount signal (%)</label>
                         <input
@@ -437,10 +494,17 @@ export default function ManualMatchModal({
                     />
                   ) : (
                     <div className="mm-results-list">
-                      {results.map((match) => (
+                      {results.map((match, index) => {
+                        const isBestMatch = index === 0 && results.length > 1;
+                        const isPreviewOpen = expandedPreviews.has(match.id);
+                        return (
                         <article
                           key={match.id}
-                          className={`mm-result-card${selectedId === match.id ? ' selected' : ''}`}
+                          className={[
+                            'mm-result-card',
+                            selectedId === match.id ? 'selected' : '',
+                            isBestMatch ? 'best-match' : '',
+                          ].filter(Boolean).join(' ')}
                           onClick={() => setSelectedId(match.id)}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === ' ') {
@@ -456,6 +520,7 @@ export default function ManualMatchModal({
                             <span className="mm-rc-title">
                               EOB #{match.eob_document_id ?? '—'} ↔ Bill #{match.bill_document_id ?? '—'}
                             </span>
+                            {isBestMatch && <Badge tone="success">⭐ Best match</Badge>}
                             <Badge tone={scoreTone(match.score)}>
                               {valueToPercent(match.score)}% match
                             </Badge>
@@ -488,6 +553,13 @@ export default function ManualMatchModal({
                           </div>
                           <div className="mm-rc-footer">
                             <span>Match #{match.id} · {formatDateTime(match.created_at)}</span>
+                            <button
+                              className="mm-rc-preview-toggle"
+                              onClick={(e) => { e.stopPropagation(); togglePreview(match.id); }}
+                              aria-expanded={isPreviewOpen}
+                            >
+                              {isPreviewOpen ? '▼ Hide preview' : '▶ Preview doc'}
+                            </button>
                             <Button
                               variant="success"
                               onClick={() => {
@@ -498,8 +570,34 @@ export default function ManualMatchModal({
                               {linkingId === match.id ? 'Linking…' : 'Link this match'}
                             </Button>
                           </div>
+
+                          {/* Inline document preview (toggle) */}
+                          {isPreviewOpen && (
+                            <div className="mm-rc-preview-panel">
+                              {match.eob_document_id && (
+                                <DocumentPreview
+                                  documentId={match.eob_document_id}
+                                  paperlessUrl={match.eob_preview_url}
+                                  variant="compact"
+                                  label="EOB"
+                                />
+                              )}
+                              {match.bill_document_id && (
+                                <DocumentPreview
+                                  documentId={match.bill_document_id}
+                                  paperlessUrl={match.bill_preview_url}
+                                  variant="compact"
+                                  label="Bill"
+                                />
+                              )}
+                              {!match.eob_document_id && !match.bill_document_id && (
+                                <div className="mm-rc-preview-empty">No documents available for preview.</div>
+                              )}
+                            </div>
+                          )}
                         </article>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </>
