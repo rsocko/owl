@@ -1345,7 +1345,7 @@ export default function ActionQueue() {
                       )}
                       {currentStatus !== 'snoozed' && currentStatus !== 'completed' && currentStatus !== 'not_an_action' && (
                         <Button
-                          variant="warning"
+                          variant="default"
                           onClick={() => {
                             // Snooze for 24 hours by default
                             const snoozedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
