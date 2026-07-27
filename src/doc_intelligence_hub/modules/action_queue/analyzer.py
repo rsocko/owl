@@ -28,7 +28,7 @@ Return a JSON object with these fields:
 {{
   "actions": [
     {{
-      "action_type": "PAY|RESPOND|FILE|REVIEW|SHARE|SCHEDULE|SIGN|ARCHIVE",
+      "action_type": "PAY|RESPOND|FILE|REVIEW|SHARE|SCHEDULE|SIGN|ARCHIVE|TASK",
       "title": "Short action title (e.g., 'Pay Electric Bill - $142.35')",
       "summary": "One sentence describing what needs to be done",
       "due_date": "YYYY-MM-DD or null if no deadline",
@@ -66,13 +66,14 @@ Rules for urgency:
 
 Rules for action_type:
 - PAY: Bills, invoices, payment requests
-- RESPOND: Forms, surveys, letters requiring a reply
+- RESPOND: Forms, surveys, letters requiring a reply or communication back
 - FILE: Statements, receipts, informational documents (no action needed)
 - REVIEW: Contracts, policies, notices requiring careful reading before deciding
 - SHARE: Tax forms, documents to forward to accountant/lawyer/family
 - SCHEDULE: Appointments, renewals, events to put on calendar
 - SIGN: Documents requiring signature
 - ARCHIVE: Already processed, ready for long-term storage
+- TASK: General to-do items that don't fit the above (create account, register, update info, cancel service, etc.)
 
 Document metadata:
 - Title: {title}
@@ -203,7 +204,7 @@ class OllamaAnalyzer:
         """Validate the multi-action response format."""
         assessment = data.get("document_assessment", {})
 
-        valid_types = {"PAY", "RESPOND", "FILE", "REVIEW", "SHARE", "SCHEDULE", "SIGN", "ARCHIVE"}
+        valid_types = {"PAY", "RESPOND", "FILE", "REVIEW", "SHARE", "SCHEDULE", "SIGN", "ARCHIVE", "TASK"}
         valid_urgency = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 
         validated_actions = []
@@ -212,7 +213,7 @@ class OllamaAnalyzer:
                 continue
             action["action_type"] = action["action_type"].upper()
             if action["action_type"] not in valid_types:
-                action["action_type"] = "REVIEW"
+                action["action_type"] = "TASK"
             action["urgency"] = action.get("urgency", "MEDIUM").upper()
             if action["urgency"] not in valid_urgency:
                 action["urgency"] = "MEDIUM"
@@ -231,12 +232,12 @@ class OllamaAnalyzer:
 
     def _convert_legacy_to_multi(self, data: dict) -> dict:
         """Convert old single-action format to multi-action format."""
-        valid_types = {"PAY", "RESPOND", "FILE", "REVIEW", "SHARE", "SCHEDULE", "SIGN", "ARCHIVE"}
+        valid_types = {"PAY", "RESPOND", "FILE", "REVIEW", "SHARE", "SCHEDULE", "SIGN", "ARCHIVE", "TASK"}
         valid_urgency = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 
-        action_type = data.get("action_type", "REVIEW").upper()
+        action_type = data.get("action_type", "TASK").upper()
         if action_type not in valid_types:
-            action_type = "REVIEW"
+            action_type = "TASK"
 
         urgency = data.get("urgency", "MEDIUM").upper()
         if urgency not in valid_urgency:

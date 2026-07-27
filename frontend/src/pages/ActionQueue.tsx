@@ -119,6 +119,8 @@ function actionTypeTone(type: string) {
       return 'info' as const;
     case 'REVIEW':
       return 'danger' as const;
+    case 'TASK':
+      return 'info' as const;
     default:
       return 'muted' as const;
   }
