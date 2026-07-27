@@ -30,7 +30,10 @@ _URGENCY_WEIGHTS: dict[str, int] = {
 _ACTION_TYPE_MULTIPLIERS: dict[str, float] = {
     "PAY": 1.3,
     "RESPOND": 1.2,
+    "DISPUTE": 1.2,
+    "CANCEL": 1.1,
     "CALL": 1.1,
+    "RENEW": 1.1,
     "REVIEW": 1.0,
     "FILE": 0.9,
     "SCHEDULE": 0.8,
