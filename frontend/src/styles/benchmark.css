@@ -1,0 +1,194 @@
+/* ── Benchmark History page ── */
+
+.benchmark-page {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+/* Run history table */
+.benchmark-runs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+.benchmark-runs-table th,
+.benchmark-runs-table td {
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.benchmark-runs-table th {
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+.benchmark-runs-table tbody tr {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.benchmark-runs-table tbody tr:hover {
+  background: var(--surface-hover, rgba(128, 128, 128, 0.06));
+}
+.benchmark-runs-table tbody tr.expanded {
+  background: var(--surface-hover, rgba(128, 128, 128, 0.06));
+}
+
+/* Expanded detail row */
+.benchmark-detail-row td {
+  padding: 0;
+  border-bottom: 2px solid var(--border);
+}
+.benchmark-detail-content {
+  padding: 0.75rem 1rem 1rem;
+}
+.benchmark-model-cards {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.benchmark-model-card {
+  flex: 1 1 200px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
+.benchmark-model-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+.benchmark-model-card dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.75rem;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.benchmark-model-card dt {
+  color: var(--text-muted);
+}
+.benchmark-model-card dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Trigger badges */
+.trigger-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+.trigger-badge.manual {
+  background: var(--accent-bg, #e8f0fe);
+  color: var(--accent, #1a73e8);
+}
+.trigger-badge.scheduled {
+  background: var(--success-bg, #e6f4ea);
+  color: var(--success, #1e8e3e);
+}
+
+/* Status badges */
+.status-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+.status-badge.completed {
+  background: var(--success-bg, #e6f4ea);
+  color: var(--success, #1e8e3e);
+}
+.status-badge.running {
+  background: var(--warning-bg, #fef7e0);
+  color: var(--warning, #e37400);
+}
+.status-badge.failed {
+  background: var(--danger-bg, #fce8e6);
+  color: var(--danger, #d93025);
+}
+
+/* Alert indicator */
+.regression-indicator {
+  color: var(--danger, #d93025);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+/* ── Trend charts section ── */
+
+.benchmark-trends {
+  margin-top: 2rem;
+}
+.benchmark-trends h3 {
+  margin: 0 0 1rem;
+  font-size: 1.05rem;
+}
+.trend-model-section {
+  margin-bottom: 1.5rem;
+}
+.trend-model-section h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}
+
+/* Reuse the insights mini-bar-chart pattern */
+.benchmark-bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 48px;
+  padding: 0;
+}
+.benchmark-bar-chart .bar-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  height: 100%;
+  justify-content: flex-end;
+}
+.benchmark-bar-chart .bar {
+  width: 100%;
+  max-width: 28px;
+  min-height: 3px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+.benchmark-bar-chart .bar:last-child,
+.benchmark-bar-chart .bar.latest {
+  opacity: 1;
+}
+.benchmark-bar-chart .bar.low {
+  background: var(--danger, #d93025);
+}
+
+.trend-metric-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.3rem;
+}
+.trend-metric-label {
+  width: 110px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Toolbar */
+.benchmark-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.benchmark-toolbar .btn {
+  white-space: nowrap;
+}

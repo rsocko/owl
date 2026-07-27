@@ -12,6 +12,7 @@ import MetadataCorrection from './pages/MetadataCorrection';
 import ManualMatchSearch from './pages/ManualMatchSearch';
 import RulesConfig from './pages/RulesConfig';
 import Insights from './pages/Insights';
+import BenchmarkHistory from './pages/BenchmarkHistory';
 import History from './pages/History';
 import OrphansDupes from './pages/OrphansDupes';
 import Settings from './pages/Settings';
@@ -39,6 +40,7 @@ function App() {
             {/* Legacy routes redirect into the unified workspace */}
             <Route path="/eob/matches/:matchId" element={<EobMatchRedirect />} />
             <Route path="/eob/unmatched" element={<Navigate to="/eob?tab=unmatched" replace />} />
+            <Route path="/eob/benchmarks" element={<BenchmarkHistory />} />
             <Route path="/eob/manual-search" element={<ManualMatchSearch />} />
             <Route path="/action-queue" element={<ActionQueue />} />
             <Route path="/triage" element={<TriageQueue />} />
