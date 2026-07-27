@@ -122,6 +122,12 @@ function actionTypeTone(type: string) {
       return 'danger' as const;
     case 'TASK':
       return 'info' as const;
+    case 'CANCEL':
+      return 'warning' as const;
+    case 'RENEW':
+      return 'success' as const;
+    case 'DISPUTE':
+      return 'danger' as const;
     default:
       return 'muted' as const;
   }
