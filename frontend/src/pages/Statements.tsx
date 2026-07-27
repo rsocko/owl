@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, ProgressBanner, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
+import { Badge, Button, Card, ConfidenceBadge, ConfidenceLegend, EmptyState, ErrorState, PageHeader, ProgressBanner, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
 import { useStreamingAction } from '../hooks/useStreamingAction';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
@@ -62,16 +62,16 @@ function getPriority(daysOverdue?: number): { label: string; tone: 'ok' | 'warni
   return { label: 'Watch', tone: 'ok' };
 }
 
-function getConfidenceTone(confidence: number): 'ok' | 'warning' | 'danger' {
-  if (confidence >= 0.85) return 'ok';
-  if (confidence >= 0.7) return 'warning';
-  return 'danger';
-}
-
 function formatDate(iso?: string | null): string {
   if (!iso) return '—';
   const parsed = new Date(iso);
   if (Number.isNaN(parsed.getTime())) return iso;
+  const diffMs = Date.now() - parsed.getTime();
+  const diffDays = Math.floor(diffMs / 86_400_000);
+  if (diffDays < 0) return parsed.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays}d ago`;
   return parsed.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
@@ -98,6 +98,7 @@ export default function Statements() {
   const [analyzedDocs, setAnalyzedDocs] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [coverageError, setCoverageError] = useState<string | null>(null);
   const [discoveryState, runDiscoveryStream, cancelDiscovery] = useStreamingAction();
   const [recsState, runRecsStream, cancelRecs] = useStreamingAction();
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
@@ -107,10 +108,23 @@ export default function Statements() {
     try {
       setLoading(true);
       setError(null);
-      const [missingResponse, providersResponse] = await Promise.all([
-        endpoints.statements.missing() as Promise<MissingStatement[]>,
-        endpoints.statements.providers() as Promise<ProvidersResponse>,
-      ]);
+      setCoverageError(null);
+
+      let missingResponse: MissingStatement[] = [];
+      let providersResponse: ProvidersResponse | null = null;
+
+      try {
+        missingResponse = (await endpoints.statements.missing()) as MissingStatement[];
+      } catch (err) {
+        setError(getErrorMessage(err));
+      }
+
+      try {
+        providersResponse = (await endpoints.statements.providers()) as ProvidersResponse;
+      } catch (err) {
+        setCoverageError(getErrorMessage(err));
+      }
+
       setRows(Array.isArray(missingResponse) ? missingResponse : []);
       setProviders(providersResponse?.providers ?? []);
       setProvidersRunAt(providersResponse?.run_at ?? null);
@@ -172,13 +186,22 @@ export default function Statements() {
         title="Statements"
         desc="Track expected statement periods, trigger discovery, and review providers that still need documents."
         actions={
-          <div className="btn-group">
-            <Button variant="primary" onClick={runDiscovery} disabled={anyRunning}>
-              {discoveryState.running ? 'Running discovery…' : 'Run discovery'}
-            </Button>
-            <Button variant="success" onClick={runRecommendations} disabled={anyRunning}>
-              {recsState.running ? 'Running recommendations…' : 'Run recommendations'}
-            </Button>
+          <div className="statements-action-steps">
+            <div className="statements-step">
+              <span className="statements-step-number">1</span>
+              <Button variant="primary" onClick={runDiscovery} disabled={anyRunning} title="Scans all documents to detect recurring statement providers and their delivery patterns.">
+                {discoveryState.running ? 'Running discovery…' : 'Run discovery'}
+              </Button>
+              <span className="statements-step-desc">Detect providers</span>
+            </div>
+            <span className="statements-step-arrow">→</span>
+            <div className="statements-step">
+              <span className={`statements-step-number ${!providersRunAt ? 'disabled' : ''}`}>2</span>
+              <Button variant="success" onClick={runRecommendations} disabled={anyRunning || !providersRunAt} title="Analyzes discovered providers to identify missing statement periods. Requires discovery to run first.">
+                {recsState.running ? 'Running recommendations…' : 'Run recommendations'}
+              </Button>
+              <span className="statements-step-desc">Find missing periods</span>
+            </div>
           </div>
         }
       />
@@ -203,11 +226,19 @@ export default function Statements() {
       )}
 
       <StatGrid>
-        <StatCard title="Discovered providers" metric={providers.length} desc={`From ${analyzedDocs} analyzed documents`} />
+        <StatCard title="Discovered providers" metric={coverageError ? '—' : providers.length} desc={coverageError ? 'Data unavailable' : `From ${analyzedDocs} analyzed documents`} />
         <StatCard title="Missing series" metric={rows.length} desc="Providers with an outstanding expected statement" />
         <StatCard title="Critical overdue" metric={summary.severe} desc="45+ days overdue" status={summary.severe > 0 ? { label: 'Needs review', tone: 'warn' } : { label: 'Stable', tone: 'ok' }} />
         <StatCard title="Longest overdue" metric={`${summary.maxOverdue}d`} desc="Worst-case delay across all missing statements" />
       </StatGrid>
+
+      {coverageError && (
+        <div className="statements-coverage-unavailable">
+          <span className="statements-coverage-unavailable-icon">⚠️</span>
+          <span className="statements-coverage-unavailable-text">Coverage data unavailable — {coverageError}</span>
+          <Button size="sm" onClick={() => void loadStatements()}>Retry</Button>
+        </div>
+      )}
 
       <div className="section" style={{ marginTop: 18 }}>
         <div className="statements-tabs">
@@ -245,6 +276,7 @@ export default function Statements() {
             ) : null}
             {!loading && !error && providers.length > 0 ? (
               <div className="statements-table-wrapper">
+                <ConfidenceLegend />
                 <table className="data-table statements-table">
                   <thead>
                     <tr>
@@ -283,9 +315,7 @@ export default function Statements() {
                           <div className="statements-subtle">±{provider.variance_days}d variance</div>
                         </td>
                         <td>
-                          <Badge tone={getConfidenceTone(provider.confidence)}>
-                            {Math.round(provider.confidence * 100)}%
-                          </Badge>
+                          <ConfidenceBadge pct={Math.round(provider.confidence * 100)} />
                         </td>
                         <td>{provider.document_count}</td>
                         <td>{formatDate(provider.first_seen)}</td>
@@ -341,17 +371,15 @@ export default function Statements() {
                             <div className="statements-subtle">{row.frequency ?? 'Unknown cadence'}</div>
                           </td>
                           <td>
-                            <div className="statements-provider">{formatExpectedPeriod(row.expected_period)}</div>
-                            <div className="statements-subtle">{row.expected_period ?? 'Unknown period'}</div>
-                          </td>
-                          <td>
-                            <div className="statements-provider">{row.days_overdue ?? 0} days</div>
-                            <div className="statements-subtle">Missing from recommendation feed</div>
-                          </td>
+                              <div className="statements-provider">{formatExpectedPeriod(row.expected_period)}</div>
+                            </td>
+                            <td>
+                              <div className="statements-provider">{row.days_overdue ?? 0} days</div>
+                            </td>
                           <td>
                             <Badge tone={priority.tone}>{priority.label}</Badge>
                           </td>
-                          <td>{row.last_received_date ?? 'Not provided'}</td>
+                          <td>{formatDate(row.last_received_date)}</td>
                           <td>
                             <code className="statements-series-key">{rowId}</code>
                           </td>
