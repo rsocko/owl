@@ -2,19 +2,29 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 from starlette.responses import StreamingResponse
 
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
 from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer
 from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
-from doc_intelligence_hub.modules.action_queue.database import Action, ActionFeedback, get_session, init_db
+from doc_intelligence_hub.modules.action_queue.database import (
+    VALID_ACTION_TYPES,
+    Action,
+    ActionFeedback,
+    get_session,
+    init_db,
+)
 from doc_intelligence_hub.modules.action_queue.pipeline import get_pipeline_progress, run_pipeline
-from doc_intelligence_hub.modules.action_queue.risk_scoring import compute_risk_score, recalculate_risk_scores
+from doc_intelligence_hub.modules.action_queue.risk_scoring import (
+    compute_risk_score,
+    recalculate_risk_scores,
+)
 from doc_intelligence_hub.modules.statements.config import resolve_api_token
 
 router = APIRouter(prefix="/api/queue", tags=["action-queue"])
@@ -37,10 +47,85 @@ class QueueRunRequest(BaseModel):
 
 
 class ActionUpdateRequest(BaseModel):
-    status: str = Field(..., pattern=r"^(completed|dismissed|pending|acknowledged|snoozed|not_an_action)$")
+    status: str | None = Field(
+        default=None,
+        pattern=r"^(completed|dismissed|pending|acknowledged|snoozed|not_an_action)$",
+    )
     dry_run: bool = True
     version: int | None = Field(default=None, description="Expected version for optimistic locking (returns 409 on mismatch)")
     snoozed_until: str | None = Field(default=None, description="ISO timestamp for snooze expiry (required when status=snoozed)")
+    action_type: str | None = Field(default=None, description="Corrected action type")
+    title: str | None = Field(default=None, description="Editable task title")
+    summary: str | None = Field(default=None, description="Editable action summary")
+    due_date: date | None = Field(default=None, description="Editable due date")
+    amount: float | None = Field(default=None, description="Editable amount")
+    urgency: str | None = Field(
+        default=None,
+        pattern=r"^(CRITICAL|HIGH|MEDIUM|LOW)$",
+        description="Editable urgency",
+    )
+    correspondent: str | None = Field(default=None, description="Editable correspondent")
+
+    @field_validator("action_type")
+    @classmethod
+    def _normalize_action_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().upper()
+        if normalized not in VALID_ACTION_TYPES:
+            raise PydanticCustomError(
+                "invalid_action_type",
+                "action_type must be one of: {valid_types}",
+                {"valid_types": ", ".join(sorted(VALID_ACTION_TYPES))},
+            )
+        return normalized
+
+    @field_validator("title")
+    @classmethod
+    def _validate_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise PydanticCustomError("blank_title", "title cannot be blank")
+        return normalized
+
+    @field_validator("summary", "correspondent")
+    @classmethod
+    def _normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def _require_changes(self) -> "ActionUpdateRequest":
+        mutable_fields = {
+            "status",
+            "snoozed_until",
+            "action_type",
+            "title",
+            "summary",
+            "due_date",
+            "amount",
+            "urgency",
+            "correspondent",
+        }
+        if not (self.model_fields_set & mutable_fields):
+            raise PydanticCustomError(
+                "missing_editable_fields",
+                "At least one editable field must be provided",
+            )
+
+        for field_name in ("action_type", "title", "urgency"):
+            if field_name in self.model_fields_set and getattr(self, field_name) is None:
+                raise PydanticCustomError(
+                    "null_editable_field",
+                    "{field_name} cannot be null",
+                    {"field_name": field_name},
+                )
+
+        return self
 
 
 class BulkActionRequest(BaseModel):
@@ -472,7 +557,7 @@ async def expired_snoozes(request: Request) -> dict[str, Any]:
 async def update_action(
     request: Request, action_id: int, body: ActionUpdateRequest
 ) -> dict[str, Any]:
-    """Update an action's status (complete, dismiss, or re-open).
+    """Update an action's editable fields and/or status.
 
     Supports optimistic locking: if `version` is provided in the request body,
     the update will only succeed if the action's current version matches.
@@ -504,25 +589,51 @@ async def update_action(
                 },
             )
 
-        action.status = body.status
-        action.version = (action.version or 1) + 1
-        if body.status == "completed":
+        supplied_fields = body.model_fields_set
+        effective_status = body.status or action.status
+        risk_inputs_changed = False
+
+        if "action_type" in supplied_fields:
+            action.action_type = body.action_type
+            risk_inputs_changed = True
+        if "title" in supplied_fields:
+            action.title = body.title
+        if "summary" in supplied_fields:
+            action.summary = body.summary
+        if "due_date" in supplied_fields:
+            action.due_date = body.due_date
+            risk_inputs_changed = True
+        if "amount" in supplied_fields:
+            action.amount = body.amount
+            risk_inputs_changed = True
+        if "urgency" in supplied_fields:
+            action.urgency = body.urgency
+            risk_inputs_changed = True
+        if "correspondent" in supplied_fields:
+            action.correspondent = body.correspondent
+
+        if "status" in supplied_fields:
+            action.status = body.status
+        if effective_status == "completed" and "status" in supplied_fields:
             action.completed_at = datetime.utcnow()
-        elif body.status == "acknowledged":
+        elif effective_status == "acknowledged" and "status" in supplied_fields:
             action.acknowledged_at = datetime.utcnow()
-        elif body.status == "snoozed":
-            if not body.snoozed_until:
-                from fastapi import HTTPException
-                raise HTTPException(
-                    status_code=422,
-                    detail="snoozed_until is required when status is 'snoozed'",
-                )
-            action.snoozed_until = datetime.fromisoformat(body.snoozed_until)
-        elif body.status == "pending":
+        elif effective_status == "snoozed":
+            if "status" in supplied_fields or "snoozed_until" in supplied_fields:
+                if not body.snoozed_until:
+                    from fastapi import HTTPException
+                    raise HTTPException(
+                        status_code=422,
+                        detail="snoozed_until is required when status is 'snoozed'",
+                    )
+                action.snoozed_until = datetime.fromisoformat(body.snoozed_until)
+        elif effective_status == "pending" and "status" in supplied_fields:
             action.completed_at = None
             action.acknowledged_at = None
             action.snoozed_until = None
-            # Recalculate risk score when reopening (due dates may have changed)
+            risk_inputs_changed = True
+
+        if risk_inputs_changed:
             action.risk_score = compute_risk_score(
                 urgency=action.urgency or "LOW",
                 due_date=action.due_date,
@@ -530,10 +641,12 @@ async def update_action(
                 confidence=action.confidence or 0,
                 action_type=action.action_type or "REVIEW",
             )
+
+        action.version = (action.version or 1) + 1
         db.commit()
 
         # Sync status to Paperless (best-effort — don't fail the user action)
-        if action_queue_settings.write_to_paperless and action.document_id:
+        if action_queue_settings.write_to_paperless and action.document_id and "status" in supplied_fields:
             try:
                 from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
 
@@ -931,9 +1044,12 @@ async def snooze_action(
 
         try:
             snooze_dt = datetime.fromisoformat(body.until)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as err:
             from fastapi import HTTPException
-            raise HTTPException(status_code=422, detail=f"Invalid ISO timestamp: {body.until}")
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid ISO timestamp: {body.until}",
+            ) from err
 
         action.status = "snoozed"
         action.snoozed_until = snooze_dt
