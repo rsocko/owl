@@ -87,7 +87,7 @@
 .data-table tr:last-child td { border-bottom: none; }
 .data-table tr:hover td { background: var(--surface-hover); }
 
-/* Tabs */
+/* Tabs — mutually exclusive view switches */
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); }
 .tab {
   padding: 9px 16px; font-size: 0.85rem; font-weight: 600; color: var(--text-muted);
@@ -95,15 +95,19 @@
 }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-
-/* Filter pills */
+
+/* Filter pills — removable status filters (UX-13: visually distinct from tabs) */
 .filter-pills { display: flex; gap: 6px; flex-wrap: wrap; }
 .filter-pill {
   padding: 5px 12px; border-radius: 14px; font-size: 0.75rem; font-weight: 600;
-  border: 1px solid var(--border); background: var(--card); color: var(--text-muted); cursor: pointer;
-}
-.filter-pill:hover { border-color: var(--accent); }
-.filter-pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  border: 1px dashed var(--border); background: transparent; color: var(--text-muted); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px; transition: all 0.15s;
+}
+.filter-pill:hover { border-color: var(--accent); border-style: solid; color: var(--text); }
+.filter-pill.active { background: var(--accent-bg); border-color: var(--accent); border-style: solid; color: var(--accent); }
+.filter-pill-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0;
+}
 
 /* Confidence bar */
 .confidence-row { display: flex; align-items: center; gap: 8px; }
@@ -114,6 +118,31 @@
 .confidence-bar-fill.medium { background: var(--warning); }
 .confidence-bar-fill.low { background: var(--danger); }
 .confidence-pct { width: 36px; text-align: right; font-size: 0.75rem; font-weight: 700; }
+
+/* Confidence badge tooltip (UX-16) */
+.confidence-badge-wrapper { cursor: help; position: relative; }
+.confidence-badge-wrapper[title]:hover::after {
+  content: attr(title);
+  position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  background: var(--card); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 6px 10px; font-size: 0.72rem; font-weight: 400;
+  white-space: nowrap; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  pointer-events: none;
+}
+
+/* Confidence legend (UX-16) */
+.confidence-legend {
+  display: flex; align-items: center; gap: 12px; font-size: 0.72rem; color: var(--text-muted);
+  padding: 6px 0; flex-wrap: wrap;
+}
+.confidence-legend-title { font-weight: 700; }
+.confidence-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.confidence-legend-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+}
+.confidence-legend-dot.high { background: var(--success); }
+.confidence-legend-dot.medium { background: var(--warning); }
+.confidence-legend-dot.low { background: var(--danger); }
 
 /* Modal */
 .modal-backdrop {
