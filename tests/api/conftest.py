@@ -76,6 +76,15 @@ def _make_mock_paperless() -> AsyncMock:
         {"id": 1, "name": "UnitedHealth"},
         {"id": 2, "name": "Aetna"},
     ]
+    mock.list_saved_views.return_value = [
+        {"id": 1, "name": "Inbox View"},
+        {"id": 2, "name": "Todo View"},
+    ]
+    mock.fetch_all_metadata.return_value = (
+        {1: "UnitedHealth", 2: "Aetna"},
+        {1: "Inbox", 2: "Medical"},
+        {1: "Statement", 2: "Bill", 3: "Letter"},
+    )
     mock.list_documents.return_value = []
     mock.get_document.return_value = {
         "id": 1,
