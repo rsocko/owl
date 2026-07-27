@@ -129,6 +129,7 @@ export const endpoints = {
     updateAction: (id: string, body: unknown) => api.patch(`/api/queue/actions/${id}`, body),
     bulk: (body: { action: string; action_ids: number[] }) =>
       api.post<{ affected: number; action: string }>('/api/queue/actions/bulk', body),
+    backfill: (body?: unknown) => api.post('/api/queue/actions/backfill', body),
   },
   alerts: {
     list: (params?: string) => api.get(`/api/insights/alerts${params ? `?${params}` : ''}`),
