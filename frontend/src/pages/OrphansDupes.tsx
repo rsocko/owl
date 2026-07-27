@@ -1,5 +1,4 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Badge,
   Button,
@@ -14,7 +13,7 @@ import {
   Tabs,
   Toast,
 } from '../components/ui';
-import DocumentPreview from '../components/DocumentPreview';
+import OrphanDetail from '../components/triage/OrphanDetail';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 
@@ -23,23 +22,27 @@ type ToastState = {
   tone: 'success' | 'error';
 };
 
-type UnmatchedEob = {
-  id: string | number;
-  provider?: string | null;
-  amount?: number | null;
-  date_of_service?: string | null;
-  patient_responsibility?: number | null;
-  document_url?: string | null;
-  created_at?: string | null;
+type TriageItem = {
+  id: string;
+  item_type: string;
+  priority: number;
+  status: string;
+  source: string;
+  target_type: string;
+  target_id: string;
+  reason: string | null;
+  metadata: Record<string, unknown> | null;
+  deferred_until: string | null;
+  resolved_at: string | null;
+  resolved_action: string | null;
+  created_at: string | null;
 };
 
-type MissingStatement = {
-  id: string;
-  correspondent?: string | null;
-  expected_period?: string | null;
-  frequency?: string | null;
-  last_received_date?: string | null;
-  days_overdue?: number | null;
+type TriageQueueResponse = {
+  items: TriageItem[];
+  count: number;
+  offset: number;
+  limit: number;
 };
 
 type QueueAction = {
@@ -73,16 +76,13 @@ type AlertsResponse = {
 
 type OrphanItem = {
   id: string;
-  kind: 'unmatched_eob' | 'missing_statement';
+  kind: 'eob' | 'bill';
   title: string;
   subtitle: string;
   ageLabel: string;
   detailLabel: string;
   detailValue: string;
-  actionUrl?: string | null;
-  providerKey?: string;
-  expectedPeriod?: string;
-  source: UnmatchedEob | MissingStatement;
+  triageItem: TriageItem;
 };
 
 type DuplicateItem = {
@@ -96,13 +96,6 @@ type DuplicateItem = {
   previewUrl?: string | null;
   actionUrl?: string | null;
   status: 'pending' | 'merged' | 'dismissed';
-};
-
-type OverrideDraft = {
-  displayName: string;
-  frequencyOverride: string;
-  anchorDayOverride: string;
-  notes: string;
 };
 
 function getErrorMessage(error: unknown) {
@@ -131,8 +124,13 @@ function containsDuplicateSignal(text: string) {
   return /duplicate|dupe|merge/i.test(text);
 }
 
+function docTypeLabel(docType?: string | null): string {
+  if (docType === 'eob') return 'EOB';
+  if (docType === 'bill') return 'Bill';
+  return 'Document';
+}
+
 export default function OrphansDupes() {
-  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('orphans');
   const [orphans, setOrphans] = useState<OrphanItem[]>([]);
   const [duplicates, setDuplicates] = useState<DuplicateItem[]>([]);
@@ -141,14 +139,8 @@ export default function OrphansDupes() {
   const [toast, setToast] = useState<ToastState | null>(null);
   const [selectedOrphan, setSelectedOrphan] = useState<OrphanItem | null>(null);
   const [selectedDuplicate, setSelectedDuplicate] = useState<DuplicateItem | null>(null);
-  const [overrideDraft, setOverrideDraft] = useState<OverrideDraft>({
-    displayName: '',
-    frequencyOverride: '',
-    anchorDayOverride: '',
-    notes: '',
-  });
-  const [savingOverride, setSavingOverride] = useState(false);
   const [busyDuplicateId, setBusyDuplicateId] = useState<string | null>(null);
+  const [orphanFilter, setOrphanFilter] = useState<'all' | 'eob' | 'bill'>('all');
   const [autoDetectEnabled, setAutoDetectEnabled] = useState(false);
   const [autoDetectLoading, setAutoDetectLoading] = useState(false);
 
@@ -164,43 +156,35 @@ export default function OrphansDupes() {
     setLoading(true);
     setError(null);
     try {
-      const [unmatchedResponse, missingResponse, actionsResponse, alertsResponse] = await Promise.allSettled([
-        endpoints.eob.unmatched() as Promise<UnmatchedEob[]>,
-        endpoints.statements.missing() as Promise<MissingStatement[]>,
+      const [triageResponse, actionsResponse, alertsResponse] = await Promise.allSettled([
+        endpoints.triage.queue('type=orphan_document&status=pending&limit=200') as Promise<TriageQueueResponse>,
         endpoints.actionQueue.actions('status=pending&limit=200') as Promise<QueueActionsResponse>,
         endpoints.alerts.list('resolved=true&limit=200') as Promise<AlertsResponse>,
       ]);
 
-      const unmatched = unmatchedResponse.status === 'fulfilled' && Array.isArray(unmatchedResponse.value) ? unmatchedResponse.value : [];
-      const missing = missingResponse.status === 'fulfilled' && Array.isArray(missingResponse.value) ? missingResponse.value : [];
+      const triageItems = triageResponse.status === 'fulfilled' && Array.isArray(triageResponse.value?.items) ? triageResponse.value.items : [];
       const queueActions = actionsResponse.status === 'fulfilled' && Array.isArray(actionsResponse.value.actions) ? actionsResponse.value.actions : [];
       const alerts = alertsResponse.status === 'fulfilled' && Array.isArray(alertsResponse.value.alerts) ? alertsResponse.value.alerts : [];
 
-      const orphanRows: OrphanItem[] = [
-        ...unmatched.map((item) => ({
-          id: `eob-${item.id}`,
-          kind: 'unmatched_eob' as const,
-          title: `Unmatched EOB from ${item.provider ?? 'Unknown provider'}`,
-          subtitle: item.date_of_service ? `Service date ${item.date_of_service}` : 'Date of service unavailable',
-          ageLabel: item.created_at ? formatDateTime(item.created_at) : 'Pending review',
-          detailLabel: 'Patient responsibility',
-          detailValue: formatCurrency(item.patient_responsibility ?? item.amount),
-          actionUrl: item.document_url,
-          source: item,
-        })),
-        ...missing.map((item) => ({
-          id: `statement-${item.id}`,
-          kind: 'missing_statement' as const,
-          title: item.correspondent ? `Missing statement: ${item.correspondent}` : `Missing statement ${item.id}`,
-          subtitle: item.frequency ? `${item.frequency} cadence` : 'Recurring statement gap',
-          ageLabel: typeof item.days_overdue === 'number' ? `${item.days_overdue} days overdue` : 'Late',
-          detailLabel: 'Expected period',
-          detailValue: item.expected_period ?? '—',
-          providerKey: item.id,
-          expectedPeriod: item.expected_period ?? undefined,
-          source: item,
-        })),
-      ];
+      const orphanRows: OrphanItem[] = triageItems.map((item) => {
+        const meta = item.metadata ?? {};
+        const documentType = (meta.document_type as string) ?? 'eob';
+        const providerName = (meta.provider_name as string) ?? 'Unknown provider';
+        const amount = meta.amount as number | null;
+        const dateOfService = meta.date_of_service as string | null;
+        const ageDays = (meta.document_age_days as number) ?? 0;
+
+        return {
+          id: item.id,
+          kind: (documentType === 'bill' ? 'bill' : 'eob') as 'eob' | 'bill',
+          title: `Unmatched ${docTypeLabel(documentType)} from ${providerName}`,
+          subtitle: dateOfService ? `Service date ${dateOfService}` : 'Date of service unavailable',
+          ageLabel: ageDays > 0 ? `${ageDays} days` : (item.created_at ? formatDateTime(item.created_at) : 'Pending review'),
+          detailLabel: documentType === 'eob' ? 'Patient responsibility' : 'Amount',
+          detailValue: formatCurrency(amount),
+          triageItem: item,
+        };
+      });
 
       const queueDuplicateRows = queueActions
         .filter((action) => containsDuplicateSignal(`${action.title ?? ''} ${action.summary ?? ''} ${action.document_title ?? ''}`))
@@ -226,11 +210,6 @@ export default function OrphansDupes() {
           similarity: extractSimilarity(`${alert.title ?? ''} ${alert.description ?? ''}`),
           createdAt: alert.created_at,
           actionUrl: alert.action_url,
-          // resolved_at is only populated once someone resolves the alert via
-          // the Insights page — map that to "dismissed" here instead of
-          // assuming every matching alert is still actionable (the
-          // `resolved=true` query param means "include resolved alerts",
-          // not "only resolved").
           status: alert.resolved_at ? ('dismissed' as const) : ('pending' as const),
         }));
 
@@ -256,6 +235,10 @@ export default function OrphansDupes() {
     );
   }, []);
 
+  const filteredOrphans = useMemo(
+    () => orphanFilter === 'all' ? orphans : orphans.filter((o) => o.kind === orphanFilter),
+    [orphans, orphanFilter],
+  );
   const orphanCount = orphans.length;
   const duplicateCount = duplicates.filter((item) => item.status === 'pending').length;
 
@@ -280,45 +263,6 @@ export default function OrphansDupes() {
   const handleOpenOrphan = (item: OrphanItem) => {
     setSelectedDuplicate(null);
     setSelectedOrphan(item);
-    if (item.kind === 'missing_statement') {
-      setOverrideDraft({
-        displayName: item.title.replace(/^Missing statement:\s*/, ''),
-        frequencyOverride: 'monthly',
-        anchorDayOverride: '',
-        notes: `Expected period ${item.expectedPeriod ?? 'unknown'}`,
-      });
-    } else {
-      setOverrideDraft({ displayName: '', frequencyOverride: '', anchorDayOverride: '', notes: '' });
-    }
-  };
-
-  const handleSaveOverride = async () => {
-    if (!selectedOrphan) return;
-
-    if (selectedOrphan.kind !== 'missing_statement' || !selectedOrphan.providerKey) {
-      // TODO: the backend currently exposes no dedicated write endpoint for unmatched-EOB orphan resolution,
-      // so unmatched review notes are retained in local UI state until the API grows a persistence surface.
-      setToast({ message: 'Saved review notes locally. Backend orphan resolution API is still pending.', tone: 'success' });
-      setSelectedOrphan(null);
-      return;
-    }
-
-    setSavingOverride(true);
-    try {
-      await endpoints.statements.setProviderOverride(selectedOrphan.providerKey, {
-        status: 'confirmed',
-        display_name: overrideDraft.displayName || undefined,
-        frequency_override: overrideDraft.frequencyOverride || undefined,
-        anchor_day_override: overrideDraft.anchorDayOverride ? Number(overrideDraft.anchorDayOverride) : undefined,
-        notes: overrideDraft.notes || undefined,
-      });
-      setToast({ message: 'Provider override saved.', tone: 'success' });
-      setSelectedOrphan(null);
-    } catch (err) {
-      setToast({ message: getErrorMessage(err), tone: 'error' });
-    } finally {
-      setSavingOverride(false);
-    }
   };
 
   const handleDuplicateAction = async (item: DuplicateItem, nextStatus: 'merged' | 'dismissed') => {
@@ -363,10 +307,10 @@ export default function OrphansDupes() {
         <>
           <div className="section" style={{ marginBottom: 16 }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-              <Card title="Review queues">
+              <Card title="Orphan documents">
                 <div style={{ display: 'grid', gap: 8 }}>
                   <div style={{ fontSize: '1.6rem', fontWeight: 800 }}>{orphanCount}</div>
-                  <div className="text-muted">Unmatched EOBs plus missing statement recommendations.</div>
+                  <div className="text-muted">Unmatched documents from the triage queue.</div>
                 </div>
               </Card>
               <Card title="Duplicate candidates">
@@ -397,7 +341,7 @@ export default function OrphansDupes() {
               active={activeTab}
               onChange={setActiveTab}
               tabs={[
-                { key: 'orphans', label: `Orphaned items (${orphans.length})` },
+                { key: 'orphans', label: `Orphaned documents (${orphans.length})` },
                 { key: 'duplicates', label: `Duplicate detections (${duplicates.length})` },
               ]}
             />
@@ -405,19 +349,24 @@ export default function OrphansDupes() {
 
           {activeTab === 'orphans' ? (
             <div className="section">
-              <Card title="Orphaned documents and missing metadata">
-                {orphans.length === 0 ? (
-                  <EmptyState title="No orphaned items were returned." desc="When unmatched EOBs or missing recurring statements exist, they will appear here." />
+              <Card title="Orphaned documents">
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                  <Button size="sm" variant={orphanFilter === 'all' ? 'primary' : undefined} onClick={() => setOrphanFilter('all')}>All ({orphans.length})</Button>
+                  <Button size="sm" variant={orphanFilter === 'eob' ? 'primary' : undefined} onClick={() => setOrphanFilter('eob')}>EOBs ({orphans.filter((o) => o.kind === 'eob').length})</Button>
+                  <Button size="sm" variant={orphanFilter === 'bill' ? 'primary' : undefined} onClick={() => setOrphanFilter('bill')}>Bills ({orphans.filter((o) => o.kind === 'bill').length})</Button>
+                </div>
+                {filteredOrphans.length === 0 ? (
+                  <EmptyState title="No orphaned documents found." desc="When unmatched EOBs or bills exist in the triage queue, they will appear here." />
                 ) : (
                   <DataTable
-                    rows={orphans}
+                    rows={filteredOrphans}
                     rowKey={(row) => row.id}
                     columns={[
                       {
                         key: 'kind',
                         header: 'Type',
-                        width: '150px',
-                        render: (row) => <Badge tone={row.kind === 'missing_statement' ? 'warning' : 'danger'}>{row.kind === 'missing_statement' ? 'Missing statement' : 'Unmatched EOB'}</Badge>,
+                        width: '120px',
+                        render: (row) => <Badge tone={row.kind === 'eob' ? 'danger' : 'warning'}>{docTypeLabel(row.kind)}</Badge>,
                       },
                       {
                         key: 'item',
@@ -442,29 +391,24 @@ export default function OrphansDupes() {
                       },
                       {
                         key: 'age',
-                        header: 'Age / timing',
-                        width: '180px',
+                        header: 'Age',
+                        width: '120px',
                         render: (row) => row.ageLabel,
+                      },
+                      {
+                        key: 'priority',
+                        header: 'Priority',
+                        width: '100px',
+                        render: (row) => <Badge tone={row.triageItem.priority >= 70 ? 'danger' : row.triageItem.priority >= 50 ? 'warning' : 'muted'}>{row.triageItem.priority}</Badge>,
                       },
                       {
                         key: 'actions',
                         header: 'Actions',
-                        width: '220px',
+                        width: '120px',
                         render: (row) => (
-                          <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
-                            <Button size="sm" onClick={() => handleOpenOrphan(row)}>
-                              Review
-                            </Button>
-                            {row.actionUrl ? (
-                              <Button size="sm" variant="primary" onClick={() => window.open(row.actionUrl ?? '#', '_blank', 'noopener')}>
-                                Open source
-                              </Button>
-                            ) : (
-                              <Button size="sm" variant="primary" onClick={() => navigate('/eob/unmatched')}>
-                                Open queue
-                              </Button>
-                            )}
-                          </div>
+                          <Button size="sm" variant="primary" onClick={() => handleOpenOrphan(row)}>
+                            Review
+                          </Button>
                         ),
                       },
                     ]}
@@ -541,92 +485,22 @@ export default function OrphansDupes() {
 
       {selectedOrphan && (
         <SidePanel title={selectedOrphan.title} onClose={() => setSelectedOrphan(null)}>
-          <div style={{ display: 'grid', gap: 16 }}>
-            <div>
-              <Badge tone={selectedOrphan.kind === 'missing_statement' ? 'warning' : 'danger'}>
-                {selectedOrphan.kind === 'missing_statement' ? 'Missing statement' : 'Unmatched EOB'}
-              </Badge>
-              <div className="text-muted" style={{ fontSize: '0.85rem', marginTop: 10 }}>{selectedOrphan.subtitle}</div>
-            </div>
-
-            <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 14 }}>
-              <div style={{ fontWeight: 700, marginBottom: 8 }}>Current context</div>
-              <div className="text-muted" style={{ fontSize: '0.82rem' }}>{selectedOrphan.detailLabel}</div>
-              <div style={{ marginTop: 4, fontWeight: 600 }}>{selectedOrphan.detailValue}</div>
-              <div className="text-muted" style={{ fontSize: '0.82rem', marginTop: 10 }}>Updated {selectedOrphan.ageLabel}</div>
-            </div>
-
-            {/* Document preview for unmatched EOBs */}
-            {selectedOrphan.kind === 'unmatched_eob' && selectedOrphan.source && !Number.isNaN(Number((selectedOrphan.source as UnmatchedEob).id)) && (
-              <DocumentPreview
-                documentId={Number((selectedOrphan.source as UnmatchedEob).id)}
-                paperlessUrl={selectedOrphan.actionUrl}
-                variant="compact"
-                label="EOB"
-              />
-            )}
-
-            <Card title={selectedOrphan.kind === 'missing_statement' ? 'Assign provider metadata' : 'Review notes'}>
-              <div className="form-group">
-                <label htmlFor="override-display-name">Display name</label>
-                <input
-                  id="override-display-name"
-                  value={overrideDraft.displayName}
-                  onChange={(event) => setOverrideDraft((current) => ({ ...current, displayName: event.target.value }))}
-                  placeholder="Friendly provider name"
-                />
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label htmlFor="override-frequency">Frequency override</label>
-                  <select
-                    id="override-frequency"
-                    value={overrideDraft.frequencyOverride}
-                    onChange={(event) => setOverrideDraft((current) => ({ ...current, frequencyOverride: event.target.value }))}
-                  >
-                    <option value="">No override</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="quarterly">Quarterly</option>
-                    <option value="annual">Annual</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label htmlFor="override-anchor-day">Anchor day</label>
-                  <input
-                    id="override-anchor-day"
-                    type="number"
-                    min={1}
-                    max={31}
-                    value={overrideDraft.anchorDayOverride}
-                    onChange={(event) => setOverrideDraft((current) => ({ ...current, anchorDayOverride: event.target.value }))}
-                    placeholder="e.g. 15"
-                  />
-                </div>
-              </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label htmlFor="override-notes">Notes</label>
-                <textarea
-                  id="override-notes"
-                  rows={4}
-                  value={overrideDraft.notes}
-                  onChange={(event) => setOverrideDraft((current) => ({ ...current, notes: event.target.value }))}
-                  placeholder="Record review context, expected billing windows, or source caveats."
-                />
-              </div>
-            </Card>
-
-            <div className="btn-group">
-              <Button onClick={() => setSelectedOrphan(null)} disabled={savingOverride}>Close</Button>
-              <Button variant="primary" onClick={() => void handleSaveOverride()} disabled={savingOverride}>
-                {savingOverride ? 'Saving…' : selectedOrphan.kind === 'missing_statement' ? 'Save override' : 'Save review notes'}
-              </Button>
-              {selectedOrphan.kind === 'unmatched_eob' && (
-                <Button variant="success" onClick={() => navigate('/eob/unmatched')}>
-                  Open unmatched queue
-                </Button>
-              )}
-            </div>
-          </div>
+          <OrphanDetail
+            triageItem={selectedOrphan.triageItem}
+            onResolved={() => {
+              setSelectedOrphan(null);
+              void loadData();
+            }}
+            onSkip={() => {
+              const currentIndex = filteredOrphans.findIndex((o) => o.id === selectedOrphan.id);
+              const next = filteredOrphans[currentIndex + 1];
+              if (next) {
+                setSelectedOrphan(next);
+              } else {
+                setSelectedOrphan(null);
+              }
+            }}
+          />
         </SidePanel>
       )}
 
