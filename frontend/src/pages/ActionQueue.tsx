@@ -4,7 +4,6 @@ import {
   Button,
   Card,
   ConfidenceBar,
-  DataTable,
   EmptyState,
   ErrorState,
   FilterPills,
@@ -16,11 +15,13 @@ import {
   StatGrid,
   Toast,
 } from '../components/ui';
+import { SortableTable, type SortableColumnDef } from '../components/SortableTable';
 import DocumentViewerModal from '../components/DocumentViewerModal';
 import { useStreamingAction } from '../hooks/useStreamingAction';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import '../styles/action-queue.css';
+import '../styles/sortable-table.css';
 
 interface ActionQueueCheck {
   status?: string;
@@ -578,6 +579,165 @@ export default function ActionQueue() {
   const pendingCount = counts.pending ?? 0;
   const progressPct = totalActions > 0 ? Math.round((resolvedToday / totalActions) * 100) : 0;
 
+  // Derive unique action type options for filtering
+  const actionTypeOptions = useMemo(() => {
+    const types = new Set(actions.map((a) => normalizeType(a.action_type)));
+    return Array.from(types).sort().map((t) => ({ value: t, label: t }));
+  }, [actions]);
+
+  const statusOptions = useMemo(() => {
+    const statuses = new Set(actions.map((a) => normalizeStatus(a.status)));
+    return Array.from(statuses).sort().map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) }));
+  }, [actions]);
+
+  const urgencyOptions = useMemo(() => {
+    const tones = new Set(actions.map((a) => dueMeta(a).tone));
+    const labelMap: Record<string, string> = { danger: 'Overdue / Due soon', warning: 'Due this week', success: 'Not urgent', muted: 'No due date' };
+    return Array.from(tones).map((t) => ({ value: t, label: labelMap[t] ?? t }));
+  }, [actions]);
+
+  // Column definitions for sortable table
+  const actionTableColumns: SortableColumnDef<ActionItem>[] = useMemo(
+    () => [
+      {
+        id: 'select',
+        header: '',
+        cell: (row) => (
+          <input
+            type="checkbox"
+            checked={checkedIds.has(row.id)}
+            onChange={(e) => toggleCheck(row.id, e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey)}
+            onClick={(e) => e.stopPropagation()}
+            aria-label={`Select action ${row.id}`}
+          />
+        ),
+        enableSorting: false,
+        width: '40px',
+      },
+      {
+        id: 'item',
+        header: 'Action item',
+        accessorFn: (row) => (row.title || row.document_title || '').toLowerCase(),
+        cell: (row) => {
+          const { tone } = dueMeta(row);
+          const isProcessing = processingIds.has(row.id);
+          return (
+            <button className="aq-link-button" onClick={() => setSelectedActionId(row.id)}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {isProcessing ? (
+                  <span className="aq-spinner" aria-label="Processing" />
+                ) : (
+                  <span className={`aq-urgency-dot ${tone}`} />
+                )}
+                <div className={selectedActionId === row.id ? 'aq-row-title selected' : 'aq-row-title'}>
+                  {row.title || row.document_title || `Action #${row.id}`}
+                </div>
+              </div>
+              <div className="text-muted">{row.correspondent || row.document_title || 'No document metadata'}</div>
+            </button>
+          );
+        },
+      },
+      {
+        id: 'type',
+        header: 'Type',
+        accessorFn: (row) => normalizeType(row.action_type),
+        cell: (row) => {
+          const type = normalizeType(row.action_type);
+          return <Badge tone={actionTypeTone(type)}>{type}</Badge>;
+        },
+        filterOptions: actionTypeOptions,
+        width: '110px',
+      },
+      {
+        id: 'due',
+        header: 'Due',
+        accessorFn: (row) => row.due_date ?? '',
+        cell: (row) => {
+          const meta = dueMeta(row);
+          return (
+            <div>
+              <div>{formatDate(row.due_date)}</div>
+              <div className={`aq-inline-note ${meta.tone}`}>{meta.label}</div>
+            </div>
+          );
+        },
+        filterOptions: urgencyOptions,
+        filterFn: (rowValue, filterValue) => {
+          // Filter by urgency tone derived from due_date
+          const dueStr = rowValue as string;
+          const due = dueStr ? new Date(dueStr) : null;
+          if (!due || Number.isNaN(due.getTime())) return filterValue === 'muted';
+          const days = Math.ceil((due.getTime() - Date.now()) / 86400000);
+          const tone = days < 0 ? 'danger' : days <= 3 ? 'danger' : days <= 7 ? 'warning' : 'success';
+          return tone === filterValue;
+        },
+        width: '140px',
+      },
+      {
+        id: 'amount',
+        header: 'Amount',
+        accessorFn: (row) => row.amount ?? 0,
+        cell: (row) => formatCurrency(row.amount),
+        width: '110px',
+      },
+      {
+        id: 'status',
+        header: 'Status',
+        accessorFn: (row) => normalizeStatus(row.status),
+        cell: (row) => {
+          const normalized = normalizeStatus(row.status);
+          return <Badge tone={statusTone(normalized)}>{normalized}</Badge>;
+        },
+        filterOptions: statusOptions,
+        width: '110px',
+      },
+      {
+        id: 'actions',
+        header: 'Actions',
+        enableSorting: false,
+        cell: (row) => {
+          const normalized = normalizeStatus(row.status);
+          return (
+            <div className="btn-group">
+              {normalized !== 'completed' && (
+                <Button
+                  size="sm"
+                  variant="success"
+                  onClick={() => void updateAction(row.id, 'completed')}
+                  disabled={busyKey !== null}
+                >
+                  Complete
+                </Button>
+              )}
+              {normalized !== 'dismissed' && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void updateAction(row.id, 'dismissed')}
+                  disabled={busyKey !== null}
+                >
+                  Dismiss
+                </Button>
+              )}
+              {normalized !== 'pending' && (
+                <Button
+                  size="sm"
+                  onClick={() => void updateAction(row.id, 'pending')}
+                  disabled={busyKey !== null}
+                >
+                  Re-open
+                </Button>
+              )}
+            </div>
+          );
+        },
+        width: '220px',
+      },
+    ],
+    [checkedIds, selectedActionId, processingIds, busyKey, actionTypeOptions, statusOptions, urgencyOptions],
+  );
+
   return (
     <>
       <PageHeader
@@ -913,129 +1073,11 @@ export default function ActionQueue() {
                 />
               )
             ) : (
-              <DataTable<ActionItem>
-                rows={filteredActions}
+              <SortableTable<ActionItem>
+                data={filteredActions}
                 rowKey={(row) => String(row.id)}
                 emptyLabel="No actions found"
-                columns={[
-                  {
-                    key: 'select',
-                    header: '',
-                    render: (row) => (
-                      <input
-                        type="checkbox"
-                        checked={checkedIds.has(row.id)}
-                        onChange={(e) => toggleCheck(row.id, e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey)}
-                        onClick={(e) => e.stopPropagation()}
-                        aria-label={`Select action ${row.id}`}
-                      />
-                    ),
-                    width: '40px',
-                  },
-                  {
-                    key: 'item',
-                    header: 'Action item',
-                    render: (row) => {
-                      const { tone } = dueMeta(row);
-                      const isProcessing = processingIds.has(row.id);
-                      return (
-                        <button className="aq-link-button" onClick={() => setSelectedActionId(row.id)}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            {/* [UX-10] Inline spinner for processing items */}
-                            {isProcessing ? (
-                              <span className="aq-spinner" aria-label="Processing" />
-                            ) : (
-                              <span className={`aq-urgency-dot ${tone}`} />
-                            )}
-                            <div className={selectedActionId === row.id ? 'aq-row-title selected' : 'aq-row-title'}>
-                              {row.title || row.document_title || `Action #${row.id}`}
-                            </div>
-                          </div>
-                          <div className="text-muted">{row.correspondent || row.document_title || 'No document metadata'}</div>
-                        </button>
-                      );
-                    },
-                  },
-                  {
-                    key: 'type',
-                    header: 'Type',
-                    render: (row) => {
-                      const type = normalizeType(row.action_type);
-                      return <Badge tone={actionTypeTone(type)}>{type}</Badge>;
-                    },
-                    width: '110px',
-                  },
-                  {
-                    key: 'due',
-                    header: 'Due',
-                    render: (row) => {
-                      const meta = dueMeta(row);
-                      return (
-                        <div>
-                          <div>{formatDate(row.due_date)}</div>
-                          <div className={`aq-inline-note ${meta.tone}`}>{meta.label}</div>
-                        </div>
-                      );
-                    },
-                    width: '140px',
-                  },
-                  {
-                    key: 'amount',
-                    header: 'Amount',
-                    render: (row) => formatCurrency(row.amount),
-                    width: '110px',
-                  },
-                  {
-                    key: 'status',
-                    header: 'Status',
-                    render: (row) => {
-                      const normalized = normalizeStatus(row.status);
-                      return <Badge tone={statusTone(normalized)}>{normalized}</Badge>;
-                    },
-                    width: '110px',
-                  },
-                  {
-                    key: 'actions',
-                    header: 'Actions',
-                    render: (row) => {
-                      const normalized = normalizeStatus(row.status);
-                      return (
-                        <div className="btn-group">
-                          {normalized !== 'completed' && (
-                            <Button
-                              size="sm"
-                              variant="success"
-                              onClick={() => void updateAction(row.id, 'completed')}
-                              disabled={busyKey !== null}
-                            >
-                              Complete
-                            </Button>
-                          )}
-                          {normalized !== 'dismissed' && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => void updateAction(row.id, 'dismissed')}
-                              disabled={busyKey !== null}
-                            >
-                              Dismiss
-                            </Button>
-                          )}
-                          {normalized !== 'pending' && (
-                            <Button
-                              size="sm"
-                              onClick={() => void updateAction(row.id, 'pending')}
-                              disabled={busyKey !== null}
-                            >
-                              Re-open
-                            </Button>
-                          )}
-                        </div>
-                      );
-                    },
-                    width: '220px',
-                  },
-                ]}
+                columns={actionTableColumns}
               />
             )}
           </Card>

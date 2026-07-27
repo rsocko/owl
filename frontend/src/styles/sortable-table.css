@@ -1,0 +1,173 @@
+/* Sortable table header controls */
+.st-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.st-header-sort {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--text);
+  white-space: nowrap;
+  user-select: none;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s;
+}
+
+.st-header-sort:hover {
+  background: var(--muted-bg);
+}
+
+.st-header-sort:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.st-sort-icon {
+  font-size: 0.7rem;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+
+.st-header-sort:hover .st-sort-icon {
+  opacity: 1;
+}
+
+/* Filter trigger button */
+.st-filter-trigger {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  transition: background 0.15s, color 0.15s;
+}
+
+.st-filter-trigger:hover {
+  background: var(--muted-bg);
+  color: var(--text);
+}
+
+.st-filter-trigger.active {
+  background: var(--accent-bg, rgba(99, 102, 241, 0.12));
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* Filter popover */
+.st-filter-popover {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  min-width: 140px;
+  max-height: 280px;
+  overflow-y: auto;
+  z-index: 9999;
+  animation: st-popover-in 0.15s ease;
+}
+
+@keyframes st-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.st-filter-arrow {
+  fill: var(--card);
+}
+
+.st-filter-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.st-filter-option {
+  all: unset;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.1s;
+  white-space: nowrap;
+}
+
+.st-filter-option:hover {
+  background: var(--muted-bg);
+}
+
+.st-filter-option.active {
+  background: var(--accent-bg, rgba(99, 102, 241, 0.12));
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Active filter pills */
+.st-active-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.st-active-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--accent-bg, rgba(99, 102, 241, 0.08));
+  color: var(--accent);
+  border-radius: 12px;
+}
+
+.st-active-filter-pill button {
+  all: unset;
+  cursor: pointer;
+  font-size: 0.7rem;
+  opacity: 0.7;
+  transition: opacity 0.1s;
+}
+
+.st-active-filter-pill button:hover {
+  opacity: 1;
+}
+
+.st-clear-all {
+  all: unset;
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.st-clear-all:hover {
+  color: var(--text);
+}
+
+/* Ensure sortable table header cells don't wrap oddly */
+.sortable-table th {
+  vertical-align: middle;
+}
