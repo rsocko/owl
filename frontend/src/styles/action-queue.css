@@ -515,3 +515,32 @@ a.aq-pdf-preview .aq-pdf-hint {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* Detail panel action layout */
+.aq-detail-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.aq-cta-section {
+  padding: 12px;
+  background: var(--muted-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.aq-cta-section .section-title {
+  margin-bottom: 8px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.aq-feedback-section {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  margin-top: 4px;
+}
