@@ -8,6 +8,7 @@ import pytest
 
 from doc_intelligence_hub.core.alerts import (
     Alert,
+    _get_due_soon_days,
     check_eob_due_dates,
     cleanup_old_alerts,
     configure,
@@ -190,6 +191,62 @@ class TestCheckEobDueDates:
         bills = [{"document_id": 4, "provider_name": "Y"}]
         count = check_eob_due_dates(bills)
         assert count == 0
+
+    def test_custom_due_soon_days(self):
+        """due_soon_days parameter narrows the window."""
+        # Bill due in 3 days: within default 7-day window, but outside 2-day window
+        soon = (datetime.now(UTC).date() + timedelta(days=3)).isoformat()
+        bills = [{"document_id": 5, "provider_name": "Lab", "due_date": soon}]
+        assert check_eob_due_dates(bills, due_soon_days=2) == 0
+        assert check_eob_due_dates(bills, due_soon_days=5) == 1
+
+
+class TestGetDueSoonDays:
+    def test_default_value(self, monkeypatch):
+        monkeypatch.delenv("EOB_DUE_SOON_DAYS", raising=False)
+        assert _get_due_soon_days() == 7
+
+    def test_env_override(self, monkeypatch):
+        monkeypatch.setenv("EOB_DUE_SOON_DAYS", "14")
+        assert _get_due_soon_days() == 14
+
+    def test_invalid_env_falls_back(self, monkeypatch):
+        monkeypatch.setenv("EOB_DUE_SOON_DAYS", "not_a_number")
+        assert _get_due_soon_days() == 7
+
+    def test_zero_env_falls_back(self, monkeypatch):
+        monkeypatch.setenv("EOB_DUE_SOON_DAYS", "0")
+        assert _get_due_soon_days() == 7
+
+
+class TestEmitAlertNotification:
+    """Verify emit_alert triggers Gotify for high/critical severity."""
+
+    def test_high_severity_triggers_notification(self):
+        from unittest.mock import patch
+
+        with patch("doc_intelligence_hub.core.notifications.notify_alert") as mock_notify:
+            alert = emit_alert(
+                alert_type="test_notify",
+                severity="high",
+                module="eob",
+                title="High alert test",
+            )
+            assert alert is not None
+            mock_notify.assert_called_once_with(alert)
+
+    def test_medium_severity_skips_notification(self):
+        from unittest.mock import patch
+
+        with patch("doc_intelligence_hub.core.notifications.notify_alert") as mock_notify:
+            alert = emit_alert(
+                alert_type="test_medium",
+                severity="medium",
+                module="eob",
+                title="Medium alert test",
+            )
+            assert alert is not None
+            mock_notify.assert_not_called()
 
 
 class TestEmitActionQueueAlerts:
