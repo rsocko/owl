@@ -344,6 +344,22 @@ class Database:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    # ----- Provider lookup -----
+
+    def get_provider_by_key(self, provider_key: str) -> dict | None:
+        """Look up a provider from the latest discovery run by its provider_key."""
+        conn = self.connect()
+        run_row = conn.execute(
+            "SELECT id FROM discovery_runs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if run_row is None:
+            return None
+        row = conn.execute(
+            "SELECT * FROM providers WHERE discovery_run_id = ? AND provider_key = ?",
+            (run_row["id"], provider_key),
+        ).fetchone()
+        return dict(row) if row else None
+
     # ----- Provider overrides -----
 
     def get_provider_overrides(self) -> dict[str, dict]:
