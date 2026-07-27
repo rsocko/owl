@@ -103,6 +103,16 @@ class NotificationConfig(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
 
+class TriageSetting(Base):
+    """Key-value settings for the triage subsystem (e.g. auto-detect toggles)."""
+
+    __tablename__ = "triage_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC))
+
+
 class ExtractionCorrection(Base):
     """Tracks field-level corrections and confirmations for extracted document metadata."""
 
@@ -1212,5 +1222,51 @@ def upsert_notification_config(
             "config": parsed_config,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
+    finally:
+        session.close()
+
+
+# ------------------------------------------------------------------
+# Triage settings CRUD
+# ------------------------------------------------------------------
+
+
+def get_triage_setting(key: str, default: str | None = None) -> str | None:
+    """Read a single triage setting by key. Returns *default* if not set."""
+    session = get_session()
+    try:
+        row = session.query(TriageSetting).filter(TriageSetting.key == key).first()
+        return row.value if row else default
+    finally:
+        session.close()
+
+
+def set_triage_setting(key: str, value: str) -> dict[str, Any]:
+    """Create or update a triage setting. Returns the saved key/value pair."""
+    session = get_session()
+    try:
+        row = session.query(TriageSetting).filter(TriageSetting.key == key).first()
+        if row:
+            row.value = value
+            row.updated_at = datetime.now(UTC)
+        else:
+            row = TriageSetting(key=key, value=value)
+            session.add(row)
+        session.commit()
+        return {
+            "key": row.key,
+            "value": row.value,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+    finally:
+        session.close()
+
+
+def get_all_triage_settings() -> dict[str, str]:
+    """Return all triage settings as a plain dict."""
+    session = get_session()
+    try:
+        rows = session.query(TriageSetting).all()
+        return {r.key: r.value for r in rows}
     finally:
         session.close()
