@@ -257,6 +257,16 @@ export default function ActionQueue() {
     setPdfExpanded(false);
   }, [selectedActionId]);
 
+  // Lock body scroll when drawer is open
+  useEffect(() => {
+    if (selectedAction) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [selectedAction]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -528,8 +538,7 @@ export default function ActionQueue() {
         <ErrorState message={error} onRetry={() => void loadData()} />
       ) : (
         <div className="action-queue-layout">
-          <Card title={`Pending actions (${filteredActions.length})`} className="aq-table-card">
-            {/* [ARCH-01] Bulk action bar */}
+          <Card title={`Pending actions (${filteredActions.length})`} className="aq-table-card">            {/* [ARCH-01] Bulk action bar */}
             {checkedIds.size > 0 && (
               <div className="aq-bulk-bar">
                 <span className="aq-bulk-count">
@@ -714,156 +723,6 @@ export default function ActionQueue() {
           </Card>
 
           <div className="aq-side-column">
-            {selectedAction ? (
-              <Card
-                title="Action detail"
-                actions={
-                  <Button variant="ghost" size="sm" onClick={handleClosePanel} title="Close panel">
-                    ✕
-                  </Button>
-                }
-              >
-                <div className="aq-detail-list" role="region" aria-live="polite" aria-label="Action detail panel">
-                  {/* [UX-07] Banner when selected item is not in the current filtered view */}
-                  {!selectedInView && (
-                    <div className="aq-out-of-view-banner" role="status">
-                      ⚠ This item is not in the current view. Change filters to see it in the list.
-                    </div>
-                  )}
-
-                  <div>
-                    <div className="aq-detail-title">{selectedAction.title || selectedAction.document_title || `Action #${selectedAction.id}`}</div>
-                    <div className="text-muted">{selectedAction.summary || 'No summary provided.'}</div>
-                  </div>
-
-                  <div className="aq-badge-row">
-                    <Badge tone={actionTypeTone(normalizeType(selectedAction.action_type))}>
-                      {normalizeType(selectedAction.action_type)}
-                    </Badge>
-                    <Badge tone={statusTone(normalizeStatus(selectedAction.status))}>
-                      {normalizeStatus(selectedAction.status)}
-                    </Badge>
-                    <Badge tone={dueMeta(selectedAction).tone}>{dueMeta(selectedAction).label}</Badge>
-                  </div>
-
-                  {selectedAction.document_id ? (
-                    <div className="aq-doc-preview-section">
-                      {pdfExpanded ? (
-                        <div className="aq-pdf-embed-wrapper">
-                          <div className="aq-pdf-embed-toolbar">
-                            <button className="aq-pdf-collapse-btn" onClick={() => setPdfExpanded(false)} title="Collapse PDF viewer">
-                              ▾ Collapse
-                            </button>
-                            {selectedAction.preview_url && /^https?:\/\//i.test(selectedAction.preview_url) && (
-                              <a href={selectedAction.preview_url} target="_blank" rel="noreferrer" className="aq-pdf-open-external">
-                                Open in Paperless ↗
-                              </a>
-                            )}
-                          </div>
-                          <iframe
-                            className="aq-pdf-embed"
-                            src={endpoints.documents.download(String(selectedAction.document_id))}
-                            title="Document PDF preview"
-                          />
-                        </div>
-                      ) : (
-                        <button
-                          className="aq-thumb-preview"
-                          onClick={() => setPdfExpanded(true)}
-                          title="Click to expand PDF viewer"
-                          aria-label="Expand document preview"
-                        >
-                          <img
-                            className="aq-thumb-img"
-                            src={endpoints.statements.documentThumb(String(selectedAction.document_id))}
-                            alt={`Thumbnail of ${selectedAction.document_title || 'document'}`}
-                            onError={(e) => {
-                              (e.currentTarget as HTMLImageElement).style.display = 'none';
-                              (e.currentTarget.nextElementSibling as HTMLElement)?.style.setProperty('display', 'flex');
-                            }}
-                          />
-                          <div className="aq-thumb-fallback" style={{ display: 'none' }}>
-                            <span className="aq-pdf-icon">📄</span>
-                          </div>
-                          <div className="aq-thumb-overlay">
-                            <span className="aq-thumb-label">{selectedAction.correspondent || selectedAction.document_title || 'Document'}</span>
-                            <span className="aq-thumb-hint">Click to preview PDF</span>
-                          </div>
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="aq-pdf-preview">
-                      <span className="aq-pdf-icon">📄</span>
-                      <span className="aq-pdf-title">{selectedAction.correspondent || selectedAction.document_title || 'No document'}</span>
-                      <span className="aq-pdf-hint">No preview available</span>
-                    </div>
-                  )}
-
-                  <div className="aq-meta-list">
-                    <div className="aq-meta-row"><span>Document</span><span>{selectedAction.document_title || `#${selectedAction.document_id ?? '—'}`}</span></div>
-                    <div className="aq-meta-row"><span>Correspondent</span><span>{selectedAction.correspondent || '—'}</span></div>
-                    <div className="aq-meta-row"><span>Amount</span><span>{formatCurrency(selectedAction.amount)}</span></div>
-                    <div className="aq-meta-row"><span>Due date</span><span>{formatDate(selectedAction.due_date)}</span></div>
-                    <div className="aq-meta-row"><span>Created</span><span>{formatDateTime(selectedAction.created_at)}</span></div>
-                    <div className="aq-meta-row"><span>Completed</span><span>{formatDateTime(selectedAction.completed_at)}</span></div>
-                  </div>
-
-                  {selectedAction.confidence != null && (
-                    <ConfidenceBar label="AI confidence" pct={selectedAction.confidence} />
-                  )}
-
-                  {selectedAction.risk_score != null && selectedAction.risk_score > 0 && (
-                    <RiskScoreBar label="Risk score" score={selectedAction.risk_score} />
-                  )}
-
-                  {selectedAction.ai_reasoning && (
-                    <div>
-                      <div className="section-title">AI reasoning</div>
-                      <div className="aq-reasoning">{selectedAction.ai_reasoning}</div>
-                    </div>
-                  )}
-
-                  {(() => {
-                    const currentStatus = normalizeStatus(selectedAction.status);
-                    return (
-                      <div className="btn-group">
-                        {currentStatus !== 'completed' && (
-                          <Button
-                            variant="success"
-                            onClick={() => void updateAction(selectedAction.id, 'completed')}
-                            disabled={busyKey !== null}
-                          >
-                            Confirm
-                          </Button>
-                        )}
-                        {currentStatus !== 'dismissed' && (
-                          <Button
-                            variant="danger"
-                            onClick={() => void updateAction(selectedAction.id, 'dismissed')}
-                            disabled={busyKey !== null}
-                          >
-                            Reject
-                          </Button>
-                        )}
-                        {currentStatus !== 'pending' && (
-                          <Button
-                            variant="ghost"
-                            onClick={() => void updateAction(selectedAction.id, 'pending')}
-                            disabled={busyKey !== null}
-                          >
-                            Requeue
-                          </Button>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </div>
-              </Card>
-            ) : (
-              <EmptyState title="Select an action" desc="Pick an item from the queue to inspect its due date, status, and AI reasoning." />
-            )}
-
             <Card title="Run health">
                 {health ? (
                   <div className="aq-meta-list">
@@ -893,6 +752,165 @@ export default function ActionQueue() {
           </div>
         </div>
       )}
+
+      {/* Slide-over drawer for action detail */}
+      <div
+        className={`aq-drawer-backdrop${selectedAction ? ' open' : ''}`}
+        onClick={handleClosePanel}
+      />
+      <div
+        className={`aq-drawer${selectedAction ? ' open' : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Action detail"
+      >
+        {selectedAction && (
+          <>
+            <div className="aq-drawer-header">
+              <h3>Action detail</h3>
+              <Button variant="ghost" size="sm" onClick={handleClosePanel} title="Close panel">
+                ✕
+              </Button>
+            </div>
+            <div className="aq-detail-list" role="region" aria-live="polite" aria-label="Action detail panel">
+              {/* [UX-07] Banner when selected item is not in the current filtered view */}
+              {!selectedInView && (
+                <div className="aq-out-of-view-banner" role="status">
+                  ⚠ This item is not in the current view. Change filters to see it in the list.
+                </div>
+              )}
+
+              <div>
+                <div className="aq-detail-title">{selectedAction.title || selectedAction.document_title || `Action #${selectedAction.id}`}</div>
+                <div className="text-muted">{selectedAction.summary || 'No summary provided.'}</div>
+              </div>
+
+              <div className="aq-badge-row">
+                <Badge tone={actionTypeTone(normalizeType(selectedAction.action_type))}>
+                  {normalizeType(selectedAction.action_type)}
+                </Badge>
+                <Badge tone={statusTone(normalizeStatus(selectedAction.status))}>
+                  {normalizeStatus(selectedAction.status)}
+                </Badge>
+                <Badge tone={dueMeta(selectedAction).tone}>{dueMeta(selectedAction).label}</Badge>
+              </div>
+
+              {selectedAction.document_id ? (
+                <div className="aq-doc-preview-section">
+                  {pdfExpanded ? (
+                    <div className="aq-pdf-embed-wrapper">
+                      <div className="aq-pdf-embed-toolbar">
+                        <button className="aq-pdf-collapse-btn" onClick={() => setPdfExpanded(false)} title="Collapse PDF viewer">
+                          ▾ Collapse
+                        </button>
+                        {selectedAction.preview_url && /^https?:\/\//i.test(selectedAction.preview_url) && (
+                          <a href={selectedAction.preview_url} target="_blank" rel="noreferrer" className="aq-pdf-open-external">
+                            Open in Paperless ↗
+                          </a>
+                        )}
+                      </div>
+                      <iframe
+                        className="aq-pdf-embed"
+                        src={endpoints.documents.download(String(selectedAction.document_id))}
+                        title="Document PDF preview"
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      className="aq-thumb-preview"
+                      onClick={() => setPdfExpanded(true)}
+                      title="Click to expand PDF viewer"
+                      aria-label="Expand document preview"
+                    >
+                      <img
+                        className="aq-thumb-img"
+                        src={endpoints.statements.documentThumb(String(selectedAction.document_id))}
+                        alt={`Thumbnail of ${selectedAction.document_title || 'document'}`}
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.display = 'none';
+                          (e.currentTarget.nextElementSibling as HTMLElement)?.style.setProperty('display', 'flex');
+                        }}
+                      />
+                      <div className="aq-thumb-fallback" style={{ display: 'none' }}>
+                        <span className="aq-pdf-icon">📄</span>
+                      </div>
+                      <div className="aq-thumb-overlay">
+                        <span className="aq-thumb-label">{selectedAction.correspondent || selectedAction.document_title || 'Document'}</span>
+                        <span className="aq-thumb-hint">Click to preview PDF</span>
+                      </div>
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="aq-pdf-preview">
+                  <span className="aq-pdf-icon">📄</span>
+                  <span className="aq-pdf-title">{selectedAction.correspondent || selectedAction.document_title || 'No document'}</span>
+                  <span className="aq-pdf-hint">No preview available</span>
+                </div>
+              )}
+
+              <div className="aq-meta-list">
+                <div className="aq-meta-row"><span>Document</span><span>{selectedAction.document_title || `#${selectedAction.document_id ?? '—'}`}</span></div>
+                <div className="aq-meta-row"><span>Correspondent</span><span>{selectedAction.correspondent || '—'}</span></div>
+                <div className="aq-meta-row"><span>Amount</span><span>{formatCurrency(selectedAction.amount)}</span></div>
+                <div className="aq-meta-row"><span>Due date</span><span>{formatDate(selectedAction.due_date)}</span></div>
+                <div className="aq-meta-row"><span>Created</span><span>{formatDateTime(selectedAction.created_at)}</span></div>
+                <div className="aq-meta-row"><span>Completed</span><span>{formatDateTime(selectedAction.completed_at)}</span></div>
+              </div>
+
+              {selectedAction.confidence != null && (
+                <ConfidenceBar label="AI confidence" pct={selectedAction.confidence} />
+              )}
+
+              {selectedAction.risk_score != null && selectedAction.risk_score > 0 && (
+                <RiskScoreBar label="Risk score" score={selectedAction.risk_score} />
+              )}
+
+              {selectedAction.ai_reasoning && (
+                <div>
+                  <div className="section-title">AI reasoning</div>
+                  <div className="aq-reasoning">{selectedAction.ai_reasoning}</div>
+                </div>
+              )}
+
+              {(() => {
+                const currentStatus = normalizeStatus(selectedAction.status);
+                return (
+                  <div className="btn-group">
+                    {currentStatus !== 'completed' && (
+                      <Button
+                        variant="success"
+                        onClick={() => void updateAction(selectedAction.id, 'completed')}
+                        disabled={busyKey !== null}
+                      >
+                        Confirm
+                      </Button>
+                    )}
+                    {currentStatus !== 'dismissed' && (
+                      <Button
+                        variant="danger"
+                        onClick={() => void updateAction(selectedAction.id, 'dismissed')}
+                        disabled={busyKey !== null}
+                      >
+                        Reject
+                      </Button>
+                    )}
+                    {currentStatus !== 'pending' && (
+                      <Button
+                        variant="ghost"
+                        onClick={() => void updateAction(selectedAction.id, 'pending')}
+                        disabled={busyKey !== null}
+                      >
+                        Requeue
+                      </Button>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          </>
+        )}
+      </div>
 
       {/* [ARCH-01] Confirmation modal for destructive bulk actions */}
       {pendingBulkAction && (
