@@ -9,6 +9,7 @@ import {
   ErrorState,
   FilterPills,
   PageHeader,
+  ProgressBanner,
   RiskScoreBar,
   SkeletonLoader,
   StatCard,
@@ -16,6 +17,7 @@ import {
   Toast,
 } from '../components/ui';
 import DocumentViewerModal from '../components/DocumentViewerModal';
+import { useStreamingAction } from '../hooks/useStreamingAction';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import '../styles/action-queue.css';
@@ -178,6 +180,9 @@ export default function ActionQueue() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
 
+  // [UX-STREAM] Pipeline streaming progress
+  const [pipelineState, runPipelineStream, cancelPipeline] = useStreamingAction();
+
   // [ARCH-01] Bulk selection state
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
   const lastCheckedRef = useRef<number | null>(null);
@@ -253,6 +258,14 @@ export default function ActionQueue() {
     const timeout = window.setTimeout(() => setToast(null), duration);
     return () => window.clearTimeout(timeout);
   }, [toast]);
+
+  // Show pipeline streaming errors as toasts and clear busy state
+  useEffect(() => {
+    if (pipelineState.error) {
+      setToast({ message: pipelineState.error, tone: 'error' });
+      setBusyKey(null);
+    }
+  }, [pipelineState.error]);
 
   const filteredActions = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -388,20 +401,21 @@ export default function ActionQueue() {
     }
   };
 
-  const runPipeline = async (dryRun: boolean) => {
+  const runPipeline = (dryRun: boolean) => {
     setBusyKey(dryRun ? 'dry-run' : 'run');
-    try {
-      await endpoints.actionQueue.run({ dry_run: dryRun, force: !dryRun });
-      await loadData();
-      setToast({ message: dryRun ? 'Dry run completed.' : 'Pipeline run completed.' });
-    } catch (err) {
-      setToast({
-        message: err instanceof Error ? err.message : 'Pipeline run failed.',
-        tone: 'error',
-      });
-    } finally {
-      setBusyKey(null);
-    }
+    runPipelineStream(
+      endpoints.actionQueue.runStreamUrl,
+      () => {
+        setToast({ message: dryRun ? 'Dry run completed.' : 'Pipeline run completed.' });
+        setBusyKey(null);
+        void loadData();
+      },
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dry_run: dryRun, force: !dryRun }),
+      },
+    );
   };
 
   const runBackfill = async (dryRun: boolean) => {
@@ -577,11 +591,11 @@ export default function ActionQueue() {
             <Button onClick={() => void runCheck('custom-fields')} disabled={busyKey !== null}>
               Check custom fields
             </Button>
-            <Button variant="ghost" onClick={() => void runPipeline(true)} disabled={busyKey !== null}>
-              Dry run
+            <Button variant="ghost" onClick={() => runPipeline(true)} disabled={busyKey !== null || pipelineState.running}>
+              {busyKey === 'dry-run' ? 'Running…' : 'Dry run'}
             </Button>
-            <Button variant="primary" onClick={() => void runPipeline(false)} disabled={busyKey !== null}>
-              Run pipeline
+            <Button variant="primary" onClick={() => runPipeline(false)} disabled={busyKey !== null || pipelineState.running}>
+              {busyKey === 'run' ? 'Running…' : 'Run pipeline'}
             </Button>
             <Button variant="ghost" onClick={() => void runBackfill(true)} disabled={busyKey !== null} title="Preview which actions would be re-synced to Paperless">
               Backfill preview
@@ -599,14 +613,28 @@ export default function ActionQueue() {
         <StatCard title="Dismissed" metric={counts.dismissed ?? 0} desc="Closed without further action." />
         <StatCard
           title="Pipeline status"
-          metric={(status?.status ?? 'idle').toUpperCase()}
-          desc={progress?.stage ? `${progress.stage}${progress.current_document ? ` · ${progress.current_document}` : ''}` : 'No active run'}
+          metric={pipelineState.running ? 'RUNNING' : (status?.status ?? 'idle').toUpperCase()}
+          desc={
+            pipelineState.running && pipelineState.progress
+              ? `${pipelineState.progress.stage}${pipelineState.progress.message ? ` · ${pipelineState.progress.message}` : ''}`
+              : progress?.stage ? `${progress.stage}${progress.current_document ? ` · ${progress.current_document}` : ''}` : 'No active run'
+          }
           status={{
             label: status?.read_only ? 'Read only' : 'Write enabled',
             tone: status?.read_only ? 'warning' : 'success',
           }}
         />
       </StatGrid>
+
+      {pipelineState.running && pipelineState.progress && (
+        <ProgressBanner
+          stage={pipelineState.progress.stage}
+          message={pipelineState.progress.message}
+          current={pipelineState.progress.current}
+          total={pipelineState.progress.total}
+          onCancel={() => { cancelPipeline(); setBusyKey(null); setToast({ message: 'Disconnected from pipeline stream. The run continues in the background.' }); }}
+        />
+      )}
 
       {/* Custom Run Panel */}
       <div style={{ margin: '16px 0' }}>
