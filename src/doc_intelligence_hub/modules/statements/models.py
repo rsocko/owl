@@ -138,6 +138,13 @@ class TimelineEntry(BaseModel):
     balance_delta: float | None = None
 
 
+class SuggestedSplitGroup(BaseModel):
+    """A suggested group of documents that share the same account hint."""
+
+    account_hint: str
+    document_ids: list[str]
+
+
 class SeriesDetail(BaseModel):
     """Full detail view of a statement series."""
 
@@ -146,6 +153,7 @@ class SeriesDetail(BaseModel):
     timeline: list[TimelineEntry] = Field(default_factory=list)
     similar_series: list[StatementSeries] = Field(default_factory=list)
     anomaly_indicators: list[str] = Field(default_factory=list)
+    suggested_split_groups: list[SuggestedSplitGroup] = Field(default_factory=list)
 
 
 class SplitSeriesRequest(BaseModel):

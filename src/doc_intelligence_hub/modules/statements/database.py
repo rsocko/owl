@@ -520,6 +520,15 @@ class Database:
         conn.commit()
         return self.get_series(series_id)
 
+    def update_series_frequency(self, series_id: str, frequency: str) -> None:
+        """Update the frequency field for a series."""
+        conn = self.connect()
+        conn.execute(
+            "UPDATE statement_series SET frequency = ? WHERE id = ?",
+            (frequency, series_id),
+        )
+        conn.commit()
+
     def add_documents_to_series(self, series_id: str, documents: list[dict]) -> None:
         """Add documents to a series. Each dict: document_id, title?, statement_date?, period_label?, account_hint?."""
         conn = self.connect()
