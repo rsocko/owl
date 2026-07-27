@@ -875,6 +875,7 @@ export default function EobMatchDetail({
 
       {sideBySideOpen && match.eob_document_id && match.bill_document_id && (
         <SideBySideViewerModal
+          heading="EOB ↔ Bill Comparison"
           left={{
             documentId: match.eob_document_id,
             title: 'EOB',
