@@ -15,6 +15,7 @@ import {
   StatGrid,
   Toast,
 } from '../components/ui';
+import DocumentViewerModal from '../components/DocumentViewerModal';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import '../styles/action-queue.css';
@@ -164,7 +165,7 @@ export default function ActionQueue() {
   const [filter, setFilter] = useState<ActionFilter>('pending');
   const [search, setSearch] = useState('');
   const [selectedActionId, setSelectedActionId] = useState<number | null>(null);
-  const [pdfExpanded, setPdfExpanded] = useState(false);
+  const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -256,7 +257,7 @@ export default function ActionQueue() {
 
   // [UX-15] Reset PDF viewer state on action selection change
   useEffect(() => {
-    setPdfExpanded(false);
+    setPdfViewerOpen(false);
   }, [selectedActionId]);
 
   // Lock body scroll when drawer is open
@@ -831,48 +832,36 @@ export default function ActionQueue() {
 
               {selectedAction.document_id ? (
                 <div className="aq-doc-preview-section">
-                  {pdfExpanded ? (
-                    <div className="aq-pdf-embed-wrapper">
-                      <div className="aq-pdf-embed-toolbar">
-                        <button className="aq-pdf-collapse-btn" onClick={() => setPdfExpanded(false)} title="Collapse PDF viewer">
-                          ▾ Collapse
-                        </button>
-                        {selectedAction.preview_url && /^https?:\/\//i.test(selectedAction.preview_url) && (
-                          <a href={selectedAction.preview_url} target="_blank" rel="noreferrer" className="aq-pdf-open-external">
-                            Open in Paperless ↗
-                          </a>
-                        )}
-                      </div>
-                      <iframe
-                        className="aq-pdf-embed"
-                        src={endpoints.documents.download(String(selectedAction.document_id))}
-                        title="Document PDF preview"
-                      />
+                  <button
+                    className="aq-thumb-preview"
+                    onClick={() => setPdfViewerOpen(true)}
+                    title="Click to preview PDF"
+                    aria-label="Preview document"
+                  >
+                    <img
+                      className="aq-thumb-img"
+                      src={endpoints.statements.documentThumb(String(selectedAction.document_id))}
+                      alt={`Thumbnail of ${selectedAction.document_title || 'document'}`}
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.display = 'none';
+                        (e.currentTarget.nextElementSibling as HTMLElement)?.style.setProperty('display', 'flex');
+                      }}
+                    />
+                    <div className="aq-thumb-fallback" style={{ display: 'none' }}>
+                      <span className="aq-pdf-icon">📄</span>
                     </div>
-                  ) : (
-                    <button
-                      className="aq-thumb-preview"
-                      onClick={() => setPdfExpanded(true)}
-                      title="Click to expand PDF viewer"
-                      aria-label="Expand document preview"
-                    >
-                      <img
-                        className="aq-thumb-img"
-                        src={endpoints.statements.documentThumb(String(selectedAction.document_id))}
-                        alt={`Thumbnail of ${selectedAction.document_title || 'document'}`}
-                        onError={(e) => {
-                          (e.currentTarget as HTMLImageElement).style.display = 'none';
-                          (e.currentTarget.nextElementSibling as HTMLElement)?.style.setProperty('display', 'flex');
-                        }}
-                      />
-                      <div className="aq-thumb-fallback" style={{ display: 'none' }}>
-                        <span className="aq-pdf-icon">📄</span>
-                      </div>
-                      <div className="aq-thumb-overlay">
-                        <span className="aq-thumb-label">{selectedAction.correspondent || selectedAction.document_title || 'Document'}</span>
-                        <span className="aq-thumb-hint">Click to preview PDF</span>
-                      </div>
-                    </button>
+                    <div className="aq-thumb-overlay">
+                      <span className="aq-thumb-label">{selectedAction.correspondent || selectedAction.document_title || 'Document'}</span>
+                      <span className="aq-thumb-hint">Click to preview PDF</span>
+                    </div>
+                  </button>
+                  {pdfViewerOpen && (
+                    <DocumentViewerModal
+                      documentId={selectedAction.document_id}
+                      title={selectedAction.document_title || selectedAction.correspondent || `Document #${selectedAction.document_id}`}
+                      paperlessUrl={selectedAction.preview_url}
+                      onClose={() => setPdfViewerOpen(false)}
+                    />
                   )}
                 </div>
               ) : (

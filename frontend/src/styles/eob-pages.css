@@ -75,6 +75,12 @@
   gap: 16px;
 }
 
+.eob-compare-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: -8px;
+}
+
 .eob-reason-banner {
   border-left: 4px solid var(--warning);
   background: var(--warning-bg);

@@ -22,6 +22,7 @@ import { getToastDuration } from '../lib/toast';
 import ManualMatchModal from './ManualMatchModal';
 import ConfirmModal from './ConfirmModal';
 import DocumentPreview from './DocumentPreview';
+import SideBySideViewerModal from './SideBySideViewerModal';
 import '../styles/eob-pages.css';
 
 // ------------------------------------------------------------------
@@ -299,6 +300,7 @@ export default function EobMatchDetail({
   const [payNotes, setPayNotes] = useState('');
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
   const [pendingAction, setPendingAction] = useState<'confirm' | 'reject' | null>(null);
+  const [sideBySideOpen, setSideBySideOpen] = useState(false);
 
   // Guard against stale requests when matchId changes rapidly
   const loadGenRef = useRef(0);
@@ -835,6 +837,13 @@ export default function EobMatchDetail({
       </Card>
 
       {/* Document preview thumbnails */}
+      {match.eob_document_id && match.bill_document_id && (
+        <div className="eob-compare-bar">
+          <Button variant="ghost" onClick={() => setSideBySideOpen(true)}>
+            📑 Compare side-by-side
+          </Button>
+        </div>
+      )}
       <div className="eob-grid-2">
         <Card title="EOB document preview">
           {match.eob_document_id ? (
@@ -863,6 +872,23 @@ export default function EobMatchDetail({
           )}
         </Card>
       </div>
+
+      {sideBySideOpen && match.eob_document_id && match.bill_document_id && (
+        <SideBySideViewerModal
+          heading="EOB ↔ Bill Comparison"
+          left={{
+            documentId: match.eob_document_id,
+            title: 'EOB',
+            paperlessUrl: match.eob_preview_url,
+          }}
+          right={{
+            documentId: match.bill_document_id,
+            title: 'Bill',
+            paperlessUrl: match.bill_preview_url,
+          }}
+          onClose={() => setSideBySideOpen(false)}
+        />
+      )}
 
       {/* Payment tracking — visible only for confirmed matches */}
       {(match.status || '').toLowerCase() === 'confirmed' && (
