@@ -248,6 +248,8 @@ async def update_action(
     Supports optimistic locking: if `version` is provided in the request body,
     the update will only succeed if the action's current version matches.
     Returns 409 Conflict if another request modified the action first.
+
+    Also syncs the status change to Paperless custom fields (best-effort).
     """
     _sync_action_queue_settings(request)
     init_db()
@@ -288,6 +290,23 @@ async def update_action(
                 action_type=action.action_type or "REVIEW",
             )
         db.commit()
+
+        # Sync status to Paperless (best-effort — don't fail the user action)
+        if action_queue_settings.write_to_paperless and action.document_id:
+            try:
+                from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
+
+                enricher = PaperlessEnricher()
+                await enricher.sync_status(action.document_id, body.status)
+                action.last_synced_status = body.status
+                db.commit()
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Failed to sync status to Paperless for action %d (doc %d): %s",
+                    action_id, action.document_id, exc,
+                )
+
         return _serialize_action(action)
     finally:
         db.close()
@@ -305,7 +324,10 @@ _BULK_ACTION_STATUS: dict[str, str] = {
 async def bulk_action(
     request: Request, body: BulkActionRequest
 ) -> dict[str, Any]:
-    """Apply an action to multiple action queue items at once."""
+    """Apply an action to multiple action queue items at once.
+
+    Also syncs status changes to Paperless custom fields (best-effort).
+    """
     from fastapi import HTTPException
 
     _sync_action_queue_settings(request)
@@ -321,6 +343,7 @@ async def bulk_action(
             raise HTTPException(status_code=404, detail="No matching actions found")
 
         affected = 0
+        affected_actions: list[Action] = []
         for action in actions:
             if action.status == target_status:
                 continue
@@ -339,8 +362,33 @@ async def bulk_action(
                     action_type=action.action_type or "REVIEW",
                 )
             affected += 1
+            affected_actions.append(action)
 
         db.commit()
+
+        # Sync status to Paperless for affected actions (best-effort)
+        if action_queue_settings.write_to_paperless and affected_actions:
+            import logging
+            log = logging.getLogger(__name__)
+            try:
+                from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
+
+                enricher = PaperlessEnricher()
+                for action in affected_actions:
+                    if not action.document_id:
+                        continue
+                    try:
+                        await enricher.sync_status(action.document_id, target_status)
+                        action.last_synced_status = target_status
+                    except Exception as exc:
+                        log.warning(
+                            "Bulk sync: failed for action %d (doc %d): %s",
+                            action.id, action.document_id, exc,
+                        )
+                db.commit()
+            except Exception as exc:
+                log.warning("Bulk sync to Paperless failed: %s", exc)
+
         return {"affected": affected, "action": body.action}
     finally:
         db.close()
