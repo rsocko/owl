@@ -1,13 +1,6 @@
-.statement-series-banner {
-  background: var(--accent-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-}
-
 .statement-series-info {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -55,65 +48,7 @@
   gap: 16px;
 }
 
-.statement-series-timeline-note {
-  color: var(--text-muted);
-  font-size: 0.82rem;
-  margin-bottom: 14px;
-}
 
-.statement-series-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.statement-series-track-row {
-  display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-}
-
-.statement-series-track-label {
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--text-muted);
-  padding-top: 8px;
-}
-
-.statement-series-track-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 8px;
-}
-
-.statement-series-cell {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  padding: 10px;
-  min-height: 72px;
-}
-
-.statement-series-cell.missing {
-  background: var(--danger-bg);
-  border-color: var(--danger);
-}
-
-.statement-series-cell.neutral {
-  opacity: 0.8;
-}
-
-.statement-series-cell-month {
-  font-size: 0.82rem;
-  font-weight: 700;
-  margin-bottom: 4px;
-}
-
-.statement-series-cell-detail {
-  color: var(--text-muted);
-  font-size: 0.78rem;
-}
 
 .statement-series-list {
   display: flex;
@@ -168,10 +103,6 @@
   .statement-series-info {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
-  .statement-series-track-row {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 640px) {
@@ -183,4 +114,77 @@
     align-items: flex-start;
     flex-direction: column;
   }
+}
+
+/* -- Account badges & doc color dots -- */
+
+.statement-series-account-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.statement-series-doc-color {
+  width: 6px;
+  min-height: 28px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.statement-series-info-sub {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+/* -- Anomaly indicators -- */
+
+.statement-series-anomalies {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* -- Rename form -- */
+
+.statement-series-rename-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* -- Doc list header (select-all buttons during split) -- */
+
+.statement-series-doc-header {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.statement-series-select-all-btn {
+  background: var(--accent-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 4px 12px;
+}
+
+.statement-series-select-all-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* -- Selected doc highlight -- */
+
+.statement-series-list-item.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
 }
