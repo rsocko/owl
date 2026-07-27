@@ -28,6 +28,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       details = undefined;
     }
     const message =
+      (details as { detail?: { message?: string } } | undefined)?.detail?.message ||
       (details as { error?: { message?: string } } | undefined)?.error?.message ||
       `Request to ${path} failed with ${res.status}`;
     throw new ApiError(message, res.status, details);

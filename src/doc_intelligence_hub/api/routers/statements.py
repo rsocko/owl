@@ -376,16 +376,62 @@ async def list_series(
 
 @router.get("/series/{series_id}")
 async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
-    """Get full detail view for a statement series."""
+    """Get full detail view for a statement series.
+
+    Looks up by series ID first; falls back to provider_key from the latest
+    discovery run so that clicking a discovered provider in the UI works even
+    before the provider has been promoted to a curated series.
+    """
     db = _get_db(request)
     try:
         series = db.get_series(series_id)
-        if not series:
-            raise_api_error(404, "series_not_found", f"Series '{series_id}' not found")
 
-        documents = db.get_series_documents(series_id)
+        if series:
+            documents = db.get_series_documents(series_id)
+            similar = db.get_similar_series(series_id)
+        else:
+            # Fallback: try to resolve as a provider_key from discovery
+            provider = db.get_provider_by_key(series_id)
+            if not provider:
+                raise_api_error(404, "series_not_found", f"Series '{series_id}' not found")
+
+            # Build a synthetic series dict from the provider record
+            import json as _json
+
+            sample_ids = (
+                _json.loads(provider["sample_document_ids"])
+                if isinstance(provider["sample_document_ids"], str)
+                else provider["sample_document_ids"]
+            )
+            series = {
+                "id": provider["provider_key"],
+                "name": provider["provider_name"],
+                "correspondent_id": provider.get("correspondent_id"),
+                "correspondent_name": provider.get("provider_name", "Unknown"),
+                "frequency": provider.get("frequency", "monthly"),
+                "account_identifier": None,
+                "manually_curated": False,
+                "document_count": provider.get("document_count", 0),
+                "first_seen": provider.get("first_seen"),
+                "last_seen": provider.get("last_seen"),
+                "created_at": None,
+                # Extra provider metadata useful for the detail UI
+                "source": "discovery",
+                "normalized_title": provider.get("normalized_title"),
+                "confidence": provider.get("confidence"),
+                "pattern_type": provider.get("pattern_type"),
+                "anchor_day": provider.get("anchor_day"),
+                "variance_days": provider.get("variance_days"),
+            }
+
+            # Build minimal document list from sample_document_ids
+            documents = [
+                {"document_id": str(doc_id), "series_id": series_id}
+                for doc_id in sample_ids
+            ]
+            similar = []
+
         timeline = _build_timeline(documents)
-        similar = db.get_similar_series(series_id)
 
         # Derive anomaly indicators from the data
         anomaly_indicators: list[str] = []
