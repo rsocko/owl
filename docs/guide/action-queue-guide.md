@@ -47,6 +47,65 @@ Documents are classified into one of these action categories:
 | `SHARE` | Forward to someone | Document for spouse/accountant |
 | `SCHEDULE` | Calendar event needed | Appointment reminder |
 | `ARCHIVE` | Safe to archive immediately | Duplicate, outdated |
+| `TASK` | General to-do (catch-all) | Create account, register, cancel service |
+
+## Action Lifecycle
+
+Actions follow a clear lifecycle from detection to resolution:
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: Document classified
+    pending --> acknowledged: User saw it
+    pending --> completed: User did it
+    pending --> snoozed: Defer until later
+    pending --> dismissed: Not relevant
+    pending --> not_an_action: False positive
+    acknowledged --> completed: Finally done
+    acknowledged --> snoozed: Defer
+    snoozed --> pending: Snooze expired
+    completed --> [*]
+    dismissed --> [*]
+    not_an_action --> [*]
+```
+
+| Status | Meaning | Remains in queue? |
+|--------|---------|-------------------|
+| `pending` | Not yet handled — needs attention | ✅ Yes (active) |
+| `acknowledged` | User saw it, intends to handle | ❌ No (removed from active queue) |
+| `completed` | User did the thing | ❌ No |
+| `snoozed` | Deferred until a specific time | ❌ No (resurfaces when snooze expires) |
+| `dismissed` | Not relevant / user doesn't care | ❌ No |
+| `not_an_action` | False positive — shouldn't have been detected | ❌ No (trains classifier) |
+
+### Severity Tiers
+
+Actions are bucketed into 3 display severity tiers (mapped from urgency):
+
+| Severity | Urgency Source | Display Treatment |
+|----------|---------------|-------------------|
+| `critical` | CRITICAL | Red badge, top of queue, notification |
+| `focus` | HIGH, MEDIUM | Amber badge, prominent placement |
+| `safe` | LOW | Normal display, no special treatment |
+
+### Recommended CTAs (Call-to-Action)
+
+Each action includes an AI-recommended primary action button with optional deep links:
+
+| CTA ID | Label Example | When Used |
+|--------|---------------|-----------|
+| `pay-online` | "Pay Online" | Bills with a payment URL |
+| `call-provider` | "Call Billing" | Documents with a phone number |
+| `email-provider` | "Draft Response" | Letters requiring a reply |
+| `schedule-event` | "Add to Calendar" | Appointments, renewals |
+| `sign-document` | "Sign Document" | Contracts, forms |
+| `share-document` | "Share with Accountant" | Tax forms, shared docs |
+| `review-document` | "Open & Review" | Policies, contracts |
+| `open-document` | "View Document" | General viewing |
+| `archive` | "Archive" | Already processed |
+| `create-task` | "Create Task" | General to-do items |
+
+CTAs can include a `url` (deep link to pay/sign/view) and/or `phone` number extracted from the document.
 
 ## User Flow
 
@@ -110,7 +169,44 @@ Returns all pending actions sorted by urgency descending.
   -d '{"status": "completed", "dry_run": false}'
 ```
 
-Valid statuses: `completed`, `dismissed`, `pending`.
+Valid statuses: `completed`, `dismissed`, `pending`, `acknowledged`, `snoozed`, `not_an_action`.
+
+When setting status to `snoozed`, include `"snoozed_until": "2026-08-01T09:00:00Z"`.
+
+### Acknowledge an Action
+
+```bash
+***REMOVED*** -X POST http://service-005.example.invalid/api/queue/actions/42/acknowledge
+```
+
+Marks the action as seen/owned. Removes from active queue without claiming completion.
+
+### Snooze an Action
+
+```bash
+***REMOVED*** -X POST http://service-005.example.invalid/api/queue/actions/42/snooze \
+  -H "Content-Type: application/json" \
+  -d '{"until": "2026-08-01T09:00:00Z"}'
+```
+
+Defers the action until the specified time. Use `GET /api/queue/actions/expired-snoozes` to find actions ready to resurface.
+
+### Submit Feedback (False Positive / Misclassification)
+
+```bash
+***REMOVED*** -X POST http://service-005.example.invalid/api/queue/actions/42/feedback \
+  -H "Content-Type: application/json" \
+  -d '{"feedback_type": "not_an_action", "reason": "This is just an ad mailer"}'
+```
+
+| feedback_type | Meaning |
+|---------------|---------|
+| `not_an_action` | Document doesn't require any action (false positive) |
+| `misclassified` | Wrong action type — provide `corrected_action_type` |
+| `wrong_urgency` | Urgency level is incorrect |
+| `wrong_amount` | Extracted amount is wrong |
+
+Feedback trains the classifier over time and is stored for analysis.
 
 ### Pipeline Progress (SSE)
 
@@ -154,6 +250,7 @@ Set `WRITE_TO_PAPERLESS=true` to allow OWL to enrich documents with custom field
 
 :::warning Current Limitations
 - **Bulk operations** are defined in the API schema but not yet implemented in the UI
-- **Deferred actions** (snooze until date) are tracked but have no automatic re-surfacing yet
-- **Learning from feedback** — user corrections are stored but not yet used for model fine-tuning
+- **Snooze re-surfacing** — snoozed actions have an expiry timestamp and the `expired-snoozes` endpoint, but automatic notification/re-promotion on expiry requires a scheduler (not yet wired)
+- **Learning from feedback** — user corrections (via `/feedback` endpoint) are stored but not yet used for model fine-tuning; feedback data can be exported for offline analysis
+- **CTA deep links** — AI extracts URLs/phone numbers when available, but not all documents have parseable payment links
 :::

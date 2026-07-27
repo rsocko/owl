@@ -12,7 +12,7 @@ from rich.console import Console
 
 from doc_intelligence_hub.core.paperless import PaperlessClient
 
-from .analyzer import OllamaAnalyzer
+from .analyzer import OllamaAnalyzer, urgency_to_severity
 from .config import settings
 from .database import Action, ProcessingHistory, get_session, init_db
 from .enricher import PaperlessEnricher
@@ -23,6 +23,18 @@ logger = logging.getLogger(__name__)
 
 # Use a file-based console to avoid Windows encoding issues when running under uvicorn
 console = Console(file=io.StringIO(), force_terminal=False, highlight=False)
+
+
+def _serialize_cta(cta: dict | str | None) -> str | None:
+    """Serialize a CTA dict to a JSON string for database storage, or None."""
+    import json
+    if cta is None:
+        return None
+    if isinstance(cta, str):
+        return cta
+    if isinstance(cta, dict):
+        return json.dumps(cta)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -689,11 +701,13 @@ class Pipeline:
             existing.due_date = self._parse_date(action_data.get("due_date"))
             existing.amount = action_data.get("amount")
             existing.urgency = action_data["urgency"]
+            existing.severity = urgency_to_severity(action_data["urgency"])
             existing.confidence = action_data.get("confidence", 0)
             existing.risk_score = risk
             existing.correspondent = correspondent_name
             existing.extracted_data = assessment.get("extracted_data")
             existing.ai_reasoning = assessment.get("reasoning")
+            existing.recommended_cta = _serialize_cta(action_data.get("recommended_cta"))
             existing.updated_at = datetime.utcnow()
             return existing
         else:
@@ -706,11 +720,13 @@ class Pipeline:
                 due_date=self._parse_date(action_data.get("due_date")),
                 amount=action_data.get("amount"),
                 urgency=action_data["urgency"],
+                severity=urgency_to_severity(action_data["urgency"]),
                 confidence=action_data.get("confidence", 0),
                 risk_score=risk,
                 correspondent=correspondent_name,
                 extracted_data=assessment.get("extracted_data"),
                 ai_reasoning=assessment.get("reasoning"),
+                recommended_cta=_serialize_cta(action_data.get("recommended_cta")),
             )
             db.add(action)
             return action

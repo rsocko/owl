@@ -8,7 +8,21 @@
     "SHARE": "Documents to share with others",
     "SCHEDULE": "Appointments, renewals to calendar",
     "SIGN": "Documents requiring signature",
-    "ARCHIVE": "Processed items ready for storage"
+    "ARCHIVE": "Processed items ready for storage",
+    "TASK": "General to-do items (catch-all)"
+  },
+  "statuses": {
+    "pending": "Not yet handled — needs attention",
+    "acknowledged": "User saw it, intends to handle",
+    "completed": "User did the thing",
+    "snoozed": "Deferred until a specific time",
+    "dismissed": "Not relevant / user doesn't care",
+    "not_an_action": "False positive — trains classifier"
+  },
+  "severity_tiers": {
+    "critical": "CRITICAL urgency → red badge, top of queue",
+    "focus": "HIGH or MEDIUM urgency → amber badge",
+    "safe": "LOW urgency → normal display"
   },
   "examples": [
     {
