@@ -28,6 +28,7 @@ CUSTOM_FIELD_DEFINITIONS = [
                 {"label": "SCHEDULE"},
                 {"label": "SIGN"},
                 {"label": "ARCHIVE"},
+                {"label": "TASK"},
             ]
         },
     },

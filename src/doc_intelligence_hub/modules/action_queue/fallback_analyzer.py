@@ -64,6 +64,12 @@ _ARCHIVE_KEYWORDS = re.compile(
     r"no\s*action\s*needed|informational\s*only|fyi)\b",
     re.IGNORECASE,
 )
+_TASK_KEYWORDS = re.compile(
+    r"\b(create\s*(an?\s*)?account|register|enroll|activate|set\s*up|"
+    r"log\s*in|go\s*online|download|install|update\s*your|"
+    r"cancel|opt[\s-]?out|unsubscribe|transfer|submit|complete\s*form)\b",
+    re.IGNORECASE,
+)
 
 # Amount extraction
 _AMOUNT_PATTERN = re.compile(r"\$\s*([\d,]+\.?\d{0,2})")
@@ -156,6 +162,7 @@ class RuleBasedAnalyzer:
             "FILE": len(_FILE_KEYWORDS.findall(text)) * 10,
             "SIGN": len(_SIGN_KEYWORDS.findall(text)) * 18,
             "ARCHIVE": len(_ARCHIVE_KEYWORDS.findall(text)) * 8,
+            "TASK": len(_TASK_KEYWORDS.findall(text)) * 15,
         }
 
         # Boost from tags
