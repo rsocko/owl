@@ -210,6 +210,11 @@ export const endpoints = {
     resolve: (id: string, body: { resolution: string; primary_doc_id?: number }) =>
       api.post(`/api/duplicates/${id}/resolve`, body),
     scan: () => api.post('/api/duplicates/scan'),
+    settings: () => api.get<{ auto_detect_enabled: boolean }>('/api/duplicates/settings'),
+    updateSettings: (body: { auto_detect_enabled: boolean }) =>
+      api.put<{ auto_detect_enabled: boolean }>('/api/duplicates/settings', body),
+    checkSingle: (body: { document_id: number }) =>
+      api.post('/api/duplicates/check-single', body),
   },
   metadata: {
     get: (docId: string | number) => api.get(`/api/metadata/${docId}`),
