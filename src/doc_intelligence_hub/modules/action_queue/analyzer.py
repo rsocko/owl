@@ -28,7 +28,7 @@ Return a JSON object with these fields:
 {{
   "actions": [
     {{
-      "action_type": "PAY|RESPOND|FILE|REVIEW|SHARE|SCHEDULE|SIGN|ARCHIVE|TASK",
+      "action_type": "PAY|RESPOND|FILE|REVIEW|SHARE|SCHEDULE|SIGN|ARCHIVE|CANCEL|RENEW|DISPUTE|TASK",
       "title": "Short action title (e.g., 'Pay Electric Bill - $142.35')",
       "summary": "One sentence describing what needs to be done",
       "due_date": "YYYY-MM-DD or null if no deadline",
@@ -80,7 +80,10 @@ Rules for action_type:
 - SCHEDULE: Appointments, renewals, events to put on calendar
 - SIGN: Documents requiring signature
 - ARCHIVE: Already processed, ready for long-term storage
-- TASK: General to-do items that don't fit the above (create account, register, update info, cancel service, etc.)
+- CANCEL: Cancellation notices, opt-outs, unsubscribes, service terminations requiring confirmation
+- RENEW: Subscriptions, memberships, licenses, or registrations coming due for renewal
+- DISPUTE: Documents indicating an error, overcharge, or discrepancy requiring correction or challenge
+- TASK: General to-do items that don't fit the above (create account, register, update info, etc.)
 
 Rules for recommended_cta:
 - Extract the MOST useful next action the user can take, including a URL or phone number from the document when available.
@@ -286,7 +289,7 @@ class OllamaAnalyzer:
         """Validate the multi-action response format."""
         assessment = data.get("document_assessment", {})
 
-        valid_types = {"PAY", "RESPOND", "FILE", "REVIEW", "SHARE", "SCHEDULE", "SIGN", "ARCHIVE", "TASK"}
+        valid_types = {"PAY", "RESPOND", "FILE", "REVIEW", "SHARE", "SCHEDULE", "SIGN", "ARCHIVE", "CANCEL", "RENEW", "DISPUTE", "TASK"}
         valid_urgency = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 
         validated_actions = []
@@ -316,7 +319,7 @@ class OllamaAnalyzer:
 
     def _convert_legacy_to_multi(self, data: dict) -> dict:
         """Convert old single-action format to multi-action format."""
-        valid_types = {"PAY", "RESPOND", "FILE", "REVIEW", "SHARE", "SCHEDULE", "SIGN", "ARCHIVE", "TASK"}
+        valid_types = {"PAY", "RESPOND", "FILE", "REVIEW", "SHARE", "SCHEDULE", "SIGN", "ARCHIVE", "CANCEL", "RENEW", "DISPUTE", "TASK"}
         valid_urgency = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 
         action_type = data.get("action_type", "TASK").upper()
