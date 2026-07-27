@@ -109,6 +109,9 @@ export const endpoints = {
       api.post('/api/eob/bulk-update', body),
     purgeStale: () => api.post('/api/eob/purge-stale'),
     benchmark: (body?: unknown) => api.post('/api/eob/benchmark', body),
+    benchmarkHistory: (params?: string) => api.get(`/api/eob/benchmark/history${params ? `?${params}` : ''}`),
+    benchmarkRunDetail: (runId: number) => api.get(`/api/eob/benchmark/history/${runId}`),
+    benchmarkTrends: (limit?: number) => api.get(`/api/eob/benchmark/trends${limit ? `?limit=${limit}` : ''}`),
     payMatch: (matchId: string, body: { amount: number; paid_date?: string | null; method?: string | null; notes?: string | null }) =>
       api.post(`/api/eob/matches/${matchId}/pay`, body),
     matchPayments: (matchId: string) => api.get(`/api/eob/matches/${matchId}/payments`),
