@@ -66,6 +66,7 @@ interface ActionItem {
   correspondent?: string | null;
   ai_reasoning?: string | null;
   preview_url?: string | null;
+  version?: number | null;
   created_at?: string | null;
   completed_at?: string | null;
 }
@@ -354,14 +355,24 @@ export default function ActionQueue() {
     setBusyKey(`action-${actionId}-${nextStatus}`);
     setProcessingIds(new Set([actionId]));
     try {
-      await endpoints.actionQueue.updateAction(String(actionId), { status: nextStatus, dry_run: false });
+      // Pass version for optimistic locking to detect concurrent edits
+      const currentAction = filteredActions.find((a) => a.id === actionId);
+      const payload: Record<string, unknown> = { status: nextStatus, dry_run: false };
+      if (currentAction?.version != null) {
+        payload.version = currentAction.version;
+      }
+      await endpoints.actionQueue.updateAction(String(actionId), payload);
       await loadData();
       setToast({ message: `Action marked ${nextStatus}.` });
     } catch (err) {
-      setToast({
-        message: err instanceof Error ? err.message : 'Failed to update action.',
-        tone: 'error',
-      });
+      const message = err instanceof Error ? err.message : 'Failed to update action.';
+      const isConflict = message.includes('409') || message.includes('version_conflict');
+      if (isConflict) {
+        await loadData();
+        setToast({ message: 'Action was modified by another user. Refreshed.', tone: 'error' });
+      } else {
+        setToast({ message, tone: 'error' });
+      }
     } finally {
       setBusyKey(null);
       setProcessingIds(new Set());

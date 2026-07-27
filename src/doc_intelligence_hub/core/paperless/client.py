@@ -8,6 +8,7 @@ Provides:
 - Saved views
 - Connection health check
 - Fixture loading for tests
+- Automatic retry with exponential backoff for transient errors
 """
 
 from __future__ import annotations
@@ -21,7 +22,19 @@ from typing import Any
 
 import httpx
 
+from doc_intelligence_hub.core.resilience import (
+    PaperlessError,
+    get_circuit_breaker,
+    CircuitOpenError,
+)
+
 logger = logging.getLogger(__name__)
+
+# HTTP methods that are safe to retry (idempotent)
+_IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "PUT", "DELETE", "OPTIONS"})
+
+# Status codes that indicate transient server issues
+_TRANSIENT_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
 
 
 class PaperlessClient:
@@ -102,6 +115,72 @@ class PaperlessClient:
 
     async def __aexit__(self, *exc_info: object) -> None:
         await self.aclose()
+
+    # ------------------------------------------------------------------
+    # Resilient HTTP request helper
+    # ------------------------------------------------------------------
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        max_attempts: int = 3,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Execute an HTTP request with retry logic and circuit breaker.
+
+        Retries on transient errors (timeouts, 429, 5xx) for idempotent
+        methods. Non-idempotent methods (POST, PATCH) retry only on
+        connection/timeout errors (not on 5xx, to avoid duplicate writes).
+        """
+        import asyncio
+
+        client = self._get_client()
+        breaker = get_circuit_breaker("paperless", failure_threshold=5, recovery_timeout=60.0)
+        is_idempotent = method.upper() in _IDEMPOTENT_METHODS
+
+        if not breaker.allow_request():
+            raise CircuitOpenError(breaker)
+
+        delay = 1.0
+        last_exc: BaseException | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = await client.request(method, path, **kwargs)
+                # Don't retry client errors (4xx), only transient server errors
+                if resp.status_code in _TRANSIENT_STATUS_CODES:
+                    if attempt < max_attempts and (is_idempotent or resp.status_code == 429):
+                        logger.warning(
+                            "Paperless %s %s returned %d (attempt %d/%d), retrying in %.1fs",
+                            method, path, resp.status_code, attempt, max_attempts, delay,
+                        )
+                        await asyncio.sleep(delay)
+                        delay = min(delay * 2, 30.0)
+                        continue
+                    # Transient error but not retrying — record as failure
+                    breaker.record_failure()
+                    return resp
+                breaker.record_success()
+                return resp
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                last_exc = e
+                breaker.record_failure()
+                if attempt >= max_attempts:
+                    raise PaperlessError(
+                        f"{method} {path} failed after {max_attempts} attempts: {e}",
+                        status_code=None,
+                    ) from e
+                logger.warning(
+                    "Paperless %s %s failed (attempt %d/%d): %s, retrying in %.1fs",
+                    method, path, attempt, max_attempts, e, delay,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30.0)
+
+        # Should not reach here
+        raise PaperlessError(f"{method} {path} exhausted retries") from last_exc
 
     # ------------------------------------------------------------------
     # Health / connectivity
@@ -261,29 +340,25 @@ class PaperlessClient:
 
     async def get_document(self, document_id: int) -> dict:
         """Get full document metadata by ID."""
-        client = self._get_client()
-        resp = await client.get(f"/api/documents/{document_id}/")
+        resp = await self._request("GET", f"/api/documents/{document_id}/")
         resp.raise_for_status()
         return resp.json()
 
     async def get_document_content(self, document_id: int) -> str:
         """Get the OCR/text content of a document."""
-        client = self._get_client()
-        resp = await client.get(f"/api/documents/{document_id}/")
+        resp = await self._request("GET", f"/api/documents/{document_id}/")
         resp.raise_for_status()
         return resp.json().get("content", "")
 
     async def get_document_thumbnail(self, document_id: int) -> tuple[bytes, str]:
         """Get document thumbnail bytes and content-type."""
-        client = self._get_client()
-        resp = await client.get(f"/api/documents/{document_id}/thumb/")
+        resp = await self._request("GET", f"/api/documents/{document_id}/thumb/")
         resp.raise_for_status()
         return resp.content, resp.headers.get("content-type", "image/webp")
 
     async def get_document_preview(self, document_id: int) -> tuple[bytes, str]:
         """Get document PDF preview bytes and content-type."""
-        client = self._get_client()
-        resp = await client.get(f"/api/documents/{document_id}/preview/")
+        resp = await self._request("GET", f"/api/documents/{document_id}/preview/")
         resp.raise_for_status()
         return resp.content, resp.headers.get("content-type", "application/pdf")
 
@@ -293,8 +368,7 @@ class PaperlessClient:
 
     async def update_document(self, document_id: int, data: dict) -> dict:
         """Patch document metadata (title, correspondent, tags, etc)."""
-        client = self._get_client()
-        resp = await client.patch(f"/api/documents/{document_id}/", json=data)
+        resp = await self._request("PATCH", f"/api/documents/{document_id}/", json=data)
         resp.raise_for_status()
         return resp.json()
 
@@ -304,8 +378,7 @@ class PaperlessClient:
         Reads existing fields first to avoid overwriting unrelated ones.
         custom_fields format: [{"field": <field_id>, "value": <value>}, ...]
         """
-        client = self._get_client()
-        resp = await client.get(f"/api/documents/{document_id}/")
+        resp = await self._request("GET", f"/api/documents/{document_id}/")
         resp.raise_for_status()
         doc = resp.json()
         existing = doc.get("custom_fields", [])
@@ -316,7 +389,7 @@ class PaperlessClient:
             field_map[new_field["field"]] = new_field["value"]
 
         merged = [{"field": fid, "value": val} for fid, val in field_map.items()]
-        resp = await client.patch(f"/api/documents/{document_id}/", json={"custom_fields": merged})
+        resp = await self._request("PATCH", f"/api/documents/{document_id}/", json={"custom_fields": merged})
         resp.raise_for_status()
 
     # ------------------------------------------------------------------

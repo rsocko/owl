@@ -126,6 +126,7 @@ class TestListActions:
             "status",
             "correspondent",
             "ai_reasoning",
+            "version",
             "preview_url",
             "created_at",
             "completed_at",
@@ -172,6 +173,35 @@ class TestUpdateAction:
             json={"status": "completed", "dry_run": False},
         )
         assert resp.status_code == 404
+
+    def test_optimistic_locking_conflict(self, seeded_client):
+        """Returns 409 when version doesn't match (concurrent modification)."""
+        resp = seeded_client.patch(
+            "/api/queue/actions/1",
+            json={"status": "completed", "dry_run": False, "version": 999},
+        )
+        assert resp.status_code == 409
+        data = resp.json()
+        detail = data["error"]
+        assert detail["error"] == "version_conflict"
+        assert detail["current_version"] == 1
+        assert detail["expected_version"] == 999
+
+    def test_optimistic_locking_success(self, seeded_client):
+        """Succeeds when version matches and bumps the version."""
+        # First get the current version
+        list_resp = seeded_client.get("/api/queue/actions?status=pending")
+        action = list_resp.json()["actions"][0]
+        current_version = action["version"]
+
+        # Update with correct version
+        resp = seeded_client.patch(
+            f"/api/queue/actions/{action['id']}",
+            json={"status": "completed", "dry_run": False, "version": current_version},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["version"] == current_version + 1
 
 
 class TestPreviewUrlEdgeCases:
