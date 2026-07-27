@@ -33,6 +33,7 @@ class Action(Base):
     correspondent = Column(String, nullable=True)
     extracted_data = Column(JSON, nullable=True)  # Full extraction payload from Ollama
     ai_reasoning = Column(Text, nullable=True)
+    version = Column(Integer, default=1, nullable=False)  # Optimistic locking
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
@@ -92,6 +93,7 @@ def _migrate_missing_columns(engine):
     _expected_additions: dict[str, list[tuple[str, str]]] = {
         "actions": [
             ("risk_score", "INTEGER DEFAULT 0"),
+            ("version", "INTEGER DEFAULT 1 NOT NULL"),
         ],
     }
 
