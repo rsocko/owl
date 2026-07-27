@@ -34,7 +34,14 @@ Return a JSON object with these fields:
       "due_date": "YYYY-MM-DD or null if no deadline",
       "amount": 123.45 or null if no monetary amount,
       "urgency": "CRITICAL|HIGH|MEDIUM|LOW",
-      "confidence": 0-100 (how confident you are in this specific action)
+      "confidence": 0-100 (how confident you are in this specific action),
+      "recommended_cta": {{
+        "id": "pay-online|open-document|call-provider|email-provider|schedule-event|sign-document|share-document|archive|review-document|create-task",
+        "label": "Human-readable button label (e.g., 'Pay Online', 'Call Billing')",
+        "url": "https://... or null if no URL found in document",
+        "phone": "phone number or null",
+        "metadata": {{}}
+      }}
     }}
   ],
   "document_assessment": {{
@@ -75,6 +82,13 @@ Rules for action_type:
 - ARCHIVE: Already processed, ready for long-term storage
 - TASK: General to-do items that don't fit the above (create account, register, update info, cancel service, etc.)
 
+Rules for recommended_cta:
+- Extract the MOST useful next action the user can take, including a URL or phone number from the document when available.
+- CTA id should be one of: pay-online, open-document, call-provider, email-provider, schedule-event, sign-document, share-document, archive, review-document, create-task
+- If the document contains a payment URL, use "pay-online" with the URL.
+- If the document has a phone number for billing/support, use "call-provider" with the phone.
+- For documents with no specific deep-link, use the most natural action (e.g., "review-document" for REVIEW type).
+
 Document metadata:
 - Title: {title}
 - Correspondent: {correspondent}
@@ -85,6 +99,74 @@ Document content:
 ---
 {content}
 ---"""
+
+
+# ------------------------------------------------------------------
+# CTA (Call-to-Action) normalization — extensible registry pattern
+# ------------------------------------------------------------------
+
+VALID_CTA_IDS = {
+    "pay-online", "open-document", "call-provider", "email-provider",
+    "schedule-event", "sign-document", "share-document", "archive",
+    "review-document", "create-task",
+}
+
+# Default CTA mapping by action type (fallback when AI doesn't provide one)
+_DEFAULT_CTA_BY_ACTION_TYPE: dict[str, dict] = {
+    "PAY": {"id": "pay-online", "label": "Pay Online"},
+    "RESPOND": {"id": "email-provider", "label": "Draft Response"},
+    "FILE": {"id": "archive", "label": "File Document"},
+    "REVIEW": {"id": "review-document", "label": "Open & Review"},
+    "SHARE": {"id": "share-document", "label": "Share Document"},
+    "SCHEDULE": {"id": "schedule-event", "label": "Add to Calendar"},
+    "SIGN": {"id": "sign-document", "label": "Sign Document"},
+    "ARCHIVE": {"id": "archive", "label": "Archive"},
+    "TASK": {"id": "create-task", "label": "Create Task"},
+}
+
+
+def _normalize_cta(raw_cta: dict | str | None, action: dict, assessment: dict) -> dict:
+    """Normalize a CTA from LLM response into a consistent structure.
+
+    Falls back to a sensible default based on action_type if the AI didn't
+    provide a valid CTA. Enriches with URLs/phone from extracted_data when available.
+    """
+    action_type = action.get("action_type", "REVIEW")
+    extracted = assessment.get("extracted_data", {}) or {}
+
+    # Start with a default CTA for this action type
+    default = _DEFAULT_CTA_BY_ACTION_TYPE.get(action_type, {"id": "review-document", "label": "Review"})
+    result = {**default, "url": None, "phone": None, "metadata": {}}
+
+    # If the AI returned a structured CTA, merge it
+    if isinstance(raw_cta, dict):
+        cta_id = raw_cta.get("id", "").lower().strip()
+        if cta_id in VALID_CTA_IDS:
+            result["id"] = cta_id
+        if raw_cta.get("label"):
+            result["label"] = raw_cta["label"]
+        if raw_cta.get("url"):
+            result["url"] = raw_cta["url"]
+        if raw_cta.get("phone"):
+            result["phone"] = raw_cta["phone"]
+        if isinstance(raw_cta.get("metadata"), dict):
+            result["metadata"] = raw_cta["metadata"]
+    elif isinstance(raw_cta, str) and raw_cta.lower().strip() in VALID_CTA_IDS:
+        result["id"] = raw_cta.lower().strip()
+
+    # Enrich from extracted_data if CTA doesn't already have a URL/phone
+    if not result["url"] and extracted.get("payment_url"):
+        result["url"] = extracted["payment_url"]
+    if not result["phone"] and extracted.get("phone"):
+        result["phone"] = extracted["phone"]
+
+    return result
+
+
+def urgency_to_severity(urgency: str | None) -> str:
+    """Map 4-tier urgency to 3-tier severity for consistent display."""
+    mapping = {"CRITICAL": "critical", "HIGH": "focus", "MEDIUM": "focus", "LOW": "safe"}
+    return mapping.get((urgency or "LOW").upper(), "safe")
 
 
 class OllamaAnalyzer:
@@ -217,6 +299,8 @@ class OllamaAnalyzer:
             action["urgency"] = action.get("urgency", "MEDIUM").upper()
             if action["urgency"] not in valid_urgency:
                 action["urgency"] = "MEDIUM"
+            # Normalize CTA if present
+            action["recommended_cta"] = _normalize_cta(action.get("recommended_cta"), action, assessment)
             validated_actions.append(action)
 
         data["actions"] = validated_actions
