@@ -253,6 +253,7 @@ def _serialize_match(
     paperless_url: str = "",
     eob: EOBRecord | None = None,
     bill: BillRecord | None = None,
+    detailed: bool = False,
 ) -> dict[str, Any]:
     base_url = paperless_url.rstrip("/") if paperless_url else ""
     return {
@@ -286,8 +287,8 @@ def _serialize_match(
         "user_status": m.user_status or "unreviewed",
         "reviewed_at": m.reviewed_at.isoformat() if m.reviewed_at else None,
         "user_notes": m.user_notes,
-        "eob_details": _serialize_eob_details(eob),
-        "bill_details": _serialize_bill_details(bill),
+        "eob_details": _serialize_eob_full(eob) if detailed else _serialize_eob_details(eob),
+        "bill_details": _serialize_bill_full(bill) if detailed else _serialize_bill_details(bill),
     }
 
 
@@ -704,7 +705,7 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
 
 
 @router.get("/results")
-async def get_last_results(request: Request) -> dict[str, Any]:
+async def get_last_results(request: Request, detailed: bool = False) -> dict[str, Any]:
     """Get the most recent pipeline run results from the database."""
     init_db()
     db = get_db_session()
@@ -729,6 +730,7 @@ async def get_last_results(request: Request) -> dict[str, Any]:
                     paperless_url,
                     eob=eob_map.get(m.eob_document_id),
                     bill=bill_map.get(m.bill_document_id),
+                    detailed=detailed,
                 )
                 for m in match_records
             ],
@@ -767,6 +769,7 @@ async def list_matches(
     run_id: int | None = None,
     limit: int = 50,
     offset: int = 0,
+    detailed: bool = False,
 ) -> dict[str, Any]:
     """List match records with optional filtering by status or run."""
     init_db()
@@ -791,6 +794,7 @@ async def list_matches(
                     paperless_url,
                     eob=eob_map.get(m.eob_document_id),
                     bill=bill_map.get(m.bill_document_id),
+                    detailed=detailed,
                 )
                 for m in matches
             ],

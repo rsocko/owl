@@ -91,7 +91,7 @@ export const endpoints = {
     check: () => api.get('/api/eob/check'),
     classify: (body: unknown) => api.post('/api/eob/classify', body),
     run: (body?: unknown) => api.post('/api/eob/run', body),
-    results: () => api.get('/api/eob/results'),
+    results: (detailed?: boolean) => api.get(`/api/eob/results${detailed ? '?detailed=true' : ''}`),
     runs: () => api.get('/api/eob/runs'),
     matches: (params?: string) => api.get(`/api/eob/matches${params ? `?${params}` : ''}`),
     updateMatch: (id: string, body: unknown) => api.patch(`/api/eob/matches/${id}`, body),
@@ -109,6 +109,9 @@ export const endpoints = {
       api.post('/api/eob/bulk-update', body),
     purgeStale: () => api.post('/api/eob/purge-stale'),
     benchmark: (body?: unknown) => api.post('/api/eob/benchmark', body),
+    benchmarkHistory: (params?: string) => api.get(`/api/eob/benchmark/history${params ? `?${params}` : ''}`),
+    benchmarkRunDetail: (runId: number) => api.get(`/api/eob/benchmark/history/${runId}`),
+    benchmarkTrends: (limit?: number) => api.get(`/api/eob/benchmark/trends${limit ? `?limit=${limit}` : ''}`),
     payMatch: (matchId: string, body: { amount: number; paid_date?: string | null; method?: string | null; notes?: string | null }) =>
       api.post(`/api/eob/matches/${matchId}/pay`, body),
     matchPayments: (matchId: string) => api.get(`/api/eob/matches/${matchId}/payments`),
@@ -211,6 +214,11 @@ export const endpoints = {
     resolve: (id: string, body: { resolution: string; primary_doc_id?: number }) =>
       api.post(`/api/duplicates/${id}/resolve`, body),
     scan: () => api.post('/api/duplicates/scan'),
+    settings: () => api.get<{ auto_detect_enabled: boolean }>('/api/duplicates/settings'),
+    updateSettings: (body: { auto_detect_enabled: boolean }) =>
+      api.put<{ auto_detect_enabled: boolean }>('/api/duplicates/settings', body),
+    checkSingle: (body: { document_id: number }) =>
+      api.post('/api/duplicates/check-single', body),
   },
   metadata: {
     get: (docId: string | number) => api.get(`/api/metadata/${docId}`),

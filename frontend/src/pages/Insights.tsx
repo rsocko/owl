@@ -135,6 +135,13 @@ export function alertToInsight(alert: AlertItem): InsightItem {
   };
 }
 
+/* ── Series type for the filter dropdown ── */
+export type SeriesOption = {
+  id: string | number;
+  name?: string | null;
+  account_identifier?: string | null;
+};
+
 /* ── Tab definitions ── */
 const TAB_KEYS = ['all', 'anomalies', 'trends', 'compliance'] as const;
 type TabKey = (typeof TAB_KEYS)[number];
@@ -394,6 +401,8 @@ export default function Insights() {
   // Filters
   const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [timeRange, setTimeRange] = useState('6m');
+  const [seriesId, setSeriesId] = useState('');
+  const [seriesOptions, setSeriesOptions] = useState<SeriesOption[]>([]);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
@@ -419,6 +428,9 @@ export default function Insights() {
       } else if (timeRange === '12m') {
         const d = new Date(); d.setFullYear(d.getFullYear() - 1);
         params.set('date_from', d.toISOString().split('T')[0]);
+      }
+      if (seriesId) {
+        params.set('series_id', seriesId);
       }
 
       try {
@@ -452,11 +464,26 @@ export default function Insights() {
     } finally {
       setLoading(false);
     }
-  }, [timeRange]);
+  }, [timeRange, seriesId]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  // Fetch series options for the filter dropdown
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await endpoints.statements.series() as SeriesOption[] | { series?: SeriesOption[] };
+        const list = Array.isArray(resp) ? resp : (resp.series ?? []);
+        if (!cancelled) setSeriesOptions(list);
+      } catch {
+        // Non-critical — dropdown just stays empty
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Client-side filtering
   const filtered = useMemo(() => {
@@ -611,6 +638,19 @@ export default function Insights() {
               ))}
             </div>
             <div className="insights-filter-sep" />
+            <select
+              className="insights-filter-select"
+              value={seriesId}
+              onChange={(e) => setSeriesId(e.target.value)}
+              aria-label="Filter by series"
+            >
+              <option value="">All Series</option>
+              {seriesOptions.map((s) => (
+                <option key={s.id} value={String(s.id)}>
+                  {s.name ?? s.account_identifier ?? `Series ${s.id}`}
+                </option>
+              ))}
+            </select>
             <select
               className="insights-filter-select"
               value={timeRange}

@@ -209,6 +209,9 @@ vi.mock('../lib/api', () => ({
       acknowledge: vi.fn(),
       resolve: vi.fn(),
     },
+    statements: {
+      series: vi.fn(),
+    },
   },
 }));
 
@@ -216,6 +219,7 @@ import { endpoints } from '../lib/api';
 
 const mockInsightsSummary = endpoints.insights.summary as ReturnType<typeof vi.fn>;
 const mockInsightsList = endpoints.insights.list as ReturnType<typeof vi.fn>;
+const mockStatementsSeries = endpoints.statements.series as ReturnType<typeof vi.fn>;
 
 function renderInsights() {
   return render(
@@ -228,6 +232,8 @@ function renderInsights() {
 describe('Insights page component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: series endpoint returns empty list
+    mockStatementsSeries.mockResolvedValue([]);
   });
 
   it('shows loading skeleton initially', () => {
@@ -401,6 +407,123 @@ describe('Insights page component', () => {
 
     await waitFor(() => {
       expect(screen.getByText('No insights match the current filters.')).toBeInTheDocument();
+    });
+  });
+
+  it('renders series filter dropdown with options from API', async () => {
+    mockStatementsSeries.mockResolvedValue([
+      { id: '1', name: 'Chase Sapphire', account_identifier: 'chase-sapphire' },
+      { id: '2', name: 'Comcast', account_identifier: 'comcast' },
+    ]);
+    mockInsightsSummary.mockResolvedValue({ total: 0 });
+    mockInsightsList.mockResolvedValue({ insights: [], total: 0 });
+
+    renderInsights();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Filter by series')).toBeInTheDocument();
+    });
+
+    const seriesSelect = screen.getByLabelText('Filter by series') as HTMLSelectElement;
+    expect(seriesSelect.value).toBe('');
+
+    // Verify options rendered
+    const options = seriesSelect.querySelectorAll('option');
+    expect(options.length).toBe(3); // "All Series" + 2 series
+    expect(options[0].textContent).toBe('All Series');
+    expect(options[1].textContent).toBe('Chase Sapphire');
+    expect(options[2].textContent).toBe('Comcast');
+  });
+
+  it('passes series_id to insights API when a series is selected', async () => {
+    mockStatementsSeries.mockResolvedValue([
+      { id: '42', name: 'Chase Sapphire' },
+    ]);
+    mockInsightsSummary.mockResolvedValue({ total: 1 });
+    mockInsightsList.mockResolvedValue({
+      insights: [{ id: '1', insight_type: 'spend_summary', status: 'new', title: 'Spend' }],
+      total: 1,
+    });
+
+    renderInsights();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Filter by series')).toBeInTheDocument();
+    });
+
+    // Wait for initial load to finish
+    await waitFor(() => {
+      expect(screen.getByText('Spend')).toBeInTheDocument();
+    });
+
+    // Clear mocks to isolate the re-fetch triggered by series change
+    mockInsightsSummary.mockClear();
+    mockInsightsList.mockClear();
+    mockInsightsSummary.mockResolvedValue({ total: 1 });
+    mockInsightsList.mockResolvedValue({ insights: [], total: 0 });
+
+    const seriesSelect = screen.getByLabelText('Filter by series');
+    fireEvent.change(seriesSelect, { target: { value: '42' } });
+
+    await waitFor(() => {
+      expect(mockInsightsList).toHaveBeenCalled();
+    });
+
+    // Verify that series_id was included in the API call
+    const callArg = mockInsightsList.mock.calls[0][0] as string;
+    expect(callArg).toContain('series_id=42');
+  });
+
+  it('renders series dropdown with "All Series" default when API fails', async () => {
+    mockStatementsSeries.mockRejectedValue(new Error('Network error'));
+    mockInsightsSummary.mockResolvedValue({ total: 0 });
+    mockInsightsList.mockResolvedValue({ insights: [], total: 0 });
+
+    renderInsights();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Filter by series')).toBeInTheDocument();
+    });
+
+    const seriesSelect = screen.getByLabelText('Filter by series') as HTMLSelectElement;
+    // Only "All Series" option
+    const options = seriesSelect.querySelectorAll('option');
+    expect(options.length).toBe(1);
+    expect(options[0].textContent).toBe('All Series');
+  });
+
+  it('handles series response wrapped in { series: [...] } format', async () => {
+    mockStatementsSeries.mockResolvedValue({
+      series: [
+        { id: '10', name: 'AT&T Wireless' },
+      ],
+    });
+    mockInsightsSummary.mockResolvedValue({ total: 0 });
+    mockInsightsList.mockResolvedValue({ insights: [], total: 0 });
+
+    renderInsights();
+
+    await waitFor(() => {
+      const seriesSelect = screen.getByLabelText('Filter by series') as HTMLSelectElement;
+      const options = seriesSelect.querySelectorAll('option');
+      expect(options.length).toBe(2);
+      expect(options[1].textContent).toBe('AT&T Wireless');
+    });
+  });
+
+  it('falls back to account_identifier when series name is null', async () => {
+    mockStatementsSeries.mockResolvedValue([
+      { id: '5', name: null, account_identifier: 'acct-123' },
+    ]);
+    mockInsightsSummary.mockResolvedValue({ total: 0 });
+    mockInsightsList.mockResolvedValue({ insights: [], total: 0 });
+
+    renderInsights();
+
+    await waitFor(() => {
+      const seriesSelect = screen.getByLabelText('Filter by series') as HTMLSelectElement;
+      const options = seriesSelect.querySelectorAll('option');
+      expect(options[1].textContent).toBe('acct-123');
     });
   });
 });

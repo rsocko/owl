@@ -119,6 +119,36 @@
 .sg-doc-meta { font-size: 11px; color: var(--muted, #6b7280); margin-top: 2px; }
 .sg-doc-account { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 4px; flex-shrink: 0; }
 
+/* ── Reassign Button & Dropdown ── */
+.sg-doc-reassign-wrap { position: relative; flex-shrink: 0; }
+.sg-doc-reassign-btn {
+  background: none; border: none; cursor: pointer; font-size: 14px;
+  padding: 4px 6px; border-radius: 4px; opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+.sg-doc-item:hover .sg-doc-reassign-btn { opacity: 1; }
+.sg-doc-reassign-btn:hover { background: #f3f4f6; }
+.sg-doc-reassign-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.sg-reassign-dropdown {
+  position: absolute; right: 0; top: 100%; z-index: 10; min-width: 240px;
+  background: var(--card, #fff); border: 1px solid var(--border, #e0e3ea);
+  border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  padding: 6px; margin-top: 4px;
+}
+.sg-reassign-title {
+  font-size: 11px; font-weight: 600; color: var(--muted, #6b7280);
+  padding: 6px 10px 4px; text-transform: uppercase; letter-spacing: 0.3px;
+}
+.sg-reassign-option {
+  display: flex; flex-direction: column; width: 100%; text-align: left;
+  padding: 8px 10px; border: none; background: none; cursor: pointer;
+  border-radius: 6px; transition: background 0.1s;
+}
+.sg-reassign-option:hover { background: #f3f4f6; }
+.sg-reassign-option:disabled { opacity: 0.5; cursor: not-allowed; }
+.sg-reassign-option-name { font-size: 13px; font-weight: 600; }
+.sg-reassign-option-meta { font-size: 11px; color: var(--muted, #6b7280); margin-top: 1px; }
+
 /* ── Similar Series ── */
 .sg-similar-list { display: flex; flex-direction: column; gap: 8px; }
 .sg-similar-item {
@@ -162,6 +192,25 @@
 }
 .sg-split-input:focus { outline: 2px solid var(--accent, #3498db); border-color: transparent; }
 .sg-split-input-short { max-width: 120px; min-width: 100px; }
+
+/* Smart split suggestion banner */
+.sg-split-suggest-banner {
+  background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+}
+.sg-split-suggest-text { font-size: 13px; color: #1e40af; }
+.sg-split-suggest-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.sg-split-suggest-btn {
+  border: 1px solid #3b82f6; background: #fff; color: #2563eb; border-radius: 6px;
+  padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.sg-split-suggest-btn:hover { background: #3b82f6; color: #fff; }
+.sg-split-suggest-dismiss {
+  border: 1px solid var(--border, #e0e3ea); background: transparent; color: var(--muted, #6b7280);
+  border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+}
+.sg-split-suggest-dismiss:hover { background: #f3f4f6; }
 
 /* ── Merge Flow ── */
 .sg-merge-root { display: flex; flex-direction: column; gap: 12px; }

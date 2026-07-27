@@ -53,6 +53,7 @@ interface SeriesDetailResponse {
   timeline: TimelineEntry[];
   similar_series: SeriesInfo[];
   anomaly_indicators: string[];
+  suggested_split_groups?: { account_hint: string; document_ids: string[] }[];
 }
 
 interface Props {
@@ -76,6 +77,7 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
   const [selectedDocs, setSelectedDocs] = useState<Set<string>>(new Set());
   const [renameForm, setRenameForm] = useState({ name: '', account_identifier: '' });
   const [busy, setBusy] = useState(false);
+  const [reassignDoc, setReassignDoc] = useState<string | null>(null);
 
   const fetchDetail = useCallback(async () => {
     setLoading(true);
@@ -150,6 +152,20 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
     if (!detail) return;
     const ids = detail.documents.filter(d => d.account_hint === account).map(d => d.document_id);
     setSelectedDocs(new Set(ids));
+  };
+
+  const handleReassign = async (documentId: string, targetSeriesId: string) => {
+    setBusy(true);
+    try {
+      await endpoints.statements.seriesReassign(seriesId, {
+        document_id: documentId,
+        target_series_id: targetSeriesId,
+      });
+      setReassignDoc(null);
+      await fetchDetail();
+    } catch { /* toast handled by parent */ } finally {
+      setBusy(false);
+    }
   };
 
   // ---- Loading / Error ----
@@ -290,6 +306,7 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
           onSelectAllByAccount={selectAllByAccount}
           accounts={accounts}
           accountColorMap={accountColorMap}
+          suggestedSplitGroups={detail.suggested_split_groups}
           onComplete={handleSplitComplete}
           onCancel={() => { setActiveFlow('none'); setSelectedDocs(new Set()); }}
         />
@@ -359,6 +376,38 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
                   <span className="sg-doc-account" style={{ background: `${acctColor}22`, color: acctColor }}>
                     {doc.account_hint}
                   </span>
+                )}
+                {/* Reassign button — move document to another series */}
+                {activeFlow === 'none' && similar_series.length > 0 && (
+                  <div className="sg-doc-reassign-wrap">
+                    <button
+                      className="sg-doc-reassign-btn"
+                      title="Move to another series"
+                      disabled={busy}
+                      onClick={() => setReassignDoc(reassignDoc === doc.document_id ? null : doc.document_id)}
+                    >
+                      ↗️
+                    </button>
+                    {reassignDoc === doc.document_id && (
+                      <div className="sg-reassign-dropdown">
+                        <div className="sg-reassign-title">Move to:</div>
+                        {similar_series.map(s => (
+                          <button
+                            key={s.id}
+                            className="sg-reassign-option"
+                            disabled={busy}
+                            onClick={() => void handleReassign(doc.document_id, s.id)}
+                          >
+                            <span className="sg-reassign-option-name">{s.name}</span>
+                            <span className="sg-reassign-option-meta">
+                              {s.frequency} · {s.document_count} docs
+                              {s.account_identifier ? ` · ${s.account_identifier}` : ''}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             );
