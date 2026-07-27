@@ -32,6 +32,7 @@ from doc_intelligence_hub.api.routers import (
     stats,
     system,
     triage,
+    webhooks,
 )
 from doc_intelligence_hub.core.llm import get_llm_settings, validate_model_availability
 from doc_intelligence_hub.core.logging_config import configure_logging
@@ -247,6 +248,10 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
                 "description": "Account number and entity extraction pipelines.",
             },
             {
+                "name": "webhooks",
+                "description": "Webhook subscriptions and n8n automation integration.",
+            },
+            {
                 "name": "stats",
                 "description": "Aggregate statistics across all DI modules for MC integration.",
             },
@@ -297,6 +302,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(analysis.router)
     app.include_router(insights.router)
     app.include_router(extraction.router)
+    app.include_router(webhooks.router)
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
