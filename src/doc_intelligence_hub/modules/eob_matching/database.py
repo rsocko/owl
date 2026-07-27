@@ -128,6 +128,9 @@ class MatchRecord(Base):
     user_status = Column(String, default="unreviewed")  # unreviewed, confirmed, rejected, override
     reviewed_at = Column(DateTime, nullable=True)
     user_notes = Column(Text, nullable=True)
+    # Billing error classification (ARCH-09)
+    error_type = Column(String, nullable=True)  # BillingErrorType enum value
+    error_details = Column(Text, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("eob_document_id", "bill_document_id", "run_id", name="uq_match_pair_run"),

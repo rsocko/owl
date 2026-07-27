@@ -25,6 +25,22 @@ class PaymentStatus(str, Enum):
     OVERPAID = "overpaid"
 
 
+class BillingErrorType(str, Enum):
+    """Categorization of billing errors found during EOB/Bill analysis (ARCH-09)."""
+
+    DUPLICATE_CHARGE = "duplicate_charge"
+    CODING_ERROR = "coding_error"
+    COVERAGE_DENIED = "coverage_denied"
+    AMOUNT_MISMATCH = "amount_mismatch"
+    UNBUNDLING = "unbundling"
+    UPCODING = "upcoding"
+    BALANCE_BILLING = "balance_billing"
+    OUT_OF_NETWORK = "out_of_network"
+    PRE_AUTH_MISSING = "pre_auth_missing"
+    TIMELY_FILING = "timely_filing"
+    OTHER = "other"
+
+
 class ClassificationResult(BaseModel):
     type: DocumentType
     confidence_score: float = 0.0
@@ -89,6 +105,9 @@ class MatchResult(BaseModel):
     payment_status: PaymentStatus = PaymentStatus.UNPAID
     paid_amount: float = 0.0
     paid_date: datetime | None = None
+    # Billing error classification (ARCH-09)
+    error_type: BillingErrorType | None = None
+    error_details: str | None = None
 
 
 class PaymentRequest(BaseModel):
