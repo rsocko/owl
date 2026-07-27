@@ -2,9 +2,12 @@
 
 Endpoints:
     GET    /api/duplicates                — List duplicate pairs (with status filter)
+    GET    /api/duplicates/settings       — Get duplicate detection settings
+    PUT    /api/duplicates/settings       — Update duplicate detection settings
     GET    /api/duplicates/{id}           — Single pair detail with document metadata
     POST   /api/duplicates/{id}/resolve   — Resolve a duplicate pair
     POST   /api/duplicates/scan           — Trigger a full duplicate scan
+    POST   /api/duplicates/check-single   — Run detection for a single document
 """
 
 from __future__ import annotations
@@ -16,11 +19,14 @@ from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.modules.triage.database import (
     get_duplicate_pair,
+    get_triage_setting,
     list_duplicate_pairs,
+    set_triage_setting,
 )
 from doc_intelligence_hub.modules.triage.duplicates import (
     get_document_metadata,
     merge_documents,
+    on_document_ingested,
     resolve_not_duplicate,
     scan_all_duplicates,
 )
@@ -44,6 +50,20 @@ class ResolveRequest(BaseModel):
     )
 
 
+class DuplicateSettingsRequest(BaseModel):
+    auto_detect_enabled: bool = Field(
+        ...,
+        description="Whether to automatically run duplicate detection when a document is ingested",
+    )
+
+
+class CheckSingleRequest(BaseModel):
+    document_id: int = Field(
+        ...,
+        description="ID of the document to check for duplicates",
+    )
+
+
 # ------------------------------------------------------------------
 # Endpoints
 # ------------------------------------------------------------------
@@ -60,10 +80,33 @@ async def list_duplicates(
     return {"pairs": pairs, "count": len(pairs), "offset": offset, "limit": limit}
 
 
+@router.get("/settings")
+async def get_duplicate_settings() -> dict[str, Any]:
+    """Get duplicate detection settings."""
+    auto_detect = get_triage_setting("duplicate_auto_detect", "false")
+    return {"auto_detect_enabled": auto_detect == "true"}
+
+
+@router.put("/settings")
+async def update_duplicate_settings(body: DuplicateSettingsRequest) -> dict[str, Any]:
+    """Update duplicate detection settings."""
+    set_triage_setting(
+        "duplicate_auto_detect", "true" if body.auto_detect_enabled else "false"
+    )
+    return {"auto_detect_enabled": body.auto_detect_enabled}
+
+
 @router.post("/scan")
 async def trigger_scan() -> dict[str, Any]:
     """Trigger a full duplicate detection scan."""
     result = scan_all_duplicates()
+    return result
+
+
+@router.post("/check-single")
+async def check_single_document(body: CheckSingleRequest) -> dict[str, Any]:
+    """Run duplicate detection for a single document (as if it were just ingested)."""
+    result = on_document_ingested(body.document_id)
     return result
 
 

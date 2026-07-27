@@ -149,6 +149,8 @@ export default function OrphansDupes() {
   });
   const [savingOverride, setSavingOverride] = useState(false);
   const [busyDuplicateId, setBusyDuplicateId] = useState<string | null>(null);
+  const [autoDetectEnabled, setAutoDetectEnabled] = useState(false);
+  const [autoDetectLoading, setAutoDetectLoading] = useState(false);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -247,6 +249,11 @@ export default function OrphansDupes() {
 
   useEffect(() => {
     void loadData();
+    // Load duplicate detection settings
+    endpoints.duplicates.settings().then(
+      (res) => setAutoDetectEnabled(res.auto_detect_enabled),
+      () => {/* settings endpoint may not exist yet — ignore */},
+    );
   }, []);
 
   const orphanCount = orphans.length;
@@ -256,6 +263,19 @@ export default function OrphansDupes() {
     () => duplicates.find((item) => item.id === selectedDuplicate?.id) ?? selectedDuplicate,
     [duplicates, selectedDuplicate],
   );
+
+  const handleToggleAutoDetect = async () => {
+    setAutoDetectLoading(true);
+    try {
+      const res = await endpoints.duplicates.updateSettings({ auto_detect_enabled: !autoDetectEnabled });
+      setAutoDetectEnabled(res.auto_detect_enabled);
+      setToast({ message: res.auto_detect_enabled ? 'Auto-detect enabled.' : 'Auto-detect disabled.', tone: 'success' });
+    } catch (err) {
+      setToast({ message: getErrorMessage(err), tone: 'error' });
+    } finally {
+      setAutoDetectLoading(false);
+    }
+  };
 
   const handleOpenOrphan = (item: OrphanItem) => {
     setSelectedDuplicate(null);
@@ -353,6 +373,20 @@ export default function OrphansDupes() {
                 <div style={{ display: 'grid', gap: 8 }}>
                   <div style={{ fontSize: '1.6rem', fontWeight: 800 }}>{duplicateCount}</div>
                   <div className="text-muted">Action queue items and alerts that mention duplicate or merge review.</div>
+                  <label
+                    htmlFor="auto-detect-toggle"
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, cursor: 'pointer', fontSize: '0.85rem' }}
+                  >
+                    <input
+                      id="auto-detect-toggle"
+                      type="checkbox"
+                      checked={autoDetectEnabled}
+                      disabled={autoDetectLoading}
+                      onChange={() => void handleToggleAutoDetect()}
+                      style={{ width: 16, height: 16 }}
+                    />
+                    Auto-detect duplicates on ingestion
+                  </label>
                 </div>
               </Card>
             </div>
