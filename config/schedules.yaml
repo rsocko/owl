@@ -48,6 +48,16 @@ eob_matching:
     enabled: true
     timeout: 300
 
+  due_date_check:
+    description: "Check all unpaid bills for approaching or overdue due dates"
+    cron: "0 8 * * *"          # Daily at 8:00 AM UTC
+    endpoint: "/api/eob/check-due-dates"
+    method: POST
+    body:
+      due_soon_days: 7
+    enabled: true
+    timeout: 120
+
   benchmark:
     description: "Benchmark LLM models for EOB extraction quality and detect regressions"
     cron: "0 6 * * 1"          # Weekly on Monday at 6:00 AM

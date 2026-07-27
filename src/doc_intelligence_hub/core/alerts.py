@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -144,6 +145,16 @@ def emit_alert(
         db.commit()
         db.refresh(alert)
         logger.info("Alert emitted: [%s] %s — %s", severity.upper(), module, title)
+
+        # Send external notification for high-severity alerts
+        if severity in ("high", "critical"):
+            try:
+                from doc_intelligence_hub.core.notifications import notify_alert
+
+                notify_alert(alert)
+            except Exception:
+                logger.debug("External notification skipped or failed", exc_info=True)
+
         return alert
     except Exception:
         db.rollback()
@@ -276,8 +287,21 @@ def emit_eob_alerts(
     return count
 
 
+def _get_due_soon_days() -> int:
+    """Read EOB_DUE_SOON_DAYS from environment, defaulting to 7."""
+    raw = os.environ.get("EOB_DUE_SOON_DAYS")
+    if raw is not None:
+        try:
+            val = int(raw)
+            if val >= 1:
+                return val
+        except (ValueError, TypeError):
+            pass
+    return 7
+
+
 # Due-date alert thresholds
-_DUE_SOON_DAYS = 7
+_DUE_SOON_DAYS = _get_due_soon_days()
 
 
 def check_eob_due_dates(
