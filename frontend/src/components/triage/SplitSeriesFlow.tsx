@@ -10,6 +10,11 @@ import { endpoints } from '../../lib/api';
 import { SeriesTimeline } from './SeriesTimeline';
 import type { SeriesInfo, SeriesDoc, TimelineEntry } from './StatementGroupingDetail';
 
+interface SuggestedSplitGroup {
+  account_hint: string;
+  document_ids: string[];
+}
+
 interface Props {
   series: SeriesInfo;
   documents: SeriesDoc[];
@@ -18,6 +23,7 @@ interface Props {
   onSelectAllByAccount: (account: string) => void;
   accounts: string[];
   accountColorMap: Record<string, string>;
+  suggestedSplitGroups?: SuggestedSplitGroup[];
   onComplete: () => void;
   onCancel: () => void;
 }
@@ -54,6 +60,7 @@ export function SplitSeriesFlow({
   selectedDocIds,
   accounts,
   accountColorMap,
+  suggestedSplitGroups,
   onComplete,
   onCancel,
 }: Props) {
@@ -61,6 +68,7 @@ export function SplitSeriesFlow({
   const [accountId, setAccountId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [suggestDismissed, setSuggestDismissed] = useState(false);
 
   const selectedDocs = useMemo(() =>
     documents.filter(d => selectedDocIds.has(d.document_id)),
@@ -117,6 +125,33 @@ export function SplitSeriesFlow({
     <Card title="✂️ Split Series">
       <div className="sg-split-root">
         {error && <div className="sg-split-error">{error}</div>}
+
+        {/* Smart split suggestion banner */}
+        {!suggestDismissed && suggestedSplitGroups && suggestedSplitGroups.length > 1 && selectedDocIds.size === 0 && (
+          <div className="sg-split-suggest-banner">
+            <div className="sg-split-suggest-text">
+              <strong>💡 We detected {suggestedSplitGroups.length} account numbers</strong> — would you like to split by account?
+            </div>
+            <div className="sg-split-suggest-actions">
+              {suggestedSplitGroups.map(group => (
+                <button
+                  key={group.account_hint}
+                  className="sg-split-suggest-btn"
+                  onClick={() => {
+                    onSelectAllByAccount(group.account_hint);
+                    setNewName(`${series.name} — ${group.account_hint}`);
+                    setAccountId(group.account_hint);
+                  }}
+                >
+                  Select "{group.account_hint}" ({group.document_ids.length} docs)
+                </button>
+              ))}
+              <button className="sg-split-suggest-dismiss" onClick={() => setSuggestDismissed(true)}>
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
 
         {selectedDocIds.size === 0 ? (
           <div className="sg-split-hint">

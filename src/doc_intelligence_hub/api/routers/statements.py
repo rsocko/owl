@@ -232,8 +232,8 @@ def _record_correction_event(
     target_type: str,
     target_id: str,
     payload: dict | None = None,
-) -> None:
-    """Record a correction event in the triage database."""
+) -> str | None:
+    """Record a correction event in the triage database. Returns the event ID or None."""
     try:
         import json
 
@@ -254,10 +254,74 @@ def _record_correction_event(
             )
             session.add(event)
             session.commit()
+            return event.id
         finally:
             session.close()
     except Exception:
         pass  # Don't fail the main operation if triage DB is unavailable
+    return None
+
+
+async def _sync_to_paperless(
+    request: Request,
+    event_id: str | None,
+    *,
+    series_name: str | None = None,
+    account_identifier: str | None = None,
+    target_series_name: str | None = None,
+) -> None:
+    """Best-effort sync a correction event to Paperless-ngx."""
+    if not event_id:
+        return
+    try:
+        from doc_intelligence_hub.modules.triage.paperless_sync import sync_correction_event
+
+        client = make_paperless_client(request, timeout=30.0)
+        await sync_correction_event(
+            client,
+            event_id,
+            series_name=series_name,
+            account_identifier=account_identifier,
+            target_series_name=target_series_name,
+        )
+    except Exception:
+        pass  # Best-effort; don't fail the main operation
+
+
+def _recalculate_frequency(db: Database, series_id: str) -> None:
+    """Recalculate the frequency field for a series based on document date gaps."""
+    from datetime import date as date_type
+    from statistics import median
+
+    documents = db.get_series_documents(series_id)
+    dates: list[date_type] = []
+    for doc in documents:
+        stmt_date = doc.get("statement_date")
+        if stmt_date:
+            try:
+                dates.append(date_type.fromisoformat(stmt_date))
+            except (ValueError, TypeError):
+                pass
+
+    if len(dates) < 2:
+        return  # Not enough data to determine frequency
+
+    dates.sort()
+    gaps = [(dates[i + 1] - dates[i]).days for i in range(len(dates) - 1)]
+    # Filter out zero/negative gaps (duplicates or bad data)
+    gaps = [g for g in gaps if g > 0]
+    if not gaps:
+        return
+
+    median_gap = median(gaps)
+    if median_gap < 45:
+        frequency = "monthly"
+    elif median_gap <= 120:
+        frequency = "quarterly"
+    else:
+        frequency = "annual"
+
+    db.update_series_frequency(series_id, frequency)
 
 
 def _resolve_triage_item_for_series(
@@ -336,12 +400,25 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
             if entry.get("gap_before_days") and entry["gap_before_days"] > 60
         )
 
+        # Build suggested split groups if multiple account hints exist
+        suggested_split_groups: list[dict] = []
+        if len(account_hints) > 1:
+            for hint in sorted(account_hints):
+                group_doc_ids = [
+                    d["document_id"] for d in documents if d.get("account_hint") == hint
+                ]
+                suggested_split_groups.append({
+                    "account_hint": hint,
+                    "document_ids": group_doc_ids,
+                })
+
         return {
             "series": series,
             "documents": documents,
             "timeline": timeline,
             "similar_series": similar,
             "anomaly_indicators": anomaly_indicators,
+            "suggested_split_groups": suggested_split_groups,
         }
     finally:
         db.close()
@@ -416,7 +493,11 @@ async def split_series(
         )
 
         # Record correction event and resolve triage item
-        _record_correction_event(
+        # Recalculate frequency for both series
+        _recalculate_frequency(db, series_id)
+        _recalculate_frequency(db, new_id)
+
+        event_id = _record_correction_event(
             "series_split",
             "statement_series",
             series_id,
@@ -427,13 +508,16 @@ async def split_series(
         )
         _resolve_triage_item_for_series(series_id, "split")
 
-        return {
+        result = {
             "status": "ok",
             "original_series": db.get_series(series_id),
             "new_series": db.get_series(new_id),
         }
     finally:
         db.close()
+
+    await _sync_to_paperless(request, event_id, series_name=body.new_series_name)
+    return result
 
 
 @router.post("/series/merge")
@@ -477,26 +561,34 @@ async def merge_series(request: Request, body: MergeSeriesRequest) -> dict[str, 
         # Mark target as manually curated
         db.update_series(body.target_series_id, manually_curated=True)
 
+        # Recalculate frequency for the merged series
+        _recalculate_frequency(db, body.target_series_id)
+
         # Record correction event and resolve triage items for both series
-        _record_correction_event(
+        event_id = _record_correction_event(
             "series_merge",
             "statement_series",
             body.target_series_id,
             {
                 "source_series_id": body.source_series_id,
                 "source_series_name": source["name"],
+                "document_ids": [d["document_id"] for d in source_docs],
             },
         )
         _resolve_triage_item_for_series(body.source_series_id, "merge")
         _resolve_triage_item_for_series(body.target_series_id, "merge")
 
-        return {
+        target_name = target["name"]
+        result = {
             "status": "ok",
             "merged_series": db.get_series(body.target_series_id),
             "documents_moved": len(source_docs),
         }
     finally:
         db.close()
+
+    await _sync_to_paperless(request, event_id, target_series_name=target_name)
+    return result
 
 
 @router.post("/series/{series_id}/reassign")
@@ -530,6 +622,10 @@ async def reassign_document(
         db.remove_documents_from_series(series_id, [body.document_id])
         db.add_documents_to_series(body.target_series_id, [doc])
 
+        # Recalculate frequency for both affected series
+        _recalculate_frequency(db, series_id)
+        _recalculate_frequency(db, body.target_series_id)
+
         # Record override
         override_id = uuid.uuid4().hex[:12]
         db.save_series_override(
@@ -542,7 +638,7 @@ async def reassign_document(
             },
         )
 
-        _record_correction_event(
+        event_id = _record_correction_event(
             "series_reassign",
             "statement_series",
             series_id,
@@ -552,13 +648,17 @@ async def reassign_document(
             },
         )
 
-        return {
+        target_name = target["name"]
+        result = {
             "status": "ok",
             "source_series": db.get_series(series_id),
             "target_series": db.get_series(body.target_series_id),
         }
     finally:
         db.close()
+
+    await _sync_to_paperless(request, event_id, target_series_name=target_name)
+    return result
 
 
 @router.post("/series/{series_id}/rename")
@@ -593,18 +693,29 @@ async def rename_series(
             },
         )
 
-        _record_correction_event(
+        # Get document IDs for Paperless sync
+        doc_ids = [d["document_id"] for d in db.get_series_documents(series_id)]
+
+        event_id = _record_correction_event(
             "series_rename",
             "statement_series",
             series_id,
             {
                 "old_name": old_name,
                 "new_name": body.name,
+                "document_ids": doc_ids,
             },
         )
         # Note: rename does NOT resolve the triage item — the grouping issue
         # may still need a split or merge after renaming.
 
-        return {"status": "ok", "series": updated}
+        result = {"status": "ok", "series": updated}
     finally:
         db.close()
+
+    await _sync_to_paperless(
+        request, event_id,
+        series_name=body.name,
+        account_identifier=body.account_identifier,
+    )
+    return result
