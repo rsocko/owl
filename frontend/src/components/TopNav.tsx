@@ -21,6 +21,7 @@ const NAV_ENTRIES: NavEntry[] = [
     items: [
       { to: '/statements', label: 'Statements' },
       { to: '/eob', label: 'EOB Matching' },
+      { to: '/eob/benchmarks', label: 'Benchmarks' },
       { to: '/orphans', label: 'Orphans & Dupes' },
     ],
   },
