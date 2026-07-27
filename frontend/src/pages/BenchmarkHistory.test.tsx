@@ -113,4 +113,26 @@ describe('BenchmarkHistory', () => {
       expect(screen.getByText('Model Trends')).toBeTruthy();
     });
   });
+
+  it('shows error state when API fails', async () => {
+    const { endpoints: ep } = await import('../lib/api');
+    vi.mocked(ep.eob.benchmarkHistory).mockRejectedValueOnce(new Error('Network error'));
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText('Network error')).toBeTruthy();
+    });
+  });
+
+  it('triggers benchmark on button click', async () => {
+    const { endpoints: ep } = await import('../lib/api');
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/Run Benchmark/)).toBeTruthy();
+    });
+    const btn = screen.getByText(/Run Benchmark/);
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(ep.eob.benchmark).toHaveBeenCalledTimes(1);
+    });
+  });
 });
