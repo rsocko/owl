@@ -91,7 +91,7 @@ export const endpoints = {
     check: () => api.get('/api/eob/check'),
     classify: (body: unknown) => api.post('/api/eob/classify', body),
     run: (body?: unknown) => api.post('/api/eob/run', body),
-    results: () => api.get('/api/eob/results'),
+    results: (detailed?: boolean) => api.get(`/api/eob/results${detailed ? '?detailed=true' : ''}`),
     runs: () => api.get('/api/eob/runs'),
     matches: (params?: string) => api.get(`/api/eob/matches${params ? `?${params}` : ''}`),
     updateMatch: (id: string, body: unknown) => api.patch(`/api/eob/matches/${id}`, body),
