@@ -26,6 +26,7 @@ class QueueRunRequest(BaseModel):
 class ActionUpdateRequest(BaseModel):
     status: str = Field(..., pattern=r"^(completed|dismissed|pending)$")
     dry_run: bool = True
+    version: int | None = Field(default=None, description="Expected version for optimistic locking (returns 409 on mismatch)")
 
 
 class BulkActionRequest(BaseModel):
@@ -84,6 +85,7 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         "status": a.status,
         "correspondent": a.correspondent,
         "ai_reasoning": a.ai_reasoning,
+        "version": a.version or 1,
         "preview_url": _build_preview_url(a.document_id),
         "created_at": a.created_at.isoformat() if a.created_at else None,
         "completed_at": a.completed_at.isoformat() if a.completed_at else None,
@@ -174,8 +176,9 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
                 emit_action_queue_alerts(action_dicts)
             finally:
                 db.close()
-        except Exception:
-            pass  # Alert emission is best-effort
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).debug("Alert emission failed (best-effort): %s", exc)
 
     status = {
         "status": "ok",
@@ -240,7 +243,12 @@ async def list_actions(
 async def update_action(
     request: Request, action_id: int, body: ActionUpdateRequest
 ) -> dict[str, Any]:
-    """Update an action's status (complete, dismiss, or re-open)."""
+    """Update an action's status (complete, dismiss, or re-open).
+
+    Supports optimistic locking: if `version` is provided in the request body,
+    the update will only succeed if the action's current version matches.
+    Returns 409 Conflict if another request modified the action first.
+    """
     _sync_action_queue_settings(request)
     init_db()
     db = get_session()
@@ -250,7 +258,23 @@ async def update_action(
             from fastapi import HTTPException
 
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+
+        # Optimistic locking: reject if version doesn't match
+        if body.version is not None and action.version != body.version:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "version_conflict",
+                    "message": f"Action {action_id} was modified by another request",
+                    "expected_version": body.version,
+                    "current_version": action.version,
+                },
+            )
+
         action.status = body.status
+        action.version = (action.version or 1) + 1
         if body.status == "completed":
             action.completed_at = datetime.utcnow()
         elif body.status == "pending":
@@ -301,6 +325,7 @@ async def bulk_action(
             if action.status == target_status:
                 continue
             action.status = target_status
+            action.version = (action.version or 1) + 1
             if target_status == "completed":
                 action.completed_at = datetime.utcnow()
             elif target_status == "pending":

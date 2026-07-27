@@ -192,7 +192,7 @@ export default function DashboardView() {
         <div className="dv-left">
           <Card title="📥 Pending Queue Breakdown">
             {queue_breakdown.length === 0 ? (
-              <EmptyState title="No pending items" desc="The triage queue is clear." />
+              <EmptyState icon="✅" title="No pending items" desc="The triage queue is clear. New items will appear as documents are ingested and analyzed." />
             ) : (
               <div className="dv-queue-breakdown">
                 {queue_breakdown.map((item) => {
@@ -214,7 +214,7 @@ export default function DashboardView() {
 
           <Card title="🎯 Auto-Match Rate (6 months)" className="dv-mt16">
             {match_rate_trend.length === 0 ? (
-              <EmptyState title="No trend data" desc="Match rate data will appear as corrections accumulate." />
+              <EmptyState icon="📊" title="No trend data" desc="Match rate data will appear as corrections accumulate over time." />
             ) : (
               <div className="dv-match-chart">
                 {match_rate_trend.map((item) => (
@@ -243,7 +243,7 @@ export default function DashboardView() {
         <div className="dv-right">
           <Card title="🕐 Recent Activity">
             {activity_feed.length === 0 ? (
-              <EmptyState title="No recent activity" desc="Correction and triage activity will appear here." />
+              <EmptyState icon="🕐" title="No recent activity" desc="Correction and triage activity will appear here as items are processed." />
             ) : (
               <div className="dv-activity-list">
                 {activity_feed.map((item) => {

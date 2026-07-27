@@ -241,7 +241,7 @@ export default function Statements() {
             {loading ? <SkeletonLoader variant="table" /> : null}
             {!loading && error ? <ErrorState message={error} onRetry={() => void loadStatements()} /> : null}
             {!loading && !error && providers.length === 0 ? (
-              <EmptyState title="No providers discovered" desc="Run discovery to scan your documents and detect recurring statement providers." />
+              <EmptyState icon="🔍" title="No providers discovered" desc="Run discovery to scan your documents and detect recurring statement providers." action="Run discovery" onAction={runDiscovery} />
             ) : null}
             {!loading && !error && providers.length > 0 ? (
               <div className="statements-table-wrapper">
@@ -304,7 +304,7 @@ export default function Statements() {
             {loading ? <SkeletonLoader variant="table" /> : null}
             {!loading && error ? <ErrorState message={error} onRetry={() => void loadStatements()} /> : null}
             {!loading && !error && rows.length === 0 ? (
-              <EmptyState title="No missing statements" desc="Run recommendations to refresh expected periods if you recently ingested new statements." />
+              <EmptyState icon="✅" title="No missing statements" desc="Run recommendations to refresh expected periods if you recently ingested new statements." action="Run recommendations" onAction={runRecommendations} />
             ) : null}
             {!loading && !error && rows.length > 0 ? (
               <div className="statements-table-wrapper">
