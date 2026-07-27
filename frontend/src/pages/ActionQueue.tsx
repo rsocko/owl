@@ -32,8 +32,11 @@ interface ActionQueueCheck {
 
 interface QueueDatabaseCounts {
   pending?: number;
+  acknowledged?: number;
   completed?: number;
   dismissed?: number;
+  snoozed?: number;
+  not_an_action?: number;
   total?: number;
 }
 
@@ -73,6 +76,10 @@ interface ActionItem {
   version?: number | null;
   created_at?: string | null;
   completed_at?: string | null;
+  acknowledged_at?: string | null;
+  snoozed_until?: string | null;
+  severity?: string | null;
+  recommended_cta?: { id: string; label: string; url?: string | null; phone?: string | null } | null;
 }
 
 interface ActionListResponse {
@@ -80,7 +87,8 @@ interface ActionListResponse {
   total?: number;
 }
 
-type ActionFilter = 'pending' | 'completed' | 'dismissed' | 'all';
+type ActionFilter = 'pending' | 'acknowledged' | 'completed' | 'dismissed' | 'snoozed' | 'not_an_action' | 'all';
+type ActionStatus = 'completed' | 'dismissed' | 'pending' | 'acknowledged' | 'snoozed' | 'not_an_action';
 type ToastState = { message: string; tone?: 'success' | 'error' } | null;
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -142,6 +150,12 @@ function statusTone(status: string) {
       return 'success' as const;
     case 'dismissed':
       return 'muted' as const;
+    case 'acknowledged':
+      return 'info' as const;
+    case 'snoozed':
+      return 'warning' as const;
+    case 'not_an_action':
+      return 'danger' as const;
     default:
       return 'warning' as const;
   }
@@ -493,7 +507,7 @@ export default function ActionQueue() {
     }
   };
 
-  const updateAction = async (actionId: number, nextStatus: 'completed' | 'dismissed' | 'pending') => {
+  const updateAction = async (actionId: number, nextStatus: ActionStatus, snoozedUntil?: string) => {
     setBusyKey(`action-${actionId}-${nextStatus}`);
     setProcessingIds(new Set([actionId]));
     try {
@@ -503,9 +517,13 @@ export default function ActionQueue() {
       if (currentAction?.version != null) {
         payload.version = currentAction.version;
       }
+      if (nextStatus === 'snoozed' && snoozedUntil) {
+        payload.snoozed_until = snoozedUntil;
+      }
       await endpoints.actionQueue.updateAction(String(actionId), payload);
       await loadData();
-      setToast({ message: `Action marked ${nextStatus}.` });
+      const statusLabel = nextStatus === 'not_an_action' ? 'not an action' : nextStatus;
+      setToast({ message: `Action marked ${statusLabel}.` });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update action.';
       const isConflict = message.includes('409') || message.includes('version_conflict');
@@ -522,7 +540,7 @@ export default function ActionQueue() {
   };
 
   // [ARCH-01] Bulk action handler
-  const handleBulkAction = async (action: 'complete' | 'dismiss' | 'reopen') => {
+  const handleBulkAction = async (action: 'complete' | 'dismiss' | 'reopen' | 'acknowledge' | 'snooze') => {
     const ids = Array.from(checkedIds);
     if (ids.length === 0) return;
 
@@ -564,6 +582,20 @@ export default function ActionQueue() {
     await executeBulkAction(action, ids);
   };
 
+  const submitFeedback = async (actionId: number, feedbackType: string) => {
+    setBusyKey(`feedback-${actionId}`);
+    try {
+      await endpoints.actionQueue.feedback(String(actionId), { feedback_type: feedbackType });
+      await loadData();
+      const label = feedbackType === 'not_an_action' ? 'Marked as not an action (feedback recorded).' : 'Feedback submitted.';
+      setToast({ message: label });
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Failed to submit feedback.', tone: 'error' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const handleClosePanel = useCallback(() => {
     setSelectedActionId(null);
     setCachedAction(null);
@@ -573,10 +605,10 @@ export default function ActionQueue() {
   const counts = status?.database ?? {};
   const progress = status?.progress;
 
-  // [UX-06] Progress tracking: resolved today = completed + dismissed
-  const resolvedToday = (counts.completed ?? 0) + (counts.dismissed ?? 0);
+  // [UX-06] Progress tracking: resolved today = completed + dismissed + not_an_action
+  const resolvedToday = (counts.completed ?? 0) + (counts.dismissed ?? 0) + (counts.not_an_action ?? 0);
   const totalActions = counts.total ?? 0;
-  const pendingCount = counts.pending ?? 0;
+  const pendingCount = (counts.pending ?? 0) + (counts.acknowledged ?? 0) + (counts.snoozed ?? 0);
   const progressPct = totalActions > 0 ? Math.round((resolvedToday / totalActions) * 100) : 0;
 
   // Derive unique action type options for filtering
@@ -700,6 +732,16 @@ export default function ActionQueue() {
           const normalized = normalizeStatus(row.status);
           return (
             <div className="btn-group">
+              {normalized === 'pending' && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void updateAction(row.id, 'acknowledged')}
+                  disabled={busyKey !== null}
+                >
+                  Acknowledge
+                </Button>
+              )}
               {normalized !== 'completed' && (
                 <Button
                   size="sm"
@@ -710,7 +752,7 @@ export default function ActionQueue() {
                   Complete
                 </Button>
               )}
-              {normalized !== 'dismissed' && (
+              {normalized !== 'dismissed' && normalized !== 'not_an_action' && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -732,7 +774,7 @@ export default function ActionQueue() {
             </div>
           );
         },
-        width: '220px',
+        width: '280px',
       },
     ],
     [checkedIds, selectedActionId, processingIds, busyKey, actionTypeOptions, statusOptions, urgencyOptions],
@@ -768,7 +810,9 @@ export default function ActionQueue() {
       />
 
       <StatGrid>
-        <StatCard title="Pending" metric={pendingCount} desc="Awaiting review or downstream completion." />
+        <StatCard title="Pending" metric={counts.pending ?? 0} desc="Awaiting review or downstream completion." />
+        <StatCard title="Acknowledged" metric={counts.acknowledged ?? 0} desc="Seen, will handle later." />
+        <StatCard title="Snoozed" metric={counts.snoozed ?? 0} desc="Deferred, will resurface." />
         <StatCard title="Completed" metric={counts.completed ?? 0} desc="Finished and written back." />
         <StatCard title="Dismissed" metric={counts.dismissed ?? 0} desc="Closed without further action." />
         <StatCard
@@ -988,8 +1032,11 @@ export default function ActionQueue() {
           onChange={(value) => setFilter(value as ActionFilter)}
           options={[
             { key: 'pending', label: `Pending (${pendingCount})` },
+            { key: 'acknowledged', label: `Acknowledged (${counts.acknowledged ?? 0})` },
+            { key: 'snoozed', label: `Snoozed (${counts.snoozed ?? 0})` },
             { key: 'completed', label: `Completed (${counts.completed ?? 0})` },
             { key: 'dismissed', label: `Dismissed (${counts.dismissed ?? 0})` },
+            { key: 'not_an_action', label: `Not an action (${counts.not_an_action ?? 0})` },
             { key: 'all', label: `All (${totalActions})` },
           ]}
         />
@@ -1028,6 +1075,9 @@ export default function ActionQueue() {
                   })()}
                 </span>
                 <div className="btn-group">
+                  <Button variant="ghost" size="sm" onClick={() => void handleBulkAction('acknowledge')} disabled={busyKey !== null}>
+                    Acknowledge
+                  </Button>
                   <Button variant="success" size="sm" onClick={() => void handleBulkAction('complete')} disabled={busyKey !== null}>
                     Complete
                   </Button>
@@ -1225,8 +1275,11 @@ export default function ActionQueue() {
                 <div className="aq-meta-row"><span>Correspondent</span><span>{selectedAction.correspondent || '—'}</span></div>
                 <div className="aq-meta-row"><span>Amount</span><span>{formatCurrency(selectedAction.amount)}</span></div>
                 <div className="aq-meta-row"><span>Due date</span><span>{formatDate(selectedAction.due_date)}</span></div>
+                <div className="aq-meta-row"><span>Severity</span><span><Badge tone={selectedAction.severity === 'critical' ? 'danger' : selectedAction.severity === 'focus' ? 'warning' : 'success'}>{selectedAction.severity ?? 'safe'}</Badge></span></div>
                 <div className="aq-meta-row"><span>Created</span><span>{formatDateTime(selectedAction.created_at)}</span></div>
-                <div className="aq-meta-row"><span>Completed</span><span>{formatDateTime(selectedAction.completed_at)}</span></div>
+                {selectedAction.completed_at && <div className="aq-meta-row"><span>Completed</span><span>{formatDateTime(selectedAction.completed_at)}</span></div>}
+                {selectedAction.acknowledged_at && <div className="aq-meta-row"><span>Acknowledged</span><span>{formatDateTime(selectedAction.acknowledged_at)}</span></div>}
+                {selectedAction.snoozed_until && <div className="aq-meta-row"><span>Snoozed until</span><span>{formatDateTime(selectedAction.snoozed_until)}</span></div>}
               </div>
 
               {selectedAction.confidence != null && (
@@ -1247,33 +1300,94 @@ export default function ActionQueue() {
               {(() => {
                 const currentStatus = normalizeStatus(selectedAction.status);
                 return (
-                  <div className="btn-group">
-                    {currentStatus !== 'completed' && (
-                      <Button
-                        variant="success"
-                        onClick={() => void updateAction(selectedAction.id, 'completed')}
-                        disabled={busyKey !== null}
-                      >
-                        Confirm
-                      </Button>
+                  <div className="aq-detail-actions">
+                    {/* Recommended CTA — primary action derived from document intelligence */}
+                    {selectedAction.recommended_cta && (
+                      <div className="aq-cta-section">
+                        <div className="section-title">Recommended action</div>
+                        <Button
+                          variant="primary"
+                          onClick={() => {
+                            if (selectedAction.recommended_cta?.url) {
+                              window.open(selectedAction.recommended_cta.url, '_blank', 'noopener');
+                            } else if (selectedAction.recommended_cta?.phone) {
+                              window.open(`tel:${selectedAction.recommended_cta.phone}`);
+                            }
+                          }}
+                          disabled={!selectedAction.recommended_cta.url && !selectedAction.recommended_cta.phone}
+                        >
+                          {selectedAction.recommended_cta.label}
+                          {selectedAction.recommended_cta.url && ' ↗'}
+                          {selectedAction.recommended_cta.phone && ` (${selectedAction.recommended_cta.phone})`}
+                        </Button>
+                      </div>
                     )}
-                    {currentStatus !== 'dismissed' && (
-                      <Button
-                        variant="danger"
-                        onClick={() => void updateAction(selectedAction.id, 'dismissed')}
-                        disabled={busyKey !== null}
-                      >
-                        Reject
-                      </Button>
-                    )}
-                    {currentStatus !== 'pending' && (
-                      <Button
-                        variant="ghost"
-                        onClick={() => void updateAction(selectedAction.id, 'pending')}
-                        disabled={busyKey !== null}
-                      >
-                        Requeue
-                      </Button>
+
+                    {/* Lifecycle transition buttons */}
+                    <div className="btn-group">
+                      {currentStatus === 'pending' && (
+                        <Button
+                          variant="ghost"
+                          onClick={() => void updateAction(selectedAction.id, 'acknowledged')}
+                          disabled={busyKey !== null}
+                        >
+                          Acknowledge
+                        </Button>
+                      )}
+                      {currentStatus !== 'completed' && (
+                        <Button
+                          variant="success"
+                          onClick={() => void updateAction(selectedAction.id, 'completed')}
+                          disabled={busyKey !== null}
+                        >
+                          Complete
+                        </Button>
+                      )}
+                      {currentStatus !== 'snoozed' && currentStatus !== 'completed' && currentStatus !== 'not_an_action' && (
+                        <Button
+                          variant="warning"
+                          onClick={() => {
+                            // Snooze for 24 hours by default
+                            const snoozedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+                            void updateAction(selectedAction.id, 'snoozed', snoozedUntil);
+                          }}
+                          disabled={busyKey !== null}
+                        >
+                          Snooze 24h
+                        </Button>
+                      )}
+                      {currentStatus !== 'dismissed' && currentStatus !== 'not_an_action' && (
+                        <Button
+                          variant="danger"
+                          onClick={() => void updateAction(selectedAction.id, 'dismissed')}
+                          disabled={busyKey !== null}
+                        >
+                          Dismiss
+                        </Button>
+                      )}
+                      {currentStatus !== 'pending' && (
+                        <Button
+                          variant="ghost"
+                          onClick={() => void updateAction(selectedAction.id, 'pending')}
+                          disabled={busyKey !== null}
+                        >
+                          Re-open
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* Feedback: not an action (false positive signal) */}
+                    {currentStatus !== 'not_an_action' && (
+                      <div className="aq-feedback-section">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void submitFeedback(selectedAction.id, 'not_an_action')}
+                          disabled={busyKey !== null}
+                        >
+                          ⚑ Not an action
+                        </Button>
+                      </div>
                     )}
                   </div>
                 );
