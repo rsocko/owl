@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
+from starlette.responses import StreamingResponse
 
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
 from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer
@@ -250,6 +253,152 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
     }
     request.app.state.last_queue_status = status
     return status
+
+
+@router.post("/run/stream")
+async def queue_run_stream(
+    request: Request,
+    body: QueueRunRequest,
+) -> StreamingResponse:
+    """SSE endpoint that runs the pipeline and streams progress events."""
+    _sync_action_queue_settings(request)
+
+    # Reject if a pipeline is already running
+    current_status = getattr(request.app.state, "last_queue_status", None) or {}
+    if current_status.get("status") == "running":
+        from fastapi.responses import JSONResponse
+        return JSONResponse(  # type: ignore[return-value]
+            {"detail": {"message": "A pipeline run is already in progress."}},
+            status_code=409,
+        )
+
+    # Apply persisted source settings when no explicit overrides are provided
+    effective_saved_view_id = body.saved_view_id
+    if not effective_saved_view_id and not body.tag_override and not body.document_id:
+        source_settings = _get_queue_settings(request)
+        if source_settings.get("scan_mode") == "saved_view" and source_settings.get("saved_view_id"):
+            effective_saved_view_id = source_settings["saved_view_id"]
+
+    async def event_generator():
+        started_at = datetime.utcnow().isoformat()
+        request.app.state.last_queue_status = {
+            "status": "running",
+            "started_at": started_at,
+            "dry_run": body.dry_run,
+            "limit": body.limit,
+            "read_only": not action_queue_settings.write_to_paperless,
+        }
+
+        # Emit an initial "starting" event so the client knows the stream is alive
+        yield f"data: {json.dumps({'stage': 'starting', 'message': 'Pipeline starting…', 'current': 0, 'total': 0})}\n\n"
+
+        # Start the pipeline in a background task
+        pipeline_task = asyncio.create_task(run_pipeline(
+            limit=body.limit,
+            dry_run=body.dry_run,
+            force=body.force,
+            tag_override=body.tag_override,
+            saved_view_id=effective_saved_view_id,
+            document_id=body.document_id,
+            created_after=body.created_after,
+            created_before=body.created_before,
+            added_after=body.added_after,
+            added_before=body.added_before,
+            correspondent=body.correspondent,
+            document_type=body.document_type,
+        ))
+
+        last_progress = None
+        try:
+            while not pipeline_task.done():
+                await asyncio.sleep(0.5)
+                progress = get_pipeline_progress()
+                current_step = progress.get("current_step", "")
+
+                # Don't forward the pipeline's internal "complete" step as a stream event
+                # — our own explicit "complete" event below is the real terminal signal.
+                if current_step == "complete":
+                    continue
+
+                # Only emit when progress changes
+                if progress != last_progress:
+                    last_progress = dict(progress)
+                    progress_str = progress.get("progress", "")
+                    current_doc = progress.get("current_document", "")
+
+                    # Parse "3/10 documents processed" into current/total
+                    current = 0
+                    total = 0
+                    if progress_str and "/" in str(progress_str):
+                        try:
+                            parts = str(progress_str).split("/")
+                            current = int(parts[0])
+                            total = int(parts[1].split()[0])
+                        except (ValueError, IndexError):
+                            pass
+
+                    event = {
+                        "stage": current_step,
+                        "message": current_doc or progress_str or current_step,
+                        "current": current,
+                        "total": total,
+                    }
+                    yield f"data: {json.dumps(event)}\n\n"
+
+            # Pipeline finished — get the result
+            result = await pipeline_task
+            finished_at = datetime.utcnow().isoformat()
+
+            # Emit alerts (best-effort)
+            if not body.dry_run:
+                try:
+                    from doc_intelligence_hub.core.alerts import emit_action_queue_alerts
+
+                    init_db()
+                    db = get_session()
+                    try:
+                        pending_actions = db.query(Action).filter_by(status="pending").all()
+                        action_dicts = [
+                            {
+                                "id": a.id,
+                                "title": a.title,
+                                "document_title": a.document_title,
+                                "urgency": a.urgency,
+                                "status": a.status,
+                                "due_date": a.due_date.isoformat() if a.due_date else None,
+                                "action_type": a.action_type,
+                            }
+                            for a in pending_actions
+                        ]
+                        emit_action_queue_alerts(action_dicts)
+                    finally:
+                        db.close()
+                except Exception:
+                    pass
+
+            # Update app state
+            final_status = {
+                "status": "ok",
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "dry_run": body.dry_run,
+                "limit": body.limit,
+                "read_only": not action_queue_settings.write_to_paperless,
+                "result": result,
+                "database": _database_counts(),
+            }
+            request.app.state.last_queue_status = final_status
+
+            yield f"data: {json.dumps({'stage': 'complete', 'result': result})}\n\n"
+        except Exception as exc:
+            request.app.state.last_queue_status = {"status": "error", "error": str(exc)}
+            yield f"data: {json.dumps({'stage': 'error', 'message': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/status")

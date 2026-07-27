@@ -124,6 +124,7 @@ export const endpoints = {
     check: () => api.get('/api/queue/check'),
     checkCustomFields: () => api.get('/api/queue/check/custom-fields'),
     run: (body?: unknown) => api.post('/api/queue/run', body),
+    runStreamUrl: '/api/queue/run/stream',
     status: () => api.get('/api/queue/status'),
     actions: (params?: string) => api.get(`/api/queue/actions${params ? `?${params}` : ''}`),
     updateAction: (id: string, body: unknown) => api.patch(`/api/queue/actions/${id}`, body),
