@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 from datetime import date
 from pathlib import Path
 
@@ -78,6 +80,7 @@ async def run_recommendations(config_path: str, as_of: date) -> RecommendationRe
     )
     _save_recommendations_to_database(config.runtime.database_path, result)
     _emit_recommendation_alerts(result)
+    await _dispatch_recommendation_webhooks(result)
     return result
 
 
@@ -180,3 +183,64 @@ def _emit_recommendation_alerts(result: RecommendationResult) -> None:
         emit_statement_alerts(recs)
     except Exception:
         pass  # Alert emission is best-effort
+
+
+logger = logging.getLogger(__name__)
+
+
+async def _dispatch_recommendation_webhooks(result: RecommendationResult) -> None:
+    """Fire webhooks for NEW missing/overdue recommendations (best-effort)."""
+    try:
+        from doc_intelligence_hub.core.webhooks import (
+            WebhookDB,
+            dispatch_to_subscribers,
+        )
+    except Exception:
+        return
+
+    db_path = os.environ.get("WEBHOOK_DB_PATH", "data/webhook_log.db")
+    db = WebhookDB(db_path)
+
+    try:
+        db.connect()
+    except Exception:
+        logger.debug("Could not open webhook DB at %s — skipping webhook dispatch", db_path)
+        return
+
+    n8n_url = os.environ.get("N8N_WEBHOOK_URL")
+    extra_urls = [n8n_url] if n8n_url else None
+
+    try:
+        for rec in result.recommendations:
+            event_type = f"statement.{rec.status}"
+            expected_str = rec.expected_date.isoformat()
+
+            # Only fire for recommendations we haven't already alerted about
+            # Also skip if a "statement.found" tombstone exists for this period
+            if db.was_already_alerted(rec.provider_key, expected_str, event_type):
+                continue
+            if db.was_already_alerted(rec.provider_key, expected_str, "statement.found"):
+                continue
+
+            payload = {
+                "provider_key": rec.provider_key,
+                "provider_name": rec.provider_name,
+                "expected_date": expected_str,
+                "status": rec.status,
+                "priority": rec.priority,
+                "days_late": rec.days_late,
+                "earliest_date": rec.earliest_date.isoformat(),
+                "latest_date": rec.latest_date.isoformat(),
+            }
+
+            results = await dispatch_to_subscribers(
+                event_type, payload, db, extra_urls=extra_urls
+            )
+
+            # Mark as alerted regardless of delivery outcome to prevent
+            # repeated fire-and-forget attempts on every cycle
+            db.mark_alerted(rec.provider_key, expected_str, event_type)
+    except Exception:
+        logger.debug("Webhook dispatch failed (best-effort)", exc_info=True)
+    finally:
+        db.close()
