@@ -120,7 +120,7 @@ export default function BenchmarkHistory() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleRunBenchmark = async () => {
+  const handleRunBenchmark = useCallback(async () => {
     setTriggering(true);
     try {
       await endpoints.eob.benchmark();
@@ -132,7 +132,7 @@ export default function BenchmarkHistory() {
     } finally {
       setTriggering(false);
     }
-  };
+  }, [load]);
 
   if (loading) return <div className="benchmark-page"><SkeletonLoader variant="table" rows={6} /></div>;
   if (error) return <div className="benchmark-page"><ErrorState message={error} onRetry={load} /></div>;
