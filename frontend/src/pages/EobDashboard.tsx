@@ -267,7 +267,7 @@ export default function EobDashboard({
     setError(null);
     try {
       const [resultsRes, runsRes, matchesRes, unmatchedRes, checkRes, alertsRes] = await Promise.all([
-        endpoints.eob.results() as Promise<EobResultsResponse>,
+        endpoints.eob.results(true) as Promise<EobResultsResponse>,
         endpoints.eob.runs() as Promise<EobRunsResponse>,
         endpoints.eob.matches('limit=8') as Promise<EobMatchesResponse>,
         endpoints.eob.unmatched() as Promise<EobUnmatchedItem[]>,

@@ -175,6 +175,41 @@ class TestGetResults:
         assert match["eob_preview_url"] == "http://paperless.test/documents/100/details"
         assert match["bill_preview_url"] == "http://paperless.test/documents/200/details"
 
+    def test_results_abbreviated_by_default(self, seeded_client):
+        resp = seeded_client.get("/api/eob/results")
+        data = resp.json()
+        eob = data["matches"][0]["eob_details"]
+        bill = data["matches"][0]["bill_details"]
+        # Abbreviated: missing full-serializer-only fields
+        assert "title" not in eob
+        assert "classification_score" not in eob
+        assert "policy_number" not in eob
+        assert "title" not in bill
+        assert "classification_score" not in bill
+        assert "due_date" not in bill
+
+    def test_results_detailed_includes_full_fields(self, seeded_client):
+        resp = seeded_client.get("/api/eob/results?detailed=true")
+        data = resp.json()
+        assert data["status"] == "ok"
+        eob = data["matches"][0]["eob_details"]
+        bill = data["matches"][0]["bill_details"]
+        # Full serializer fields present
+        assert "title" in eob
+        assert "classification_score" in eob
+        assert "id" in eob
+        assert "document_id" in eob
+        assert "services_json" in eob
+        assert eob["title"] == "EOB from UHC"
+        assert eob["classification_score"] == 92.0
+        assert "title" in bill
+        assert "classification_score" in bill
+        assert "id" in bill
+        assert "document_id" in bill
+        assert "services_json" in bill
+        assert bill["title"] == "Bill from Dr. Smith"
+        assert bill["classification_score"] == 85.0
+
 
 class TestListRuns:
     def test_list_runs_empty(self, client):
@@ -243,6 +278,20 @@ class TestListMatches:
         assert "eob_preview_url" in match
         assert "bill_preview_url" in match
         assert match["breakdown"]["date"] == 95.0
+
+    def test_matches_detailed_includes_full_fields(self, seeded_client):
+        resp = seeded_client.get("/api/eob/matches?detailed=true")
+        data = resp.json()
+        eob = data["matches"][0]["eob_details"]
+        bill = data["matches"][0]["bill_details"]
+        assert eob["title"] == "EOB from UHC"
+        assert eob["classification_score"] == 92.0
+        assert "id" in eob
+        assert "services_json" in eob
+        assert bill["title"] == "Bill from Dr. Smith"
+        assert bill["classification_score"] == 85.0
+        assert "id" in bill
+        assert "services_json" in bill
 
 
 class TestUpdateMatch:
