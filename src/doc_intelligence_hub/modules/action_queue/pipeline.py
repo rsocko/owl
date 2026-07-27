@@ -16,6 +16,7 @@ from .config import settings
 from .database import Action, ProcessingHistory, get_session, init_db
 from .enricher import PaperlessEnricher
 from .fallback_analyzer import RuleBasedAnalyzer
+from .risk_scoring import compute_risk_score
 
 logger = logging.getLogger(__name__)
 
@@ -485,6 +486,11 @@ class Pipeline:
                     )
                     stored_actions.append(action)
 
+                # Emit alerts inline for high-risk actions (best-effort)
+                # Flush to ensure action IDs are assigned before emitting
+                db.flush()
+                self._emit_inline_alerts(stored_actions)
+
                 # Enrich Paperless with PRIMARY action's data (only if writes enabled and available)
                 primary_action = actions[primary_idx] if primary_idx < len(actions) else actions[0]
                 if settings.write_to_paperless and self._enrichment_available:
@@ -664,6 +670,15 @@ class Pipeline:
                 .first()
             )
 
+        # Compute composite risk score
+        risk = compute_risk_score(
+            urgency=action_data["urgency"],
+            due_date=self._parse_date(action_data.get("due_date")),
+            amount=action_data.get("amount"),
+            confidence=action_data.get("confidence", 0),
+            action_type=action_data["action_type"],
+        )
+
         if existing:
             existing.action_type = action_data["action_type"]
             existing.title = action_data["title"]
@@ -672,6 +687,7 @@ class Pipeline:
             existing.amount = action_data.get("amount")
             existing.urgency = action_data["urgency"]
             existing.confidence = action_data.get("confidence", 0)
+            existing.risk_score = risk
             existing.correspondent = correspondent_name
             existing.extracted_data = assessment.get("extracted_data")
             existing.ai_reasoning = assessment.get("reasoning")
@@ -688,6 +704,7 @@ class Pipeline:
                 amount=action_data.get("amount"),
                 urgency=action_data["urgency"],
                 confidence=action_data.get("confidence", 0),
+                risk_score=risk,
                 correspondent=correspondent_name,
                 extracted_data=assessment.get("extracted_data"),
                 ai_reasoning=assessment.get("reasoning"),
@@ -768,6 +785,41 @@ class Pipeline:
             "word_count": word_count,
             "text_quality_score": max(0, min(100, score)),
         }
+
+    @staticmethod
+    def _emit_inline_alerts(stored_actions: list[Action]) -> None:
+        """Emit alerts for high-risk actions created during pipeline run.
+
+        Only emits for CRITICAL/HIGH urgency or high risk_score actions to
+        avoid flooding the alert system during bulk processing.
+        """
+        try:
+            from doc_intelligence_hub.core.alerts import emit_alert
+
+            for action in stored_actions:
+                urgency = (action.urgency or "LOW").upper()
+                if urgency == "CRITICAL" or action.risk_score >= 70:
+                    emit_alert(
+                        alert_type="high_risk_action_created",
+                        severity="high" if urgency == "CRITICAL" else "medium",
+                        module="action_queue",
+                        title=f"High-risk action: {action.title[:80]}",
+                        description=(
+                            f"Action created with risk score {action.risk_score}/100 "
+                            f"(urgency: {urgency}, type: {action.action_type})."
+                        ),
+                        metadata={
+                            "action_id": action.id,
+                            "document_id": action.document_id,
+                            "risk_score": action.risk_score,
+                            "urgency": urgency,
+                            "action_type": action.action_type,
+                            "due_date": action.due_date.isoformat() if action.due_date else None,
+                            "amount": action.amount,
+                        },
+                    )
+        except Exception:
+            pass  # Alert emission is best-effort
 
     @staticmethod
     def _parse_date(date_str: str | None) -> date | None:

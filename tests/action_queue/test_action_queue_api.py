@@ -122,6 +122,7 @@ class TestListActions:
             "amount",
             "urgency",
             "confidence",
+            "risk_score",
             "status",
             "correspondent",
             "ai_reasoning",
