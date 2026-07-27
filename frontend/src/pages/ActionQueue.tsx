@@ -171,6 +171,7 @@ export default function ActionQueue() {
   const [filter, setFilter] = useState<ActionFilter>('pending');
   const [search, setSearch] = useState('');
   const [selectedActionId, setSelectedActionId] = useState<number | null>(null);
+  const [drawerExpanded, setDrawerExpanded] = useState(false);
   const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -551,6 +552,7 @@ export default function ActionQueue() {
   const handleClosePanel = useCallback(() => {
     setSelectedActionId(null);
     setCachedAction(null);
+    setDrawerExpanded(false);
   }, []);
 
   const counts = status?.database ?? {};
@@ -1047,7 +1049,7 @@ export default function ActionQueue() {
         onClick={handleClosePanel}
       />
       <div
-        className={`aq-drawer${selectedAction ? ' open' : ''}`}
+        className={`aq-drawer${selectedAction ? ' open' : ''}${drawerExpanded ? ' expanded' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-label="Action detail"
@@ -1056,9 +1058,32 @@ export default function ActionQueue() {
           <>
             <div className="aq-drawer-header">
               <h3>Action detail</h3>
-              <Button variant="ghost" size="sm" onClick={handleClosePanel} title="Close panel">
-                ✕
-              </Button>
+              <div className="aq-drawer-header-actions">
+                {selectedAction.document_id && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      const url = endpoints.documents.previewUrl(selectedAction.document_id!);
+                      window.open(url, '_blank', 'noopener,noreferrer');
+                    }}
+                    title="Pop out preview in new window"
+                  >
+                    ↗
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDrawerExpanded((v) => !v)}
+                  title={drawerExpanded ? 'Collapse panel' : 'Expand panel'}
+                >
+                  {drawerExpanded ? '⇥' : '⇤'}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={handleClosePanel} title="Close panel">
+                  ✕
+                </Button>
+              </div>
             </div>
             <div className="aq-detail-list" role="region" aria-live="polite" aria-label="Action detail panel">
               {/* [UX-07] Banner when selected item is not in the current filtered view */}
