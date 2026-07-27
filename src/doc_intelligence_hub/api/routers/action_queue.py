@@ -21,6 +21,16 @@ class QueueRunRequest(BaseModel):
     limit: int | None = Field(default=None, ge=1, le=500)
     dry_run: bool = True
     force: bool = False
+    # Source overrides (for custom/ad-hoc runs)
+    tag_override: str | None = Field(default=None, description="Comma-separated tag names to override configured defaults")
+    saved_view_id: int | None = Field(default=None, description="Paperless saved view ID to use as document source")
+    document_id: int | None = Field(default=None, description="Analyze a specific document by ID")
+    created_after: str | None = Field(default=None, description="Filter: document created after (YYYY-MM-DD)")
+    created_before: str | None = Field(default=None, description="Filter: document created before (YYYY-MM-DD)")
+    added_after: str | None = Field(default=None, description="Filter: added to Paperless after (YYYY-MM-DD)")
+    added_before: str | None = Field(default=None, description="Filter: added to Paperless before (YYYY-MM-DD)")
+    correspondent: str | None = Field(default=None, description="Filter by correspondent name")
+    document_type: str | None = Field(default=None, description="Filter by document type name")
 
 
 class ActionUpdateRequest(BaseModel):
@@ -177,7 +187,27 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
         "read_only": not action_queue_settings.write_to_paperless,
     }
 
-    result = await run_pipeline(limit=body.limit, dry_run=body.dry_run, force=body.force)
+    # Apply persisted source settings when no explicit overrides are provided
+    saved_view_id = body.saved_view_id
+    if not saved_view_id and not body.tag_override and not body.document_id:
+        source_settings = _get_queue_settings(request)
+        if source_settings.get("scan_mode") == "saved_view" and source_settings.get("saved_view_id"):
+            saved_view_id = source_settings["saved_view_id"]
+
+    result = await run_pipeline(
+        limit=body.limit,
+        dry_run=body.dry_run,
+        force=body.force,
+        tag_override=body.tag_override,
+        saved_view_id=saved_view_id,
+        document_id=body.document_id,
+        created_after=body.created_after,
+        created_before=body.created_before,
+        added_after=body.added_after,
+        added_before=body.added_before,
+        correspondent=body.correspondent,
+        document_type=body.document_type,
+    )
     finished_at = datetime.utcnow().isoformat()
 
     # Emit unified alerts for pending actions (best-effort)
@@ -790,3 +820,156 @@ async def acknowledge_action(request: Request, action_id: int) -> dict[str, Any]
         return _serialize_action(action)
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Action Queue Settings (persisted via app.state for this server session)
+# ---------------------------------------------------------------------------
+
+
+class QueueSettingsResponse(BaseModel):
+    scan_mode: str = Field(default="tags", description="Default scan source: 'tags' or 'saved_view'")
+    monitor_tags: list[str] = Field(default_factory=lambda: ["Inbox", "Todo"])
+    saved_view_id: int | None = None
+    confidence_threshold: int = 70
+    document_limit: int | None = None
+    rate_limit_delay: float = 0.25
+
+
+class QueueSettingsUpdate(BaseModel):
+    scan_mode: str | None = Field(default=None, pattern=r"^(tags|saved_view)$")
+    monitor_tags: list[str] | None = None
+    saved_view_id: int | None = Field(default=None, description="Set to 0 to clear")
+    confidence_threshold: int | None = Field(default=None, ge=1, le=100)
+    document_limit: int | None = Field(default=None, description="Set to 0 to clear (unlimited)")
+    rate_limit_delay: float | None = Field(default=None, ge=0, le=10)
+
+
+def _get_queue_settings(request: Request) -> dict:
+    """Get persisted queue settings from app state, with defaults."""
+    stored = getattr(request.app.state, "action_queue_source_settings", None)
+    if stored is None:
+        # Initialize from the action_queue module-level config
+        stored = {
+            "scan_mode": "tags",
+            "monitor_tags": action_queue_settings.monitor_tags,
+            "saved_view_id": None,
+            "confidence_threshold": action_queue_settings.confidence_threshold,
+            "document_limit": None,
+            "rate_limit_delay": action_queue_settings.rate_limit_delay,
+        }
+        request.app.state.action_queue_source_settings = stored
+    return stored
+
+
+@router.get("/settings")
+async def get_queue_settings(request: Request) -> dict[str, Any]:
+    """Get current Action Queue source configuration."""
+    _sync_action_queue_settings(request)
+    return _get_queue_settings(request)
+
+
+@router.put("/settings")
+async def update_queue_settings(request: Request, body: QueueSettingsUpdate) -> dict[str, Any]:
+    """Update Action Queue source configuration."""
+    _sync_action_queue_settings(request)
+    current = _get_queue_settings(request)
+    changed = []
+
+    if body.scan_mode is not None:
+        current["scan_mode"] = body.scan_mode
+        changed.append("scan_mode")
+    if body.monitor_tags is not None:
+        current["monitor_tags"] = [t.strip() for t in body.monitor_tags if t.strip()]
+        changed.append("monitor_tags")
+        # Also update the action_queue module settings so next run uses them
+        action_queue_settings.tags_to_monitor = ",".join(current["monitor_tags"])
+    if body.saved_view_id is not None:
+        # saved_view_id=0 means "clear"; any positive value means "set"
+        current["saved_view_id"] = body.saved_view_id if body.saved_view_id > 0 else None
+        changed.append("saved_view_id")
+    if body.confidence_threshold is not None:
+        current["confidence_threshold"] = body.confidence_threshold
+        changed.append("confidence_threshold")
+        action_queue_settings.confidence_threshold = body.confidence_threshold
+    if body.document_limit is not None:
+        # document_limit=0 means "clear" (unlimited); positive value means "set"
+        current["document_limit"] = body.document_limit if body.document_limit > 0 else None
+        changed.append("document_limit")
+    if body.rate_limit_delay is not None:
+        current["rate_limit_delay"] = body.rate_limit_delay
+        changed.append("rate_limit_delay")
+        action_queue_settings.rate_limit_delay = body.rate_limit_delay
+
+    request.app.state.action_queue_source_settings = current
+    return {"status": "ok", "changed": changed, "settings": current}
+
+
+# ---------------------------------------------------------------------------
+# Paperless metadata endpoints (for UI dropdowns)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/metadata/tags")
+async def list_paperless_tags(request: Request) -> dict[str, Any]:
+    """List all tags from Paperless (for tag picker UI)."""
+    _sync_action_queue_settings(request)
+    try:
+        client = make_paperless_client(request, timeout=15.0)
+        tags = await client.list_tags()
+        return {
+            "tags": [{"id": item["id"], "name": item["name"]} for item in tags],
+        }
+    except Exception as exc:
+        return {"tags": [], "error": str(exc)}
+
+
+@router.get("/metadata/saved-views")
+async def list_paperless_saved_views(request: Request) -> dict[str, Any]:
+    """List all saved views from Paperless."""
+    _sync_action_queue_settings(request)
+    try:
+        client = make_paperless_client(request, timeout=15.0)
+        views = await client.list_saved_views()
+        return {
+            "saved_views": [
+                {"id": v["id"], "name": v["name"]}
+                for v in views
+            ],
+        }
+    except Exception as exc:
+        return {"saved_views": [], "error": str(exc)}
+
+
+@router.get("/metadata/correspondents")
+async def list_paperless_correspondents(request: Request) -> dict[str, Any]:
+    """List all correspondents from Paperless."""
+    _sync_action_queue_settings(request)
+    try:
+        client = make_paperless_client(request, timeout=15.0)
+        correspondents = await client.list_correspondents()
+        return {
+            "correspondents": [
+                {"id": c["id"], "name": c["name"]}
+                for c in correspondents
+            ],
+        }
+    except Exception as exc:
+        return {"correspondents": [], "error": str(exc)}
+
+
+@router.get("/metadata/document-types")
+async def list_paperless_document_types(request: Request) -> dict[str, Any]:
+    """List all document types from Paperless."""
+    _sync_action_queue_settings(request)
+    try:
+        client = make_paperless_client(request, timeout=15.0)
+        _, _, doc_types = await client.fetch_all_metadata()
+        return {
+            "document_types": [
+                {"id": type_id, "name": name}
+                for type_id, name in sorted(doc_types.items(), key=lambda x: x[1])
+            ],
+        }
+    except Exception as exc:
+        return {"document_types": [], "error": str(exc)}

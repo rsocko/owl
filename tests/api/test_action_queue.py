@@ -305,3 +305,84 @@ class TestBackfill:
             assert "write_to_paperless" in resp.json()["error"]["message"]
         finally:
             client.app.state.hub_settings.write_to_paperless = True
+
+
+class TestQueueSettings:
+    """Tests for GET/PUT /api/queue/settings."""
+
+    def test_get_default_settings(self, client, mock_paperless):
+        resp = client.get("/api/queue/settings")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["scan_mode"] == "tags"
+        assert "monitor_tags" in data
+        assert isinstance(data["monitor_tags"], list)
+        assert data["confidence_threshold"] >= 1
+
+    def test_update_settings_tags(self, client, mock_paperless):
+        resp = client.put(
+            "/api/queue/settings",
+            json={"monitor_tags": ["Bills", "Medical"]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "monitor_tags" in data["changed"]
+        assert data["settings"]["monitor_tags"] == ["Bills", "Medical"]
+
+    def test_update_settings_scan_mode(self, client, mock_paperless):
+        resp = client.put(
+            "/api/queue/settings",
+            json={"scan_mode": "saved_view", "saved_view_id": 5},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["settings"]["scan_mode"] == "saved_view"
+        assert data["settings"]["saved_view_id"] == 5
+
+    def test_update_settings_clear_saved_view(self, client, mock_paperless):
+        # Set a saved view first
+        client.put("/api/queue/settings", json={"saved_view_id": 5})
+        # Clear it by sending 0
+        resp = client.put("/api/queue/settings", json={"saved_view_id": 0})
+        assert resp.status_code == 200
+        assert resp.json()["settings"]["saved_view_id"] is None
+
+    def test_update_settings_invalid_scan_mode(self, client, mock_paperless):
+        resp = client.put(
+            "/api/queue/settings",
+            json={"scan_mode": "invalid"},
+        )
+        assert resp.status_code == 422
+
+
+class TestQueueMetadata:
+    """Tests for GET /api/queue/metadata/* endpoints."""
+
+    def test_list_tags(self, client, mock_paperless):
+        resp = client.get("/api/queue/metadata/tags")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "tags" in data
+        assert len(data["tags"]) == 2
+        assert data["tags"][0]["name"] == "Inbox"
+
+    def test_list_saved_views(self, client, mock_paperless):
+        resp = client.get("/api/queue/metadata/saved-views")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "saved_views" in data
+        assert len(data["saved_views"]) == 2
+
+    def test_list_correspondents(self, client, mock_paperless):
+        resp = client.get("/api/queue/metadata/correspondents")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "correspondents" in data
+        assert len(data["correspondents"]) == 2
+
+    def test_list_document_types(self, client, mock_paperless):
+        resp = client.get("/api/queue/metadata/document-types")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "document_types" in data
+        assert len(data["document_types"]) == 3

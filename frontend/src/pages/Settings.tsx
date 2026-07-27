@@ -160,6 +160,28 @@ export default function Settings() {
   const [retentionSaving, setRetentionSaving] = useState(false);
   const [cleanupRunning, setCleanupRunning] = useState(false);
 
+  // Action Queue source settings
+  const [aqSourceLoading, setAqSourceLoading] = useState(false);
+  const [aqSourceSaving, setAqSourceSaving] = useState(false);
+  const [aqSource, setAqSource] = useState<{
+    scan_mode: string;
+    monitor_tags: string[];
+    saved_view_id: number | null;
+    confidence_threshold: number;
+    document_limit: number | null;
+    rate_limit_delay: number;
+  }>({
+    scan_mode: 'tags',
+    monitor_tags: ['Inbox', 'Todo'],
+    saved_view_id: null,
+    confidence_threshold: 70,
+    document_limit: null,
+    rate_limit_delay: 0.25,
+  });
+  const [aqAvailableTags, setAqAvailableTags] = useState<Array<{ id: number; name: string }>>([]);
+  const [aqSavedViews, setAqSavedViews] = useState<Array<{ id: number; name: string }>>([]);
+  const [aqNewTag, setAqNewTag] = useState('');
+
   const [connection, setConnection] = useState<ConnectionDraft>({
     paperlessUrl: '',
     paperlessToken: '',
@@ -227,7 +249,60 @@ export default function Settings() {
 
   useEffect(() => {
     void loadSettings();
+    void loadAqSourceSettings();
   }, []);
+
+  const loadAqSourceSettings = async () => {
+    setAqSourceLoading(true);
+    try {
+      const [settingsResp, tagsResp, viewsResp] = await Promise.all([
+        endpoints.actionQueue.settings() as Promise<typeof aqSource>,
+        endpoints.actionQueue.metadataTags() as Promise<{ tags: Array<{ id: number; name: string }> }>,
+        endpoints.actionQueue.metadataSavedViews() as Promise<{ saved_views: Array<{ id: number; name: string }> }>,
+      ]);
+      setAqSource({
+        scan_mode: settingsResp.scan_mode ?? 'tags',
+        monitor_tags: settingsResp.monitor_tags ?? ['Inbox', 'Todo'],
+        saved_view_id: settingsResp.saved_view_id ?? null,
+        confidence_threshold: settingsResp.confidence_threshold ?? 70,
+        document_limit: settingsResp.document_limit ?? null,
+        rate_limit_delay: settingsResp.rate_limit_delay ?? 0.25,
+      });
+      setAqAvailableTags(tagsResp.tags ?? []);
+      setAqSavedViews(viewsResp.saved_views ?? []);
+    } catch {
+      // Don't block the page if AQ settings fail to load
+    } finally {
+      setAqSourceLoading(false);
+    }
+  };
+
+  const handleSaveAqSource = async () => {
+    setAqSourceSaving(true);
+    try {
+      await endpoints.actionQueue.updateSettings(aqSource);
+      setToast({ message: 'Action Queue source settings saved.', tone: 'success' });
+    } catch (err) {
+      setToast({ message: getErrorMessage(err), tone: 'error' });
+    } finally {
+      setAqSourceSaving(false);
+    }
+  };
+
+  const handleAddAqTag = () => {
+    const tag = aqNewTag.trim();
+    if (tag && !aqSource.monitor_tags.includes(tag)) {
+      setAqSource((prev) => ({ ...prev, monitor_tags: [...prev.monitor_tags, tag] }));
+    }
+    setAqNewTag('');
+  };
+
+  const handleRemoveAqTag = (tag: string) => {
+    setAqSource((prev) => ({
+      ...prev,
+      monitor_tags: prev.monitor_tags.filter((t) => t !== tag),
+    }));
+  };
 
   const modelOptions = useMemo(() => {
     const options = new Set<string>();
@@ -608,6 +683,181 @@ export default function Settings() {
                   {scheduleSaving ? 'Saving…' : 'Save schedules'}
                 </Button>
               </div>
+            </Card>
+          </div>
+
+          <div className="section">
+            <Card
+              title="Action Queue — Document Source"
+              actions={<Badge tone="info">{aqSource.scan_mode === 'tags' ? `Tags: ${aqSource.monitor_tags.join(', ')}` : 'Saved view'}</Badge>}
+            >
+              <div className="text-muted" style={{ fontSize: '0.82rem', marginBottom: 16 }}>
+                Configure what documents the Action Queue pipeline scans by default. Scheduled and manual runs both use this configuration unless overridden with a custom run.
+              </div>
+
+              {aqSourceLoading ? (
+                <SkeletonLoader variant="cards" />
+              ) : (
+                <>
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 8 }}>Default scan mode</div>
+                    <div style={{ display: 'flex', gap: 16 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input
+                          type="radio"
+                          name="aq-scan-mode"
+                          value="tags"
+                          checked={aqSource.scan_mode === 'tags'}
+                          onChange={() => setAqSource((prev) => ({ ...prev, scan_mode: 'tags' }))}
+                          style={{ width: 'auto' }}
+                        />
+                        Tag list
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input
+                          type="radio"
+                          name="aq-scan-mode"
+                          value="saved_view"
+                          checked={aqSource.scan_mode === 'saved_view'}
+                          onChange={() => setAqSource((prev) => ({ ...prev, scan_mode: 'saved_view' }))}
+                          style={{ width: 'auto' }}
+                        />
+                        Saved view
+                      </label>
+                    </div>
+                  </div>
+
+                  {aqSource.scan_mode === 'tags' && (
+                    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 12, marginBottom: 16, background: 'var(--bg)' }}>
+                      <div style={{ fontWeight: 600, marginBottom: 8 }}>Monitor tags</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                        {aqSource.monitor_tags.map((tag) => (
+                          <span
+                            key={tag}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              background: 'var(--surface-hover)',
+                              border: '1px solid var(--border)',
+                              borderRadius: 'var(--radius-sm)',
+                              padding: '2px 8px',
+                              fontSize: '0.82rem',
+                            }}
+                          >
+                            {tag}
+                            <button
+                              onClick={() => handleRemoveAqTag(tag)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '1rem', color: 'var(--text-muted)' }}
+                              aria-label={`Remove tag ${tag}`}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <select
+                          value={aqNewTag}
+                          onChange={(e) => setAqNewTag(e.target.value)}
+                          style={{ flex: 1 }}
+                        >
+                          <option value="">Select a tag…</option>
+                          {aqAvailableTags
+                            .filter((t) => !aqSource.monitor_tags.includes(t.name))
+                            .map((t) => (
+                              <option key={t.id} value={t.name}>{t.name}</option>
+                            ))
+                          }
+                        </select>
+                        <Button onClick={handleAddAqTag} disabled={!aqNewTag.trim()}>
+                          Add
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {aqSource.scan_mode === 'saved_view' && (
+                    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 12, marginBottom: 16, background: 'var(--bg)' }}>
+                      <div className="form-group">
+                        <label htmlFor="aq-saved-view">Saved view</label>
+                        <select
+                          id="aq-saved-view"
+                          value={aqSource.saved_view_id ?? ''}
+                          onChange={(e) => setAqSource((prev) => ({
+                            ...prev,
+                            saved_view_id: e.target.value ? Number(e.target.value) : null,
+                          }))}
+                        >
+                          <option value="">Select a saved view…</option>
+                          {aqSavedViews.map((v) => (
+                            <option key={v.id} value={v.id}>{v.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  <details style={{ marginBottom: 16 }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 600, marginBottom: 8 }}>Advanced settings</summary>
+                    <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+                      <div className="form-group">
+                        <label htmlFor="aq-confidence">Confidence threshold (%)</label>
+                        <input
+                          id="aq-confidence"
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={aqSource.confidence_threshold}
+                          onChange={(e) => setAqSource((prev) => ({
+                            ...prev,
+                            confidence_threshold: Number(e.target.value) || 70,
+                          }))}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label htmlFor="aq-limit">Document limit per run</label>
+                        <input
+                          id="aq-limit"
+                          type="number"
+                          min={1}
+                          max={5000}
+                          value={aqSource.document_limit ?? ''}
+                          placeholder="Unlimited"
+                          onChange={(e) => setAqSource((prev) => ({
+                            ...prev,
+                            document_limit: e.target.value ? Number(e.target.value) : null,
+                          }))}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label htmlFor="aq-rate-limit">Rate limit delay (s)</label>
+                        <input
+                          id="aq-rate-limit"
+                          type="number"
+                          min={0}
+                          max={10}
+                          step={0.05}
+                          value={aqSource.rate_limit_delay}
+                          onChange={(e) => setAqSource((prev) => ({
+                            ...prev,
+                            rate_limit_delay: Number(e.target.value) || 0,
+                          }))}
+                        />
+                      </div>
+                    </div>
+                  </details>
+
+                  <div className="btn-group">
+                    <Button variant="primary" onClick={() => void handleSaveAqSource()} disabled={aqSourceSaving}>
+                      {aqSourceSaving ? 'Saving…' : 'Save source settings'}
+                    </Button>
+                    <Button onClick={() => void loadAqSourceSettings()} disabled={aqSourceLoading}>
+                      Refresh
+                    </Button>
+                  </div>
+                </>
+              )}
             </Card>
           </div>
 

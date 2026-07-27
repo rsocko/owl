@@ -130,6 +130,12 @@ export const endpoints = {
     bulk: (body: { action: string; action_ids: number[] }) =>
       api.post<{ affected: number; action: string }>('/api/queue/actions/bulk', body),
     backfill: (body?: unknown) => api.post('/api/queue/actions/backfill', body),
+    settings: () => api.get('/api/queue/settings'),
+    updateSettings: (body: unknown) => api.put('/api/queue/settings', body),
+    metadataTags: () => api.get('/api/queue/metadata/tags'),
+    metadataSavedViews: () => api.get('/api/queue/metadata/saved-views'),
+    metadataCorrespondents: () => api.get('/api/queue/metadata/correspondents'),
+    metadataDocumentTypes: () => api.get('/api/queue/metadata/document-types'),
   },
   alerts: {
     list: (params?: string) => api.get(`/api/insights/alerts${params ? `?${params}` : ''}`),
