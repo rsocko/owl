@@ -121,15 +121,19 @@ class TestListActions:
             "due_date",
             "amount",
             "urgency",
+            "severity",
             "confidence",
             "risk_score",
             "status",
+            "recommended_cta",
             "correspondent",
             "ai_reasoning",
             "version",
             "preview_url",
             "created_at",
             "completed_at",
+            "acknowledged_at",
+            "snoozed_until",
         }
         assert set(action.keys()) == expected_fields
 
@@ -254,3 +258,160 @@ class TestPreviewUrlEdgeCases:
             assert action["preview_url"] == "http://paperless.test/documents/42/details"
         finally:
             aq_settings.paperless_url = original
+
+
+class TestAcknowledgeAction:
+    def test_acknowledge_sets_status_and_timestamp(self, seeded_client):
+        resp = seeded_client.post("/api/queue/actions/1/acknowledge")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "acknowledged"
+        assert data["acknowledged_at"] is not None
+
+    def test_acknowledge_nonexistent_returns_404(self, seeded_client):
+        resp = seeded_client.post("/api/queue/actions/999/acknowledge")
+        assert resp.status_code == 404
+
+
+class TestSnoozeAction:
+    def test_snooze_sets_status_and_until(self, seeded_client):
+        resp = seeded_client.post(
+            "/api/queue/actions/1/snooze",
+            json={"until": "2026-08-01T09:00:00"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "snoozed"
+        assert "2026-08-01" in data["snoozed_until"]
+
+    def test_snooze_invalid_timestamp_returns_422(self, seeded_client):
+        resp = seeded_client.post(
+            "/api/queue/actions/1/snooze",
+            json={"until": "not-a-date"},
+        )
+        assert resp.status_code == 422
+
+    def test_snooze_nonexistent_returns_404(self, seeded_client):
+        resp = seeded_client.post(
+            "/api/queue/actions/999/snooze",
+            json={"until": "2026-08-01T09:00:00"},
+        )
+        assert resp.status_code == 404
+
+
+class TestExpiredSnoozes:
+    def test_expired_snoozes_returns_past_due(self, seeded_client):
+        # First snooze to a past date
+        seeded_client.post(
+            "/api/queue/actions/1/snooze",
+            json={"until": "2020-01-01T00:00:00"},
+        )
+        resp = seeded_client.get("/api/queue/actions/expired-snoozes")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["count"] == 1
+        assert data["actions"][0]["id"] == 1
+
+    def test_expired_snoozes_excludes_future(self, seeded_client):
+        # Snooze to a future date
+        seeded_client.post(
+            "/api/queue/actions/1/snooze",
+            json={"until": "2099-12-31T23:59:59"},
+        )
+        resp = seeded_client.get("/api/queue/actions/expired-snoozes")
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 0
+
+
+class TestFeedback:
+    def test_submit_not_an_action_feedback(self, seeded_client):
+        resp = seeded_client.post(
+            "/api/queue/actions/1/feedback",
+            json={"feedback_type": "not_an_action", "reason": "Just an ad"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["feedback_type"] == "not_an_action"
+        assert data["action_status"] == "not_an_action"
+
+    def test_submit_misclassified_feedback_corrects_type(self, seeded_client):
+        resp = seeded_client.post(
+            "/api/queue/actions/1/feedback",
+            json={"feedback_type": "misclassified", "corrected_action_type": "FILE"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["action_type"] == "FILE"
+
+    def test_get_feedback_history(self, seeded_client):
+        # Submit feedback
+        seeded_client.post(
+            "/api/queue/actions/1/feedback",
+            json={"feedback_type": "wrong_urgency", "reason": "Not that urgent"},
+        )
+        # Retrieve feedback
+        resp = seeded_client.get("/api/queue/actions/1/feedback")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["feedback"]) == 1
+        assert data["feedback"][0]["feedback_type"] == "wrong_urgency"
+
+    def test_feedback_nonexistent_action_returns_404(self, seeded_client):
+        resp = seeded_client.post(
+            "/api/queue/actions/999/feedback",
+            json={"feedback_type": "not_an_action"},
+        )
+        assert resp.status_code == 404
+
+
+class TestNewStatusesViaUpdate:
+    def test_update_to_acknowledged(self, seeded_client):
+        resp = seeded_client.patch(
+            "/api/queue/actions/1",
+            json={"status": "acknowledged", "dry_run": False},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "acknowledged"
+
+    def test_update_to_snoozed_requires_until(self, seeded_client):
+        resp = seeded_client.patch(
+            "/api/queue/actions/1",
+            json={"status": "snoozed", "dry_run": False},
+        )
+        assert resp.status_code == 422
+
+    def test_update_to_snoozed_with_until(self, seeded_client):
+        resp = seeded_client.patch(
+            "/api/queue/actions/1",
+            json={"status": "snoozed", "dry_run": False, "snoozed_until": "2026-09-01T00:00:00"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "snoozed"
+
+    def test_reopen_clears_timestamps(self, seeded_client):
+        # Acknowledge first
+        seeded_client.post("/api/queue/actions/1/acknowledge")
+        # Reopen
+        resp = seeded_client.patch(
+            "/api/queue/actions/1",
+            json={"status": "pending", "dry_run": False},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "pending"
+        assert data["acknowledged_at"] is None
+        assert data["snoozed_until"] is None
+
+
+class TestSeverityField:
+    def test_severity_derived_from_urgency(self, seeded_client):
+        resp = seeded_client.get("/api/queue/actions?status=pending")
+        action = resp.json()["actions"][0]
+        # Action 1 has urgency=HIGH → severity should be "focus"
+        assert action["severity"] == "focus"
+
+    def test_severity_low_urgency(self, seeded_client):
+        resp = seeded_client.get("/api/queue/actions?status=completed")
+        action = resp.json()["actions"][0]
+        # Action 2 has urgency=LOW → severity should be "safe"
+        assert action["severity"] == "safe"

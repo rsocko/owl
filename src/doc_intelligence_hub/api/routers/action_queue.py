@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
 from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer
 from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
-from doc_intelligence_hub.modules.action_queue.database import Action, get_session, init_db
+from doc_intelligence_hub.modules.action_queue.database import Action, ActionFeedback, get_session, init_db
 from doc_intelligence_hub.modules.action_queue.pipeline import get_pipeline_progress, run_pipeline
 from doc_intelligence_hub.modules.action_queue.risk_scoring import compute_risk_score, recalculate_risk_scores
 from doc_intelligence_hub.modules.statements.config import resolve_api_token
@@ -24,20 +24,22 @@ class QueueRunRequest(BaseModel):
 
 
 class ActionUpdateRequest(BaseModel):
-    status: str = Field(..., pattern=r"^(completed|dismissed|pending)$")
+    status: str = Field(..., pattern=r"^(completed|dismissed|pending|acknowledged|snoozed|not_an_action)$")
     dry_run: bool = True
     version: int | None = Field(default=None, description="Expected version for optimistic locking (returns 409 on mismatch)")
+    snoozed_until: str | None = Field(default=None, description="ISO timestamp for snooze expiry (required when status=snoozed)")
 
 
 class BulkActionRequest(BaseModel):
     action: str = Field(
-        ..., pattern=r"^(complete|dismiss|reopen)$",
-        description="Bulk action: 'complete', 'dismiss', or 'reopen'",
+        ..., pattern=r"^(complete|dismiss|reopen|acknowledge|snooze)$",
+        description="Bulk action: 'complete', 'dismiss', 'reopen', 'acknowledge', or 'snooze'",
     )
     action_ids: list[int] = Field(
         ..., min_length=1, max_length=200,
         description="List of action IDs to update (max 200)",
     )
+    snoozed_until: str | None = Field(default=None, description="ISO timestamp for snooze expiry (required for 'snooze' action)")
 
 
 def _sync_action_queue_settings(request: Request) -> None:
@@ -70,6 +72,16 @@ def _build_preview_url(document_id: int | None) -> str | None:
 
 def _serialize_action(a: Action) -> dict[str, Any]:
     """Serialize an Action row to a JSON-safe dict with preview_url."""
+    import json
+
+    # Deserialize recommended_cta from JSON string if stored as such
+    cta = a.recommended_cta
+    if isinstance(cta, str):
+        try:
+            cta = json.loads(cta)
+        except (json.JSONDecodeError, TypeError):
+            pass  # Keep as string if not valid JSON
+
     return {
         "id": a.id,
         "document_id": a.document_id,
@@ -80,16 +92,26 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         "due_date": a.due_date.isoformat() if a.due_date else None,
         "amount": a.amount,
         "urgency": a.urgency,
+        "severity": _urgency_to_severity(a.urgency),
         "confidence": a.confidence,
         "risk_score": a.risk_score,
         "status": a.status,
+        "recommended_cta": cta,
         "correspondent": a.correspondent,
         "ai_reasoning": a.ai_reasoning,
         "version": a.version or 1,
         "preview_url": _build_preview_url(a.document_id),
         "created_at": a.created_at.isoformat() if a.created_at else None,
         "completed_at": a.completed_at.isoformat() if a.completed_at else None,
+        "acknowledged_at": a.acknowledged_at.isoformat() if a.acknowledged_at else None,
+        "snoozed_until": a.snoozed_until.isoformat() if a.snoozed_until else None,
     }
+
+
+def _urgency_to_severity(urgency: str | None) -> str:
+    """Map 4-tier urgency to 3-tier severity for consistent display."""
+    mapping = {"CRITICAL": "critical", "HIGH": "focus", "MEDIUM": "focus", "LOW": "safe"}
+    return mapping.get((urgency or "LOW").upper(), "safe")
 
 
 def _database_counts() -> dict[str, int]:
@@ -97,13 +119,19 @@ def _database_counts() -> dict[str, int]:
     db = get_session()
     try:
         pending = db.query(Action).filter_by(status="pending").count()
+        acknowledged = db.query(Action).filter_by(status="acknowledged").count()
         completed = db.query(Action).filter_by(status="completed").count()
         dismissed = db.query(Action).filter_by(status="dismissed").count()
+        snoozed = db.query(Action).filter_by(status="snoozed").count()
+        not_an_action = db.query(Action).filter_by(status="not_an_action").count()
         return {
             "pending": pending,
+            "acknowledged": acknowledged,
             "completed": completed,
             "dismissed": dismissed,
-            "total": pending + completed + dismissed,
+            "snoozed": snoozed,
+            "not_an_action": not_an_action,
+            "total": pending + acknowledged + completed + dismissed + snoozed + not_an_action,
         }
     finally:
         db.close()
@@ -239,6 +267,28 @@ async def list_actions(
         db.close()
 
 
+@router.get("/actions/expired-snoozes")
+async def expired_snoozes(request: Request) -> dict[str, Any]:
+    """Find snoozed actions whose snooze has expired (ready to resurface)."""
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        now = datetime.utcnow()
+        expired = (
+            db.query(Action)
+            .filter(Action.status == "snoozed", Action.snoozed_until <= now)
+            .order_by(Action.snoozed_until.asc())
+            .all()
+        )
+        return {
+            "count": len(expired),
+            "actions": [_serialize_action(a) for a in expired],
+        }
+    finally:
+        db.close()
+
+
 @router.patch("/actions/{action_id}")
 async def update_action(
     request: Request, action_id: int, body: ActionUpdateRequest
@@ -279,8 +329,20 @@ async def update_action(
         action.version = (action.version or 1) + 1
         if body.status == "completed":
             action.completed_at = datetime.utcnow()
+        elif body.status == "acknowledged":
+            action.acknowledged_at = datetime.utcnow()
+        elif body.status == "snoozed":
+            if not body.snoozed_until:
+                from fastapi import HTTPException
+                raise HTTPException(
+                    status_code=422,
+                    detail="snoozed_until is required when status is 'snoozed'",
+                )
+            action.snoozed_until = datetime.fromisoformat(body.snoozed_until)
         elif body.status == "pending":
             action.completed_at = None
+            action.acknowledged_at = None
+            action.snoozed_until = None
             # Recalculate risk score when reopening (due dates may have changed)
             action.risk_score = compute_risk_score(
                 urgency=action.urgency or "LOW",
@@ -317,6 +379,8 @@ _BULK_ACTION_STATUS: dict[str, str] = {
     "complete": "completed",
     "dismiss": "dismissed",
     "reopen": "pending",
+    "acknowledge": "acknowledged",
+    "snooze": "snoozed",
 }
 
 
@@ -552,5 +616,177 @@ async def backfill_paperless(request: Request, body: BackfillRequest) -> dict[st
             "failed": failed,
             "errors": errors[:20],  # Cap error list to avoid huge responses
         }
+    finally:
+        db.close()
+
+
+# ------------------------------------------------------------------
+# Feedback endpoint — false positive / misclassification signals
+# ------------------------------------------------------------------
+
+
+class FeedbackRequest(BaseModel):
+    feedback_type: str = Field(
+        ..., pattern=r"^(not_an_action|misclassified|wrong_urgency|wrong_amount)$",
+        description="Type of feedback signal",
+    )
+    corrected_action_type: str | None = Field(
+        default=None,
+        description="What the action type should be (for misclassified feedback)",
+    )
+    reason: str | None = Field(default=None, description="Optional user explanation")
+
+
+@router.post("/actions/{action_id}/feedback")
+async def submit_feedback(
+    request: Request, action_id: int, body: FeedbackRequest
+) -> dict[str, Any]:
+    """Submit feedback on an action item — trains the classifier over time.
+
+    Feedback types:
+    - not_an_action: This document doesn't require any action (false positive)
+    - misclassified: The action type is wrong (e.g., classified as PAY but should be FILE)
+    - wrong_urgency: Urgency level is incorrect
+    - wrong_amount: Extracted amount is wrong
+
+    When feedback_type is 'not_an_action', the action status is also set to 'not_an_action'.
+    """
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        action = db.query(Action).filter_by(id=action_id).first()
+        if not action:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+
+        # Record the feedback
+        feedback = ActionFeedback(
+            action_id=action_id,
+            feedback_type=body.feedback_type,
+            original_action_type=action.action_type,
+            corrected_action_type=body.corrected_action_type,
+            reason=body.reason,
+        )
+        db.add(feedback)
+
+        # If "not_an_action", also update the action status
+        if body.feedback_type == "not_an_action":
+            action.status = "not_an_action"
+            action.version = (action.version or 1) + 1
+
+        # If misclassified and a correction is provided, update the action type
+        if body.feedback_type == "misclassified" and body.corrected_action_type:
+            from doc_intelligence_hub.modules.action_queue.database import VALID_ACTION_TYPES
+            if body.corrected_action_type.upper() in VALID_ACTION_TYPES:
+                action.action_type = body.corrected_action_type.upper()
+                action.version = (action.version or 1) + 1
+
+        db.commit()
+
+        return {
+            "feedback_id": feedback.id,
+            "action_id": action_id,
+            "feedback_type": body.feedback_type,
+            "action_status": action.status,
+            "action_type": action.action_type,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/actions/{action_id}/feedback")
+async def get_feedback(request: Request, action_id: int) -> dict[str, Any]:
+    """Get all feedback submitted for an action item."""
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        feedbacks = db.query(ActionFeedback).filter_by(action_id=action_id).order_by(
+            ActionFeedback.created_at.desc()
+        ).all()
+        return {
+            "action_id": action_id,
+            "feedback": [
+                {
+                    "id": f.id,
+                    "feedback_type": f.feedback_type,
+                    "original_action_type": f.original_action_type,
+                    "corrected_action_type": f.corrected_action_type,
+                    "reason": f.reason,
+                    "created_at": f.created_at.isoformat() if f.created_at else None,
+                }
+                for f in feedbacks
+            ],
+        }
+    finally:
+        db.close()
+
+
+# ------------------------------------------------------------------
+# Convenience snooze endpoint
+# ------------------------------------------------------------------
+
+
+class SnoozeRequest(BaseModel):
+    until: str = Field(..., description="ISO timestamp when the action should resurface")
+
+
+@router.post("/actions/{action_id}/snooze")
+async def snooze_action(
+    request: Request, action_id: int, body: SnoozeRequest
+) -> dict[str, Any]:
+    """Snooze an action — defer it until a specified time.
+
+    The action moves to 'snoozed' status and will resurface when the snooze expires.
+    Use the queue/unsnoozed endpoint to find actions whose snooze has expired.
+    """
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        action = db.query(Action).filter_by(id=action_id).first()
+        if not action:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+
+        try:
+            snooze_dt = datetime.fromisoformat(body.until)
+        except (ValueError, TypeError):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=422, detail=f"Invalid ISO timestamp: {body.until}")
+
+        action.status = "snoozed"
+        action.snoozed_until = snooze_dt
+        action.version = (action.version or 1) + 1
+        db.commit()
+
+        return _serialize_action(action)
+    finally:
+        db.close()
+
+
+@router.post("/actions/{action_id}/acknowledge")
+async def acknowledge_action(request: Request, action_id: int) -> dict[str, Any]:
+    """Acknowledge an action — mark as seen/owned without claiming completion.
+
+    Use when you've seen the action and intend to handle it, but haven't completed
+    the actual task yet. Removes it from the active queue.
+    """
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        action = db.query(Action).filter_by(id=action_id).first()
+        if not action:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+
+        action.status = "acknowledged"
+        action.acknowledged_at = datetime.utcnow()
+        action.version = (action.version or 1) + 1
+        db.commit()
+
+        return _serialize_action(action)
     finally:
         db.close()
