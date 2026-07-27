@@ -82,7 +82,9 @@ class TestSubscriptionEndpoints:
         assert resp.status_code == 200
         assert resp.json()["status"] == "removed"
 
-    def test_toggle_subscription(self, client: TestClient):
+    def test_delete_nonexistent_returns_404(self, client: TestClient):
+        resp = client.delete("/api/webhooks/subscriptions/999")
+        assert resp.status_code == 404
         create_resp = client.post(
             "/api/webhooks/subscriptions",
             json={"url": "https://n8n.test/hook", "event_type": "statement.missing"},
@@ -91,6 +93,17 @@ class TestSubscriptionEndpoints:
         resp = client.patch(f"/api/webhooks/subscriptions/{sub_id}/toggle?active=false")
         assert resp.status_code == 200
         assert resp.json()["active"] is False
+
+    def test_toggle_nonexistent_returns_404(self, client: TestClient):
+        resp = client.patch("/api/webhooks/subscriptions/999/toggle?active=true")
+        assert resp.status_code == 404
+
+    def test_create_invalid_event_type(self, client: TestClient):
+        resp = client.post(
+            "/api/webhooks/subscriptions",
+            json={"url": "https://n8n.test/hook", "event_type": "invalid.type"},
+        )
+        assert resp.status_code == 422
 
 
 class TestStatementMissingEndpoint:
@@ -103,7 +116,7 @@ class TestStatementMissingEndpoint:
             resp = client.post(
                 "/api/webhooks/statement-missing",
                 json={
-                    "provider_key": "electric-co::monthly",
+                    "provider_key": "electric-co::monthly-notify",
                     "provider_name": "Electric Co",
                     "expected_date": "2026-07-15",
                     "status": "missing",
@@ -112,8 +125,7 @@ class TestStatementMissingEndpoint:
                 },
             )
             assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] in ("dispatched", "already_alerted")
+            assert resp.json()["status"] == "dispatched"
 
     def test_dedup_prevents_double_alert(self, client: TestClient):
         with patch(

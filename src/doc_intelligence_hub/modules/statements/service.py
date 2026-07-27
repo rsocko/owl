@@ -216,7 +216,10 @@ async def _dispatch_recommendation_webhooks(result: RecommendationResult) -> Non
             expected_str = rec.expected_date.isoformat()
 
             # Only fire for recommendations we haven't already alerted about
+            # Also skip if a "statement.found" tombstone exists for this period
             if db.was_already_alerted(rec.provider_key, expected_str, event_type):
+                continue
+            if db.was_already_alerted(rec.provider_key, expected_str, "statement.found"):
                 continue
 
             payload = {
@@ -234,8 +237,9 @@ async def _dispatch_recommendation_webhooks(result: RecommendationResult) -> Non
                 event_type, payload, db, extra_urls=extra_urls
             )
 
-            if any(results.values()):
-                db.mark_alerted(rec.provider_key, expected_str, event_type)
+            # Mark as alerted regardless of delivery outcome to prevent
+            # repeated fire-and-forget attempts on every cycle
+            db.mark_alerted(rec.provider_key, expected_str, event_type)
     except Exception:
         logger.debug("Webhook dispatch failed (best-effort)", exc_info=True)
     finally:
