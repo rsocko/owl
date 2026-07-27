@@ -99,6 +99,10 @@ class StatementSeries(BaseModel):
     first_seen: str | None = None
     last_seen: str | None = None
     created_at: str | None = None
+    # Financial reconciliation fields (ARCH-08)
+    currency: str = "USD"
+    expected_amount: float | None = None
+    amount_variance_threshold: float | None = None
 
 
 class SeriesDocument(BaseModel):
@@ -111,6 +115,11 @@ class SeriesDocument(BaseModel):
     period_label: str | None = None
     account_hint: str | None = None
     added_at: str | None = None
+    # Financial reconciliation fields (ARCH-08)
+    statement_amount: float | None = None
+    opening_balance: float | None = None
+    closing_balance: float | None = None
+    currency: str | None = None
 
 
 class TimelineEntry(BaseModel):
@@ -122,6 +131,11 @@ class TimelineEntry(BaseModel):
     period_label: str | None = None
     account_hint: str | None = None
     gap_before_days: int | None = None
+    # Financial reconciliation fields (ARCH-08)
+    statement_amount: float | None = None
+    opening_balance: float | None = None
+    closing_balance: float | None = None
+    balance_delta: float | None = None
 
 
 class SeriesDetail(BaseModel):
