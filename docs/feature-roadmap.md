@@ -148,7 +148,7 @@ This document delineates what's **built and working today** versus what's **plan
 | n8n workflow orchestration (weekly scans, webhooks) | LOW | M | #740 |
 | Azure DI tier for premium remediation | LOW | L | #739 |
 
-**Decision gate:** Only proceed if OCR quality is actively blocking other modules. Tagvico's OCR rescue feature (#815) may eliminate the need for this entirely.
+**Decision gate:** Only proceed if OCR quality is actively blocking other modules. Tagvico's OCR rescue feature (#815) may eliminate the need for this entirely. See [OCR Quality Implementation Plan](design/proposed/ocr-quality-implementation-plan.md) for phased build approach.
 
 **Estimated total effort: 60+ hours.**
 
@@ -208,6 +208,7 @@ This document delineates what's **built and working today** versus what's **plan
 | Evaluate Copilot SDK as AI provider (free GPT-5.4-mini via Copilot subscription) | MEDIUM | M | #816 |
 | DocType/Tag review for DocIntel | MEDIUM | S | #865 |
 | Consolidate extractors into shared `core/extractors/` | LOW | M | — |
+| Plugin module architecture (auto-discovery, protocol) | LOW | M | — |
 | Docker image optimization (multi-stage build) | LOW | S | — |
 
 ---
