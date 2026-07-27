@@ -127,27 +127,63 @@ export function FilterPills({
   onChange: (key: string) => void;
 }) {
   return (
-    <div className="filter-pills">
+    <div className="filter-pills" role="radiogroup">
       {options.map((o) => (
         <button
           key={o.key}
           className={`filter-pill ${active === o.key ? 'active' : ''}`}
           onClick={() => onChange(o.key)}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
+          role="radio"
+          aria-checked={active === o.key}
+        >
+          {active === o.key && <span className="filter-pill-dot" aria-hidden="true" />}
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export function confidenceTone(pct: number): 'high' | 'medium' | 'low' {
   if (pct >= 85) return 'high';
   if (pct >= 60) return 'medium';
   return 'low';
 }
-
-export function ConfidenceBar({ label, pct }: { label: string; pct: number }) {
+
+export function confidenceLabel(pct: number): string {
+  if (pct >= 85) return 'High confidence — strong pattern match with consistent history';
+  if (pct >= 60) return 'Medium confidence — some pattern irregularities detected';
+  return 'Low confidence — weak pattern or insufficient data';
+}
+
+export function ConfidenceBadge({ pct }: { pct: number }) {
+  const tone = confidenceTone(pct);
+  const badgeTone = tone === 'high' ? 'ok' : tone === 'medium' ? 'warning' : 'danger';
+  return (
+    <span className="confidence-badge-wrapper" title={confidenceLabel(pct)}>
+      <Badge tone={badgeTone}>{pct}%</Badge>
+    </span>
+  );
+}
+
+export function ConfidenceLegend() {
+  return (
+    <div className="confidence-legend" role="note" aria-label="Confidence score legend">
+      <span className="confidence-legend-title">Confidence:</span>
+      <span className="confidence-legend-item">
+        <span className="confidence-legend-dot high" />≥85% High
+      </span>
+      <span className="confidence-legend-item">
+        <span className="confidence-legend-dot medium" />60–84% Medium
+      </span>
+      <span className="confidence-legend-item">
+        <span className="confidence-legend-dot low" />&lt;60% Low
+      </span>
+    </div>
+  );
+}
+
+export function ConfidenceBar({ label, pct }: { label: string; pct: number }) {
   const tone = confidenceTone(pct);
   return (
     <div className="confidence-row">

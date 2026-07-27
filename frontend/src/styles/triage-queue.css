@@ -434,6 +434,63 @@
   color: var(--text);
 }
 
+/* Shortcuts link button (UX-11) */
+.triage-shortcuts-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: inherit;
+  padding: 0;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.triage-shortcuts-link:hover { text-decoration: underline; }
+
+/* Keyboard shortcuts modal (UX-11) */
+.triage-shortcuts-modal {
+  max-width: 540px;
+}
+
+.triage-shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 20px;
+  padding: 16px 20px;
+}
+
+.triage-shortcut-section-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.triage-shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 0.82rem;
+}
+
+.triage-shortcut-row kbd {
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 3px 8px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  min-width: 28px;
+  text-align: center;
+}
+
 /* ── Status filter bar ── */
 .triage-status-filter {
   margin-top: 8px;

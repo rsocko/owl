@@ -3,6 +3,7 @@ import {
   Badge,
   Button,
   Card,
+  ConfidenceBadge,
   EmptyState,
   ErrorState,
   FilterPills,
@@ -181,6 +182,7 @@ export default function TriageQueue() {
   const [toast, setToast] = useState<ToastState>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [populating, setPopulating] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   // Bulk confirm modal & threshold
   const [pendingBulkAction, setPendingBulkAction] = useState<{ action: string; ids: string[] } | null>(null);
@@ -430,14 +432,22 @@ export default function TriageQueue() {
       // Escape closes modals first, then deselects
       if (e.key === 'Escape') {
         e.preventDefault();
+        if (showShortcuts) { setShowShortcuts(false); return; }
         if (pendingBulkAction) { setPendingBulkAction(null); return; }
         if (pendingThreshold) { setPendingThreshold(false); return; }
         setSelectedId(null);
         return;
       }
 
+      // ? opens keyboard shortcuts overlay
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault();
+        setShowShortcuts((s) => !s);
+        return;
+      }
+
       // Suppress all other shortcuts while a modal is open
-      if (pendingBulkAction || pendingThreshold) return;
+      if (pendingBulkAction || pendingThreshold || showShortcuts) return;
 
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -469,7 +479,7 @@ export default function TriageQueue() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [items, selectedId, selectedItem, pendingBulkAction, pendingThreshold]);
+  }, [items, selectedId, selectedItem, pendingBulkAction, pendingThreshold, showShortcuts]);
 
   // ------------------------------------------------------------------
   // Derived counts
@@ -651,9 +661,7 @@ export default function TriageQueue() {
                           )}
                           <Badge tone={typeBadgeTone(item.item_type)}>{typeLabel(item.item_type)}</Badge>
                           {item.metadata && typeof item.metadata.score_pct === 'number' && (
-                            <span className={`triage-score ${item.metadata.score_pct >= 85 ? 'high' : item.metadata.score_pct >= 70 ? 'medium' : 'low'}`}>
-                              {item.metadata.score_pct}%
-                            </span>
+                            <ConfidenceBadge pct={item.metadata.score_pct as number} />
                           )}
                         </div>
                         <div className="triage-item-title">{itemTitle(item)}</div>
@@ -920,9 +928,47 @@ export default function TriageQueue() {
         </div>
       )}
 
-      {/* Keyboard hint */}
+      {/* Keyboard shortcuts overlay (UX-11) */}
+      {showShortcuts && (
+        <div className="triage-modal-overlay" onClick={() => setShowShortcuts(false)}>
+          <div className="triage-modal triage-shortcuts-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onClick={(e) => e.stopPropagation()}>
+            <div className="triage-modal-title">
+              ⌨️ Keyboard shortcuts
+            </div>
+            <div className="triage-shortcuts-grid">
+              <div className="triage-shortcut-section">
+                <div className="triage-shortcut-section-title">Actions</div>
+                <div className="triage-shortcut-row"><kbd>Y</kbd><span>Confirm selected item</span></div>
+                <div className="triage-shortcut-row"><kbd>N</kbd><span>Reject selected item</span></div>
+                <div className="triage-shortcut-row"><kbd>D</kbd><span>Defer for 7 days</span></div>
+                <div className="triage-shortcut-row"><kbd>X</kbd><span>Dismiss item</span></div>
+              </div>
+              <div className="triage-shortcut-section">
+                <div className="triage-shortcut-section-title">Navigation</div>
+                <div className="triage-shortcut-row"><kbd>↑</kbd><span>Previous item</span></div>
+                <div className="triage-shortcut-row"><kbd>↓</kbd><span>Next item</span></div>
+                <div className="triage-shortcut-row"><kbd>S</kbd><span>Skip (next item)</span></div>
+                <div className="triage-shortcut-row"><kbd>F</kbd><span>Toggle queue panel</span></div>
+              </div>
+              <div className="triage-shortcut-section">
+                <div className="triage-shortcut-section-title">General</div>
+                <div className="triage-shortcut-row"><kbd>?</kbd><span>Show this help</span></div>
+                <div className="triage-shortcut-row"><kbd>Esc</kbd><span>Close modal / deselect</span></div>
+              </div>
+            </div>
+            <div className="triage-modal-actions">
+              <Button size="sm" onClick={() => setShowShortcuts(false)}>Close</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Keyboard hint bar */}
       <div className="triage-keyboard-hint">
-        <kbd>Y</kbd> Confirm · <kbd>N</kbd> Reject · <kbd>S</kbd> Skip · <kbd>D</kbd> Defer · <kbd>X</kbd> Dismiss · <kbd>↑↓</kbd> Navigate · <kbd>Esc</kbd> Deselect · <kbd>F</kbd> Toggle queue
+        <kbd>Y</kbd> Confirm · <kbd>N</kbd> Reject · <kbd>S</kbd> Skip · <kbd>D</kbd> Defer · <kbd>X</kbd> Dismiss · <kbd>↑↓</kbd> Navigate · <kbd>F</kbd> Toggle queue ·{' '}
+        <button type="button" className="triage-shortcuts-link" onClick={() => setShowShortcuts(true)}>
+          <kbd>?</kbd> All shortcuts
+        </button>
       </div>
 
       {/* Toast with optional undo */}
