@@ -182,6 +182,39 @@ export default function ActionQueue() {
   // [UX-07] Cache selected action so filter changes don't lose it
   const [cachedAction, setCachedAction] = useState<ActionItem | null>(null);
 
+  // Custom run panel state
+  const [customRunOpen, setCustomRunOpen] = useState(false);
+  const [customRunMode, setCustomRunMode] = useState<'defaults' | 'custom'>('defaults');
+  const [customRunFilters, setCustomRunFilters] = useState<{
+    tag_override: string;
+    saved_view_id: string;
+    correspondent: string;
+    document_type: string;
+    created_after: string;
+    created_before: string;
+    added_after: string;
+    added_before: string;
+    document_id: string;
+    limit: string;
+  }>({
+    tag_override: '',
+    saved_view_id: '',
+    correspondent: '',
+    document_type: '',
+    created_after: '',
+    created_before: '',
+    added_after: '',
+    added_before: '',
+    document_id: '',
+    limit: '',
+  });
+  const [customRunMetadata, setCustomRunMetadata] = useState<{
+    saved_views: Array<{ id: number; name: string }>;
+    correspondents: Array<{ id: number; name: string }>;
+    document_types: Array<{ id: number; name: string }>;
+    loaded: boolean;
+  }>({ saved_views: [], correspondents: [], document_types: [], loaded: false });
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -389,6 +422,54 @@ export default function ActionQueue() {
     }
   };
 
+  const loadCustomRunMetadata = async () => {
+    if (customRunMetadata.loaded) return;
+    try {
+      const [views, correspondents, docTypes] = await Promise.all([
+        endpoints.actionQueue.metadataSavedViews() as Promise<{ saved_views: Array<{ id: number; name: string }> }>,
+        endpoints.actionQueue.metadataCorrespondents() as Promise<{ correspondents: Array<{ id: number; name: string }> }>,
+        endpoints.actionQueue.metadataDocumentTypes() as Promise<{ document_types: Array<{ id: number; name: string }> }>,
+      ]);
+      setCustomRunMetadata({
+        saved_views: views.saved_views ?? [],
+        correspondents: correspondents.correspondents ?? [],
+        document_types: docTypes.document_types ?? [],
+        loaded: true,
+      });
+    } catch {
+      // Metadata load failure is non-blocking
+    }
+  };
+
+  const runCustomPipeline = async (dryRun: boolean) => {
+    setBusyKey(dryRun ? 'custom-dry-run' : 'custom-run');
+    try {
+      const body: Record<string, unknown> = { dry_run: dryRun, force: !dryRun };
+      if (customRunMode === 'custom') {
+        if (customRunFilters.tag_override) body.tag_override = customRunFilters.tag_override;
+        if (customRunFilters.saved_view_id) body.saved_view_id = Number(customRunFilters.saved_view_id);
+        if (customRunFilters.document_id) body.document_id = Number(customRunFilters.document_id);
+        if (customRunFilters.created_after) body.created_after = customRunFilters.created_after;
+        if (customRunFilters.created_before) body.created_before = customRunFilters.created_before;
+        if (customRunFilters.added_after) body.added_after = customRunFilters.added_after;
+        if (customRunFilters.added_before) body.added_before = customRunFilters.added_before;
+        if (customRunFilters.correspondent) body.correspondent = customRunFilters.correspondent;
+        if (customRunFilters.document_type) body.document_type = customRunFilters.document_type;
+      }
+      if (customRunFilters.limit) body.limit = Number(customRunFilters.limit);
+      await endpoints.actionQueue.run(body);
+      await loadData();
+      setToast({ message: dryRun ? 'Custom dry run completed.' : 'Custom pipeline run completed.' });
+    } catch (err) {
+      setToast({
+        message: err instanceof Error ? err.message : 'Custom pipeline run failed.',
+        tone: 'error',
+      });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const updateAction = async (actionId: number, nextStatus: 'completed' | 'dismissed' | 'pending') => {
     setBusyKey(`action-${actionId}-${nextStatus}`);
     setProcessingIds(new Set([actionId]));
@@ -517,6 +598,172 @@ export default function ActionQueue() {
           }}
         />
       </StatGrid>
+
+      {/* Custom Run Panel */}
+      <div style={{ margin: '16px 0' }}>
+        <details
+          open={customRunOpen}
+          onToggle={(e) => {
+            const open = (e.target as HTMLDetailsElement).open;
+            setCustomRunOpen(open);
+            if (open) void loadCustomRunMetadata();
+          }}
+        >
+          <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', padding: '8px 0' }}>
+            ▸ Custom Run (one-off with filters)
+          </summary>
+          <Card title="Run with custom filters">
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="radio"
+                    name="custom-run-mode"
+                    value="defaults"
+                    checked={customRunMode === 'defaults'}
+                    onChange={() => setCustomRunMode('defaults')}
+                    style={{ width: 'auto' }}
+                  />
+                  Use configured defaults
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="radio"
+                    name="custom-run-mode"
+                    value="custom"
+                    checked={customRunMode === 'custom'}
+                    onChange={() => setCustomRunMode('custom')}
+                    style={{ width: 'auto' }}
+                  />
+                  Custom filters
+                </label>
+              </div>
+
+              {customRunMode === 'custom' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <div className="form-group">
+                    <label htmlFor="cr-tag-override">Tags override</label>
+                    <input
+                      id="cr-tag-override"
+                      placeholder="e.g. Inbox,Bills"
+                      value={customRunFilters.tag_override}
+                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, tag_override: e.target.value }))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="cr-saved-view">Saved view</label>
+                    <select
+                      id="cr-saved-view"
+                      value={customRunFilters.saved_view_id}
+                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, saved_view_id: e.target.value }))}
+                    >
+                      <option value="">None</option>
+                      {customRunMetadata.saved_views.map((v) => (
+                        <option key={v.id} value={v.id}>{v.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="cr-correspondent">Correspondent</label>
+                    <select
+                      id="cr-correspondent"
+                      value={customRunFilters.correspondent}
+                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, correspondent: e.target.value }))}
+                    >
+                      <option value="">Any</option>
+                      {customRunMetadata.correspondents.map((c) => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="cr-doc-type">Document type</label>
+                    <select
+                      id="cr-doc-type"
+                      value={customRunFilters.document_type}
+                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, document_type: e.target.value }))}
+                    >
+                      <option value="">Any</option>
+                      {customRunMetadata.document_types.map((t) => (
+                        <option key={t.id} value={t.name}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="cr-created-after">Created after</label>
+                    <input
+                      id="cr-created-after"
+                      type="date"
+                      value={customRunFilters.created_after}
+                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, created_after: e.target.value }))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="cr-created-before">Created before</label>
+                    <input
+                      id="cr-created-before"
+                      type="date"
+                      value={customRunFilters.created_before}
+                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, created_before: e.target.value }))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="cr-added-after">Added after</label>
+                    <input
+                      id="cr-added-after"
+                      type="date"
+                      value={customRunFilters.added_after}
+                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, added_after: e.target.value }))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="cr-added-before">Added before</label>
+                    <input
+                      id="cr-added-before"
+                      type="date"
+                      value={customRunFilters.added_before}
+                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, added_before: e.target.value }))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="cr-doc-id">Document ID (specific)</label>
+                    <input
+                      id="cr-doc-id"
+                      type="number"
+                      placeholder="e.g. 1234"
+                      value={customRunFilters.document_id}
+                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, document_id: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div className="form-group" style={{ margin: 0, width: 120 }}>
+                  <label htmlFor="cr-limit" style={{ fontSize: '0.78rem' }}>Limit</label>
+                  <input
+                    id="cr-limit"
+                    type="number"
+                    min={1}
+                    max={500}
+                    placeholder="No limit"
+                    value={customRunFilters.limit}
+                    onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, limit: e.target.value }))}
+                  />
+                </div>
+                <div className="btn-group" style={{ marginTop: 16 }}>
+                  <Button variant="ghost" onClick={() => void runCustomPipeline(true)} disabled={busyKey !== null}>
+                    Dry run
+                  </Button>
+                  <Button variant="primary" onClick={() => void runCustomPipeline(false)} disabled={busyKey !== null}>
+                    Run now
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </details>
+      </div>
 
       {/* [UX-06] Progress indicator */}
       {totalActions > 0 && (
