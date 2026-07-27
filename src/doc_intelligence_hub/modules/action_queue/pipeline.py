@@ -7,6 +7,7 @@ import time
 from datetime import date, datetime
 from typing import Any
 
+import httpx
 from rich.console import Console
 
 from doc_intelligence_hub.core.paperless import PaperlessClient
@@ -124,8 +125,10 @@ class Pipeline:
         try:
             correspondents = await self.paperless.list_correspondents()
             self._correspondent_cache = {c["id"]: c["name"] for c in correspondents}
-        except Exception:
-            pass  # Non-fatal — we'll fall back to IDs
+        except (httpx.TimeoutException, httpx.ConnectError, OSError) as exc:
+            logger.info("Could not load correspondent cache (will use IDs): %s", exc)
+        except Exception as exc:
+            logger.warning("Unexpected error loading correspondent cache: %s", exc)
 
         # Step 1: Ensure custom fields exist (skip in dry-run or read-only mode)
         self._enrichment_available = True
@@ -819,7 +822,7 @@ class Pipeline:
                         },
                     )
         except Exception:
-            pass  # Alert emission is best-effort
+            logger.debug("Alert emission skipped (best-effort): circuit may be open or alert system unavailable")
 
     @staticmethod
     def _parse_date(date_str: str | None) -> date | None:

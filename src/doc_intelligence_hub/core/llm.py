@@ -16,10 +16,20 @@ Environment variables:
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, APIConnectionError, APITimeoutError, RateLimitError
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from doc_intelligence_hub.core.resilience import (
+    CircuitOpenError,
+    LLMError,
+    get_circuit_breaker,
+    retry_async,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class LLMSettings(BaseSettings):
@@ -114,14 +124,37 @@ async def chat_completion(
         kwargs["response_format"] = response_format
 
     try:
-        response = await client.chat.completions.create(**kwargs)
+        breaker = get_circuit_breaker("llm", failure_threshold=5, recovery_timeout=60.0)
+        if not breaker.allow_request():
+            raise CircuitOpenError(breaker)
+        response = await _llm_call_with_retry(client, **kwargs)
+        breaker.record_success()
         return response.choices[0].message.content
-    except Exception as e:
-        # Log but don't crash — callers handle None gracefully
-        import logging
-
-        logging.getLogger(__name__).warning("LLM call failed: %s", e)
+    except CircuitOpenError:
+        logger.warning("LLM circuit breaker is open — skipping call")
         return None
+    except (APIConnectionError, APITimeoutError) as e:
+        breaker = get_circuit_breaker("llm")
+        breaker.record_failure()
+        logger.warning("LLM call failed (transient): %s", e)
+        return None
+    except RateLimitError as e:
+        breaker = get_circuit_breaker("llm")
+        breaker.record_failure()
+        logger.warning("LLM rate limited: %s", e)
+        return None
+    except Exception as e:
+        logger.error("LLM call failed (non-transient): %s", e)
+        return None
+
+
+@retry_async(max_attempts=3, base_delay=2.0, max_delay=30.0)
+async def _llm_call_with_retry(client: AsyncOpenAI, **kwargs: Any) -> Any:
+    """Execute LLM call with automatic retry on transient failures."""
+    try:
+        return await client.chat.completions.create(**kwargs)
+    except (APIConnectionError, APITimeoutError, RateLimitError) as e:
+        raise LLMError(str(e)) from e
 
 
 async def chat_json(
@@ -217,12 +250,26 @@ async def validate_model_availability() -> dict[str, Any]:
             )
         return result
 
-    except Exception as e:
+    except httpx.TimeoutException as e:
         return {
             "available": None,
             "configured_model": settings.model,
             "base_url": settings.base_url,
-            "message": f"Could not query gateway models endpoint: {e}",
+            "message": f"Gateway timeout querying models endpoint: {e}",
+        }
+    except httpx.HTTPStatusError as e:
+        return {
+            "available": None,
+            "configured_model": settings.model,
+            "base_url": settings.base_url,
+            "message": f"Gateway returned HTTP {e.response.status_code}: {e}",
+        }
+    except (httpx.ConnectError, OSError) as e:
+        return {
+            "available": None,
+            "configured_model": settings.model,
+            "base_url": settings.base_url,
+            "message": f"Cannot connect to gateway: {e}",
         }
 
 
@@ -241,6 +288,13 @@ async def health_check() -> dict[str, Any]:
             "model": settings.model,
             "base_url": settings.base_url,
             "response": response.choices[0].message.content,
+        }
+    except (APIConnectionError, APITimeoutError) as e:
+        return {
+            "status": "error",
+            "model": settings.model,
+            "base_url": settings.base_url,
+            "message": f"Connection failed: {e}",
         }
     except Exception as e:
         return {

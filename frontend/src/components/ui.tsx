@@ -280,15 +280,20 @@ export function SkeletonLoader({ variant = 'default', rows = 5 }: { variant?: 's
   );
 }
 
-export function EmptyState({ icon = '📭', title, desc }: { icon?: string; title: ReactNode; desc?: ReactNode }) {
+export function EmptyState({ icon = '📭', title, desc, action, onAction }: { icon?: string; title: ReactNode; desc?: ReactNode; action?: string; onAction?: () => void }) {
   return (
     <div className="empty-state">
       <div className="icon">{icon}</div>
-      <div>{title}</div>
+      <div className="empty-state-title">{title}</div>
       {desc && <div className="text-muted">{desc}</div>}
-    </div>
-  );
-}
+      {action && onAction && (
+        <div style={{ marginTop: 12 }}>
+          <Button onClick={onAction}>{action}</Button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
