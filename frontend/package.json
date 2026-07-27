@@ -12,6 +12,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@radix-ui/react-popover": "^1.1.20",
+    "@tanstack/react-table": "^8.21.3",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "7.18.1"
