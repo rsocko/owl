@@ -206,6 +206,7 @@ export const endpoints = {
       alreadyPaid: (id: string) => api.post(`/api/triage/orphans/${id}/already-paid`),
       notMedical: (id: string) => api.post(`/api/triage/orphans/${id}/not-medical`),
     },
+    paperlessSync: () => api.post('/api/triage/paperless-sync'),
   },
   duplicates: {
     list: (params?: string) => api.get(`/api/duplicates${params ? `?${params}` : ''}`),
