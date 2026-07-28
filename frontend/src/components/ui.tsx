@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
+import * as RadixTooltip from '@radix-ui/react-tooltip';
 
 export type Tone = 'ok' | 'warn' | 'err' | 'info' | 'muted' | 'success' | 'warning' | 'danger';
 
@@ -96,8 +97,26 @@ export function Button({
     </button>
   );
 }
-
-export function Tabs({
+
+export function TooltipProvider({ children }: { children: ReactNode }) {
+  return <RadixTooltip.Provider delayDuration={300}>{children}</RadixTooltip.Provider>;
+}
+
+export function Tooltip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <RadixTooltip.Root>
+      <RadixTooltip.Trigger asChild>{children}</RadixTooltip.Trigger>
+      <RadixTooltip.Portal>
+        <RadixTooltip.Content className="tooltip-content" sideOffset={5} side="top">
+          {label}
+          <RadixTooltip.Arrow className="tooltip-arrow" />
+        </RadixTooltip.Content>
+      </RadixTooltip.Portal>
+    </RadixTooltip.Root>
+  );
+}
+
+export function Tabs({
   tabs,
   active,
   onChange,

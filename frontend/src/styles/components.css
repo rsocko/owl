@@ -119,6 +119,17 @@
 .confidence-bar-fill.low { background: var(--danger); }
 .confidence-pct { width: 36px; text-align: right; font-size: 0.75rem; font-weight: 700; }
 
+/* Radix tooltip */
+.tooltip-content {
+  background: var(--card); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 6px 10px; font-size: 0.72rem; font-weight: 400;
+  max-width: 260px; line-height: 1.4;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000;
+  animation: tooltip-fade-in 0.15s ease;
+}
+.tooltip-arrow { fill: var(--card); }
+@keyframes tooltip-fade-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
+
 /* Confidence badge tooltip (UX-16) */
 .confidence-badge-wrapper { cursor: help; position: relative; }
 .confidence-badge-wrapper[title]:hover::after {
