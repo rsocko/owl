@@ -165,6 +165,71 @@
   flex-wrap: wrap;
 }
 
+.aq-edit-section {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--muted-bg);
+}
+
+.aq-edit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.aq-edit-header .section-title {
+  margin: 0;
+}
+
+.aq-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.aq-edit-field {
+  display: grid;
+  gap: 6px;
+  font-size: 0.82rem;
+}
+
+.aq-edit-field span {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.aq-edit-field input,
+.aq-edit-field select,
+.aq-edit-field textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+}
+
+.aq-edit-field input:focus,
+.aq-edit-field select:focus,
+.aq-edit-field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.aq-edit-field-full,
+.aq-edit-actions {
+  grid-column: 1 / -1;
+}
+
+.aq-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .aq-meta-list {
   display: grid;
 }

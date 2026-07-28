@@ -90,7 +90,19 @@ interface ActionListResponse {
 
 type ActionFilter = 'pending' | 'acknowledged' | 'completed' | 'dismissed' | 'snoozed' | 'not_an_action' | 'all';
 type ActionStatus = 'completed' | 'dismissed' | 'pending' | 'acknowledged' | 'snoozed' | 'not_an_action';
+type ActionEditDraft = {
+  action_type: string;
+  title: string;
+  summary: string;
+  due_date: string;
+  amount: string;
+  urgency: string;
+  correspondent: string;
+};
 type ToastState = { message: string; tone?: 'success' | 'error' } | null;
+
+const ACTION_TYPE_OPTIONS = ['ARCHIVE', 'FILE', 'PAY', 'RESPOND', 'REVIEW', 'SCHEDULE', 'SHARE', 'SIGN', 'TASK'] as const;
+const URGENCY_OPTIONS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -120,6 +132,22 @@ function normalizeStatus(value?: string | null) {
 
 function normalizeType(value?: string | null) {
   return (value ?? 'review').toUpperCase();
+}
+
+function dateInputValue(value?: string | null) {
+  return value ? value.slice(0, 10) : '';
+}
+
+function buildEditDraft(action: ActionItem): ActionEditDraft {
+  return {
+    action_type: normalizeType(action.action_type),
+    title: action.title ?? '',
+    summary: action.summary ?? '',
+    due_date: dateInputValue(action.due_date),
+    amount: action.amount == null ? '' : String(action.amount),
+    urgency: action.urgency ?? 'LOW',
+    correspondent: action.correspondent ?? '',
+  };
 }
 
 function actionTypeTone(type: string) {
@@ -210,6 +238,8 @@ export default function ActionQueue() {
 
   // [UX-07] Cache selected action so filter changes don't lose it
   const [cachedAction, setCachedAction] = useState<ActionItem | null>(null);
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [editDraft, setEditDraft] = useState<ActionEditDraft | null>(null);
 
   // Custom run panel state
   const [customRunOpen, setCustomRunOpen] = useState(false);
@@ -329,6 +359,10 @@ export default function ActionQueue() {
     setPdfViewerOpen(false);
   }, [selectedActionId]);
 
+  useEffect(() => {
+    setIsEditingDetails(false);
+  }, [selectedActionId]);
+
   // Lock body scroll when drawer is open
   useEffect(() => {
     if (selectedAction) {
@@ -338,6 +372,16 @@ export default function ActionQueue() {
     }
     return () => { document.body.style.overflow = ''; };
   }, [selectedAction]);
+
+  useEffect(() => {
+    if (!selectedAction) {
+      setEditDraft(null);
+      return;
+    }
+    if (!isEditingDetails) {
+      setEditDraft(buildEditDraft(selectedAction));
+    }
+  }, [selectedAction, isEditingDetails]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -511,27 +555,27 @@ export default function ActionQueue() {
     }
   };
 
-  const updateAction = async (actionId: number, nextStatus: ActionStatus, snoozedUntil?: string) => {
-    setBusyKey(`action-${actionId}-${nextStatus}`);
+  const patchAction = async (
+    actionId: number,
+    payload: Record<string, unknown>,
+    successMessage: string,
+    onSuccess?: () => void,
+  ) => {
+    setBusyKey(`action-${actionId}`);
     setProcessingIds(new Set([actionId]));
     try {
-      // Pass version for optimistic locking to detect concurrent edits
-      const currentAction = filteredActions.find((a) => a.id === actionId);
-      const payload: Record<string, unknown> = { status: nextStatus, dry_run: false };
-      if (currentAction?.version != null) {
-        payload.version = currentAction.version;
+      const updatedAction = await endpoints.actionQueue.updateAction(String(actionId), payload) as ActionItem;
+      if (selectedActionId === actionId) {
+        setCachedAction(updatedAction);
       }
-      if (nextStatus === 'snoozed' && snoozedUntil) {
-        payload.snoozed_until = snoozedUntil;
-      }
-      await endpoints.actionQueue.updateAction(String(actionId), payload);
       await loadData();
-      const statusLabel = nextStatus === 'not_an_action' ? 'not an action' : nextStatus;
-      setToast({ message: `Action marked ${statusLabel}.` });
+      onSuccess?.();
+      setToast({ message: successMessage });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update action.';
       const isConflict = message.includes('409') || message.includes('version_conflict');
       if (isConflict) {
+        setIsEditingDetails(false);
         await loadData();
         setToast({ message: 'Action was modified by another user. Refreshed.', tone: 'error' });
       } else {
@@ -541,6 +585,67 @@ export default function ActionQueue() {
       setBusyKey(null);
       setProcessingIds(new Set());
     }
+  };
+
+  const updateAction = async (actionId: number, nextStatus: ActionStatus, snoozedUntil?: string) => {
+    setBusyKey(`action-${actionId}-${nextStatus}`);
+    const currentAction = filteredActions.find((a) => a.id === actionId) ?? cachedAction;
+    const payload: Record<string, unknown> = { status: nextStatus, dry_run: false };
+    if (currentAction?.version != null) {
+      payload.version = currentAction.version;
+    }
+    if (nextStatus === 'snoozed' && snoozedUntil) {
+      payload.snoozed_until = snoozedUntil;
+    }
+    const statusLabel = nextStatus === 'not_an_action' ? 'not an action' : nextStatus;
+    await patchAction(actionId, payload, `Action marked ${statusLabel}.`);
+  };
+
+  const saveActionDetails = async () => {
+    if (!selectedAction || !editDraft) return;
+
+    if (!editDraft.title.trim()) {
+      setToast({ message: 'Task name is required.', tone: 'error' });
+      return;
+    }
+
+    const payload: Record<string, unknown> = {};
+    const currentVersion = selectedAction.version;
+    if (currentVersion != null) {
+      payload.version = currentVersion;
+    }
+
+    if (normalizeType(selectedAction.action_type) !== editDraft.action_type) {
+      payload.action_type = editDraft.action_type;
+    }
+    if ((selectedAction.title ?? '') !== editDraft.title.trim()) {
+      payload.title = editDraft.title.trim();
+    }
+    if ((selectedAction.summary ?? '') !== editDraft.summary.trim()) {
+      payload.summary = editDraft.summary.trim() || null;
+    }
+    if (dateInputValue(selectedAction.due_date) !== editDraft.due_date) {
+      payload.due_date = editDraft.due_date || null;
+    }
+    if ((selectedAction.amount == null ? '' : String(selectedAction.amount)) !== editDraft.amount.trim()) {
+      payload.amount = editDraft.amount.trim() ? Number(editDraft.amount) : null;
+    }
+    if ((selectedAction.urgency ?? 'LOW') !== editDraft.urgency) {
+      payload.urgency = editDraft.urgency;
+    }
+    if ((selectedAction.correspondent ?? '') !== editDraft.correspondent.trim()) {
+      payload.correspondent = editDraft.correspondent.trim() || null;
+    }
+
+    if (Object.keys(payload).length === (currentVersion != null ? 1 : 0)) {
+      setIsEditingDetails(false);
+      setToast({ message: 'No detail changes to save.' });
+      return;
+    }
+
+    await patchAction(selectedAction.id, payload, 'Action details updated.', () => {
+      setIsEditingDetails(false);
+    });
   };
 
   // [ARCH-01] Bulk action handler
@@ -1230,6 +1335,110 @@ export default function ActionQueue() {
                   {normalizeStatus(selectedAction.status)}
                 </Badge>
                 <Badge tone={dueMeta(selectedAction).tone}>{dueMeta(selectedAction).label}</Badge>
+              </div>
+
+              <div className="aq-edit-section">
+                <div className="aq-edit-header">
+                  <div className="section-title">Correct extracted details</div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      if (isEditingDetails) {
+                        setEditDraft(buildEditDraft(selectedAction));
+                        setIsEditingDetails(false);
+                      } else {
+                        setEditDraft(buildEditDraft(selectedAction));
+                        setIsEditingDetails(true);
+                      }
+                    }}
+                    disabled={busyKey !== null}
+                  >
+                    {isEditingDetails ? 'Cancel' : 'Edit details'}
+                  </Button>
+                </div>
+
+                {isEditingDetails && editDraft && (
+                  <div className="aq-edit-grid">
+                    <label className="aq-edit-field">
+                      <span>Action type</span>
+                      <select
+                        aria-label="Action type"
+                        value={editDraft.action_type}
+                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, action_type: e.target.value } : prev))}
+                      >
+                        {ACTION_TYPE_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="aq-edit-field">
+                      <span>Task name</span>
+                      <input
+                        aria-label="Task name"
+                        value={editDraft.title}
+                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, title: e.target.value } : prev))}
+                      />
+                    </label>
+                    <label className="aq-edit-field aq-edit-field-full">
+                      <span>Summary</span>
+                      <textarea
+                        aria-label="Summary"
+                        rows={3}
+                        value={editDraft.summary}
+                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, summary: e.target.value } : prev))}
+                      />
+                    </label>
+                    <label className="aq-edit-field">
+                      <span>Due date</span>
+                      <input
+                        aria-label="Due date"
+                        type="date"
+                        value={editDraft.due_date}
+                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, due_date: e.target.value } : prev))}
+                      />
+                    </label>
+                    <label className="aq-edit-field">
+                      <span>Amount</span>
+                      <input
+                        aria-label="Amount"
+                        type="number"
+                        step="0.01"
+                        value={editDraft.amount}
+                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, amount: e.target.value } : prev))}
+                      />
+                    </label>
+                    <label className="aq-edit-field">
+                      <span>Urgency</span>
+                      <select
+                        aria-label="Urgency"
+                        value={editDraft.urgency}
+                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, urgency: e.target.value } : prev))}
+                      >
+                        {URGENCY_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="aq-edit-field">
+                      <span>Correspondent</span>
+                      <input
+                        aria-label="Correspondent"
+                        value={editDraft.correspondent}
+                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, correspondent: e.target.value } : prev))}
+                      />
+                    </label>
+                    <div className="aq-edit-actions">
+                      <Button variant="success" size="sm" onClick={() => void saveActionDetails()} disabled={busyKey !== null}>
+                        Save details
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {selectedAction.document_id ? (
