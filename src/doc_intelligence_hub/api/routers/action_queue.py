@@ -784,6 +784,170 @@ async def recalculate_risk(request: Request) -> dict[str, Any]:
         db.close()
 
 
+class RefreshMetadataRequest(BaseModel):
+    status_filter: str | None = Field(
+        default=None,
+        pattern=r"^(pending|acknowledged|completed|dismissed|snoozed|not_an_action)$",
+        description="Only refresh actions with this status (default: all)",
+    )
+    limit: int | None = Field(default=None, ge=1, le=1000, description="Max actions to refresh")
+    force: bool = Field(
+        default=False,
+        description="Re-fetch even if metadata fields are already populated",
+    )
+
+
+@router.post("/actions/refresh-metadata")
+async def refresh_metadata_from_paperless(
+    request: Request, body: RefreshMetadataRequest
+) -> dict[str, Any]:
+    """Refresh document_date, document_type, tags, and correspondent from Paperless.
+
+    Fetches current metadata from the Paperless API and updates the local action
+    database. No AI/LLM call is made — this only reads Paperless document metadata.
+    Use this to backfill metadata columns for actions created before these fields
+    were added, or to pick up changes made in Paperless after initial ingestion.
+    """
+    import logging
+
+    from doc_intelligence_hub.core.paperless import PaperlessClient
+
+    _sync_action_queue_settings(request)
+
+    init_db()
+    db = get_session()
+    log = logging.getLogger(__name__)
+
+    try:
+        # Build query for actions to refresh
+        query = db.query(Action)
+
+        if body.status_filter:
+            query = query.filter_by(status=body.status_filter)
+
+        if not body.force:
+            # Only actions missing at least one metadata field
+            query = query.filter(
+                (Action.document_date == None)  # noqa: E711
+                | (Action.document_type == None)  # noqa: E711
+                | (Action.tags == None)  # noqa: E711
+            )
+
+        query = query.order_by(Action.created_at.asc())
+
+        if body.limit:
+            query = query.limit(body.limit)
+
+        actions_to_refresh = query.all()
+
+        if not actions_to_refresh:
+            return {"updated": 0, "failed": 0, "message": "No actions need metadata refresh."}
+
+        # Collect unique document IDs to fetch
+        doc_ids = list({a.document_id for a in actions_to_refresh})
+
+        # Build metadata lookup caches from Paperless
+        client = PaperlessClient(
+            base_url=action_queue_settings.paperless_url,
+            token=action_queue_settings.paperless_api_token,
+        )
+        correspondents, tags_map, doc_types = await client.fetch_all_metadata()
+
+        # Fetch each document's metadata from Paperless (batched with rate limiting)
+        doc_metadata: dict[int, dict] = {}
+        fetch_errors: list[dict[str, Any]] = []
+        for doc_id in doc_ids:
+            try:
+                doc = await client.get_document(doc_id)
+                doc_metadata[doc_id] = doc
+            except Exception as exc:
+                fetch_errors.append({"document_id": doc_id, "error": str(exc)})
+                log.warning("refresh-metadata: failed to fetch doc_id=%s: %s", doc_id, exc)
+            await asyncio.sleep(0.05)  # Light rate limiting
+
+        # Update actions with fresh metadata
+        updated = 0
+        skipped = 0
+        for action in actions_to_refresh:
+            doc = doc_metadata.get(action.document_id)
+            if not doc:
+                skipped += 1
+                continue
+
+            changed = False
+
+            # Document date (Paperless "created" field)
+            new_date = _parse_date_safe(doc.get("created"))
+            if new_date and (body.force or action.document_date is None):
+                action.document_date = new_date
+                changed = True
+
+            # Document type (resolve ID to name)
+            doc_type_raw = doc.get("document_type")
+            if doc_type_raw is not None:
+                if isinstance(doc_type_raw, int):
+                    doc_type_name = doc_types.get(doc_type_raw, str(doc_type_raw))
+                else:
+                    doc_type_name = str(doc_type_raw) if doc_type_raw else None
+                if doc_type_name and (body.force or action.document_type is None):
+                    action.document_type = doc_type_name
+                    changed = True
+
+            # Tags (resolve IDs to names)
+            tag_ids = doc.get("tags", [])
+            if tag_ids:
+                tag_names = [tags_map.get(tid, str(tid)) for tid in tag_ids if isinstance(tid, int)]
+                if not tag_names:
+                    # tag_names might already be strings
+                    tag_names = [str(t) for t in doc.get("tag_names", tag_ids)]
+            else:
+                tag_names = [str(t) for t in doc.get("tag_names", [])]
+            if tag_names and (body.force or action.tags is None):
+                action.tags = tag_names
+                changed = True
+
+            # Correspondent (resolve ID to name)
+            corr_raw = doc.get("correspondent")
+            if corr_raw is not None:
+                if isinstance(corr_raw, int):
+                    corr_name = correspondents.get(corr_raw, str(corr_raw))
+                else:
+                    corr_name = str(corr_raw) if corr_raw else None
+                if corr_name and (body.force or action.correspondent is None):
+                    action.correspondent = corr_name
+                    changed = True
+
+            if changed:
+                action.updated_at = datetime.utcnow()
+                updated += 1
+            else:
+                skipped += 1
+
+        db.commit()
+
+        return {
+            "updated": updated,
+            "skipped": skipped,
+            "failed": len(fetch_errors),
+            "total_candidates": len(actions_to_refresh),
+            "unique_documents_fetched": len(doc_metadata),
+            "errors": fetch_errors[:20],
+        }
+    finally:
+        db.close()
+
+
+def _parse_date_safe(date_str: str | None):
+    """Parse a date string, returning None on failure."""
+    if not date_str:
+        return None
+    try:
+        from dateutil.parser import parse
+        return parse(date_str).date()
+    except (ValueError, TypeError):
+        return None
+
+
 class BackfillRequest(BaseModel):
     status_filter: str | None = Field(
         default=None,

@@ -418,3 +418,83 @@ class TestSeverityField:
         action = resp.json()["actions"][0]
         # Action 2 has urgency=LOW → severity should be "safe"
         assert action["severity"] == "safe"
+
+
+class TestRefreshMetadata:
+    """Tests for POST /api/queue/actions/refresh-metadata."""
+
+    def test_refresh_metadata_no_candidates(self, seeded_client):
+        """When all actions already have metadata, nothing to refresh."""
+        # Seed metadata on existing actions so they're not candidates
+        db = get_session()
+        try:
+            for a in db.query(Action).all():
+                a.document_date = date(2026, 1, 1)
+                a.document_type = "Bill"
+                a.tags = ["Inbox"]
+            db.commit()
+        finally:
+            db.close()
+
+        resp = seeded_client.post(
+            "/api/queue/actions/refresh-metadata",
+            json={"force": False},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["updated"] == 0
+        assert data["message"] == "No actions need metadata refresh."
+
+    def test_refresh_metadata_finds_candidates(self, seeded_client):
+        """Actions with null metadata fields are candidates for refresh."""
+        # The seeded actions have no document_date/document_type/tags,
+        # so they should be candidates. The endpoint will fail to reach
+        # Paperless but we verify it finds them.
+        from unittest.mock import AsyncMock, patch
+
+        mock_fetch = AsyncMock(return_value=(
+            {1: "Power Co"},  # correspondents
+            {10: "Inbox", 11: "Todo"},  # tags
+            {5: "Bill"},  # doc_types
+        ))
+        mock_get_doc = AsyncMock(side_effect=[
+            {
+                "id": 42,
+                "created": "2026-01-10",
+                "document_type": 5,
+                "tags": [10, 11],
+                "correspondent": 1,
+            },
+            {
+                "id": 99,
+                "created": "2025-12-20",
+                "document_type": 5,
+                "tags": [10],
+                "correspondent": 1,
+            },
+        ])
+
+        with patch(
+            "doc_intelligence_hub.core.paperless.PaperlessClient.fetch_all_metadata",
+            mock_fetch,
+        ), patch(
+            "doc_intelligence_hub.core.paperless.PaperlessClient.get_document",
+            mock_get_doc,
+        ):
+            resp = seeded_client.post(
+                "/api/queue/actions/refresh-metadata",
+                json={"force": False},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["updated"] == 2
+        assert data["failed"] == 0
+
+        # Verify the metadata was written to the DB
+        actions_resp = seeded_client.get("/api/queue/actions")
+        for action in actions_resp.json()["actions"]:
+            assert action["document_date"] is not None
+            assert action["document_type"] == "Bill"
+            assert action["tags"] is not None
+            assert len(action["tags"]) > 0

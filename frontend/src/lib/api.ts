@@ -131,6 +131,7 @@ export const endpoints = {
     bulk: (body: { action: string; action_ids: number[] }) =>
       api.post<{ affected: number; action: string }>('/api/queue/actions/bulk', body),
     backfill: (body?: unknown) => api.post('/api/queue/actions/backfill', body),
+    refreshMetadata: (body?: unknown) => api.post('/api/queue/actions/refresh-metadata', body),
     feedback: (id: string, body: { feedback_type: string; corrected_action_type?: string; reason?: string }) =>
       api.post(`/api/queue/actions/${id}/feedback`, body),
     settings: () => api.get('/api/queue/settings'),
