@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { forwardRef, useEffect, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import * as RadixTooltip from '@radix-ui/react-tooltip';
 
@@ -73,30 +73,25 @@ export function StatGrid({ children }: { children: ReactNode }) {
   return <div className="stat-grid">{children}</div>;
 }
 
-export function Button({
-  children,
-  variant = 'default',
-  size,
-  onClick,
-  disabled,
-  type = 'button',
-  title,
-}: {
-  children: ReactNode;
-  variant?: 'default' | 'primary' | 'success' | 'danger' | 'ghost';
-  size?: 'sm';
-  onClick?: () => void;
-  disabled?: boolean;
-  type?: 'button' | 'submit';
-  title?: string;
-}) {
-  const cls = ['btn', variant !== 'default' ? variant : '', size === 'sm' ? 'sm' : ''].filter(Boolean).join(' ');
-  return (
-    <button className={cls} onClick={onClick} disabled={disabled} type={type} title={title}>
-      {children}
-    </button>
-  );
-}
+export const Button = forwardRef<
+  HTMLButtonElement,
+  {
+    children: ReactNode;
+    variant?: 'default' | 'primary' | 'success' | 'danger' | 'ghost';
+    size?: 'sm';
+    onClick?: () => void;
+    disabled?: boolean;
+    type?: 'button' | 'submit';
+    title?: string;
+  } & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'type' | 'onClick'>
+>(function Button({ children, variant = 'default', size, onClick, disabled, type = 'button', title, ...rest }, ref) {
+  const cls = ['btn', variant !== 'default' ? variant : '', size === 'sm' ? 'sm' : ''].filter(Boolean).join(' ');
+  return (
+    <button className={cls} onClick={onClick} disabled={disabled} type={type} title={title} ref={ref} {...rest}>
+      {children}
+    </button>
+  );
+});
 
 export function TooltipProvider({ children }: { children: ReactNode }) {
   return <RadixTooltip.Provider delayDuration={300}>{children}</RadixTooltip.Provider>;
