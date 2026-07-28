@@ -857,7 +857,7 @@ export default function ActionQueue() {
         id: 'document_type',
         header: 'Doc Type',
         accessorFn: (row) => row.document_type ?? '',
-        cell: (row) => row.document_type ? <Badge tone="neutral">{row.document_type}</Badge> : <span className="text-muted">—</span>,
+        cell: (row) => row.document_type ? <Badge tone="muted">{row.document_type}</Badge> : <span className="text-muted">—</span>,
         filterOptions: documentTypeOptions,
         width: '120px',
       },
@@ -872,7 +872,7 @@ export default function ActionQueue() {
           return (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
               {tags.slice(0, 3).map((tag) => (
-                <Badge key={tag} tone="neutral">{tag}</Badge>
+                <Badge key={tag} tone="muted">{tag}</Badge>
               ))}
               {tags.length > 3 && <span className="text-muted">+{tags.length - 3}</span>}
             </div>
