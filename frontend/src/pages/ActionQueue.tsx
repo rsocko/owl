@@ -1355,13 +1355,15 @@ export default function ActionQueue() {
               <div className="aq-badge-row">
                 <Popover.Root>
                   <Tooltip label="Click to change action type">
-                  <Popover.Trigger asChild>
-                    <button className="aq-type-picker-trigger" disabled={busyKey !== null}>
-                      <Badge tone={actionTypeTone(normalizeType(selectedAction.action_type))}>
-                        {normalizeType(selectedAction.action_type)} ▾
-                      </Badge>
-                    </button>
-                  </Popover.Trigger>
+                    <span style={{ display: 'inline-flex' }}>
+                      <Popover.Trigger asChild>
+                        <button className="aq-type-picker-trigger" disabled={busyKey !== null}>
+                          <Badge tone={actionTypeTone(normalizeType(selectedAction.action_type))}>
+                            {normalizeType(selectedAction.action_type)} ▾
+                          </Badge>
+                        </button>
+                      </Popover.Trigger>
+                    </span>
                   </Tooltip>
                   <Popover.Portal>
                     <Popover.Content className="aq-type-picker-popover" sideOffset={5} align="start">
