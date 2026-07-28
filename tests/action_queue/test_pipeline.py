@@ -295,11 +295,15 @@ class TestPipelineFetchTimeout:
         async def fake_list_correspondents():
             return []
 
+        async def fake_fetch_all_metadata():
+            return ({}, {}, {})
+
         async def hanging_list_documents(**kwargs):
             await asyncio.sleep(5)  # simulate a Paperless instance that never responds in time
             return []  # pragma: no cover - never reached
 
         monkeypatch.setattr(pipeline.paperless, "list_correspondents", fake_list_correspondents)
+        monkeypatch.setattr(pipeline.paperless, "fetch_all_metadata", fake_fetch_all_metadata)
         monkeypatch.setattr(pipeline.paperless, "list_documents", hanging_list_documents)
 
         start = time.monotonic()

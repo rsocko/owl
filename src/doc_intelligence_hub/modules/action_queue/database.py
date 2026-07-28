@@ -41,6 +41,9 @@ class Action(Base):
     status = Column(String, default="pending", index=True)  # pending, acknowledged, completed, snoozed, dismissed, not_an_action
     last_synced_status = Column(String, nullable=True)  # What we last wrote to Paperless
     correspondent = Column(String, nullable=True)
+    document_date = Column(Date, nullable=True)  # Paperless "created" date (document date)
+    document_type = Column(String, nullable=True)  # Paperless document type name
+    tags = Column(JSON, nullable=True)  # Paperless tags as JSON array of strings
     extracted_data = Column(JSON, nullable=True)  # Full extraction payload from Ollama
     ai_reasoning = Column(Text, nullable=True)
     recommended_cta = Column(String, nullable=True)  # AI-recommended call-to-action (e.g., "pay-online", "open-document")
@@ -129,6 +132,9 @@ def _migrate_missing_columns(engine):
             ("recommended_cta", "TEXT"),
             ("acknowledged_at", "TIMESTAMP"),
             ("snoozed_until", "TIMESTAMP"),
+            ("document_date", "DATE"),
+            ("document_type", "TEXT"),
+            ("tags", "TEXT"),  # JSON array stored as TEXT in SQLite
         ],
     }
 

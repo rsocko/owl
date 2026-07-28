@@ -74,6 +74,9 @@ interface ActionItem {
   risk_score?: number | null;
   status?: string | null;
   correspondent?: string | null;
+  document_date?: string | null;
+  document_type?: string | null;
+  tags?: string[] | null;
   ai_reasoning?: string | null;
   preview_url?: string | null;
   version?: number | null;
@@ -326,6 +329,8 @@ export default function ActionQueue() {
         action.correspondent,
         action.action_type,
         action.document_id,
+        action.document_type,
+        ...(action.tags || []),
       ]
         .filter(Boolean)
         .join(' ')
@@ -746,6 +751,16 @@ export default function ActionQueue() {
     return Array.from(tones).map((t) => ({ value: t, label: labelMap[t] ?? t }));
   }, [actions]);
 
+  const documentTypeOptions = useMemo(() => {
+    const types = new Set(actions.map((a) => a.document_type).filter(Boolean) as string[]);
+    return Array.from(types).sort().map((t) => ({ value: t, label: t }));
+  }, [actions]);
+
+  const tagOptions = useMemo(() => {
+    const allTags = new Set(actions.flatMap((a) => a.tags || []));
+    return Array.from(allTags).sort().map((t) => ({ value: t, label: t }));
+  }, [actions]);
+
   // Column definitions for sortable table
   const actionTableColumns: SortableColumnDef<ActionItem>[] = useMemo(
     () => [
@@ -830,6 +845,45 @@ export default function ActionQueue() {
         accessorFn: (row) => row.amount ?? 0,
         cell: (row) => formatCurrency(row.amount),
         width: '110px',
+      },
+      {
+        id: 'document_date',
+        header: 'Doc Date',
+        accessorFn: (row) => row.document_date ?? '',
+        cell: (row) => formatDate(row.document_date),
+        width: '110px',
+      },
+      {
+        id: 'document_type',
+        header: 'Doc Type',
+        accessorFn: (row) => row.document_type ?? '',
+        cell: (row) => row.document_type ? <Badge tone="neutral">{row.document_type}</Badge> : <span className="text-muted">—</span>,
+        filterOptions: documentTypeOptions,
+        width: '120px',
+      },
+      {
+        id: 'tags',
+        header: 'Tags',
+        enableSorting: false,
+        accessorFn: (row) => (row.tags || []).join(','),
+        cell: (row) => {
+          const tags = row.tags || [];
+          if (!tags.length) return <span className="text-muted">—</span>;
+          return (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+              {tags.slice(0, 3).map((tag) => (
+                <Badge key={tag} tone="neutral">{tag}</Badge>
+              ))}
+              {tags.length > 3 && <span className="text-muted">+{tags.length - 3}</span>}
+            </div>
+          );
+        },
+        filterOptions: tagOptions,
+        filterFn: (rowValue, filterValue) => {
+          const tagsStr = String(rowValue ?? '');
+          return tagsStr.split(',').includes(filterValue);
+        },
+        width: '160px',
       },
       {
         id: 'status',
