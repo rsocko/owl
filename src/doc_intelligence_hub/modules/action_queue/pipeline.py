@@ -142,6 +142,16 @@ class Pipeline:
         except Exception as exc:
             logger.warning("Unexpected error loading correspondent cache: %s", exc)
 
+        # Build a document type ID→name cache
+        self._doc_type_cache: dict[int, str] = {}
+        try:
+            _, _, doc_types = await self.paperless.fetch_all_metadata()
+            self._doc_type_cache = doc_types
+        except (httpx.TimeoutException, httpx.ConnectError, OSError) as exc:
+            logger.info("Could not load document type cache (will use IDs): %s", exc)
+        except Exception as exc:
+            logger.warning("Unexpected error loading document type cache: %s", exc)
+
         # Step 1: Ensure custom fields exist (skip in dry-run or read-only mode)
         self._enrichment_available = True
         if not dry_run and settings.write_to_paperless:
@@ -670,6 +680,21 @@ class Pipeline:
         else:
             correspondent_name = str(corr_raw) if corr_raw else None
 
+        # Resolve document type name from cache
+        doc_type_raw = document.get("document_type")
+        if isinstance(doc_type_raw, int):
+            document_type_name = self._doc_type_cache.get(doc_type_raw, str(doc_type_raw))
+        elif doc_type_raw and str(doc_type_raw).isdigit():
+            document_type_name = self._doc_type_cache.get(int(doc_type_raw), str(doc_type_raw))
+        else:
+            document_type_name = str(doc_type_raw) if doc_type_raw else None
+
+        # Extract tags as list of strings
+        tag_names = [str(t) for t in document.get("tag_names", document.get("tags", []))]
+
+        # Extract document date (Paperless "created" field)
+        document_date = self._parse_date(document.get("created"))
+
         # Strategy 1: exact match on document_id + title
         existing = (
             db.query(Action).filter_by(document_id=doc_id, title=action_data["title"]).first()
@@ -705,6 +730,9 @@ class Pipeline:
             existing.confidence = action_data.get("confidence", 0)
             existing.risk_score = risk
             existing.correspondent = correspondent_name
+            existing.document_date = document_date
+            existing.document_type = document_type_name
+            existing.tags = tag_names or None
             existing.extracted_data = assessment.get("extracted_data")
             existing.ai_reasoning = assessment.get("reasoning")
             existing.recommended_cta = _serialize_cta(action_data.get("recommended_cta"))
@@ -724,6 +752,9 @@ class Pipeline:
                 confidence=action_data.get("confidence", 0),
                 risk_score=risk,
                 correspondent=correspondent_name,
+                document_date=document_date,
+                document_type=document_type_name,
+                tags=tag_names or None,
                 extracted_data=assessment.get("extracted_data"),
                 ai_reasoning=assessment.get("reasoning"),
                 recommended_cta=_serialize_cta(action_data.get("recommended_cta")),
