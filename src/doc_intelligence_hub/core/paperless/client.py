@@ -411,6 +411,27 @@ class PaperlessClient:
         client = self._get_client()
         return await self._resolve_tag_ids(client, tag_names)
 
+    async def remove_tags_from_document(self, document_id: int, tag_names: list[str]) -> dict:
+        """Remove specific tags from a document by name.
+
+        Fetches the document's current tag list, resolves the names to IDs,
+        filters them out, and PATCHes the updated list back.
+        Returns the updated document dict, or the original if no change was needed.
+        """
+        tag_ids_to_remove = await self.resolve_tag_ids(tag_names)
+        if not tag_ids_to_remove:
+            return await self.get_document(document_id)
+
+        doc = await self.get_document(document_id)
+        current_tags: list[int] = doc.get("tags", [])
+        remove_set = set(tag_ids_to_remove)
+        updated_tags = [t for t in current_tags if t not in remove_set]
+
+        if len(updated_tags) == len(current_tags):
+            return doc  # None of the target tags were present
+
+        return await self.update_document(document_id, {"tags": updated_tags})
+
     # ------------------------------------------------------------------
     # Correspondents
     # ------------------------------------------------------------------

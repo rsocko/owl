@@ -1,5 +1,6 @@
 import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { TopNav } from './components/TopNav';
+import { TooltipProvider } from './components/ui';
 import OverviewDashboard from './pages/OverviewDashboard';
 import DashboardView from './pages/DashboardView';
 import CorrectionHistory from './pages/CorrectionHistory';
@@ -27,6 +28,7 @@ function EobMatchRedirect() {
 function App() {
   return (
     <HashRouter>
+      <TooltipProvider>
       <div className="app-shell">
         <TopNav />
         <main className="app-main">
@@ -55,6 +57,7 @@ function App() {
           </Routes>
         </main>
       </div>
+      </TooltipProvider>
     </HashRouter>
   );
 }

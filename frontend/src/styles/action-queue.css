@@ -609,3 +609,51 @@ a.aq-pdf-preview .aq-pdf-hint {
   padding-top: 8px;
   margin-top: 4px;
 }
+
+/* Quick action type picker */
+.aq-type-picker-trigger {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  line-height: 1;
+}
+.aq-type-picker-trigger:disabled { cursor: not-allowed; opacity: 0.5; }
+
+.aq-type-picker-popover {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  z-index: 1000;
+  min-width: 200px;
+  animation: tooltip-fade-in 0.15s ease;
+}
+.aq-type-picker-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+.aq-type-picker-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.aq-type-picker-option {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  cursor: pointer;
+  transition: border-color 0.1s;
+}
+.aq-type-picker-option:hover { border-color: var(--border); }
+.aq-type-picker-option.active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+.aq-type-picker-arrow { fill: var(--card); }
