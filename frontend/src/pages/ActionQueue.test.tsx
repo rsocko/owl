@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ActionQueue from './ActionQueue';
+import { buildQueueRunBody } from './actionQueueRunBody';
 
 const { statusMock, actionsMock, updateActionMock } = vi.hoisted(() => ({
   statusMock: vi.fn(),
@@ -126,5 +127,19 @@ describe('ActionQueue', () => {
     await waitFor(() => {
       expect(screen.getByText('Action details updated.')).toBeTruthy();
     });
+  });
+});
+
+describe('buildQueueRunBody', () => {
+  it('does not force a normal live rerun', () => {
+    expect(buildQueueRunBody(false)).toEqual({ dry_run: false });
+  });
+
+  it('does not force a dry run', () => {
+    expect(buildQueueRunBody(true, 1234)).toEqual({ dry_run: true });
+  });
+
+  it('forces an explicit single-document live rerun', () => {
+    expect(buildQueueRunBody(false, 1234)).toEqual({ dry_run: false, force: true });
   });
 });

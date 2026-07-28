@@ -22,6 +22,7 @@ import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import '../styles/action-queue.css';
 import '../styles/sortable-table.css';
+import { buildQueueRunBody } from './actionQueueRunBody';
 
 interface ActionQueueCheck {
   status?: string;
@@ -472,7 +473,7 @@ export default function ActionQueue() {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dry_run: dryRun, force: !dryRun }),
+        body: JSON.stringify(buildQueueRunBody(dryRun)),
       },
     );
   };
@@ -525,7 +526,10 @@ export default function ActionQueue() {
   const runCustomPipeline = async (dryRun: boolean) => {
     setBusyKey(dryRun ? 'custom-dry-run' : 'custom-run');
     try {
-      const body: Record<string, unknown> = { dry_run: dryRun, force: !dryRun };
+      const body: Record<string, unknown> = buildQueueRunBody(
+        dryRun,
+        customRunFilters.document_id,
+      );
       if (customRunMode === 'custom') {
         if (customRunFilters.tag_override) body.tag_override = customRunFilters.tag_override;
         if (customRunFilters.saved_view_id) body.saved_view_id = Number(customRunFilters.saved_view_id);
