@@ -20,6 +20,7 @@ from doc_intelligence_hub.modules.action_queue.database import (
     get_session,
     init_db,
 )
+from sqlalchemy import String as SAString
 from doc_intelligence_hub.modules.action_queue.pipeline import get_pipeline_progress, run_pipeline
 from doc_intelligence_hub.modules.action_queue.risk_scoring import (
     compute_risk_score,
@@ -196,6 +197,9 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         "status": a.status,
         "recommended_cta": cta,
         "correspondent": a.correspondent,
+        "document_date": a.document_date.isoformat() if a.document_date else None,
+        "document_type": a.document_type,
+        "tags": a.tags if isinstance(a.tags, list) else None,
         "ai_reasoning": a.ai_reasoning,
         "version": a.version or 1,
         "preview_url": _build_preview_url(a.document_id),
@@ -502,10 +506,12 @@ async def queue_status(request: Request) -> dict[str, Any]:
 async def list_actions(
     request: Request,
     status: str | None = None,
+    document_type: str | None = None,
+    tag: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
-    """List action items from the database with optional status filter."""
+    """List action items from the database with optional status/document_type/tag filters."""
     _sync_action_queue_settings(request)
     init_db()
     db = get_session()
@@ -513,6 +519,12 @@ async def list_actions(
         query = db.query(Action)
         if status:
             query = query.filter_by(status=status)
+        if document_type:
+            query = query.filter(Action.document_type == document_type)
+        if tag:
+            # SQLite JSON: check if tag appears in the JSON array
+            query = query.filter(Action.tags.isnot(None))
+            query = query.filter(Action.tags.cast(SAString).contains(f'"{tag}"'))
         # Sort pending actions by risk_score (highest risk first), then by created_at
         if status == "pending":
             query = query.order_by(Action.risk_score.desc(), Action.created_at.desc())
