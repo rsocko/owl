@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as Popover from '@radix-ui/react-popover';
 import {
   Badge,
   Button,
@@ -600,6 +601,13 @@ export default function ActionQueue() {
     }
     const statusLabel = nextStatus === 'not_an_action' ? 'not an action' : nextStatus;
     await patchAction(actionId, payload, `Action marked ${statusLabel}.`);
+  };
+
+  const quickChangeType = async (actionId: number, newType: string) => {
+    const action = filteredActions.find((a) => a.id === actionId) ?? cachedAction;
+    const payload: Record<string, unknown> = { action_type: newType };
+    if (action?.version != null) payload.version = action.version;
+    await patchAction(actionId, payload, `Action type changed to ${newType}.`);
   };
 
   const saveActionDetails = async () => {
@@ -1345,9 +1353,35 @@ export default function ActionQueue() {
               </div>
 
               <div className="aq-badge-row">
-                <Badge tone={actionTypeTone(normalizeType(selectedAction.action_type))}>
-                  {normalizeType(selectedAction.action_type)}
-                </Badge>
+                <Popover.Root>
+                  <Tooltip label="Click to change action type">
+                  <Popover.Trigger asChild>
+                    <button className="aq-type-picker-trigger" disabled={busyKey !== null}>
+                      <Badge tone={actionTypeTone(normalizeType(selectedAction.action_type))}>
+                        {normalizeType(selectedAction.action_type)} ▾
+                      </Badge>
+                    </button>
+                  </Popover.Trigger>
+                  </Tooltip>
+                  <Popover.Portal>
+                    <Popover.Content className="aq-type-picker-popover" sideOffset={5} align="start">
+                      <div className="aq-type-picker-label">Change action type</div>
+                      <div className="aq-type-picker-grid">
+                        {ACTION_TYPE_OPTIONS.map((type) => (
+                          <Popover.Close asChild key={type}>
+                            <button
+                              className={`aq-type-picker-option ${normalizeType(selectedAction.action_type) === type ? 'active' : ''}`}
+                              onClick={() => void quickChangeType(selectedAction.id, type)}
+                            >
+                              <Badge tone={actionTypeTone(type)}>{type}</Badge>
+                            </button>
+                          </Popover.Close>
+                        ))}
+                      </div>
+                      <Popover.Arrow className="aq-type-picker-arrow" />
+                    </Popover.Content>
+                  </Popover.Portal>
+                </Popover.Root>
                 <Badge tone={statusTone(normalizeStatus(selectedAction.status))}>
                   {normalizeStatus(selectedAction.status)}
                 </Badge>

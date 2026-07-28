@@ -239,6 +239,9 @@ class PaperlessEnricher:
         """Mirror a status change from internal DB back to Paperless.
 
         Called when user marks an action complete/dismissed in the dashboard.
+        When the status resolves the action (completed, dismissed, not_an_action),
+        also removes the configured source tags (e.g. "Todo") from the document
+        so it no longer surfaces in the intake queue.
         """
         if not settings.write_to_paperless:
             return  # Safety: writes disabled via config
@@ -258,6 +261,23 @@ class PaperlessEnricher:
                 }
             ],
         )
+
+        # Remove source tags when the action is resolved
+        resolved_statuses = {"completed", "dismissed", "not_an_action"}
+        if settings.remove_source_tag_on_resolve and status in resolved_statuses:
+            tags_to_remove = settings.monitor_tags
+            if tags_to_remove:
+                try:
+                    await self.client.remove_tags_from_document(document_id, tags_to_remove)
+                    logger.info(
+                        "Removed source tags %s from document %d (status=%s)",
+                        tags_to_remove, document_id, status,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to remove source tags from document %d: %s",
+                        document_id, exc,
+                    )
 
     async def read_paperless_status(self, document_id: int) -> str | None:
         """Read the current Action Status value from Paperless.
