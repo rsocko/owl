@@ -626,7 +626,7 @@ a.aq-pdf-preview .aq-pdf-hint {
   border-radius: var(--radius);
   padding: 10px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.18);
-  z-index: 1000;
+  z-index: 9999;
   min-width: 200px;
   animation: tooltip-fade-in 0.15s ease;
 }
