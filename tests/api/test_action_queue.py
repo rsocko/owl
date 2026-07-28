@@ -146,6 +146,68 @@ class TestUpdateAction:
         )
         assert resp.status_code == 422
 
+    def test_update_action_details(self, client, seed_actions):
+        actions = client.get("/api/queue/actions?status=pending").json()
+        action = actions["actions"][0]
+        action_id = action["id"]
+
+        resp = client.patch(
+            f"/api/queue/actions/{action_id}",
+            json={
+                "version": action["version"],
+                "action_type": "task",
+                "title": "Call utility company",
+                "summary": "Confirm the latest balance",
+                "due_date": "2026-08-15",
+                "amount": 123.45,
+                "urgency": "HIGH",
+                "correspondent": "Utility Co",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "pending"
+        assert data["action_type"] == "TASK"
+        assert data["title"] == "Call utility company"
+        assert data["summary"] == "Confirm the latest balance"
+        assert data["due_date"] == "2026-08-15"
+        assert data["amount"] == 123.45
+        assert data["urgency"] == "HIGH"
+        assert data["correspondent"] == "Utility Co"
+        assert data["version"] == action["version"] + 1
+
+    def test_update_action_allows_clearing_optional_fields(self, client, seed_actions):
+        actions = client.get("/api/queue/actions?status=pending").json()
+        action = actions["actions"][0]
+        action_id = action["id"]
+
+        resp = client.patch(
+            f"/api/queue/actions/{action_id}",
+            json={
+                "version": action["version"],
+                "summary": None,
+                "due_date": None,
+                "amount": None,
+                "correspondent": None,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["summary"] is None
+        assert data["due_date"] is None
+        assert data["amount"] is None
+        assert data["correspondent"] is None
+
+    def test_update_action_invalid_action_type(self, client, seed_actions):
+        actions = client.get("/api/queue/actions?status=pending").json()
+        action_id = actions["actions"][0]["id"]
+
+        resp = client.patch(
+            f"/api/queue/actions/{action_id}",
+            json={"action_type": "invalid"},
+        )
+        assert resp.status_code == 422
+
 
 class TestBulkAction:
     """Tests for POST /api/queue/actions/bulk."""
