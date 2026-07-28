@@ -25,6 +25,7 @@ class Settings(BaseSettings):
 
     # Safety
     write_to_paperless: bool = Field(default=True)
+    remove_source_tag_on_resolve: bool = Field(default=True)
     rate_limit_delay: float = Field(default=0.25)
 
     # Timeouts
