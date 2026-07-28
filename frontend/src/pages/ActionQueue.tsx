@@ -511,6 +511,27 @@ export default function ActionQueue() {
     }
   };
 
+  const refreshMetadata = async () => {
+    setBusyKey('refresh-metadata');
+    try {
+      const result = await endpoints.actionQueue.refreshMetadata({ force: false }) as Record<string, unknown>;
+      await loadData();
+      const updated = (result as { updated?: number }).updated ?? 0;
+      const failed = (result as { failed?: number }).failed ?? 0;
+      const msg = failed > 0
+        ? `Metadata refreshed: ${updated} updated, ${failed} failed.`
+        : `Metadata refreshed: ${updated} action(s) updated from Paperless.`;
+      setToast({ message: msg, tone: failed > 0 ? 'error' : undefined });
+    } catch (err) {
+      setToast({
+        message: err instanceof Error ? err.message : 'Metadata refresh failed.',
+        tone: 'error',
+      });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const loadCustomRunMetadata = async () => {
     if (customRunMetadata.loaded) return;
     try {
@@ -984,6 +1005,9 @@ export default function ActionQueue() {
             </Button>
             <Button onClick={() => void runBackfill(false)} disabled={busyKey !== null} title="Re-write action metadata to Paperless for actions that were never synced">
               Backfill Paperless
+            </Button>
+            <Button variant="ghost" onClick={() => void refreshMetadata()} disabled={busyKey !== null} title="Fetch latest document date, type, tags, and correspondent from Paperless for existing actions">
+              {busyKey === 'refresh-metadata' ? 'Refreshing…' : 'Refresh metadata'}
             </Button>
           </div>
         }
