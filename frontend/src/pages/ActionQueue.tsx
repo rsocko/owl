@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as Popover from '@radix-ui/react-popover';
 import {
   Badge,
   Button,
@@ -14,6 +15,7 @@ import {
   StatCard,
   StatGrid,
   Toast,
+  Tooltip,
 } from '../components/ui';
 import { SortableTable, type SortableColumnDef } from '../components/SortableTable';
 import DocumentViewerModal from '../components/DocumentViewerModal';
@@ -601,6 +603,13 @@ export default function ActionQueue() {
     await patchAction(actionId, payload, `Action marked ${statusLabel}.`);
   };
 
+  const quickChangeType = async (actionId: number, newType: string) => {
+    const action = filteredActions.find((a) => a.id === actionId) ?? cachedAction;
+    const payload: Record<string, unknown> = { action_type: newType };
+    if (action?.version != null) payload.version = action.version;
+    await patchAction(actionId, payload, `Action type changed to ${newType}.`);
+  };
+
   const saveActionDetails = async () => {
     if (!selectedAction || !editDraft) return;
 
@@ -842,6 +851,7 @@ export default function ActionQueue() {
           return (
             <div className="btn-group">
               {normalized === 'pending' && (
+                <Tooltip label="Mark as seen — you'll handle it later">
                 <Button
                   size="sm"
                   variant="ghost"
@@ -850,8 +860,10 @@ export default function ActionQueue() {
                 >
                   Acknowledge
                 </Button>
+                </Tooltip>
               )}
               {normalized !== 'completed' && (
+                <Tooltip label="Mark as done — action has been resolved">
                 <Button
                   size="sm"
                   variant="success"
@@ -860,8 +872,10 @@ export default function ActionQueue() {
                 >
                   Complete
                 </Button>
+                </Tooltip>
               )}
               {normalized !== 'dismissed' && normalized !== 'not_an_action' && (
+                <Tooltip label="Close without acting — removes from active queue">
                 <Button
                   size="sm"
                   variant="ghost"
@@ -870,8 +884,10 @@ export default function ActionQueue() {
                 >
                   Dismiss
                 </Button>
+                </Tooltip>
               )}
               {normalized !== 'pending' && (
+                <Tooltip label="Move back to pending for review">
                 <Button
                   size="sm"
                   onClick={() => void updateAction(row.id, 'pending')}
@@ -879,6 +895,7 @@ export default function ActionQueue() {
                 >
                   Re-open
                 </Button>
+                </Tooltip>
               )}
             </div>
           );
@@ -1184,18 +1201,26 @@ export default function ActionQueue() {
                   })()}
                 </span>
                 <div className="btn-group">
+                  <Tooltip label="Mark as seen — you'll handle them later">
                   <Button variant="ghost" size="sm" onClick={() => void handleBulkAction('acknowledge')} disabled={busyKey !== null}>
                     Acknowledge
                   </Button>
+                  </Tooltip>
+                  <Tooltip label="Mark as done — actions have been resolved">
                   <Button variant="success" size="sm" onClick={() => void handleBulkAction('complete')} disabled={busyKey !== null}>
                     Complete
                   </Button>
+                  </Tooltip>
+                  <Tooltip label="Close without acting — removes from active queue">
                   <Button variant="ghost" size="sm" onClick={() => void handleBulkAction('dismiss')} disabled={busyKey !== null}>
                     Dismiss
                   </Button>
+                  </Tooltip>
+                  <Tooltip label="Move back to pending for review">
                   <Button size="sm" onClick={() => void handleBulkAction('reopen')} disabled={busyKey !== null}>
                     Re-open
                   </Button>
+                  </Tooltip>
                   <Button size="sm" onClick={() => setCheckedIds(new Set())} disabled={busyKey !== null}>
                     Clear
                   </Button>
@@ -1328,9 +1353,35 @@ export default function ActionQueue() {
               </div>
 
               <div className="aq-badge-row">
-                <Badge tone={actionTypeTone(normalizeType(selectedAction.action_type))}>
-                  {normalizeType(selectedAction.action_type)}
-                </Badge>
+                <Popover.Root>
+                  <Tooltip label="Click to change action type">
+                  <Popover.Trigger asChild>
+                    <button className="aq-type-picker-trigger" disabled={busyKey !== null}>
+                      <Badge tone={actionTypeTone(normalizeType(selectedAction.action_type))}>
+                        {normalizeType(selectedAction.action_type)} ▾
+                      </Badge>
+                    </button>
+                  </Popover.Trigger>
+                  </Tooltip>
+                  <Popover.Portal>
+                    <Popover.Content className="aq-type-picker-popover" sideOffset={5} align="start">
+                      <div className="aq-type-picker-label">Change action type</div>
+                      <div className="aq-type-picker-grid">
+                        {ACTION_TYPE_OPTIONS.map((type) => (
+                          <Popover.Close asChild key={type}>
+                            <button
+                              className={`aq-type-picker-option ${normalizeType(selectedAction.action_type) === type ? 'active' : ''}`}
+                              onClick={() => void quickChangeType(selectedAction.id, type)}
+                            >
+                              <Badge tone={actionTypeTone(type)}>{type}</Badge>
+                            </button>
+                          </Popover.Close>
+                        ))}
+                      </div>
+                      <Popover.Arrow className="aq-type-picker-arrow" />
+                    </Popover.Content>
+                  </Popover.Portal>
+                </Popover.Root>
                 <Badge tone={statusTone(normalizeStatus(selectedAction.status))}>
                   {normalizeStatus(selectedAction.status)}
                 </Badge>
@@ -1539,6 +1590,7 @@ export default function ActionQueue() {
                     {/* Lifecycle transition buttons */}
                     <div className="btn-group">
                       {currentStatus === 'pending' && (
+                        <Tooltip label="Mark as seen — you'll handle it later">
                         <Button
                           variant="ghost"
                           onClick={() => void updateAction(selectedAction.id, 'acknowledged')}
@@ -1546,8 +1598,10 @@ export default function ActionQueue() {
                         >
                           Acknowledge
                         </Button>
+                        </Tooltip>
                       )}
                       {currentStatus !== 'completed' && (
+                        <Tooltip label="Mark as done — action has been resolved">
                         <Button
                           variant="success"
                           onClick={() => void updateAction(selectedAction.id, 'completed')}
@@ -1555,8 +1609,10 @@ export default function ActionQueue() {
                         >
                           Complete
                         </Button>
+                        </Tooltip>
                       )}
                       {currentStatus !== 'snoozed' && currentStatus !== 'completed' && currentStatus !== 'not_an_action' && (
+                        <Tooltip label="Hide for 24 hours — it will resurface automatically">
                         <Button
                           variant="default"
                           onClick={() => {
@@ -1568,8 +1624,10 @@ export default function ActionQueue() {
                         >
                           Snooze 24h
                         </Button>
+                        </Tooltip>
                       )}
                       {currentStatus !== 'dismissed' && currentStatus !== 'not_an_action' && (
+                        <Tooltip label="Close without acting — removes from active queue">
                         <Button
                           variant="danger"
                           onClick={() => void updateAction(selectedAction.id, 'dismissed')}
@@ -1577,8 +1635,10 @@ export default function ActionQueue() {
                         >
                           Dismiss
                         </Button>
+                        </Tooltip>
                       )}
                       {currentStatus !== 'pending' && (
+                        <Tooltip label="Move back to pending for review">
                         <Button
                           variant="ghost"
                           onClick={() => void updateAction(selectedAction.id, 'pending')}
@@ -1586,12 +1646,14 @@ export default function ActionQueue() {
                         >
                           Re-open
                         </Button>
+                        </Tooltip>
                       )}
                     </div>
 
                     {/* Feedback: not an action (false positive signal) */}
                     {currentStatus !== 'not_an_action' && (
                       <div className="aq-feedback-section">
+                        <Tooltip label="Flag as false positive — this document doesn't need action">
                         <Button
                           size="sm"
                           variant="ghost"
@@ -1600,6 +1662,7 @@ export default function ActionQueue() {
                         >
                           ⚑ Not an action
                         </Button>
+                        </Tooltip>
                       </div>
                     )}
                   </div>
