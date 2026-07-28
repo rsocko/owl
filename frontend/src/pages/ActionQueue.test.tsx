@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ActionQueue from './ActionQueue';
 import { buildQueueRunBody } from './actionQueueRunBody';
+import { TooltipProvider } from '../components/ui';
 
 const { statusMock, actionsMock, updateActionMock } = vi.hoisted(() => ({
   statusMock: vi.fn(),
@@ -94,7 +95,7 @@ beforeEach(() => {
 
 describe('ActionQueue', () => {
   it('saves corrected action details from the drawer', async () => {
-    render(<ActionQueue />);
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /pay electric bill/i })).toBeTruthy();
