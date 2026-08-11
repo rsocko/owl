@@ -5,10 +5,11 @@ import { customReminderUntil, reminderUntil } from './actionReminder';
 import { buildQueueRunBody } from './actionQueueRunBody';
 import { TooltipProvider } from '../components/ui';
 
-const { statusMock, actionsMock, updateActionMock } = vi.hoisted(() => ({
+const { statusMock, actionsMock, updateActionMock, feedbackMock } = vi.hoisted(() => ({
   statusMock: vi.fn(),
   actionsMock: vi.fn(),
   updateActionMock: vi.fn(),
+  feedbackMock: vi.fn(),
 }));
 
 vi.mock('../hooks/useStreamingAction', () => ({
@@ -27,7 +28,7 @@ vi.mock('../lib/api', () => ({
       updateAction: updateActionMock,
       bulk: vi.fn(),
       backfill: vi.fn(),
-      feedback: vi.fn(),
+      feedback: feedbackMock,
       settings: vi.fn(),
       updateSettings: vi.fn(),
       metadataTags: vi.fn(),
@@ -77,6 +78,7 @@ beforeEach(() => {
   statusMock.mockReset();
   actionsMock.mockReset();
   updateActionMock.mockReset();
+  feedbackMock.mockReset();
   statusMock.mockResolvedValue({
     status: 'idle',
     database: {
@@ -94,6 +96,7 @@ beforeEach(() => {
     .mockResolvedValueOnce({ actions: [initialAction], total: 1 })
     .mockResolvedValueOnce({ actions: [updatedAction], total: 1 });
   updateActionMock.mockResolvedValue(updatedAction);
+  feedbackMock.mockResolvedValue({});
 });
 
 describe('ActionQueue', () => {
@@ -145,6 +148,20 @@ describe('ActionQueue', () => {
     await waitFor(() => {
       expect(screen.getByText('Action details updated.')).toBeTruthy();
     });
+  });
+
+  it('explains Paperless metadata changes before marking no action needed', async () => {
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'No action needed' })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'No action needed' }));
+
+    expect(screen.getByRole('dialog', { name: 'Mark as no action needed?' })).toHaveTextContent(
+      'Document Amount is kept; Action Type, Due Date, Urgency, Summary, and Action Count are cleared.',
+    );
+    expect(feedbackMock).not.toHaveBeenCalled();
   });
 });
 

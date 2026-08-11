@@ -551,9 +551,7 @@ class Pipeline:
                         list(enrichment_data.keys()),
                     )
                     try:
-                        await self.enricher.enrich_document(
-                            doc_id, enrichment_data, action_count=len(actions)
-                        )
+                        await self.enricher.enrich_document(doc_id, enrichment_data)
                         logger.info("doc_id=%s: enrichment succeeded", doc_id)
                         # Track what we wrote so bidirectional sync knows our last state
                         for a in stored_actions:
