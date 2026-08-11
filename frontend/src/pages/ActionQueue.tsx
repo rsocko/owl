@@ -314,6 +314,7 @@ export default function ActionQueue() {
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
   const lastCheckedRef = useRef<number | null>(null);
   const [pendingBulkAction, setPendingBulkAction] = useState<{ action: string; ids: number[] } | null>(null);
+  const [pendingNoActionId, setPendingNoActionId] = useState<number | null>(null);
 
   // [UX-10] Per-item loading state for bulk ops
   const [processingIds, setProcessingIds] = useState<Set<number>>(new Set());
@@ -473,13 +474,14 @@ export default function ActionQueue() {
       if (e.key === 'Escape') {
         const tag = (e.target as HTMLElement)?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        if (pendingNoActionId !== null) { setPendingNoActionId(null); return; }
         if (pendingBulkAction) { setPendingBulkAction(null); return; }
         if (selectedActionId !== null) setSelectedActionId(null);
       }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectedActionId, pendingBulkAction]);
+  }, [selectedActionId, pendingBulkAction, pendingNoActionId]);
 
   // ------------------------------------------------------------------
   // Selection helpers (ARCH-01)
@@ -821,6 +823,13 @@ export default function ActionQueue() {
     }
   };
 
+  const confirmNoAction = async () => {
+    if (pendingNoActionId === null) return;
+    const actionId = pendingNoActionId;
+    setPendingNoActionId(null);
+    await submitFeedback(actionId, 'not_an_action');
+  };
+
   const handleClosePanel = useCallback(() => {
     setSelectedActionId(null);
     setCachedAction(null);
@@ -1042,7 +1051,7 @@ export default function ActionQueue() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => void submitFeedback(row.id, 'not_an_action')}
+                    onClick={() => setPendingNoActionId(row.id)}
                     disabled={busyKey !== null}
                   >
                     No action needed
@@ -1794,7 +1803,7 @@ export default function ActionQueue() {
                         <Tooltip label="OWL incorrectly identified this document as requiring action">
                         <Button
                           variant="ghost"
-                          onClick={() => void submitFeedback(selectedAction.id, 'not_an_action')}
+                          onClick={() => setPendingNoActionId(selectedAction.id)}
                           disabled={busyKey !== null}
                         >
                           No action needed
@@ -1822,6 +1831,30 @@ export default function ActionQueue() {
         )}
       </div>
 
+      {pendingNoActionId !== null && (
+        <div className="aq-modal-overlay" onClick={() => setPendingNoActionId(null)}>
+          <div
+            className="aq-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="no-action-confirm-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div id="no-action-confirm-title" className="aq-modal-title">Mark as no action needed?</div>
+            <p className="aq-modal-desc">
+              OWL will retain the extracted details for audit and model improvement. In Paperless,
+              Document Amount is kept; Action Type, Due Date, Urgency, Summary, and Action Count are cleared.
+            </p>
+            <div className="aq-modal-actions">
+              <Button size="sm" onClick={() => setPendingNoActionId(null)}>Cancel</Button>
+              <Button variant="danger" size="sm" onClick={() => void confirmNoAction()}>
+                No action needed
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* [ARCH-01] Confirmation modal for destructive bulk actions */}
       {pendingBulkAction && (
         <div className="aq-modal-overlay" onClick={() => setPendingBulkAction(null)}>
@@ -1832,6 +1865,10 @@ export default function ActionQueue() {
             <p className="aq-modal-desc">
               Are you sure you want to <strong>{bulkActionLabel(pendingBulkAction.action)}</strong>{' '}
               {pendingBulkAction.ids.length} action{pendingBulkAction.ids.length !== 1 ? 's' : ''}?
+              {pendingBulkAction.action === 'not_an_action' && (
+                <> OWL retains the extracted details. Paperless keeps Document Amount and clears Action Type,
+                  Due Date, Urgency, Summary, and Action Count.</>
+              )}
               This action cannot be easily undone in bulk.
             </p>
             <div className="aq-modal-actions">
