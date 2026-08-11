@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
+from sqlalchemy import String as SAString
 from starlette.responses import StreamingResponse
 
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
@@ -20,7 +21,6 @@ from doc_intelligence_hub.modules.action_queue.database import (
     get_session,
     init_db,
 )
-from sqlalchemy import String as SAString
 from doc_intelligence_hub.modules.action_queue.pipeline import get_pipeline_progress, run_pipeline
 from doc_intelligence_hub.modules.action_queue.risk_scoring import (
     compute_risk_score,
@@ -1078,12 +1078,7 @@ async def backfill_paperless(request: Request, body: BackfillRequest) -> dict[st
                     "overall_confidence": action.confidence or 0,
                 }
 
-                # Count sibling actions for the same document
-                action_count = db.query(Action).filter_by(document_id=action.document_id).count()
-
-                await enricher.enrich_document(
-                    action.document_id, enrichment_data, action_count=action_count
-                )
+                await enricher.enrich_document(action.document_id, enrichment_data)
 
                 # Also sync the current status (not just "pending")
                 if action.status != "pending":
@@ -1186,6 +1181,29 @@ async def submit_feedback(
                 action.version = (action.version or 1) + 1
 
         db.commit()
+
+        if (
+            body.feedback_type == "not_an_action"
+            and action_queue_settings.write_to_paperless
+            and action.document_id
+        ):
+            try:
+                from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
+
+                enricher = PaperlessEnricher()
+                await enricher.sync_status(action.document_id, "not_an_action")
+                action.last_synced_status = "not_an_action"
+                db.commit()
+            except Exception as exc:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Failed to sync no-action feedback to Paperless for action %d "
+                    "(doc %d): %s",
+                    action_id,
+                    action.document_id,
+                    exc,
+                )
 
         return {
             "feedback_id": feedback.id,
