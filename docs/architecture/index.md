@@ -32,7 +32,7 @@ OWL is organized into independent, single-responsibility modules. Each module ow
 | **Action Queue** | Inbox-zero workflow — classify documents, recommend next actions |
 | **Statement Tracking** | Detect missing recurring statements (bills, pay stubs) |
 | **EOB Matching** | Match medical Explanation of Benefits to provider bills |
-| **Triage / Analysis** | LLM-powered document classification and correction suggestions |
+| **Needs Review** | Human review of uncertain matches, possible duplicates, grouping issues, and unmatched documents |
 | **Alerts** | Unified alerting engine consumed by all modules |
 
 ### Module Organization
@@ -75,7 +75,7 @@ flowchart TD
         aq[Action Queue]
         st[Statement Tracking]
         eob[EOB Matching]
-        triage[Triage / Analysis]
+        triage[Needs Review]
         alerts[Alerts Engine]
         ui[Built-in Dashboard]
     end

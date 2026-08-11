@@ -219,13 +219,13 @@ export default function ManualMatchSearch() {
     <>
       <Breadcrumb
         items={[
-          { label: 'Triage', to: '/triage' },
+          { label: 'Needs Review', to: '/triage' },
           { label: 'Manual Match Search' },
         ]}
       />
       <PageHeader
         title="Manual Match Search"
-        desc="Search the current candidate match set and manually confirm the best EOB ↔ claim pairing when the triage queue needs extra review."
+        desc="Search the current candidate match set and manually confirm the best EOB ↔ claim pairing."
       />
 
       {loading ? (
