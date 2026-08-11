@@ -136,12 +136,12 @@ export default function OrphanDetail({ triageItem, onResolved, onSkip }: OrphanD
       setToast({ message: 'Document matched and orphan resolved.', tone: 'success' });
       onResolved?.();
     } catch (err) {
-      setToast({ message: err instanceof Error ? err.message : 'Match created but failed to resolve triage item.', tone: 'error' });
+      setToast({ message: err instanceof Error ? err.message : 'Match created but failed to resolve the review item.', tone: 'error' });
     }
   };
 
   const handleDefer = () =>
-    handleAction('defer', () => endpoints.triage.orphans.defer(triageItem.id), `Deferred for 30 days — will re-flag if still unmatched.`);
+    handleAction('defer', () => endpoints.triage.orphans.defer(triageItem.id), `Review postponed for 30 days — will re-flag if still unmatched.`);
 
   const handleSelfPay = () =>
     handleAction('self-pay', () => endpoints.triage.orphans.selfPay(triageItem.id), 'Marked as self-pay. Document tagged in Paperless.');
@@ -317,14 +317,14 @@ export default function OrphanDetail({ triageItem, onResolved, onSkip }: OrphanD
           <span className="orphan-action-icon">⏳</span>
           <div className="orphan-action-text">
             <div className="orphan-action-label">Waiting for {missingDocLabel(documentType)}</div>
-            <div className="orphan-action-desc">Defer for 30 days — will auto-reflag if still unmatched</div>
+            <div className="orphan-action-desc">Review again in 30 days if still unmatched</div>
           </div>
           <button
             className="orphan-action-btn"
             onClick={() => void handleDefer()}
             disabled={!isPending || busyAction !== null}
           >
-            {busyAction === 'defer' ? 'Deferring…' : 'Defer 30d'}
+            {busyAction === 'defer' ? 'Scheduling…' : 'Review later'}
           </button>
         </div>
 

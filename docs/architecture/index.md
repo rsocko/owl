@@ -105,8 +105,8 @@ The two workflows represent different kinds of human work:
 
 | Workflow | Question it answers | Typical items | User outcome |
 |----------|---------------------|---------------|--------------|
-| **Action Queue** | "What do I need to do because of this document?" | Pay a bill, sign a form, respond to a letter, schedule an appointment | Complete, remind later, or close without acting |
-| **Needs Review** | "Where does OWL need my judgment before it can proceed?" | Uncertain EOB matches, possible duplicates, grouping issues, unmatched documents | Confirm, reject, correct, match, or review later |
+| **Action Queue** | "What do I need to do because of this document?" | Pay a bill, sign a form, respond to a letter, schedule an appointment | Done, remind me later, won't do, or no action needed |
+| **Needs Review** | "Where does OWL need my judgment before it can proceed?" | Uncertain EOB matches, possible duplicates, grouping issues, unmatched documents | Accept, reject, correct, match, or review later |
 
 An item in Needs Review is not necessarily a task and may represent a relationship between several documents rather than one document. Conversely, reviewing a document can itself be a real-world task, so generic labels such as "Documents to Review" would overlap with the Action Queue.
 
