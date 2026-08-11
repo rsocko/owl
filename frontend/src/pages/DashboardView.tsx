@@ -130,7 +130,7 @@ export default function DashboardView() {
   if (loading && !data) {
     return (
       <>
-        <PageHeader title="Dashboard" desc="Triage overview, match rate trends, and recent activity." />
+        <PageHeader title="Dashboard" desc="Review overview, match rate trends, and recent activity." />
         <SkeletonLoader variant="stat-grid" />
         <div className="section"><SkeletonLoader variant="cards" /></div>
       </>
@@ -140,7 +140,7 @@ export default function DashboardView() {
   if (error && !data) {
     return (
       <>
-        <PageHeader title="Dashboard" desc="Triage overview, match rate trends, and recent activity." />
+        <PageHeader title="Dashboard" desc="Review overview, match rate trends, and recent activity." />
         <ErrorState message={error} onRetry={() => void loadDashboard()} />
       </>
     );
@@ -154,7 +154,7 @@ export default function DashboardView() {
     <>
       <PageHeader
         title="Dashboard"
-        desc="Triage overview, match rate trends, and recent activity."
+        desc="Review overview, match rate trends, and recent activity."
         actions={
           <Button onClick={() => void loadDashboard()} disabled={loading}>Refresh</Button>
         }
@@ -163,7 +163,7 @@ export default function DashboardView() {
       {/* Stats row */}
       <StatGrid>
         <StatCard
-          title="Pending Triage"
+          title="Needs Review"
           metric={stats.pending_count}
           desc="Items awaiting human review"
           status={stats.pending_count > 10 ? { label: 'High', tone: 'danger' } : stats.pending_count > 0 ? { label: 'Active', tone: 'warning' } : { label: 'Clear', tone: 'ok' }}
@@ -175,9 +175,9 @@ export default function DashboardView() {
           status={{ label: stats.match_rate >= 90 ? 'Excellent' : stats.match_rate >= 75 ? 'Good' : 'Needs attention', tone: stats.match_rate >= 90 ? 'ok' : stats.match_rate >= 75 ? 'warning' : 'danger' }}
         />
         <StatCard
-          title="Triaged This Month"
+          title="Reviewed This Month"
           metric={stats.triaged_this_month}
-          desc="Resolved triage items this period"
+          desc="Review items resolved this period"
         />
         <StatCard
           title="Extraction Accuracy"
@@ -192,7 +192,7 @@ export default function DashboardView() {
         <div className="dv-left">
           <Card title="📥 Pending Queue Breakdown">
             {queue_breakdown.length === 0 ? (
-              <EmptyState icon="✅" title="No pending items" desc="The triage queue is clear. New items will appear as documents are ingested and analyzed." />
+              <EmptyState icon="✅" title="Nothing needs review" desc="New items will appear when OWL needs help resolving a document decision." />
             ) : (
               <div className="dv-queue-breakdown">
                 {queue_breakdown.map((item) => {
