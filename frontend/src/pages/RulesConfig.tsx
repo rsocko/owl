@@ -77,7 +77,7 @@ const SEED_RULES: Rule[] = [
     conditions: [
       { id: uid(), field: 'days_since_service', operator: '≥', value: '30', unit: 'days', conjunction: 'IF' },
     ],
-    routeBadges: [{ label: '→ Triage', type: 'triage' }, { label: '→ MC (60d)', type: 'mc' }],
+    routeBadges: [{ label: '→ Needs Review', type: 'triage' }, { label: '→ MC (60d)', type: 'mc' }],
     escalation: { target: 'Mission Control alert', condition: 'days_since_service ≥ 60' },
   },
   {
@@ -87,7 +87,7 @@ const SEED_RULES: Rule[] = [
     conditions: [
       { id: uid(), field: 'similarity_score', operator: '≥', value: '85', unit: '%', conjunction: 'IF' },
     ],
-    routeBadges: [{ label: '→ Triage', type: 'triage' }],
+    routeBadges: [{ label: '→ Needs Review', type: 'triage' }],
   },
   {
     id: uid(), name: 'Monthly Spend Spike', type: 'basic', enabled: true,
@@ -106,7 +106,7 @@ const SEED_RULES: Rule[] = [
     conditions: [
       { id: uid(), field: 'extraction_confidence', operator: '<', value: '60', unit: '%', conjunction: 'IF' },
     ],
-    routeBadges: [{ label: '→ Triage', type: 'triage' }],
+    routeBadges: [{ label: '→ Needs Review', type: 'triage' }],
   },
   {
     id: uid(), name: 'Bill Reasonableness Check', type: 'llm', enabled: true,
@@ -166,7 +166,7 @@ Respond with JSON: { "changes_detected": bool, "changes": [...], "severity": "no
       { label: 'Match Analysis', type: 'llm' },
       { label: 'Return Result', type: 'output' },
     ],
-    routeBadges: [{ label: '→ Triage', type: 'triage' }, { label: '→ MC (unpaid)', type: 'mc' }],
+    routeBadges: [{ label: '→ Needs Review', type: 'triage' }, { label: '→ MC (unpaid)', type: 'mc' }],
   },
   {
     id: uid(), name: 'Provider Price Comparison', type: 'n8n', enabled: false,
@@ -614,7 +614,7 @@ function RuleEditor({
         <div className="route-config">
           {([
             { key: 'insight' as RouteTarget, icon: '📊', label: 'Insight Only', desc: 'Show in DI Insights tab. No action needed.' },
-            { key: 'triage' as RouteTarget, icon: '📥', label: 'Triage Queue', desc: 'Add to triage queue for review.' },
+            { key: 'triage' as RouteTarget, icon: '📥', label: 'Needs Review', desc: 'Ask for human review before proceeding.' },
             { key: 'mc' as RouteTarget, icon: '🚨', label: 'Mission Control', desc: 'Create MC alert for immediate action.' },
           ]).map((r) => (
             <div
@@ -641,7 +641,7 @@ function RuleEditor({
             onChange={(e) => onChange({ escalation: { ...rule.escalation, target: e.target.value, condition: rule.escalation?.condition ?? '' } })}
           >
             <option>Mission Control alert</option>
-            <option>Triage queue (high priority)</option>
+            <option>Needs Review (high priority)</option>
           </select>
           <span style={{ fontSize: 12 }}>when</span>
           <input
