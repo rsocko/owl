@@ -61,8 +61,11 @@ CUSTOM_FIELD_DEFINITIONS = [
         "extra_data": {
             "select_options": [
                 {"label": "pending"},
+                {"label": "acknowledged"},
                 {"label": "completed"},
+                {"label": "snoozed"},
                 {"label": "dismissed"},
+                {"label": "not_an_action"},
             ]
         },
     },
@@ -102,10 +105,14 @@ class PaperlessEnricher:
         for field_def in CUSTOM_FIELD_DEFINITIONS:
             name = field_def["name"]
             if name in existing_by_name:
-                field_map[name] = existing_by_name[name]["id"]
+                existing_field = existing_by_name[name]
+                field_map[name] = existing_field["id"]
                 # Cache select option IDs for existing fields
                 if field_def.get("data_type") == "select":
-                    self._cache_select_options(name, existing_by_name[name])
+                    existing_field = await self._ensure_select_options(
+                        field_def, existing_field
+                    )
+                    self._cache_select_options(name, existing_field)
             else:
                 try:
                     created = await self.client.create_custom_field(field_def)
@@ -126,6 +133,35 @@ class PaperlessEnricher:
 
         self._field_id_cache = field_map
         return field_map
+
+    async def _ensure_select_options(self, field_def: dict, existing_field: dict) -> dict:
+        """Add newly supported options without replacing existing option IDs."""
+        desired_options = field_def.get("extra_data", {}).get("select_options", [])
+        existing_extra = dict(existing_field.get("extra_data") or {})
+        existing_options = list(existing_extra.get("select_options") or [])
+        existing_labels = {
+            option.get("label")
+            for option in existing_options
+            if isinstance(option, dict)
+        }
+        missing_options = [
+            dict(option)
+            for option in desired_options
+            if option.get("label") not in existing_labels
+        ]
+        if not missing_options:
+            return existing_field
+
+        existing_extra["select_options"] = [*existing_options, *missing_options]
+        updated = await self.client.update_custom_field(
+            existing_field["id"], {"extra_data": existing_extra}
+        )
+        logger.info(
+            "Added select options %s to Paperless custom field %s",
+            [option["label"] for option in missing_options],
+            field_def["name"],
+        )
+        return updated
 
     def _cache_select_options(self, field_name: str, field_data: dict) -> None:
         """Build label -> option_id mapping for a select field."""
@@ -238,7 +274,7 @@ class PaperlessEnricher:
     async def sync_status(self, document_id: int, status: str) -> None:
         """Mirror a status change from internal DB back to Paperless.
 
-        Called when user marks an action complete/dismissed in the dashboard.
+        Called when a classification or user action changes the action lifecycle.
         When the status resolves the action (completed, dismissed, not_an_action),
         also removes the configured source tags (e.g. "Todo") from the document
         so it no longer surfaces in the intake queue.
@@ -249,8 +285,7 @@ class PaperlessEnricher:
         field_ids = await self.get_field_ids()
         status_field_id = field_ids.get("Action Status")
         if not status_field_id:
-            logger.warning("Cannot sync status — 'Action Status' field not found in Paperless")
-            return
+            raise RuntimeError("Cannot sync status: 'Action Status' field not found in Paperless")
 
         await self.client.update_custom_fields(
             document_id,
@@ -267,17 +302,13 @@ class PaperlessEnricher:
         if settings.remove_source_tag_on_resolve and status in resolved_statuses:
             tags_to_remove = settings.monitor_tags
             if tags_to_remove:
-                try:
-                    await self.client.remove_tags_from_document(document_id, tags_to_remove)
-                    logger.info(
-                        "Removed source tags %s from document %d (status=%s)",
-                        tags_to_remove, document_id, status,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to remove source tags from document %d: %s",
-                        document_id, exc,
-                    )
+                await self.client.remove_tags_from_document(document_id, tags_to_remove)
+                logger.info(
+                    "Removed source tags %s from document %d (status=%s)",
+                    tags_to_remove,
+                    document_id,
+                    status,
+                )
 
     async def read_paperless_status(self, document_id: int) -> str | None:
         """Read the current Action Status value from Paperless.

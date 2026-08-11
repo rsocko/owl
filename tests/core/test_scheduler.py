@@ -7,6 +7,7 @@ import pytest
 from doc_intelligence_hub.core.scheduler import (
     DEFAULT_SCHEDULES,
     HubScheduler,
+    _build_request_body,
     _parse_cron,
 )
 
@@ -120,3 +121,15 @@ class TestDefaultSchedules:
         for config in DEFAULT_SCHEDULES.values():
             # Should not raise
             _parse_cron(config["cron"])
+
+
+class TestScheduledRequestBody:
+    def test_live_schedule_limit_overrides_static_body(self):
+        body = _build_request_body(
+            {
+                "body": {"dry_run": False, "limit": 50},
+                "limit": 12,
+            }
+        )
+
+        assert body == {"dry_run": False, "limit": 12}

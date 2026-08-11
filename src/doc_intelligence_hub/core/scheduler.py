@@ -101,6 +101,14 @@ def _parse_cron(expr: str) -> dict[str, str]:
     }
 
 
+def _build_request_body(config: dict[str, Any]) -> dict[str, Any] | None:
+    """Apply live schedule fields to the configured endpoint payload."""
+    body = dict(config.get("body") or {})
+    if config.get("limit") is not None:
+        body["limit"] = config["limit"]
+    return body or None
+
+
 class HubScheduler:
     """Manages cron-based job scheduling for all DI Hub modules."""
 
@@ -172,7 +180,7 @@ class HubScheduler:
         """Execute a scheduled job by calling the hub's own API."""
         endpoint = config.get("endpoint", "")
         method = config.get("method", "POST").upper()
-        body = config.get("body")
+        body = _build_request_body(config)
         base_url = f"http://127.0.0.1:{self._port}"
 
         # For gap check, inject today's date as query param
