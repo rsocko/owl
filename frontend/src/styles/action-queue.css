@@ -581,6 +581,42 @@ a.aq-pdf-preview .aq-pdf-hint {
   gap: 8px;
 }
 
+.aq-reminder-popover {
+  z-index: 9999;
+  display: grid;
+  gap: 8px;
+  min-width: 240px;
+  padding: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.aq-reminder-popover > .btn {
+  justify-content: flex-start;
+}
+
+.aq-reminder-title {
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.aq-reminder-custom {
+  display: grid;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.aq-reminder-custom input {
+  padding: 7px 8px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
 /* Detail panel action layout */
 .aq-detail-actions {
   display: flex;

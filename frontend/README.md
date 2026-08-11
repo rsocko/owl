@@ -45,7 +45,7 @@ is needed for deep links — every route lives under the `#/...` fragment.
 ## Pages
 
 Overview, Statements (+ series detail), EOB Matching (dashboard, match review,
-unmatched), Action Queue, Triage Queue, Manual Match Search, Rules Config,
+unmatched), Action Queue, Needs Review, Manual Match Search, Rules Config,
 Insights, History, Orphans & Dupes, and Settings (merges the old `/admin` UI).
 Some pages note API gaps in code comments where a dedicated backend endpoint
 doesn't exist yet (e.g. statement series detail, duplicate document search).

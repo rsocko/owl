@@ -142,14 +142,31 @@ class ActionUpdateRequest(BaseModel):
 
 class BulkActionRequest(BaseModel):
     action: str = Field(
-        ..., pattern=r"^(complete|dismiss|reopen|acknowledge|snooze)$",
-        description="Bulk action: 'complete', 'dismiss', 'reopen', 'acknowledge', or 'snooze'",
+        ..., pattern=r"^(complete|dismiss|reopen|acknowledge|snooze|not_an_action)$",
+        description="Bulk action: 'complete', 'dismiss', 'reopen', 'acknowledge', 'snooze', or 'not_an_action'",
     )
     action_ids: list[int] = Field(
         ..., min_length=1, max_length=200,
         description="List of action IDs to update (max 200)",
     )
     snoozed_until: str | None = Field(default=None, description="ISO timestamp for snooze expiry (required for 'snooze' action)")
+
+    @model_validator(mode="after")
+    def _validate_snooze(self) -> "BulkActionRequest":
+        if self.action == "snooze" and not self.snoozed_until:
+            raise PydanticCustomError(
+                "missing_snoozed_until",
+                "snoozed_until is required when action is 'snooze'",
+            )
+        if self.snoozed_until:
+            try:
+                datetime.fromisoformat(self.snoozed_until)
+            except ValueError as exc:
+                raise PydanticCustomError(
+                    "invalid_snoozed_until",
+                    "snoozed_until must be a valid ISO timestamp",
+                ) from exc
+        return self
 
 
 def _sync_action_queue_settings(request: Request) -> None:
@@ -703,6 +720,7 @@ _BULK_ACTION_STATUS: dict[str, str] = {
     "reopen": "pending",
     "acknowledge": "acknowledged",
     "snooze": "snoozed",
+    "not_an_action": "not_an_action",
 }
 
 
@@ -720,6 +738,11 @@ async def bulk_action(
     target_status = _BULK_ACTION_STATUS.get(body.action)
     if not target_status:
         raise HTTPException(status_code=400, detail=f"Unknown action: {body.action}")
+    snoozed_until = (
+        datetime.fromisoformat(body.snoozed_until)
+        if body.action == "snooze" and body.snoozed_until
+        else None
+    )
 
     init_db()
     db = get_session()
@@ -737,8 +760,12 @@ async def bulk_action(
             action.version = (action.version or 1) + 1
             if target_status == "completed":
                 action.completed_at = datetime.utcnow()
+            elif target_status == "snoozed":
+                action.snoozed_until = snoozed_until
             elif target_status == "pending":
                 action.completed_at = None
+                action.acknowledged_at = None
+                action.snoozed_until = None
                 # Recalculate risk score on reopen
                 action.risk_score = compute_risk_score(
                     urgency=action.urgency or "LOW",
@@ -746,6 +773,14 @@ async def bulk_action(
                     amount=action.amount,
                     confidence=action.confidence or 0,
                     action_type=action.action_type or "REVIEW",
+                )
+            elif target_status == "not_an_action":
+                db.add(
+                    ActionFeedback(
+                        action_id=action.id,
+                        feedback_type="not_an_action",
+                        original_action_type=action.action_type,
+                    )
                 )
             affected += 1
             affected_actions.append(action)

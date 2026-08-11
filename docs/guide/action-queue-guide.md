@@ -11,7 +11,7 @@ mockups:
 The Action Queue is OWL's primary workflow module. It scans your Paperless-ngx inbox, classifies each document using an LLM, assigns urgency scores, and surfaces recommended actions — turning a pile of unprocessed documents into a prioritized task list.
 
 :::info Interactive Mockup
-Preview the triage queue UI: [Unified Triage Dashboard](../../mockups/triage-correction/triage-unified.html) — The combined action/triage workflow with keyboard shortcuts and bulk operations.
+Preview the Needs Review UI: [Unified Review Dashboard](../../mockups/triage-correction/triage-unified.html) — The human-review workflow with keyboard shortcuts and bulk operations.
 :::
 
 ## How It Works
@@ -56,13 +56,12 @@ Actions follow a clear lifecycle from detection to resolution:
 ```mermaid
 stateDiagram-v2
     [*] --> pending: Document classified
-    pending --> acknowledged: User saw it
-    pending --> completed: User did it
-    pending --> snoozed: Defer until later
-    pending --> dismissed: Not relevant
-    pending --> not_an_action: False positive
-    acknowledged --> completed: Finally done
-    acknowledged --> snoozed: Defer
+    pending --> completed: Done
+    pending --> snoozed: Remind me later
+    pending --> dismissed: Won't do
+    pending --> not_an_action: No action needed
+    acknowledged --> completed: Done (legacy state)
+    acknowledged --> snoozed: Set reminder (legacy state)
     snoozed --> pending: Snooze expired
     completed --> [*]
     dismissed --> [*]
@@ -72,11 +71,11 @@ stateDiagram-v2
 | Status | Meaning | Remains in queue? |
 |--------|---------|-------------------|
 | `pending` | Not yet handled — needs attention | ✅ Yes (active) |
-| `acknowledged` | User saw it, intends to handle | ❌ No (removed from active queue) |
-| `completed` | User did the thing | ❌ No |
-| `snoozed` | Deferred until a specific time | ❌ No (resurfaces when snooze expires) |
-| `dismissed` | Not relevant / user doesn't care | ❌ No |
-| `not_an_action` | False positive — shouldn't have been detected | ❌ No (trains classifier) |
+| `acknowledged` | Legacy state created by the removed Acknowledge action | ❌ No |
+| `completed` | **Done** — user completed the real-world task | ❌ No |
+| `snoozed` | **Remind me later** — returns tomorrow, next week, or on a selected date | ❌ No (resurfaces when the reminder expires) |
+| `dismissed` | **Won't do** — this was a real task, intentionally declined | ❌ No |
+| `not_an_action` | **No action needed** — OWL detected a task incorrectly | ❌ No (records classifier feedback) |
 
 ### Severity Tiers
 
@@ -112,8 +111,8 @@ CTAs can include a `url` (deep link to pay/sign/view) and/or `phone` number extr
 1. **Documents arrive** — Scanned mail, email attachments, or manual uploads land in Paperless with an `inbox` tag.
 2. **OWL classifies** — On schedule or manual trigger, OWL fetches unprocessed documents and runs LLM classification.
 3. **Actions appear** — Each document gets an action type, urgency score (1–10), and human-readable summary.
-4. **User reviews** — In Mission Control, review the queue sorted by urgency. Complete, dismiss, or defer each item.
-5. **Enrichment** — Classifications and status changes update Paperless custom fields. Resolved documents have their configured intake tags removed by default.
+4. **User acts** — In Mission Control, review the queue sorted by urgency. Mark items done, set a reminder, decline the task, or tell OWL that no action was needed.
+5. **Enrichment** — Classifications and status changes update Paperless custom fields for downstream filtering. Resolved documents have their configured intake tags removed by default.
 
 ## API Reference
 
@@ -173,13 +172,15 @@ Valid statuses: `completed`, `dismissed`, `pending`, `acknowledged`, `snoozed`, 
 
 When setting status to `snoozed`, include `"snoozed_until": "2026-08-01T09:00:00Z"`.
 
-### Acknowledge an Action
+### Set a Reminder
 
 ```bash
-***REMOVED*** -X POST http://service-005.example.invalid/api/queue/actions/42/acknowledge
+***REMOVED*** -X PATCH http://service-005.example.invalid/api/queue/actions/42 \
+  -H "Content-Type: application/json" \
+  -d '{"status": "snoozed", "snoozed_until": "2026-08-20T09:00:00", "dry_run": false}'
 ```
 
-Marks the action as seen/owned. Removes from active queue without claiming completion.
+Removes the action from the active queue until the specified date and time.
 
 ### Snooze an Action
 
