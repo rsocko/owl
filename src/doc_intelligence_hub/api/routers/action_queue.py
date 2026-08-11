@@ -1098,12 +1098,7 @@ async def backfill_paperless(request: Request, body: BackfillRequest) -> dict[st
                     "overall_confidence": action.confidence or 0,
                 }
 
-                # Count sibling actions for the same document
-                action_count = db.query(Action).filter_by(document_id=action.document_id).count()
-
-                await enricher.enrich_document(
-                    action.document_id, enrichment_data, action_count=action_count
-                )
+                await enricher.enrich_document(action.document_id, enrichment_data)
 
                 # Also sync the current status (not just "pending")
                 if action.status != "pending":
@@ -1223,7 +1218,7 @@ async def submit_feedback(
                 import logging
 
                 logging.getLogger(__name__).warning(
-                    "Failed to sync not-an-action feedback to Paperless for action %d "
+                    "Failed to sync no-action feedback to Paperless for action %d "
                     "(doc %d): %s",
                     action_id,
                     action.document_id,

@@ -1,4 +1,4 @@
-"""Paperless custom field enricher — writes action metadata back to documents."""
+"""Paperless custom field enricher for neutral document-level metadata."""
 
 import logging
 
@@ -13,47 +13,12 @@ def _make_paperless_client() -> PaperlessClient:
     return PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_api_token)
 
 
-# Custom field definitions to auto-create in Paperless
+# OWL owns inferred action details. Paperless receives only document-level values
+# and enough disposition metadata to support its document workflow.
 CUSTOM_FIELD_DEFINITIONS = [
     {
-        "name": "Action Type",
-        "data_type": "select",
-        "extra_data": {
-            "select_options": [
-                {"label": "PAY"},
-                {"label": "RESPOND"},
-                {"label": "FILE"},
-                {"label": "REVIEW"},
-                {"label": "SHARE"},
-                {"label": "SCHEDULE"},
-                {"label": "SIGN"},
-                {"label": "ARCHIVE"},
-                {"label": "CANCEL"},
-                {"label": "RENEW"},
-                {"label": "DISPUTE"},
-                {"label": "TASK"},
-            ]
-        },
-    },
-    {
-        "name": "Action Due Date",
-        "data_type": "date",
-    },
-    {
-        "name": "Action Amount",
+        "name": "Document Amount",
         "data_type": "float",
-    },
-    {
-        "name": "Action Urgency",
-        "data_type": "select",
-        "extra_data": {
-            "select_options": [
-                {"label": "CRITICAL"},
-                {"label": "HIGH"},
-                {"label": "MEDIUM"},
-                {"label": "LOW"},
-            ]
-        },
     },
     {
         "name": "Action Status",
@@ -70,22 +35,23 @@ CUSTOM_FIELD_DEFINITIONS = [
         },
     },
     {
-        "name": "Action Summary",
-        "data_type": "string",
-    },
-    {
         "name": "Action Analyzed",
         "data_type": "date",
     },
-    {
-        "name": "Action Count",
-        "data_type": "integer",
-    },
 ]
+
+LEGACY_AMOUNT_FIELD = "Action Amount"
+LEGACY_INFERRED_FIELDS = (
+    "Action Type",
+    "Action Due Date",
+    "Action Urgency",
+    "Action Summary",
+    "Action Count",
+)
 
 
 class PaperlessEnricher:
-    """Writes extracted action metadata back to Paperless custom fields."""
+    """Writes document metadata and OWL disposition back to Paperless."""
 
     def __init__(self):
         self.client = _make_paperless_client()
@@ -101,17 +67,30 @@ class PaperlessEnricher:
         existing = await self.client.list_custom_fields()
         existing_by_name = {f["name"]: f for f in existing}
 
+        if "Document Amount" not in existing_by_name and LEGACY_AMOUNT_FIELD in existing_by_name:
+            legacy_field = existing_by_name.pop(LEGACY_AMOUNT_FIELD)
+            renamed = await self.client.update_custom_field(
+                legacy_field["id"], {"name": "Document Amount"}
+            )
+            existing_by_name["Document Amount"] = renamed
+            logger.info(
+                "Renamed Paperless custom field %r to %r",
+                LEGACY_AMOUNT_FIELD,
+                "Document Amount",
+            )
+
         field_map = {}
         for field_def in CUSTOM_FIELD_DEFINITIONS:
             name = field_def["name"]
             if name in existing_by_name:
                 existing_field = existing_by_name[name]
+                if field_def.get("data_type") == "select":
+                    existing_field = await self._ensure_select_options(
+                        existing_field, field_def
+                    )
                 field_map[name] = existing_field["id"]
                 # Cache select option IDs for existing fields
                 if field_def.get("data_type") == "select":
-                    existing_field = await self._ensure_select_options(
-                        field_def, existing_field
-                    )
                     self._cache_select_options(name, existing_field)
             else:
                 try:
@@ -131,35 +110,46 @@ class PaperlessEnricher:
                     )
                     # Continue creating other fields — partial enrichment is better than none
 
+        # Keep IDs for legacy inferred fields so a no-action disposition can
+        # remove stale values without recreating those fields.
+        for name in LEGACY_INFERRED_FIELDS:
+            existing_field = existing_by_name.get(name)
+            if existing_field:
+                field_map[name] = existing_field["id"]
+
         self._field_id_cache = field_map
         return field_map
 
-    async def _ensure_select_options(self, field_def: dict, existing_field: dict) -> dict:
-        """Add newly supported options without replacing existing option IDs."""
-        desired_options = field_def.get("extra_data", {}).get("select_options", [])
-        existing_extra = dict(existing_field.get("extra_data") or {})
-        existing_options = list(existing_extra.get("select_options") or [])
+    async def _ensure_select_options(self, existing: dict, desired: dict) -> dict:
+        """Append missing select options without replacing existing option IDs."""
+        existing_extra = existing.get("extra_data", {})
+        existing_options = existing_extra.get("select_options", [])
         existing_labels = {
             option.get("label")
             for option in existing_options
             if isinstance(option, dict)
         }
-        missing_options = [
-            dict(option)
-            for option in desired_options
+        missing = [
+            option
+            for option in desired.get("extra_data", {}).get("select_options", [])
             if option.get("label") not in existing_labels
         ]
-        if not missing_options:
-            return existing_field
+        if not missing:
+            return existing
 
-        existing_extra["select_options"] = [*existing_options, *missing_options]
         updated = await self.client.update_custom_field(
-            existing_field["id"], {"extra_data": existing_extra}
+            existing["id"],
+            {
+                "extra_data": {
+                    **existing_extra,
+                    "select_options": [*existing_options, *missing],
+                }
+            },
         )
         logger.info(
-            "Added select options %s to Paperless custom field %s",
-            [option["label"] for option in missing_options],
-            field_def["name"],
+            "Added Paperless select options %s to %r",
+            [option["label"] for option in missing],
+            existing["name"],
         )
         return updated
 
@@ -197,15 +187,12 @@ class PaperlessEnricher:
             await self.ensure_custom_fields_exist()
         return self._field_id_cache
 
-    async def enrich_document(
-        self, document_id: int, extraction: dict, action_count: int = 1
-    ) -> None:
-        """Write extraction results to Paperless custom fields.
+    async def enrich_document(self, document_id: int, extraction: dict) -> None:
+        """Write document-level extraction results to Paperless custom fields.
 
         Args:
             document_id: Paperless document ID
-            extraction: Parsed result from OllamaAnalyzer (primary action + assessment)
-            action_count: Total number of actions identified for this document
+            extraction: Parsed OWL result; inferred action details remain in OWL
         """
         if not settings.write_to_paperless:
             return  # Safety: writes disabled via config
@@ -221,43 +208,15 @@ class PaperlessEnricher:
             if fid is not None:
                 custom_fields.append({"field": fid, "value": value})
 
-        # Action Type (select)
-        if extraction.get("action_type"):
-            _add_field(
-                "Action Type",
-                self._resolve_select_value("Action Type", extraction["action_type"]),
-            )
-
-        # Due Date
-        if extraction.get("due_date"):
-            _add_field("Action Due Date", extraction["due_date"])
-
-        # Amount
+        # Amount describes the document and remains useful even without an action.
         if extraction.get("amount") is not None:
-            _add_field("Action Amount", extraction["amount"])
-
-        # Urgency (select)
-        if extraction.get("urgency"):
-            _add_field(
-                "Action Urgency",
-                self._resolve_select_value("Action Urgency", extraction["urgency"]),
-            )
+            _add_field("Document Amount", extraction["amount"])
 
         # Status (select — always starts as pending)
         _add_field("Action Status", self._resolve_select_value("Action Status", "pending"))
 
-        # Summary (include action count hint if multiple)
-        summary = extraction.get("summary", "")
-        if action_count > 1:
-            summary = f"[{action_count} actions] {summary}"
-        if summary:
-            _add_field("Action Summary", summary[:255])
-
         # Analyzed date
         _add_field("Action Analyzed", date.today().isoformat())
-
-        # Action Count
-        _add_field("Action Count", action_count)
 
         if custom_fields:
             import asyncio
@@ -287,15 +246,20 @@ class PaperlessEnricher:
         if not status_field_id:
             raise RuntimeError("Cannot sync status: 'Action Status' field not found in Paperless")
 
-        await self.client.update_custom_fields(
-            document_id,
-            [
-                {
-                    "field": status_field_id,
-                    "value": self._resolve_select_value("Action Status", status),
-                }
-            ],
-        )
+        updates = [
+            {
+                "field": status_field_id,
+                "value": self._resolve_select_value("Action Status", status),
+            }
+        ]
+        if status == "not_an_action":
+            updates.extend(
+                {"field": field_ids[name], "value": None}
+                for name in LEGACY_INFERRED_FIELDS
+                if name in field_ids
+            )
+
+        await self.client.update_custom_fields(document_id, updates)
 
         # Remove source tags when the action is resolved
         resolved_statuses = {"completed", "dismissed", "not_an_action"}
