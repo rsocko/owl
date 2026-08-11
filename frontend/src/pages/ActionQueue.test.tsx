@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ActionQueue from './ActionQueue';
+import { customReminderUntil, reminderUntil } from './actionReminder';
 import { buildQueueRunBody } from './actionQueueRunBody';
 import { TooltipProvider } from '../components/ui';
 
@@ -73,7 +74,9 @@ const updatedAction = {
 };
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  statusMock.mockReset();
+  actionsMock.mockReset();
+  updateActionMock.mockReset();
   statusMock.mockResolvedValue({
     status: 'idle',
     database: {
@@ -94,6 +97,20 @@ beforeEach(() => {
 });
 
 describe('ActionQueue', () => {
+  it('shows outcome-oriented actions instead of acknowledge and dismiss', async () => {
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Done' })).toBeTruthy();
+    });
+
+    expect(screen.getByRole('button', { name: 'Remind me later…' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: "Won't do" })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'No action needed' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Acknowledge' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+  });
+
   it('saves corrected action details from the drawer', async () => {
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
 
@@ -128,6 +145,32 @@ describe('ActionQueue', () => {
     await waitFor(() => {
       expect(screen.getByText('Action details updated.')).toBeTruthy();
     });
+  });
+});
+
+describe('reminder dates', () => {
+  it('sets tomorrow and next week to 9 AM local time', () => {
+    const now = new Date(2026, 7, 10, 23, 0, 0);
+    const tomorrow = new Date(reminderUntil('tomorrow', now));
+    const nextWeek = new Date(reminderUntil('next_week', now));
+
+    expect(tomorrow.getDate()).toBe(11);
+    expect(tomorrow.getHours()).toBe(9);
+    expect(nextWeek.getDate()).toBe(17);
+    expect(nextWeek.getHours()).toBe(9);
+  });
+
+  it('turns a custom date into a 9 AM local reminder', () => {
+    const now = new Date(2026, 7, 10, 12, 0, 0);
+    const reminder = new Date(customReminderUntil('2026-08-20', now) ?? '');
+
+    expect(reminder.getFullYear()).toBe(2026);
+    expect(reminder.getMonth()).toBe(7);
+    expect(reminder.getDate()).toBe(20);
+    expect(reminder.getHours()).toBe(9);
+    expect(customReminderUntil('', now)).toBeNull();
+    expect(customReminderUntil('2026-08-10', now)).toBeNull();
+    expect(customReminderUntil('not-a-date', now)).toBeNull();
   });
 });
 

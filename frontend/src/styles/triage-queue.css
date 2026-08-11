@@ -109,6 +109,37 @@
   font-size: 0.82rem;
 }
 
+.triage-more-popover {
+  z-index: 9999;
+  display: grid;
+  gap: 8px;
+  width: 240px;
+  padding: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.triage-more-popover .btn {
+  justify-content: flex-start;
+}
+
+.triage-more-title {
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.triage-more-help {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.triage-more-arrow {
+  fill: var(--card);
+}
+
 .triage-queue-list {
   overflow: auto;
 }

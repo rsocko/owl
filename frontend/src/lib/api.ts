@@ -128,7 +128,7 @@ export const endpoints = {
     status: () => api.get('/api/queue/status'),
     actions: (params?: string) => api.get(`/api/queue/actions${params ? `?${params}` : ''}`),
     updateAction: (id: string, body: unknown) => api.patch(`/api/queue/actions/${id}`, body),
-    bulk: (body: { action: string; action_ids: number[] }) =>
+    bulk: (body: { action: string; action_ids: number[]; snoozed_until?: string }) =>
       api.post<{ affected: number; action: string }>('/api/queue/actions/bulk', body),
     backfill: (body?: unknown) => api.post('/api/queue/actions/backfill', body),
     refreshMetadata: (body?: unknown) => api.post('/api/queue/actions/refresh-metadata', body),

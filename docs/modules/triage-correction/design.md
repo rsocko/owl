@@ -1,5 +1,5 @@
 ---
-title: "Triage & Correction Design"
+title: "Needs Review & Correction Design"
 sidebar_label: Design
 sidebar_position: 1
 mockups:
@@ -9,11 +9,11 @@ mockups:
   - "[manual-match-search.html](../../../mockups/triage-correction/manual-match-search.html)"
 ---
 
-# Design Document: Document Relationship Triage & Correction UI
+# Design Document: Needs Review & Document Correction UI
 
 ## Executive Summary
 
-This document defines a **triage and correction interface** for the Document Intelligence admin UI that lets users review, correct, and adjust automated document relationships in Paperless-ngx. It addresses five core workflows:
+This document defines the **Needs Review and correction interface** for the Document Intelligence admin UI. It lets users review, correct, and adjust automated document relationships in Paperless-ngx. Internal routes, APIs, and data models retain the `triage` name for compatibility. It addresses five core workflows:
 
 1. **EOB ↔ Bill Match Triage** — Reviewing, confirming, rejecting, and manually re-linking automated matches
 2. **Statement Grouping Correction** — Splitting, merging, and reassigning documents that were incorrectly grouped into the same statement "series"
@@ -21,7 +21,7 @@ This document defines a **triage and correction interface** for the Document Int
 4. **Duplicate Detection & Merge** — Identifying and merging duplicate documents (e.g., same bill received via mail + portal), with options for superseded documents
 5. **Metadata Correction & Writeback** — Fixing incomplete or incorrect extracted data (OCR/LLM errors), writing corrections back to Paperless custom fields, and using corrections as extraction training data
 
-**Key principle:** The system makes its best guess automatically, but humans must be able to correct it quickly without deep technical knowledge.
+**Key principle:** Needs Review contains places where the system needs human judgment, not real-world tasks the user must perform. The system makes its best guess automatically, but humans must be able to correct it quickly without deep technical knowledge. See [Action Queue vs. Needs Review](../../architecture/index.md#action-queue-vs-needs-review) for the cross-workflow routing model.
 
 ---
 

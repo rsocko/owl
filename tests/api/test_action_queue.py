@@ -241,6 +241,51 @@ class TestBulkAction:
         assert resp.status_code == 200
         assert resp.json()["affected"] == 2
 
+    def test_bulk_snooze_requires_and_persists_reminder_time(self, client, seed_actions):
+        actions = client.get("/api/queue/actions?status=pending").json()
+        ids = [a["id"] for a in actions["actions"]]
+
+        missing_time = client.post(
+            "/api/queue/actions/bulk",
+            json={"action": "snooze", "action_ids": ids},
+        )
+        assert missing_time.status_code == 422
+
+        snoozed_until = "2026-08-18T09:00:00"
+        resp = client.post(
+            "/api/queue/actions/bulk",
+            json={
+                "action": "snooze",
+                "action_ids": ids,
+                "snoozed_until": snoozed_until,
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["affected"] == 2
+
+        snoozed = client.get("/api/queue/actions?status=snoozed").json()
+        assert snoozed["total"] == 2
+        assert {action["snoozed_until"] for action in snoozed["actions"]} == {
+            snoozed_until
+        }
+
+    def test_bulk_no_action_needed_records_feedback(self, client, seed_actions):
+        actions = client.get("/api/queue/actions?status=pending").json()
+        ids = [a["id"] for a in actions["actions"]]
+
+        resp = client.post(
+            "/api/queue/actions/bulk",
+            json={"action": "not_an_action", "action_ids": ids},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["affected"] == 2
+
+        no_action = client.get("/api/queue/actions?status=not_an_action").json()
+        assert no_action["total"] == 2
+        for action_id in ids:
+            feedback = client.get(f"/api/queue/actions/{action_id}/feedback").json()
+            assert feedback["feedback"][0]["feedback_type"] == "not_an_action"
+
     def test_bulk_reopen(self, client, seed_actions):
         actions = client.get("/api/queue/actions?status=completed").json()
         ids = [a["id"] for a in actions["actions"]]
