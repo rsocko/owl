@@ -210,7 +210,7 @@ export default function TriageQueue() {
       setItems(queueRes?.items ?? []);
       setStats(statsRes ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load triage queue.');
+      setError(err instanceof Error ? err.message : 'Failed to load items needing review.');
     } finally {
       setLoading(false);
     }
@@ -496,8 +496,8 @@ export default function TriageQueue() {
   return (
     <>
       <PageHeader
-        title="Triage Queue"
-        desc="Review flagged items: low-confidence EOB matches, grouping anomalies, and orphan documents."
+        title="Needs Review"
+        desc="Help OWL resolve uncertain matches, possible duplicates, grouping issues, and unmatched documents."
       />
 
       {loading && !items.length ? (
@@ -518,7 +518,7 @@ export default function TriageQueue() {
               </button>
               <div className="triage-queue-header-content">
                 <div className="triage-queue-title">
-                  Triage Queue <span>{pendingCount} pending</span>
+                  Needs Review <span>{pendingCount} pending</span>
                 </div>
 
                 {/* Type filter tabs */}

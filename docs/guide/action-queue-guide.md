@@ -11,7 +11,7 @@ mockups:
 The Action Queue is OWL's primary workflow module. It scans your Paperless-ngx inbox, classifies each document using an LLM, assigns urgency scores, and surfaces recommended actions — turning a pile of unprocessed documents into a prioritized task list.
 
 :::info Interactive Mockup
-Preview the triage queue UI: [Unified Triage Dashboard](../../mockups/triage-correction/triage-unified.html) — The combined action/triage workflow with keyboard shortcuts and bulk operations.
+Preview the Needs Review UI: [Unified Review Dashboard](../../mockups/triage-correction/triage-unified.html) — The human-review workflow with keyboard shortcuts and bulk operations.
 :::
 
 ## How It Works

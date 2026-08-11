@@ -174,11 +174,11 @@ flowchart LR
 
 ---
 
-## 3. Document Triage Flow
+## 3. Document Review Flow
 
 ### Current State: Two Overlapping Queues
 
-Action Queue and Triage Queue serve similar purposes (review documents and take action) but exist as separate pages with different UIs and no shared context. Users must check both to ensure nothing is missed.
+Action Queue and Needs Review are separate pages for different kinds of work: Action Queue contains real-world tasks, while Needs Review contains uncertain system decisions. The different UIs and lack of shared context can still make it easy to miss work across the two pages.
 
 ```mermaid
 flowchart TD
@@ -191,7 +191,7 @@ flowchart TD
             AQ_LIST --> AQ_DETAIL
         end
         
-        subgraph tq["Triage Queue (/triage)"]
+        subgraph tq["Needs Review (/triage)"]
             TQ_LIST["Document List<br/>(list + detail)"]
             TQ_DETAIL["Detail Panel<br/>(5 content types!)"]
             TQ_LIST --> TQ_DETAIL
@@ -212,9 +212,9 @@ flowchart TD
 
 **Problems:**
 - Users don't know which queue to check — overlapping purposes
-- Triage detail panel renders 5 different content types without clear context switching
-- Action Queue and Triage Queue have different UI patterns for similar tasks
-- Manual Search is accessible only from Triage, not from Action Queue
+- Needs Review renders 5 different content types without clear context switching
+- Action Queue and Needs Review have different UI patterns for related work
+- Manual Search is accessible only from Needs Review, not from Action Queue
 
 ---
 
