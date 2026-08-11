@@ -28,8 +28,8 @@ CUSTOM_FIELD_DEFINITIONS = [
                 {"label": "pending"},
                 {"label": "acknowledged"},
                 {"label": "completed"},
-                {"label": "dismissed"},
                 {"label": "snoozed"},
+                {"label": "dismissed"},
                 {"label": "not_an_action"},
             ]
         },
@@ -233,7 +233,7 @@ class PaperlessEnricher:
     async def sync_status(self, document_id: int, status: str) -> None:
         """Mirror a status change from internal DB back to Paperless.
 
-        Called when user marks an action complete/dismissed in the dashboard.
+        Called when a classification or user action changes the action lifecycle.
         When the status resolves the action (completed, dismissed, not_an_action),
         also removes the configured source tags (e.g. "Todo") from the document
         so it no longer surfaces in the intake queue.
@@ -244,8 +244,7 @@ class PaperlessEnricher:
         field_ids = await self.get_field_ids()
         status_field_id = field_ids.get("Action Status")
         if not status_field_id:
-            logger.warning("Cannot sync status — 'Action Status' field not found in Paperless")
-            return
+            raise RuntimeError("Cannot sync status: 'Action Status' field not found in Paperless")
 
         updates = [
             {
@@ -267,17 +266,13 @@ class PaperlessEnricher:
         if settings.remove_source_tag_on_resolve and status in resolved_statuses:
             tags_to_remove = settings.monitor_tags
             if tags_to_remove:
-                try:
-                    await self.client.remove_tags_from_document(document_id, tags_to_remove)
-                    logger.info(
-                        "Removed source tags %s from document %d (status=%s)",
-                        tags_to_remove, document_id, status,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to remove source tags from document %d: %s",
-                        document_id, exc,
-                    )
+                await self.client.remove_tags_from_document(document_id, tags_to_remove)
+                logger.info(
+                    "Removed source tags %s from document %d (status=%s)",
+                    tags_to_remove,
+                    document_id,
+                    status,
+                )
 
     async def read_paperless_status(self, document_id: int) -> str | None:
         """Read the current Action Status value from Paperless.

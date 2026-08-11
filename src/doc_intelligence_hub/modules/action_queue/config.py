@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Processing
     confidence_threshold: int = Field(default=70)
-    tags_to_monitor: str = Field(default="Inbox,Todo")
+    tags_to_monitor: str = Field(default="Inbox")
 
     # Safety
     write_to_paperless: bool = Field(default=True)
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     @property
     def monitor_tags(self) -> list[str]:
-        return [t.strip() for t in self.tags_to_monitor.split(",")]
+        return [t.strip() for t in self.tags_to_monitor.split(",") if t.strip()]
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

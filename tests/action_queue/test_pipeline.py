@@ -4,6 +4,7 @@ isolation, and the overall pipeline duration timeout.
 
 import asyncio
 import time
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -125,6 +126,162 @@ class TestPipelineErrorIsolation:
         assert stats["errors"][0]["document_id"] == 2
         assert "simulated fetch failure" in stats["errors"][0]["error"]
         assert stats["timed_out"] is False
+
+    @pytest.mark.asyncio
+    async def test_no_action_classification_updates_paperless(self, db, monkeypatch):
+        pipeline = Pipeline()
+        no_action_extraction = {
+            "actions": [],
+            "document_assessment": {
+                "overall_confidence": 95,
+                "requires_action": False,
+                "text_quality": "good",
+            },
+        }
+
+        monkeypatch.setattr(aq_settings, "write_to_paperless", True)
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", AsyncMock(return_value=[]))
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "fetch_all_metadata",
+            AsyncMock(return_value=({}, {}, {})),
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "list_documents",
+            AsyncMock(return_value=_make_docs(1)),
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "get_document_content",
+            AsyncMock(return_value="Informational notice only."),
+        )
+        monkeypatch.setattr(pipeline.analyzer, "health_check", AsyncMock(return_value=False))
+        monkeypatch.setattr(
+            pipeline.fallback_analyzer,
+            "analyze_document",
+            lambda doc: no_action_extraction,
+        )
+        pipeline.enricher.ensure_custom_fields_exist = AsyncMock(return_value={})
+        pipeline.enricher.sync_status = AsyncMock()
+
+        stats = await pipeline.run(force=True, dry_run=False)
+
+        assert stats["no_action"] == 1
+        pipeline.enricher.sync_status.assert_awaited_once_with(1, "not_an_action")
+
+    @pytest.mark.asyncio
+    async def test_failed_no_action_sync_remains_retryable(self, db, monkeypatch):
+        from doc_intelligence_hub.modules.action_queue.database import (
+            ProcessingHistory,
+            get_session,
+        )
+
+        pipeline = Pipeline()
+        no_action_extraction = {
+            "actions": [],
+            "document_assessment": {
+                "overall_confidence": 95,
+                "requires_action": False,
+                "text_quality": "good",
+            },
+        }
+
+        monkeypatch.setattr(aq_settings, "write_to_paperless", True)
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", AsyncMock(return_value=[]))
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "fetch_all_metadata",
+            AsyncMock(return_value=({}, {}, {})),
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "list_documents",
+            AsyncMock(return_value=_make_docs(1)),
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "get_document_content",
+            AsyncMock(return_value="Informational notice only."),
+        )
+        monkeypatch.setattr(pipeline.analyzer, "health_check", AsyncMock(return_value=False))
+        monkeypatch.setattr(
+            pipeline.fallback_analyzer,
+            "analyze_document",
+            lambda doc: no_action_extraction,
+        )
+        pipeline.enricher.ensure_custom_fields_exist = AsyncMock(return_value={})
+        pipeline.enricher.sync_status = AsyncMock(
+            side_effect=RuntimeError("Paperless unavailable")
+        )
+
+        stats = await pipeline.run(force=True, dry_run=False)
+
+        session = get_session()
+        try:
+            history = session.query(ProcessingHistory).filter_by(document_id=1).one()
+            assert history.success == 0
+            assert history.disposition == "no_action_sync_failed"
+        finally:
+            session.close()
+        assert stats["enrichment_failed"] == 1
+
+    @pytest.mark.asyncio
+    async def test_unavailable_enrichment_keeps_no_action_retryable(self, db, monkeypatch):
+        from doc_intelligence_hub.modules.action_queue.database import (
+            ProcessingHistory,
+            get_session,
+        )
+
+        pipeline = Pipeline()
+        no_action_extraction = {
+            "actions": [],
+            "document_assessment": {
+                "overall_confidence": 95,
+                "requires_action": False,
+                "text_quality": "good",
+            },
+        }
+
+        monkeypatch.setattr(aq_settings, "write_to_paperless", True)
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", AsyncMock(return_value=[]))
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "fetch_all_metadata",
+            AsyncMock(return_value=({}, {}, {})),
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "list_documents",
+            AsyncMock(return_value=_make_docs(1)),
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "get_document_content",
+            AsyncMock(return_value="Informational notice only."),
+        )
+        monkeypatch.setattr(pipeline.analyzer, "health_check", AsyncMock(return_value=False))
+        monkeypatch.setattr(
+            pipeline.fallback_analyzer,
+            "analyze_document",
+            lambda doc: no_action_extraction,
+        )
+        pipeline.enricher.ensure_custom_fields_exist = AsyncMock(
+            side_effect=RuntimeError("Custom fields unavailable")
+        )
+        pipeline.enricher.sync_status = AsyncMock()
+
+        stats = await pipeline.run(force=True, dry_run=False)
+
+        session = get_session()
+        try:
+            history = session.query(ProcessingHistory).filter_by(document_id=1).one()
+            assert history.success == 0
+            assert history.disposition == "no_action_sync_failed"
+        finally:
+            session.close()
+        pipeline.enricher.sync_status.assert_not_awaited()
+        assert stats["enrichment_failed"] == 1
 
 
 class TestPipelineOverallTimeout:

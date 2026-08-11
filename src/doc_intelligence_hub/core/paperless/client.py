@@ -372,6 +372,12 @@ class PaperlessClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def update_custom_field(self, field_id: int, data: dict) -> dict:
+        """Patch a Paperless custom field definition."""
+        resp = await self._request("PATCH", f"/api/custom_fields/{field_id}/", json=data)
+        resp.raise_for_status()
+        return resp.json()
+
     async def update_custom_fields(self, document_id: int, custom_fields: list[dict]) -> None:
         """Update custom field values on a document (merge, not replace).
 
@@ -470,13 +476,6 @@ class PaperlessClient:
         """Create a new custom field definition."""
         client = self._get_client()
         resp = await client.post("/api/custom_fields/", json=field_def)
-        resp.raise_for_status()
-        return resp.json()
-
-    async def update_custom_field(self, field_id: int, changes: dict) -> dict:
-        """Patch an existing custom field definition."""
-        client = self._get_client()
-        resp = await client.patch(f"/api/custom_fields/{field_id}/", json=changes)
         resp.raise_for_status()
         return resp.json()
 

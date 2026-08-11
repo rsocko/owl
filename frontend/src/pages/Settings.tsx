@@ -170,13 +170,15 @@ export default function Settings() {
     confidence_threshold: number;
     document_limit: number | null;
     rate_limit_delay: number;
+    remove_source_tag_on_resolve: boolean;
   }>({
     scan_mode: 'tags',
-    monitor_tags: ['Inbox', 'Todo'],
+    monitor_tags: ['Inbox'],
     saved_view_id: null,
     confidence_threshold: 70,
     document_limit: null,
     rate_limit_delay: 0.25,
+    remove_source_tag_on_resolve: true,
   });
   const [aqAvailableTags, setAqAvailableTags] = useState<Array<{ id: number; name: string }>>([]);
   const [aqSavedViews, setAqSavedViews] = useState<Array<{ id: number; name: string }>>([]);
@@ -262,11 +264,12 @@ export default function Settings() {
       ]);
       setAqSource({
         scan_mode: settingsResp.scan_mode ?? 'tags',
-        monitor_tags: settingsResp.monitor_tags ?? ['Inbox', 'Todo'],
+        monitor_tags: settingsResp.monitor_tags ?? ['Inbox'],
         saved_view_id: settingsResp.saved_view_id ?? null,
         confidence_threshold: settingsResp.confidence_threshold ?? 70,
         document_limit: settingsResp.document_limit ?? null,
         rate_limit_delay: settingsResp.rate_limit_delay ?? 0.25,
+        remove_source_tag_on_resolve: settingsResp.remove_source_tag_on_resolve ?? true,
       });
       setAqAvailableTags(tagsResp.tags ?? []);
       setAqSavedViews(viewsResp.saved_views ?? []);
@@ -748,8 +751,10 @@ export default function Settings() {
                             {tag}
                             <button
                               onClick={() => handleRemoveAqTag(tag)}
+                              disabled={aqSource.monitor_tags.length === 1}
                               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '1rem', color: 'var(--text-muted)' }}
                               aria-label={`Remove tag ${tag}`}
+                              title={aqSource.monitor_tags.length === 1 ? 'At least one intake tag is required' : undefined}
                             >
                               ×
                             </button>
@@ -846,6 +851,24 @@ export default function Settings() {
                         />
                       </div>
                     </div>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 12 }}>
+                      <input
+                        type="checkbox"
+                        checked={aqSource.remove_source_tag_on_resolve}
+                        onChange={(e) => setAqSource((prev) => ({
+                          ...prev,
+                          remove_source_tag_on_resolve: e.target.checked,
+                        }))}
+                        style={{ width: 'auto', marginTop: 3 }}
+                      />
+                      <span>
+                        <strong>Remove intake tags when resolved</strong>
+                        <span className="text-muted" style={{ display: 'block', fontSize: '0.78rem' }}>
+                          Removes the monitored tags from Paperless when an action is completed,
+                          dismissed, or classified as not requiring action.
+                        </span>
+                      </span>
+                    </label>
                   </details>
 
                   <div className="btn-group">

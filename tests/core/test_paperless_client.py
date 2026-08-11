@@ -77,6 +77,11 @@ def _mock_transport():
             return httpx.Response(
                 200, json={"results": [{"id": 1, "name": "Status", "data_type": "string"}]}
             )
+        if request.url.path == "/api/custom_fields/7/" and request.method == "PATCH":
+            return httpx.Response(
+                200,
+                json={"id": 7, "name": "Action Status", "extra_data": {"select_options": []}},
+            )
         if request.url.path == "/api/saved_views/":
             return httpx.Response(200, json={"results": [{"id": 1, "name": "Inbox"}]})
         return httpx.Response(404)
@@ -140,6 +145,17 @@ async def test_list_custom_fields(client):
     fields = await client.list_custom_fields()
     assert len(fields) == 1
     assert fields[0]["name"] == "Status"
+
+
+@pytest.mark.asyncio
+async def test_update_custom_field(client):
+    updated = await client.update_custom_field(
+        7,
+        {"extra_data": {"select_options": []}},
+    )
+
+    assert updated["id"] == 7
+    assert updated["name"] == "Action Status"
 
 
 @pytest.mark.asyncio

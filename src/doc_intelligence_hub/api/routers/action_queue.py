@@ -18,6 +18,7 @@ from doc_intelligence_hub.modules.action_queue.database import (
     VALID_ACTION_TYPES,
     Action,
     ActionFeedback,
+    QueueConfiguration,
     get_session,
     init_db,
 )
@@ -29,6 +30,16 @@ from doc_intelligence_hub.modules.action_queue.risk_scoring import (
 from doc_intelligence_hub.modules.statements.config import resolve_api_token
 
 router = APIRouter(prefix="/api/queue", tags=["action-queue"])
+
+_INITIAL_QUEUE_SETTINGS = {
+    "scan_mode": "tags",
+    "monitor_tags": list(action_queue_settings.monitor_tags),
+    "saved_view_id": None,
+    "confidence_threshold": action_queue_settings.confidence_threshold,
+    "document_limit": None,
+    "rate_limit_delay": action_queue_settings.rate_limit_delay,
+    "remove_source_tag_on_resolve": action_queue_settings.remove_source_tag_on_resolve,
+}
 
 
 class QueueRunRequest(BaseModel):
@@ -176,6 +187,7 @@ def _sync_action_queue_settings(request: Request) -> None:
     action_queue_settings.write_to_paperless = hub_settings.write_to_paperless
     action_queue_settings.ollama_url = hub_settings.ollama_url
     action_queue_settings.ollama_model = hub_settings.ollama_model
+    _get_queue_settings(request)
 
 
 def _build_preview_url(document_id: int | None) -> str | None:
@@ -287,24 +299,27 @@ async def queue_check_custom_fields(request: Request) -> dict[str, Any]:
 @router.post("/run")
 async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
     _sync_action_queue_settings(request)
+    source_settings = _get_queue_settings(request)
+    effective_limit = (
+        body.limit if body.limit is not None else source_settings.get("document_limit")
+    )
     started_at = datetime.utcnow().isoformat()
     request.app.state.last_queue_status = {
         "status": "running",
         "started_at": started_at,
         "dry_run": body.dry_run,
-        "limit": body.limit,
+        "limit": effective_limit,
         "read_only": not action_queue_settings.write_to_paperless,
     }
 
     # Apply persisted source settings when no explicit overrides are provided
     saved_view_id = body.saved_view_id
     if not saved_view_id and not body.tag_override and not body.document_id:
-        source_settings = _get_queue_settings(request)
         if source_settings.get("scan_mode") == "saved_view" and source_settings.get("saved_view_id"):
             saved_view_id = source_settings["saved_view_id"]
 
     result = await run_pipeline(
-        limit=body.limit,
+        limit=effective_limit,
         dry_run=body.dry_run,
         force=body.force,
         tag_override=body.tag_override,
@@ -352,7 +367,7 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
         "started_at": started_at,
         "finished_at": finished_at,
         "dry_run": body.dry_run,
-        "limit": body.limit,
+        "limit": effective_limit,
         "read_only": not action_queue_settings.write_to_paperless,
         "result": result,
         "database": _database_counts(),
@@ -368,6 +383,10 @@ async def queue_run_stream(
 ) -> StreamingResponse:
     """SSE endpoint that runs the pipeline and streams progress events."""
     _sync_action_queue_settings(request)
+    source_settings = _get_queue_settings(request)
+    effective_limit = (
+        body.limit if body.limit is not None else source_settings.get("document_limit")
+    )
 
     # Reject if a pipeline is already running
     current_status = getattr(request.app.state, "last_queue_status", None) or {}
@@ -381,7 +400,6 @@ async def queue_run_stream(
     # Apply persisted source settings when no explicit overrides are provided
     effective_saved_view_id = body.saved_view_id
     if not effective_saved_view_id and not body.tag_override and not body.document_id:
-        source_settings = _get_queue_settings(request)
         if source_settings.get("scan_mode") == "saved_view" and source_settings.get("saved_view_id"):
             effective_saved_view_id = source_settings["saved_view_id"]
 
@@ -391,7 +409,7 @@ async def queue_run_stream(
             "status": "running",
             "started_at": started_at,
             "dry_run": body.dry_run,
-            "limit": body.limit,
+            "limit": effective_limit,
             "read_only": not action_queue_settings.write_to_paperless,
         }
 
@@ -400,7 +418,7 @@ async def queue_run_stream(
 
         # Start the pipeline in a background task
         pipeline_task = asyncio.create_task(run_pipeline(
-            limit=body.limit,
+            limit=effective_limit,
             dry_run=body.dry_run,
             force=body.force,
             tag_override=body.tag_override,
@@ -1029,9 +1047,11 @@ async def backfill_paperless(request: Request, body: BackfillRequest) -> dict[st
             query = query.filter_by(status=body.status_filter)
 
         if not body.force:
-            # Only actions that were never successfully synced to Paperless
+            # Retry actions that were never synced or whose status has changed.
             query = query.filter(
-                (Action.last_synced_status == None) | (Action.last_synced_status == "")  # noqa: E711
+                (Action.last_synced_status == None)  # noqa: E711
+                | (Action.last_synced_status == "")
+                | (Action.last_synced_status != Action.status)
             )
 
         query = query.order_by(Action.created_at.asc())
@@ -1323,11 +1343,12 @@ async def acknowledge_action(request: Request, action_id: int) -> dict[str, Any]
 
 class QueueSettingsResponse(BaseModel):
     scan_mode: str = Field(default="tags", description="Default scan source: 'tags' or 'saved_view'")
-    monitor_tags: list[str] = Field(default_factory=lambda: ["Inbox", "Todo"])
+    monitor_tags: list[str] = Field(default_factory=lambda: ["Inbox"])
     saved_view_id: int | None = None
     confidence_threshold: int = 70
     document_limit: int | None = None
     rate_limit_delay: float = 0.25
+    remove_source_tag_on_resolve: bool = True
 
 
 class QueueSettingsUpdate(BaseModel):
@@ -1337,23 +1358,55 @@ class QueueSettingsUpdate(BaseModel):
     confidence_threshold: int | None = Field(default=None, ge=1, le=100)
     document_limit: int | None = Field(default=None, description="Set to 0 to clear (unlimited)")
     rate_limit_delay: float | None = Field(default=None, ge=0, le=10)
+    remove_source_tag_on_resolve: bool | None = None
 
 
 def _get_queue_settings(request: Request) -> dict:
-    """Get persisted queue settings from app state, with defaults."""
-    stored = getattr(request.app.state, "action_queue_source_settings", None)
-    if stored is None:
-        # Initialize from the action_queue module-level config
-        stored = {
-            "scan_mode": "tags",
-            "monitor_tags": action_queue_settings.monitor_tags,
-            "saved_view_id": None,
-            "confidence_threshold": action_queue_settings.confidence_threshold,
-            "document_limit": None,
-            "rate_limit_delay": action_queue_settings.rate_limit_delay,
+    """Load durable queue settings, creating them from environment defaults once."""
+    init_db()
+    db = get_session()
+    try:
+        stored = db.get(QueueConfiguration, 1)
+        if stored is None:
+            stored = QueueConfiguration(id=1, **_INITIAL_QUEUE_SETTINGS)
+            db.add(stored)
+            db.commit()
+            db.refresh(stored)
+
+        values = {
+            "scan_mode": stored.scan_mode,
+            "monitor_tags": list(stored.monitor_tags or []),
+            "saved_view_id": stored.saved_view_id,
+            "confidence_threshold": stored.confidence_threshold,
+            "document_limit": stored.document_limit,
+            "rate_limit_delay": stored.rate_limit_delay,
+            "remove_source_tag_on_resolve": stored.remove_source_tag_on_resolve,
         }
-        request.app.state.action_queue_source_settings = stored
-    return stored
+    finally:
+        db.close()
+
+    action_queue_settings.tags_to_monitor = ",".join(values["monitor_tags"])
+    action_queue_settings.confidence_threshold = values["confidence_threshold"]
+    action_queue_settings.rate_limit_delay = values["rate_limit_delay"]
+    action_queue_settings.remove_source_tag_on_resolve = values[
+        "remove_source_tag_on_resolve"
+    ]
+    return values
+
+
+def _persist_queue_settings(values: dict[str, Any]) -> None:
+    init_db()
+    db = get_session()
+    try:
+        stored = db.get(QueueConfiguration, 1)
+        if stored is None:
+            stored = QueueConfiguration(id=1)
+            db.add(stored)
+        for field_name, value in values.items():
+            setattr(stored, field_name, value)
+        db.commit()
+    finally:
+        db.close()
 
 
 @router.get("/settings")
@@ -1378,24 +1431,55 @@ async def update_queue_settings(request: Request, body: QueueSettingsUpdate) -> 
         changed.append("monitor_tags")
         # Also update the action_queue module settings so next run uses them
         action_queue_settings.tags_to_monitor = ",".join(current["monitor_tags"])
-    if body.saved_view_id is not None:
+    if "saved_view_id" in body.model_fields_set:
         # saved_view_id=0 means "clear"; any positive value means "set"
-        current["saved_view_id"] = body.saved_view_id if body.saved_view_id > 0 else None
+        current["saved_view_id"] = (
+            body.saved_view_id
+            if body.saved_view_id is not None and body.saved_view_id > 0
+            else None
+        )
         changed.append("saved_view_id")
     if body.confidence_threshold is not None:
         current["confidence_threshold"] = body.confidence_threshold
         changed.append("confidence_threshold")
         action_queue_settings.confidence_threshold = body.confidence_threshold
-    if body.document_limit is not None:
+    if "document_limit" in body.model_fields_set:
         # document_limit=0 means "clear" (unlimited); positive value means "set"
-        current["document_limit"] = body.document_limit if body.document_limit > 0 else None
+        current["document_limit"] = (
+            body.document_limit
+            if body.document_limit is not None and body.document_limit > 0
+            else None
+        )
         changed.append("document_limit")
     if body.rate_limit_delay is not None:
         current["rate_limit_delay"] = body.rate_limit_delay
         changed.append("rate_limit_delay")
-        action_queue_settings.rate_limit_delay = body.rate_limit_delay
+    if body.remove_source_tag_on_resolve is not None:
+        current["remove_source_tag_on_resolve"] = body.remove_source_tag_on_resolve
+        changed.append("remove_source_tag_on_resolve")
 
-    request.app.state.action_queue_source_settings = current
+    if current["scan_mode"] == "tags" and not current["monitor_tags"]:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=422,
+            detail="At least one monitored tag is required when scan mode is 'tags'",
+        )
+    if current["scan_mode"] == "saved_view" and current["saved_view_id"] is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=422,
+            detail="A saved view is required when scan mode is 'saved_view'",
+        )
+
+    _persist_queue_settings(current)
+    action_queue_settings.tags_to_monitor = ",".join(current["monitor_tags"])
+    action_queue_settings.confidence_threshold = current["confidence_threshold"]
+    action_queue_settings.rate_limit_delay = current["rate_limit_delay"]
+    action_queue_settings.remove_source_tag_on_resolve = current[
+        "remove_source_tag_on_resolve"
+    ]
     return {"status": "ok", "changed": changed, "settings": current}
 
 
