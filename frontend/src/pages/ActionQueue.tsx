@@ -25,6 +25,7 @@ import { getToastDuration } from '../lib/toast';
 import '../styles/action-queue.css';
 import '../styles/sortable-table.css';
 import { buildQueueRunBody } from './actionQueueRunBody';
+import { customReminderUntil, minimumReminderDate, reminderUntil } from './actionReminder';
 
 interface ActionQueueCheck {
   status?: string;
@@ -108,6 +109,83 @@ type ToastState = { message: string; tone?: 'success' | 'error' } | null;
 
 const ACTION_TYPE_OPTIONS = ['ARCHIVE', 'FILE', 'PAY', 'RESPOND', 'REVIEW', 'SCHEDULE', 'SHARE', 'SIGN', 'TASK'] as const;
 const URGENCY_OPTIONS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
+
+function ReminderMenu({
+  onSelect,
+  disabled,
+  size,
+}: {
+  onSelect: (until: string) => void;
+  disabled?: boolean;
+  size?: 'sm';
+}) {
+  const [open, setOpen] = useState(false);
+  const [customDate, setCustomDate] = useState('');
+  const minimumDate = minimumReminderDate();
+  const customUntil = customReminderUntil(customDate);
+
+  const choose = (until: string | null) => {
+    if (!until) return;
+    onSelect(until);
+    setOpen(false);
+    setCustomDate('');
+  };
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <Button size={size} disabled={disabled}>Remind me later…</Button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content className="aq-reminder-popover" sideOffset={5} align="start">
+          <div className="aq-reminder-title">When should this return?</div>
+          <Button size="sm" variant="ghost" onClick={() => choose(reminderUntil('tomorrow'))}>
+            Tomorrow at 9:00 AM
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => choose(reminderUntil('next_week'))}>
+            Next week at 9:00 AM
+          </Button>
+          <label className="aq-reminder-custom">
+            <span>Pick a date</span>
+            <input
+              type="date"
+              min={minimumDate}
+              value={customDate}
+              onChange={(event) => setCustomDate(event.target.value)}
+            />
+          </label>
+          <Button size="sm" variant="primary" disabled={!customUntil} onClick={() => choose(customUntil)}>
+            Set reminder
+          </Button>
+          <Popover.Arrow className="aq-type-picker-arrow" />
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+function statusDisplayLabel(status: string): string {
+  const labels: Record<string, string> = {
+    pending: 'Pending',
+    acknowledged: 'Acknowledged (legacy)',
+    completed: 'Done',
+    dismissed: "Won't do",
+    snoozed: 'Remind later',
+    not_an_action: 'No action needed',
+  };
+  return labels[status] ?? status;
+}
+
+function bulkActionLabel(action: string): string {
+  const labels: Record<string, string> = {
+    complete: 'mark as done',
+    dismiss: "mark as won't do",
+    not_an_action: 'mark as no action needed',
+    reopen: 'move back to pending',
+    snooze: 'remind later',
+  };
+  return labels[action] ?? action;
+}
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -625,8 +703,7 @@ export default function ActionQueue() {
     if (nextStatus === 'snoozed' && snoozedUntil) {
       payload.snoozed_until = snoozedUntil;
     }
-    const statusLabel = nextStatus === 'not_an_action' ? 'not an action' : nextStatus;
-    await patchAction(actionId, payload, `Action marked ${statusLabel}.`);
+    await patchAction(actionId, payload, `Action updated: ${statusDisplayLabel(nextStatus)}.`);
   };
 
   const quickChangeType = async (actionId: number, newType: string) => {
@@ -684,12 +761,12 @@ export default function ActionQueue() {
   };
 
   // [ARCH-01] Bulk action handler
-  const handleBulkAction = async (action: 'complete' | 'dismiss' | 'reopen' | 'acknowledge' | 'snooze') => {
+  const handleBulkAction = async (action: 'complete' | 'dismiss' | 'reopen' | 'not_an_action') => {
     const ids = Array.from(checkedIds);
     if (ids.length === 0) return;
 
     // Destructive actions require confirmation
-    if (action === 'dismiss') {
+    if (action === 'dismiss' || action === 'not_an_action') {
       setPendingBulkAction({ action, ids });
       return;
     }
@@ -697,17 +774,21 @@ export default function ActionQueue() {
     await executeBulkAction(action, ids);
   };
 
-  const executeBulkAction = async (action: string, ids: number[]) => {
+  const executeBulkAction = async (action: string, ids: number[], snoozedUntil?: string) => {
     setBusyKey(`bulk-${action}`);
     // [UX-10] Mark all affected items as processing
     setProcessingIds(new Set(ids));
     setBulkProgress({ done: 0, total: ids.length });
     try {
-      const result = await endpoints.actionQueue.bulk({ action, action_ids: ids });
+      const result = await endpoints.actionQueue.bulk({
+        action,
+        action_ids: ids,
+        ...(snoozedUntil ? { snoozed_until: snoozedUntil } : {}),
+      });
       setBulkProgress({ done: result.affected, total: ids.length });
       setCheckedIds(new Set());
       setToast({
-        message: `${result.affected} action${result.affected !== 1 ? 's' : ''} ${action}${action.endsWith('e') ? 'd' : 'ed'}.`,
+        message: `${result.affected} action${result.affected !== 1 ? 's' : ''} updated: ${bulkActionLabel(action)}.`,
       });
       await loadData();
     } catch (err) {
@@ -731,7 +812,7 @@ export default function ActionQueue() {
     try {
       await endpoints.actionQueue.feedback(String(actionId), { feedback_type: feedbackType });
       await loadData();
-      const label = feedbackType === 'not_an_action' ? 'Marked as not an action (feedback recorded).' : 'Feedback submitted.';
+      const label = feedbackType === 'not_an_action' ? 'Marked as no action needed. Feedback recorded.' : 'Feedback submitted.';
       setToast({ message: label });
     } catch (err) {
       setToast({ message: err instanceof Error ? err.message : 'Failed to submit feedback.', tone: 'error' });
@@ -763,7 +844,7 @@ export default function ActionQueue() {
 
   const statusOptions = useMemo(() => {
     const statuses = new Set(actions.map((a) => normalizeStatus(a.status)));
-    return Array.from(statuses).sort().map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) }));
+    return Array.from(statuses).sort().map((s) => ({ value: s, label: statusDisplayLabel(s) }));
   }, [actions]);
 
   const urgencyOptions = useMemo(() => {
@@ -912,7 +993,7 @@ export default function ActionQueue() {
         accessorFn: (row) => normalizeStatus(row.status),
         cell: (row) => {
           const normalized = normalizeStatus(row.status);
-          return <Badge tone={statusTone(normalized)}>{normalized}</Badge>;
+          return <Badge tone={statusTone(normalized)}>{statusDisplayLabel(normalized)}</Badge>;
         },
         filterOptions: statusOptions,
         width: '110px',
@@ -925,19 +1006,14 @@ export default function ActionQueue() {
           const normalized = normalizeStatus(row.status);
           return (
             <div className="btn-group">
-              {normalized === 'pending' && (
-                <Tooltip label="Mark as seen — you'll handle it later">
-                <Button
+              {['pending', 'acknowledged', 'snoozed'].includes(normalized) && (
+                <ReminderMenu
                   size="sm"
-                  variant="ghost"
-                  onClick={() => void updateAction(row.id, 'acknowledged')}
                   disabled={busyKey !== null}
-                >
-                  Acknowledge
-                </Button>
-                </Tooltip>
+                  onSelect={(until) => void updateAction(row.id, 'snoozed', until)}
+                />
               )}
-              {normalized !== 'completed' && (
+              {['pending', 'acknowledged', 'snoozed'].includes(normalized) && (
                 <Tooltip label="Mark as done — action has been resolved">
                 <Button
                   size="sm"
@@ -945,20 +1021,32 @@ export default function ActionQueue() {
                   onClick={() => void updateAction(row.id, 'completed')}
                   disabled={busyKey !== null}
                 >
-                  Complete
+                  Done
                 </Button>
                 </Tooltip>
               )}
-              {normalized !== 'dismissed' && normalized !== 'not_an_action' && (
-                <Tooltip label="Close without acting — removes from active queue">
+              {['pending', 'acknowledged', 'snoozed'].includes(normalized) && (
+                <Tooltip label="This was a real task, but you are choosing not to do it">
                 <Button
                   size="sm"
                   variant="ghost"
                   onClick={() => void updateAction(row.id, 'dismissed')}
                   disabled={busyKey !== null}
                 >
-                  Dismiss
+                  Won't do
                 </Button>
+                </Tooltip>
+              )}
+              {['pending', 'acknowledged', 'snoozed'].includes(normalized) && (
+                <Tooltip label="OWL incorrectly identified this document as requiring action">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void submitFeedback(row.id, 'not_an_action')}
+                    disabled={busyKey !== null}
+                  >
+                    No action needed
+                  </Button>
                 </Tooltip>
               )}
               {normalized !== 'pending' && (
@@ -975,7 +1063,7 @@ export default function ActionQueue() {
             </div>
           );
         },
-        width: '280px',
+        width: '460px',
       },
     ],
     [checkedIds, selectedActionId, processingIds, busyKey, actionTypeOptions, statusOptions, urgencyOptions],
@@ -1015,10 +1103,10 @@ export default function ActionQueue() {
 
       <StatGrid>
         <StatCard title="Pending" metric={counts.pending ?? 0} desc="Awaiting review or downstream completion." />
-        <StatCard title="Acknowledged" metric={counts.acknowledged ?? 0} desc="Seen, will handle later." />
-        <StatCard title="Snoozed" metric={counts.snoozed ?? 0} desc="Deferred, will resurface." />
-        <StatCard title="Completed" metric={counts.completed ?? 0} desc="Finished and written back." />
-        <StatCard title="Dismissed" metric={counts.dismissed ?? 0} desc="Closed without further action." />
+        <StatCard title="Acknowledged (legacy)" metric={counts.acknowledged ?? 0} desc="Previously saved without a return date." />
+        <StatCard title="Remind later" metric={counts.snoozed ?? 0} desc="Hidden until the selected reminder date." />
+        <StatCard title="Done" metric={counts.completed ?? 0} desc="Finished and written back." />
+        <StatCard title="Won't do" metric={counts.dismissed ?? 0} desc="Real tasks intentionally closed without acting." />
         <StatCard
           title="Pipeline status"
           metric={pipelineState.running ? 'RUNNING' : (status?.status ?? 'idle').toUpperCase()}
@@ -1236,11 +1324,11 @@ export default function ActionQueue() {
           onChange={(value) => setFilter(value as ActionFilter)}
           options={[
             { key: 'pending', label: `Pending (${pendingCount})` },
-            { key: 'acknowledged', label: `Acknowledged (${counts.acknowledged ?? 0})` },
-            { key: 'snoozed', label: `Snoozed (${counts.snoozed ?? 0})` },
-            { key: 'completed', label: `Completed (${counts.completed ?? 0})` },
-            { key: 'dismissed', label: `Dismissed (${counts.dismissed ?? 0})` },
-            { key: 'not_an_action', label: `Not an action (${counts.not_an_action ?? 0})` },
+            { key: 'acknowledged', label: `Acknowledged - legacy (${counts.acknowledged ?? 0})` },
+            { key: 'snoozed', label: `Remind later (${counts.snoozed ?? 0})` },
+            { key: 'completed', label: `Done (${counts.completed ?? 0})` },
+            { key: 'dismissed', label: `Won't do (${counts.dismissed ?? 0})` },
+            { key: 'not_an_action', label: `No action needed (${counts.not_an_action ?? 0})` },
             { key: 'all', label: `All (${totalActions})` },
           ]}
         />
@@ -1279,19 +1367,24 @@ export default function ActionQueue() {
                   })()}
                 </span>
                 <div className="btn-group">
-                  <Tooltip label="Mark as seen — you'll handle them later">
-                  <Button variant="ghost" size="sm" onClick={() => void handleBulkAction('acknowledge')} disabled={busyKey !== null}>
-                    Acknowledge
-                  </Button>
-                  </Tooltip>
+                  <ReminderMenu
+                    size="sm"
+                    disabled={busyKey !== null}
+                    onSelect={(until) => void executeBulkAction('snooze', Array.from(checkedIds), until)}
+                  />
                   <Tooltip label="Mark as done — actions have been resolved">
                   <Button variant="success" size="sm" onClick={() => void handleBulkAction('complete')} disabled={busyKey !== null}>
-                    Complete
+                    Done
                   </Button>
                   </Tooltip>
-                  <Tooltip label="Close without acting — removes from active queue">
+                  <Tooltip label="These are real tasks you are choosing not to do">
                   <Button variant="ghost" size="sm" onClick={() => void handleBulkAction('dismiss')} disabled={busyKey !== null}>
-                    Dismiss
+                    Won't do
+                  </Button>
+                  </Tooltip>
+                  <Tooltip label="OWL incorrectly identified these documents as requiring action">
+                  <Button variant="ghost" size="sm" onClick={() => void handleBulkAction('not_an_action')} disabled={busyKey !== null}>
+                    No action needed
                   </Button>
                   </Tooltip>
                   <Tooltip label="Move back to pending for review">
@@ -1621,9 +1714,9 @@ export default function ActionQueue() {
                 <div className="aq-meta-row"><span>Due date</span><span>{formatDate(selectedAction.due_date)}</span></div>
                 <div className="aq-meta-row"><span>Severity</span><span><Badge tone={selectedAction.severity === 'critical' ? 'danger' : selectedAction.severity === 'focus' ? 'warning' : 'success'}>{selectedAction.severity ?? 'safe'}</Badge></span></div>
                 <div className="aq-meta-row"><span>Created</span><span>{formatDateTime(selectedAction.created_at)}</span></div>
-                {selectedAction.completed_at && <div className="aq-meta-row"><span>Completed</span><span>{formatDateTime(selectedAction.completed_at)}</span></div>}
-                {selectedAction.acknowledged_at && <div className="aq-meta-row"><span>Acknowledged</span><span>{formatDateTime(selectedAction.acknowledged_at)}</span></div>}
-                {selectedAction.snoozed_until && <div className="aq-meta-row"><span>Snoozed until</span><span>{formatDateTime(selectedAction.snoozed_until)}</span></div>}
+                {selectedAction.completed_at && <div className="aq-meta-row"><span>Done</span><span>{formatDateTime(selectedAction.completed_at)}</span></div>}
+                {selectedAction.acknowledged_at && <div className="aq-meta-row"><span>Acknowledged (legacy)</span><span>{formatDateTime(selectedAction.acknowledged_at)}</span></div>}
+                {selectedAction.snoozed_until && <div className="aq-meta-row"><span>Remind on</span><span>{formatDateTime(selectedAction.snoozed_until)}</span></div>}
               </div>
 
               {selectedAction.confidence != null && (
@@ -1669,51 +1762,42 @@ export default function ActionQueue() {
 
                     {/* Lifecycle transition buttons */}
                     <div className="btn-group">
-                      {currentStatus === 'pending' && (
-                        <Tooltip label="Mark as seen — you'll handle it later">
-                        <Button
-                          variant="ghost"
-                          onClick={() => void updateAction(selectedAction.id, 'acknowledged')}
+                      {['pending', 'acknowledged', 'snoozed'].includes(currentStatus) && (
+                        <ReminderMenu
                           disabled={busyKey !== null}
-                        >
-                          Acknowledge
-                        </Button>
-                        </Tooltip>
+                          onSelect={(until) => void updateAction(selectedAction.id, 'snoozed', until)}
+                        />
                       )}
-                      {currentStatus !== 'completed' && (
+                      {['pending', 'acknowledged', 'snoozed'].includes(currentStatus) && (
                         <Tooltip label="Mark as done — action has been resolved">
                         <Button
                           variant="success"
                           onClick={() => void updateAction(selectedAction.id, 'completed')}
                           disabled={busyKey !== null}
                         >
-                          Complete
+                          Done
                         </Button>
                         </Tooltip>
                       )}
-                      {currentStatus !== 'snoozed' && currentStatus !== 'completed' && currentStatus !== 'not_an_action' && (
-                        <Tooltip label="Hide for 24 hours — it will resurface automatically">
-                        <Button
-                          variant="default"
-                          onClick={() => {
-                            // Snooze for 24 hours by default
-                            const snoozedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-                            void updateAction(selectedAction.id, 'snoozed', snoozedUntil);
-                          }}
-                          disabled={busyKey !== null}
-                        >
-                          Snooze 24h
-                        </Button>
-                        </Tooltip>
-                      )}
-                      {currentStatus !== 'dismissed' && currentStatus !== 'not_an_action' && (
-                        <Tooltip label="Close without acting — removes from active queue">
+                      {['pending', 'acknowledged', 'snoozed'].includes(currentStatus) && (
+                        <Tooltip label="This was a real task, but you are choosing not to do it">
                         <Button
                           variant="danger"
                           onClick={() => void updateAction(selectedAction.id, 'dismissed')}
                           disabled={busyKey !== null}
                         >
-                          Dismiss
+                          Won't do
+                        </Button>
+                        </Tooltip>
+                      )}
+                      {['pending', 'acknowledged', 'snoozed'].includes(currentStatus) && (
+                        <Tooltip label="OWL incorrectly identified this document as requiring action">
+                        <Button
+                          variant="ghost"
+                          onClick={() => void submitFeedback(selectedAction.id, 'not_an_action')}
+                          disabled={busyKey !== null}
+                        >
+                          No action needed
                         </Button>
                         </Tooltip>
                       )}
@@ -1730,21 +1814,6 @@ export default function ActionQueue() {
                       )}
                     </div>
 
-                    {/* Feedback: not an action (false positive signal) */}
-                    {currentStatus !== 'not_an_action' && (
-                      <div className="aq-feedback-section">
-                        <Tooltip label="Flag as false positive — this document doesn't need action">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => void submitFeedback(selectedAction.id, 'not_an_action')}
-                          disabled={busyKey !== null}
-                        >
-                          ⚑ Not an action
-                        </Button>
-                        </Tooltip>
-                      </div>
-                    )}
                   </div>
                 );
               })()}
@@ -1758,10 +1827,10 @@ export default function ActionQueue() {
         <div className="aq-modal-overlay" onClick={() => setPendingBulkAction(null)}>
           <div className="aq-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="aq-modal-title">
-              Confirm bulk {pendingBulkAction.action}
+              Confirm bulk action
             </div>
             <p className="aq-modal-desc">
-              Are you sure you want to <strong>{pendingBulkAction.action}</strong>{' '}
+              Are you sure you want to <strong>{bulkActionLabel(pendingBulkAction.action)}</strong>{' '}
               {pendingBulkAction.ids.length} action{pendingBulkAction.ids.length !== 1 ? 's' : ''}?
               This action cannot be easily undone in bulk.
             </p>
@@ -1772,7 +1841,7 @@ export default function ActionQueue() {
                 size="sm"
                 onClick={() => void confirmPendingBulkAction()}
               >
-                {pendingBulkAction.action === 'dismiss' ? 'Dismiss' : pendingBulkAction.action} {pendingBulkAction.ids.length} actions
+                {bulkActionLabel(pendingBulkAction.action)} for {pendingBulkAction.ids.length} actions
               </Button>
             </div>
           </div>
