@@ -466,11 +466,34 @@ class Pipeline:
                     logger.info(
                         "doc_id=%s: no action needed (confidence=%s%%)", doc_id, overall_confidence
                     )
+                    sync_error: Exception | None = None
+                    if settings.write_to_paperless:
+                        if self._enrichment_available:
+                            try:
+                                await self.enricher.sync_status(doc_id, "not_an_action")
+                            except Exception as exc:
+                                sync_error = exc
+                                logger.warning(
+                                    "doc_id=%s: no-action resolution stored but Paperless sync failed: %s",
+                                    doc_id,
+                                    exc,
+                                )
+                        else:
+                            sync_error = RuntimeError(
+                                "Paperless custom-field enrichment is unavailable"
+                            )
+                        if sync_error is not None:
+                            stats["enrichment_failed"] += 1
                     self._record_history(
                         db,
                         doc_id,
-                        success=True,
-                        disposition="no_action_needed",
+                        success=sync_error is None,
+                        disposition=(
+                            "no_action_needed"
+                            if sync_error is None
+                            else "no_action_sync_failed"
+                        ),
+                        error=str(sync_error) if sync_error is not None else None,
                         text_metrics=text_metrics,
                     )
                     stats["no_action"] += 1
@@ -653,7 +676,7 @@ class Pipeline:
                 limit=fetch_limit,
             )
 
-        # Default: use configured tags (Inbox, Todo)
+        # Default: use configured intake tags.
         tags = [tag_override] if tag_override else settings.monitor_tags
         console.print(f"[dim]Fetching documents tagged: {tags}[/dim]")
         return await self.paperless.list_documents(tags=tags, limit=fetch_limit)

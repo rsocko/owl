@@ -2,7 +2,18 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, Date, DateTime, Float, Integer, String, Text, create_engine
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    Integer,
+    String,
+    Text,
+    create_engine,
+)
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import settings
@@ -87,13 +98,29 @@ class ProcessingHistory(Base):
     error_message = Column(Text, nullable=True)
 
     # Disposition: what happened when we processed this document
-    # action_created | no_action_needed | unreadable | low_confidence
+    # action_created | no_action_needed | no_action_sync_failed | unreadable | low_confidence
     disposition = Column(String, default="action_created")
 
     # Basic text quality metrics (free data for future OCR quality pipeline)
     content_length = Column(Integer, nullable=True)  # chars in OCR text
     word_count = Column(Integer, nullable=True)
     text_quality_score = Column(Integer, nullable=True)  # 0-100 heuristic
+
+
+class QueueConfiguration(Base):
+    """Durable user configuration for Action Queue intake and resolution."""
+
+    __tablename__ = "action_queue_configuration"
+
+    id = Column(Integer, primary_key=True, default=1)
+    scan_mode = Column(String, nullable=False, default="tags")
+    monitor_tags = Column(JSON, nullable=False, default=lambda: ["Inbox"])
+    saved_view_id = Column(Integer, nullable=True)
+    confidence_threshold = Column(Integer, nullable=False, default=70)
+    document_limit = Column(Integer, nullable=True)
+    rate_limit_delay = Column(Float, nullable=False, default=0.25)
+    remove_source_tag_on_resolve = Column(Boolean, nullable=False, default=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 def get_engine():

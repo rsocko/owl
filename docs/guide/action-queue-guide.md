@@ -23,7 +23,7 @@ sequenceDiagram
     participant LLM as LLM (Bifrost)
     participant MC as Mission Control
 
-    P->>OWL: Documents in inbox (tagged "inbox" or "todo")
+    P->>OWL: Documents in inbox (tagged "Inbox" by default)
     OWL->>P: Fetch document metadata + OCR text
     OWL->>LLM: Classify document intent & urgency
     LLM-->>OWL: Action type, summary, due date, risk
@@ -113,7 +113,7 @@ CTAs can include a `url` (deep link to pay/sign/view) and/or `phone` number extr
 2. **OWL classifies** — On schedule or manual trigger, OWL fetches unprocessed documents and runs LLM classification.
 3. **Actions appear** — Each document gets an action type, urgency score (1–10), and human-readable summary.
 4. **User reviews** — In Mission Control, review the queue sorted by urgency. Complete, dismiss, or defer each item.
-5. **Enrichment** — Completed actions update Paperless custom fields (action type, status) for downstream filtering.
+5. **Enrichment** — Classifications and status changes update Paperless custom fields. Resolved documents have their configured intake tags removed by default.
 
 ## API Reference
 
@@ -245,6 +245,15 @@ Use the admin API to configure automatic runs:
 ### Write-Back Control
 
 Set `WRITE_TO_PAPERLESS=true` to allow OWL to enrich documents with custom fields. When `false`, OWL operates read-only and actions exist only in OWL's database.
+
+The default document source and resolution behavior are durable settings under
+**Settings → Action Queue — Document Source**. The default source is the
+Paperless `Inbox` tag; ad-hoc Custom Run filters do not change that default.
+
+When **Remove intake tags when resolved** is enabled (the default), OWL removes
+the configured monitored tags after an action is completed, dismissed, or
+classified as `not_an_action`. OWL uses the `Action Status` custom field for
+workflow state and does not add a separate `Todo` tag.
 
 ## Limitations
 

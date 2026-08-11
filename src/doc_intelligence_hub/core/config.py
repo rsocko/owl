@@ -21,7 +21,6 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +65,7 @@ class ActionQueueConfig(BaseModel):
     """Action queue module settings."""
 
     confidence_threshold: int = 70
-    tags_to_monitor: list[str] = Field(default_factory=lambda: ["Inbox", "Todo"])
+    tags_to_monitor: list[str] = Field(default_factory=lambda: ["Inbox"])
     write_to_paperless: bool = True
     database_url: str = "sqlite:///./data/actions.db"
     rate_limit_delay: float = 0.25

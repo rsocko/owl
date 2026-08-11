@@ -23,9 +23,9 @@ from typing import Any
 import httpx
 
 from doc_intelligence_hub.core.resilience import (
+    CircuitOpenError,
     PaperlessError,
     get_circuit_breaker,
-    CircuitOpenError,
 )
 
 logger = logging.getLogger(__name__)
@@ -369,6 +369,12 @@ class PaperlessClient:
     async def update_document(self, document_id: int, data: dict) -> dict:
         """Patch document metadata (title, correspondent, tags, etc)."""
         resp = await self._request("PATCH", f"/api/documents/{document_id}/", json=data)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def update_custom_field(self, field_id: int, data: dict) -> dict:
+        """Patch a Paperless custom field definition."""
+        resp = await self._request("PATCH", f"/api/custom_fields/{field_id}/", json=data)
         resp.raise_for_status()
         return resp.json()
 

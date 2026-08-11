@@ -43,6 +43,28 @@ class TestQueueStatus:
         assert data["database"]["completed"] == 1
 
 
+class TestQueueRunSettings:
+    def test_run_uses_persisted_document_limit(self, client, mock_paperless):
+        from unittest.mock import AsyncMock, patch
+
+        settings_resp = client.put(
+            "/api/queue/settings",
+            json={"document_limit": 12},
+        )
+        assert settings_resp.status_code == 200
+
+        mock_run = AsyncMock(return_value={"processed": 0})
+        with patch(
+            "doc_intelligence_hub.api.routers.action_queue.run_pipeline",
+            mock_run,
+        ):
+            resp = client.post("/api/queue/run", json={"dry_run": True})
+
+        assert resp.status_code == 200
+        assert resp.json()["limit"] == 12
+        assert mock_run.await_args.kwargs["limit"] == 12
+
+
 class TestListActions:
     """Tests for GET /api/queue/actions."""
 
@@ -115,6 +137,7 @@ class TestUpdateAction:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "dismissed"
+
 
     def test_reopen_action(self, client, seed_actions):
         actions = client.get("/api/queue/actions?status=completed").json()
@@ -207,6 +230,31 @@ class TestUpdateAction:
             json={"action_type": "invalid"},
         )
         assert resp.status_code == 422
+
+
+class TestActionFeedbackSync:
+    def test_not_an_action_feedback_updates_paperless(self, client, seed_actions):
+        from unittest.mock import AsyncMock, patch
+
+        action = client.get("/api/queue/actions?status=pending").json()["actions"][0]
+        action_id = action["id"]
+        mock_enricher = AsyncMock()
+        mock_enricher.sync_status = AsyncMock()
+
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
+            return_value=mock_enricher,
+        ):
+            resp = client.post(
+                f"/api/queue/actions/{action_id}/feedback",
+                json={"feedback_type": "not_an_action", "reason": "Informational only"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["action_status"] == "not_an_action"
+        mock_enricher.sync_status.assert_awaited_once_with(
+            action["document_id"], "not_an_action"
+        )
 
 
 class TestBulkAction:
@@ -368,6 +416,28 @@ class TestBackfill:
         finally:
             client.app.state.hub_settings.write_to_paperless = True
 
+    def test_backfill_includes_actions_with_unsynced_status(self, client, seed_actions):
+        from doc_intelligence_hub.modules.action_queue.database import Action, get_session
+
+        db = get_session()
+        try:
+            actions = db.query(Action).all()
+            for action in actions:
+                action.last_synced_status = action.status
+            target = actions[0]
+            target.status = "not_an_action"
+            db.commit()
+        finally:
+            db.close()
+
+        resp = client.post(
+            "/api/queue/actions/backfill",
+            json={"dry_run": True},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["would_sync"] == 1
+
 
 class TestQueueSettings:
     """Tests for GET/PUT /api/queue/settings."""
@@ -380,6 +450,7 @@ class TestQueueSettings:
         assert "monitor_tags" in data
         assert isinstance(data["monitor_tags"], list)
         assert data["confidence_threshold"] >= 1
+        assert data["remove_source_tag_on_resolve"] is True
 
     def test_update_settings_tags(self, client, mock_paperless):
         resp = client.put(
@@ -409,12 +480,58 @@ class TestQueueSettings:
         assert resp.status_code == 200
         assert resp.json()["settings"]["saved_view_id"] is None
 
+    def test_update_settings_clear_document_limit_with_null(self, client, mock_paperless):
+        client.put("/api/queue/settings", json={"document_limit": 25})
+
+        resp = client.put("/api/queue/settings", json={"document_limit": None})
+
+        assert resp.status_code == 200
+        assert resp.json()["settings"]["document_limit"] is None
+
     def test_update_settings_invalid_scan_mode(self, client, mock_paperless):
         resp = client.put(
             "/api/queue/settings",
             json={"scan_mode": "invalid"},
         )
         assert resp.status_code == 422
+
+    def test_tag_scan_mode_requires_at_least_one_tag(self, client, mock_paperless):
+        resp = client.put(
+            "/api/queue/settings",
+            json={"scan_mode": "tags", "monitor_tags": []},
+        )
+        assert resp.status_code == 422
+
+    def test_settings_are_reloaded_from_database(self, client, mock_paperless):
+        from doc_intelligence_hub.modules.action_queue.config import settings
+
+        resp = client.put(
+            "/api/queue/settings",
+            json={
+                "monitor_tags": ["Bills"],
+                "remove_source_tag_on_resolve": False,
+            },
+        )
+        assert resp.status_code == 200
+
+        settings.tags_to_monitor = "Temporary"
+        settings.remove_source_tag_on_resolve = True
+
+        persisted = client.get("/api/queue/settings").json()
+        assert persisted["monitor_tags"] == ["Bills"]
+        assert persisted["remove_source_tag_on_resolve"] is False
+        assert settings.monitor_tags == ["Bills"]
+        assert settings.remove_source_tag_on_resolve is False
+
+    def test_update_remove_source_tag_setting(self, client, mock_paperless):
+        resp = client.put(
+            "/api/queue/settings",
+            json={"remove_source_tag_on_resolve": False},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "remove_source_tag_on_resolve" in data["changed"]
+        assert data["settings"]["remove_source_tag_on_resolve"] is False
 
 
 class TestQueueMetadata:
