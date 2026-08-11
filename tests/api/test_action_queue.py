@@ -331,6 +331,28 @@ class TestBulkAction:
         assert resp.status_code == 404
 
 
+class TestFeedback:
+    def test_no_action_feedback_syncs_paperless_disposition(self, client, seed_actions):
+        from unittest.mock import AsyncMock, patch
+
+        action = client.get("/api/queue/actions?status=pending&limit=1").json()["actions"][0]
+        enricher = AsyncMock()
+
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
+            return_value=enricher,
+        ):
+            resp = client.post(
+                f"/api/queue/actions/{action['id']}/feedback",
+                json={"feedback_type": "not_an_action"},
+            )
+
+        assert resp.status_code == 200
+        enricher.sync_status.assert_awaited_once_with(
+            action["document_id"], "not_an_action"
+        )
+
+
 class TestBackfill:
     """Tests for POST /api/queue/actions/backfill."""
 
