@@ -310,7 +310,7 @@ export default function OrphansDupes() {
               <Card title="Orphan documents">
                 <div style={{ display: 'grid', gap: 8 }}>
                   <div style={{ fontSize: '1.6rem', fontWeight: 800 }}>{orphanCount}</div>
-                  <div className="text-muted">Unmatched documents from the triage queue.</div>
+                  <div className="text-muted">Unmatched documents that need review.</div>
                 </div>
               </Card>
               <Card title="Duplicate candidates">
@@ -356,7 +356,7 @@ export default function OrphansDupes() {
                   <Button size="sm" variant={orphanFilter === 'bill' ? 'primary' : undefined} onClick={() => setOrphanFilter('bill')}>Bills ({orphans.filter((o) => o.kind === 'bill').length})</Button>
                 </div>
                 {filteredOrphans.length === 0 ? (
-                  <EmptyState title="No orphaned documents found." desc="When unmatched EOBs or bills exist in the triage queue, they will appear here." />
+                  <EmptyState title="No orphaned documents found." desc="Unmatched EOBs or bills that need review will appear here." />
                 ) : (
                   <DataTable
                     rows={filteredOrphans}

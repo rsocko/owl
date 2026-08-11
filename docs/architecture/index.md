@@ -32,7 +32,7 @@ OWL is organized into independent, single-responsibility modules. Each module ow
 | **Action Queue** | Inbox-zero workflow — classify documents, recommend next actions |
 | **Statement Tracking** | Detect missing recurring statements (bills, pay stubs) |
 | **EOB Matching** | Match medical Explanation of Benefits to provider bills |
-| **Triage / Analysis** | LLM-powered document classification and correction suggestions |
+| **Needs Review** | Human review of uncertain matches, possible duplicates, grouping issues, and unmatched documents |
 | **Alerts** | Unified alerting engine consumed by all modules |
 
 ### Module Organization
@@ -75,7 +75,7 @@ flowchart TD
         aq[Action Queue]
         st[Statement Tracking]
         eob[EOB Matching]
-        triage[Triage / Analysis]
+        triage[Needs Review]
         alerts[Alerts Engine]
         ui[Built-in Dashboard]
     end
@@ -98,6 +98,46 @@ flowchart TD
 ```
 
 Each module independently queries Paperless via the shared client, processes documents through its own logic (potentially calling the LLM), and emits alerts. The built-in dashboard displays these directly; Mission Control polls the connector endpoints for integration into its own UI.
+
+## Action Queue vs. Needs Review
+
+The two workflows represent different kinds of human work:
+
+| Workflow | Question it answers | Typical items | User outcome |
+|----------|---------------------|---------------|--------------|
+| **Action Queue** | "What do I need to do because of this document?" | Pay a bill, sign a form, respond to a letter, schedule an appointment | Done, remind me later, won't do, or no action needed |
+| **Needs Review** | "Where does OWL need my judgment before it can proceed?" | Uncertain EOB matches, possible duplicates, grouping issues, unmatched documents | Accept, reject, correct, match, or review later |
+
+An item in Needs Review is not necessarily a task and may represent a relationship between several documents rather than one document. Conversely, reviewing a document can itself be a real-world task, so generic labels such as "Documents to Review" would overlap with the Action Queue.
+
+The workflows are currently implemented as independent modules. The target routing model below makes their intended relationship explicit: confident analysis bypasses Needs Review, while uncertain analysis goes there first and may produce an Action Queue item after a person resolves the uncertainty.
+
+```mermaid
+flowchart TD
+    D[Document received] --> Analyze[OWL analyzes document]
+
+    Analyze -->|Confident and no work required| File[File automatically]
+    Analyze -->|Confident and work required| Action[Action Queue]
+    Analyze -->|Uncertain interpretation| Review[Needs Review]
+
+    Review -->|User corrects or confirms| Reprocess[Re-evaluate document]
+    Review -->|No task required| File
+    Reprocess -->|Work required| Action
+    Reprocess -->|No work required| File
+
+    Action -->|Done| Finished[Finished]
+    Action -->|Remind later| Action
+    Action -->|Won't do| Finished
+```
+
+This establishes the product rule:
+
+- **Needs Review determines what OWL should believe.**
+- **Action Queue tracks what the user should do.**
+- Most confidently understood documents never enter Needs Review.
+- Resolving an item in Needs Review does not always create an action.
+
+The existing `/triage` route, API namespace, database tables, and internal code identifiers retain the `triage` name for compatibility. **Needs Review** is the user-facing product name.
 
 ## Technology Stack
 

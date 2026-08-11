@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as Popover from '@radix-ui/react-popover';
 import {
   Badge,
   Button,
@@ -157,6 +158,46 @@ function TriageDetailBreadcrumb({ item }: { item: TriageItem }) {
   );
 }
 
+function MoreActionsMenu({
+  onDismiss,
+  disabled,
+  size,
+}: {
+  onDismiss: () => void;
+  disabled?: boolean;
+  size?: 'sm';
+}) {
+  return (
+    <Popover.Root>
+      <Popover.Trigger asChild>
+        <Button size={size} variant="ghost" disabled={disabled}>More…</Button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content className="triage-more-popover" sideOffset={5} align="end">
+          <div className="triage-more-title">Other actions</div>
+          <Popover.Close asChild>
+            <Button size="sm" variant="ghost" onClick={onDismiss}>
+              Dismiss
+            </Button>
+          </Popover.Close>
+          <div className="triage-more-help">Close without deciding whether the suggestion is correct.</div>
+          <Popover.Arrow className="triage-more-arrow" />
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+function reviewActionLabel(action: string): string {
+  const labels: Record<string, string> = {
+    confirm: 'accept',
+    reject: 'reject',
+    defer: 'review later',
+    dismiss: 'dismiss',
+  };
+  return labels[action] ?? action;
+}
+
 // ------------------------------------------------------------------
 // Component
 // ------------------------------------------------------------------
@@ -210,7 +251,7 @@ export default function TriageQueue() {
       setItems(queueRes?.items ?? []);
       setStats(statsRes ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load triage queue.');
+      setError(err instanceof Error ? err.message : 'Failed to load items needing review.');
     } finally {
       setLoading(false);
     }
@@ -300,7 +341,11 @@ export default function TriageQueue() {
     setBusyAction(`${itemId}-${action}`);
     try {
       await endpoints.triage.resolve(itemId, { action });
-      setToast({ message: `Item ${action}ed.`, tone: 'success', undoId: itemId });
+      setToast({
+        message: action === 'confirm' ? 'Suggestion accepted.' : 'Suggestion rejected.',
+        tone: 'success',
+        undoId: itemId,
+      });
       await loadData();
     } catch (err) {
       setToast({ message: err instanceof Error ? err.message : 'Action failed.', tone: 'error' });
@@ -313,10 +358,10 @@ export default function TriageQueue() {
     setBusyAction(`${itemId}-defer`);
     try {
       await endpoints.triage.defer(itemId);
-      setToast({ message: 'Item deferred for 7 days.', tone: 'success', undoId: itemId });
+      setToast({ message: 'Review postponed for 7 days.', tone: 'success', undoId: itemId });
       await loadData();
     } catch (err) {
-      setToast({ message: err instanceof Error ? err.message : 'Defer failed.', tone: 'error' });
+      setToast({ message: err instanceof Error ? err.message : 'Unable to schedule another review.', tone: 'error' });
     } finally {
       setBusyAction(null);
     }
@@ -364,7 +409,7 @@ export default function TriageQueue() {
       const result = await endpoints.triage.bulk({ action, item_ids: ids });
       setCheckedIds(new Set());
       setToast({
-        message: `${result.affected} item${result.affected !== 1 ? 's' : ''} ${action}ed.`,
+        message: `${result.affected} item${result.affected !== 1 ? 's' : ''} updated: ${reviewActionLabel(action)}.`,
         tone: 'success',
       });
       await loadData();
@@ -392,12 +437,12 @@ export default function TriageQueue() {
     try {
       const result = await endpoints.triage.bulkConfirmThreshold({ min_confidence: thresholdPct });
       setToast({
-        message: `${result.affected} item${result.affected !== 1 ? 's' : ''} auto-confirmed (≥${thresholdPct}%).`,
+        message: `${result.affected} item${result.affected !== 1 ? 's' : ''} auto-accepted (≥${thresholdPct}%).`,
         tone: 'success',
       });
       await loadData();
     } catch (err) {
-      setToast({ message: err instanceof Error ? err.message : 'Threshold confirm failed.', tone: 'error' });
+      setToast({ message: err instanceof Error ? err.message : 'Auto-accept failed.', tone: 'error' });
     } finally {
       setBusyAction(null);
     }
@@ -468,9 +513,6 @@ export default function TriageQueue() {
       } else if (e.key.toLowerCase() === 'd' && selectedId) {
         e.preventDefault();
         void handleDefer(selectedId);
-      } else if (e.key.toLowerCase() === 'x' && selectedId) {
-        e.preventDefault();
-        void handleDismiss(selectedId);
       } else if (e.key.toLowerCase() === 'f') {
         e.preventDefault();
         setCollapsed((c) => !c);
@@ -496,8 +538,8 @@ export default function TriageQueue() {
   return (
     <>
       <PageHeader
-        title="Triage Queue"
-        desc="Review flagged items: low-confidence EOB matches, grouping anomalies, and orphan documents."
+        title="Needs Review"
+        desc="Help OWL resolve uncertain matches, possible duplicates, grouping issues, and unmatched documents."
       />
 
       {loading && !items.length ? (
@@ -518,7 +560,7 @@ export default function TriageQueue() {
               </button>
               <div className="triage-queue-header-content">
                 <div className="triage-queue-title">
-                  Triage Queue <span>{pendingCount} pending</span>
+                  Needs Review <span>{pendingCount} pending</span>
                 </div>
 
                 {/* Type filter tabs */}
@@ -541,22 +583,22 @@ export default function TriageQueue() {
                     onChange={(v) => setStatusFilter(v as StatusFilter)}
                     options={[
                       { key: 'pending', label: `Pending (${statusCounts.pending ?? 0})` },
-                      { key: 'deferred', label: `Deferred (${statusCounts.deferred ?? 0})` },
+                      { key: 'deferred', label: `Review later (${statusCounts.deferred ?? 0})` },
                       { key: 'resolved', label: `Resolved (${statusCounts.resolved ?? 0})` },
                     ]}
                   />
                 </div>
 
-                {/* Auto-confirm threshold */}
+                {/* Auto-accept threshold */}
                 {statusFilter === 'pending' && (
                   <div className="triage-threshold-bar">
                     <button
                       className="triage-auto-confirm-btn"
                       onClick={() => void handleBulkConfirmThreshold()}
                       disabled={busyAction !== null}
-                      title={`Auto-confirm all EOB matches with confidence ≥ ${thresholdPct}%`}
+                      title={`Auto-accept all EOB matches with confidence ≥ ${thresholdPct}%`}
                     >
-                      ⚡ Auto-confirm ≥
+                      ⚡ Auto-accept ≥
                     </button>
                     <input
                       type="number"
@@ -591,17 +633,19 @@ export default function TriageQueue() {
                     </span>
                     <div className="btn-group">
                       <Button variant="success" size="sm" onClick={() => void handleBulkAction('confirm')} disabled={busyAction !== null}>
-                        Confirm
+                        Accept
                       </Button>
                       <Button variant="danger" size="sm" onClick={() => void handleBulkAction('reject')} disabled={busyAction !== null}>
                         Reject
                       </Button>
                       <Button size="sm" onClick={() => void handleBulkAction('defer')} disabled={busyAction !== null}>
-                        Defer
+                        Review later
                       </Button>
-                      <Button size="sm" onClick={() => void handleBulkAction('dismiss')} disabled={busyAction !== null}>
-                        Dismiss
-                      </Button>
+                      <MoreActionsMenu
+                        size="sm"
+                        disabled={busyAction !== null}
+                        onDismiss={() => void handleBulkAction('dismiss')}
+                      />
                       <Button size="sm" onClick={() => setCheckedIds(new Set())} disabled={busyAction !== null}>
                         Clear
                       </Button>
@@ -738,9 +782,9 @@ export default function TriageQueue() {
                       variant="success"
                       onClick={() => void handleResolve(selectedItem.id, 'confirm')}
                       disabled={busyAction !== null || selectedItem.status !== 'pending'}
-                      title="Confirm (Y)"
+                      title="Accept (Y)"
                     >
-                      Confirm
+                      Accept
                     </Button>
                     <Button
                       variant="danger"
@@ -753,18 +797,14 @@ export default function TriageQueue() {
                     <Button
                       onClick={() => void handleDefer(selectedItem.id)}
                       disabled={busyAction !== null || selectedItem.status !== 'pending'}
-                      title="Defer (D)"
+                      title="Review later (D)"
                     >
-                      Defer
+                      Review later
                     </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={() => void handleDismiss(selectedItem.id)}
+                    <MoreActionsMenu
                       disabled={busyAction !== null || selectedItem.status !== 'pending'}
-                      title="Dismiss (X)"
-                    >
-                      Dismiss
-                    </Button>
+                      onDismiss={() => void handleDismiss(selectedItem.id)}
+                    />
                   </div>
                 </div>
 
@@ -801,7 +841,7 @@ export default function TriageQueue() {
                     </div>
                     {selectedItem.deferred_until && (
                       <div className="triage-detail-row">
-                        <span>Deferred until</span>
+                        <span>Review after</span>
                         <strong>{new Date(selectedItem.deferred_until).toLocaleString()}</strong>
                       </div>
                     )}
@@ -869,8 +909,8 @@ export default function TriageQueue() {
               )
             ) : (
               <EmptyState
-                title="No triage item selected"
-                desc="Choose a queue item to inspect its details, metadata, and available actions."
+                title="No review item selected"
+                desc="Choose an item to inspect its details, metadata, and available actions."
               />
             )}
           </section>
@@ -882,10 +922,10 @@ export default function TriageQueue() {
         <div className="triage-modal-overlay" onClick={() => setPendingBulkAction(null)}>
           <div className="triage-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="triage-modal-title">
-              Confirm bulk {pendingBulkAction.action}
+              Confirm bulk action
             </div>
             <p className="triage-modal-desc">
-              Are you sure you want to <strong>{pendingBulkAction.action}</strong>{' '}
+              Are you sure you want to <strong>{reviewActionLabel(pendingBulkAction.action)}</strong>{' '}
               {pendingBulkAction.ids.length} item{pendingBulkAction.ids.length !== 1 ? 's' : ''}?
               This action cannot be easily undone in bulk.
             </p>
@@ -903,15 +943,15 @@ export default function TriageQueue() {
         </div>
       )}
 
-      {/* Confirmation modal for threshold auto-confirm */}
+      {/* Confirmation modal for threshold auto-accept */}
       {pendingThreshold && (
         <div className="triage-modal-overlay" onClick={() => setPendingThreshold(false)}>
           <div className="triage-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="triage-modal-title">
-              Auto-confirm matches ≥ {thresholdPct}%
+              Auto-accept matches ≥ {thresholdPct}%
             </div>
             <p className="triage-modal-desc">
-              This will confirm <strong>all pending EOB matches</strong> with a confidence score
+              This will accept <strong>all pending EOB matches</strong> with a confidence score
               of {thresholdPct}% or higher. This may affect many items.
             </p>
             <div className="triage-modal-actions">
@@ -921,7 +961,7 @@ export default function TriageQueue() {
                 size="sm"
                 onClick={() => void executeBulkConfirmThreshold()}
               >
-                ⚡ Auto-confirm
+                ⚡ Auto-accept
               </Button>
             </div>
           </div>
@@ -938,10 +978,9 @@ export default function TriageQueue() {
             <div className="triage-shortcuts-grid">
               <div className="triage-shortcut-section">
                 <div className="triage-shortcut-section-title">Actions</div>
-                <div className="triage-shortcut-row"><kbd>Y</kbd><span>Confirm selected item</span></div>
+                <div className="triage-shortcut-row"><kbd>Y</kbd><span>Accept selected item</span></div>
                 <div className="triage-shortcut-row"><kbd>N</kbd><span>Reject selected item</span></div>
-                <div className="triage-shortcut-row"><kbd>D</kbd><span>Defer for 7 days</span></div>
-                <div className="triage-shortcut-row"><kbd>X</kbd><span>Dismiss item</span></div>
+                <div className="triage-shortcut-row"><kbd>D</kbd><span>Review again in 7 days</span></div>
               </div>
               <div className="triage-shortcut-section">
                 <div className="triage-shortcut-section-title">Navigation</div>
@@ -965,7 +1004,7 @@ export default function TriageQueue() {
 
       {/* Keyboard hint bar */}
       <div className="triage-keyboard-hint">
-        <kbd>Y</kbd> Confirm · <kbd>N</kbd> Reject · <kbd>S</kbd> Skip · <kbd>D</kbd> Defer · <kbd>X</kbd> Dismiss · <kbd>↑↓</kbd> Navigate · <kbd>F</kbd> Toggle queue ·{' '}
+        <kbd>Y</kbd> Accept · <kbd>N</kbd> Reject · <kbd>S</kbd> Skip · <kbd>D</kbd> Review later · <kbd>↑↓</kbd> Navigate · <kbd>F</kbd> Toggle queue ·{' '}
         <button type="button" className="triage-shortcuts-link" onClick={() => setShowShortcuts(true)}>
           <kbd>?</kbd> All shortcuts
         </button>
