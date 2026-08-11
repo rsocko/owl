@@ -42,7 +42,7 @@ Please change the parent <Route path="${e}"> to <Route path="${e===`/`?`*`:`${e}
   .${of} .${of} {
     margin-right: 0 ${r};
   }
-  
+
   body[${Ff}] {
     ${cf}: ${s}px;
   }
