@@ -850,6 +850,96 @@ class RefreshMetadataRequest(BaseModel):
     )
 
 
+def _resolve_metadata_name(value: Any, names: dict[int, str]) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return names.get(value, str(value))
+    return str(value) or None
+
+
+def _resolve_document_tags(document: dict[str, Any], tags: dict[int, str]) -> list[str]:
+    tag_names = document.get("tag_names")
+    if isinstance(tag_names, list):
+        return [str(tag) for tag in tag_names]
+
+    raw_tags = document.get("tags")
+    if not isinstance(raw_tags, list):
+        return []
+    return [
+        tags.get(tag, str(tag)) if isinstance(tag, int) else str(tag)
+        for tag in raw_tags
+    ]
+
+
+def _replace_action_metadata(
+    action: Action,
+    document: dict[str, Any],
+    correspondents: dict[int, str],
+    tags: dict[int, str],
+    document_types: dict[int, str],
+) -> None:
+    """Replace an action's Paperless snapshot with current document metadata."""
+    document_title = document.get("title")
+    if document_title is not None:
+        action.document_title = str(document_title)
+    action.correspondent = _resolve_metadata_name(
+        document.get("correspondent"), correspondents
+    )
+    action.document_date = _parse_date_safe(document.get("created"))
+    action.document_type = _resolve_metadata_name(
+        document.get("document_type"), document_types
+    )
+    action.tags = _resolve_document_tags(document, tags)
+    action.updated_at = datetime.utcnow()
+    action.version = (action.version or 1) + 1
+
+
+@router.get("/actions/{action_id}/refresh")
+async def refresh_action_from_paperless(request: Request, action_id: int) -> dict[str, Any]:
+    """Replace one action's stored document metadata with the current Paperless values."""
+    from fastapi import HTTPException
+
+    from doc_intelligence_hub.core.paperless import PaperlessClient
+
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        action = db.query(Action).filter_by(id=action_id).first()
+        if not action:
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+
+        client = PaperlessClient(
+            base_url=action_queue_settings.paperless_url,
+            token=action_queue_settings.paperless_api_token,
+        )
+        try:
+            correspondents, tags, document_types = await client.fetch_all_metadata()
+            document = await client.get_document(action.document_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Failed to refresh action {action_id} from Paperless "
+                    f"document {action.document_id}: {exc}"
+                ),
+            ) from exc
+
+        _replace_action_metadata(
+            action,
+            document,
+            correspondents,
+            tags,
+            document_types,
+        )
+        db.commit()
+        db.refresh(action)
+        return _serialize_action(action)
+    finally:
+        db.close()
+
+
 @router.post("/actions/refresh-metadata")
 async def refresh_metadata_from_paperless(
     request: Request, body: RefreshMetadataRequest

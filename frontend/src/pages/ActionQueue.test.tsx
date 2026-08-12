@@ -5,10 +5,11 @@ import { customReminderUntil, reminderUntil } from './actionReminder';
 import { buildQueueRunBody } from './actionQueueRunBody';
 import { TooltipProvider } from '../components/ui';
 
-const { statusMock, actionsMock, updateActionMock, feedbackMock } = vi.hoisted(() => ({
+const { statusMock, actionsMock, updateActionMock, refreshActionMock, feedbackMock } = vi.hoisted(() => ({
   statusMock: vi.fn(),
   actionsMock: vi.fn(),
   updateActionMock: vi.fn(),
+  refreshActionMock: vi.fn(),
   feedbackMock: vi.fn(),
 }));
 
@@ -26,8 +27,10 @@ vi.mock('../lib/api', () => ({
       status: statusMock,
       actions: actionsMock,
       updateAction: updateActionMock,
+      refreshAction: refreshActionMock,
       bulk: vi.fn(),
       backfill: vi.fn(),
+      refreshMetadata: vi.fn(),
       feedback: feedbackMock,
       settings: vi.fn(),
       updateSettings: vi.fn(),
@@ -78,6 +81,7 @@ beforeEach(() => {
   statusMock.mockReset();
   actionsMock.mockReset();
   updateActionMock.mockReset();
+  refreshActionMock.mockReset();
   feedbackMock.mockReset();
   statusMock.mockResolvedValue({
     status: 'idle',
@@ -96,6 +100,15 @@ beforeEach(() => {
     .mockResolvedValueOnce({ actions: [initialAction], total: 1 })
     .mockResolvedValueOnce({ actions: [updatedAction], total: 1 });
   updateActionMock.mockResolvedValue(updatedAction);
+  refreshActionMock.mockResolvedValue({
+    ...initialAction,
+    document_title: 'Corrected Electric Statement',
+    correspondent: 'Updated Utility',
+    document_date: '2026-02-03',
+    document_type: 'Statement',
+    tags: ['Reviewed'],
+    version: 4,
+  });
   feedbackMock.mockResolvedValue({});
 });
 
@@ -162,6 +175,24 @@ describe('ActionQueue', () => {
       'Document Amount is kept; Action Type, Due Date, Urgency, Summary, and Action Count are cleared.',
     );
     expect(feedbackMock).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the selected action metadata from Paperless', async () => {
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /pay electric bill/i })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /pay electric bill/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh from Paperless' }));
+
+    await waitFor(() => {
+      expect(refreshActionMock).toHaveBeenCalledWith('1');
+      expect(screen.getByText('Corrected Electric Statement')).toBeTruthy();
+      expect(screen.getAllByText('Updated Utility')).not.toHaveLength(0);
+      expect(screen.getAllByText('Statement')).not.toHaveLength(0);
+      expect(screen.getAllByText('Reviewed')).not.toHaveLength(0);
+    });
   });
 });
 
