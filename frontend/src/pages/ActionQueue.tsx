@@ -612,6 +612,28 @@ export default function ActionQueue() {
     }
   };
 
+  const refreshAction = async (actionId: number) => {
+    const key = `refresh-action-${actionId}`;
+    setBusyKey(key);
+    try {
+      const updatedAction = await endpoints.actionQueue.refreshAction(String(actionId)) as ActionItem;
+      setActions((current) => current.map((action) => (
+        action.id === actionId ? updatedAction : action
+      )));
+      setCachedAction((current) => (
+        current?.id === actionId ? updatedAction : current
+      ));
+      setToast({ message: 'Document metadata refreshed from Paperless.', tone: 'success' });
+    } catch (err) {
+      setToast({
+        message: err instanceof Error ? err.message : 'Document metadata refresh failed.',
+        tone: 'error',
+      });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const loadCustomRunMetadata = async () => {
     if (customRunMetadata.loaded) return;
     try {
@@ -1716,9 +1738,29 @@ export default function ActionQueue() {
                 </div>
               )}
 
+              <div className="aq-edit-header">
+                <div className="section-title">Document metadata</div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void refreshAction(selectedAction.id)}
+                  disabled={busyKey !== null}
+                  aria-busy={busyKey === `refresh-action-${selectedAction.id}`}
+                >
+                  {busyKey === `refresh-action-${selectedAction.id}` && (
+                    <span className="aq-spinner" aria-hidden="true" />
+                  )}
+                  {busyKey === `refresh-action-${selectedAction.id}`
+                    ? 'Refreshing…'
+                    : 'Refresh from Paperless'}
+                </Button>
+              </div>
               <div className="aq-meta-list">
                 <div className="aq-meta-row"><span>Document</span><span>{selectedAction.document_title || `#${selectedAction.document_id ?? '—'}`}</span></div>
                 <div className="aq-meta-row"><span>Correspondent</span><span>{selectedAction.correspondent || '—'}</span></div>
+                <div className="aq-meta-row"><span>Document date</span><span>{formatDate(selectedAction.document_date)}</span></div>
+                <div className="aq-meta-row"><span>Document type</span><span>{selectedAction.document_type || '—'}</span></div>
+                <div className="aq-meta-row"><span>Tags</span><span>{selectedAction.tags?.join(', ') || '—'}</span></div>
                 <div className="aq-meta-row"><span>Amount</span><span>{formatCurrency(selectedAction.amount)}</span></div>
                 <div className="aq-meta-row"><span>Due date</span><span>{formatDate(selectedAction.due_date)}</span></div>
                 <div className="aq-meta-row"><span>Severity</span><span><Badge tone={selectedAction.severity === 'critical' ? 'danger' : selectedAction.severity === 'focus' ? 'warning' : 'success'}>{selectedAction.severity ?? 'safe'}</Badge></span></div>
