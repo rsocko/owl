@@ -498,3 +498,86 @@ class TestRefreshMetadata:
             assert action["document_type"] == "Bill"
             assert action["tags"] is not None
             assert len(action["tags"]) > 0
+
+
+class TestRefreshAction:
+    """Tests for GET /api/queue/actions/{id}/refresh."""
+
+    def test_refresh_action_replaces_snapshot(self, seeded_client):
+        from unittest.mock import AsyncMock, patch
+
+        mock_fetch = AsyncMock(return_value=(
+            {2: "Updated Utility"},
+            {12: "Reviewed"},
+            {6: "Statement"},
+        ))
+        mock_get_doc = AsyncMock(return_value={
+            "id": 42,
+            "title": "Corrected Electric Statement",
+            "created": "2026-02-03",
+            "document_type": 6,
+            "tags": [12],
+            "correspondent": 2,
+        })
+
+        with patch(
+            "doc_intelligence_hub.core.paperless.PaperlessClient.fetch_all_metadata",
+            mock_fetch,
+        ), patch(
+            "doc_intelligence_hub.core.paperless.PaperlessClient.get_document",
+            mock_get_doc,
+        ):
+            resp = seeded_client.get("/api/queue/actions/1/refresh")
+
+        assert resp.status_code == 200
+        action = resp.json()
+        assert action["document_title"] == "Corrected Electric Statement"
+        assert action["correspondent"] == "Updated Utility"
+        assert action["document_date"] == "2026-02-03"
+        assert action["document_type"] == "Statement"
+        assert action["tags"] == ["Reviewed"]
+        assert action["version"] == 2
+
+    def test_refresh_action_clears_removed_metadata(self, seeded_client):
+        from unittest.mock import AsyncMock, patch
+
+        mock_fetch = AsyncMock(return_value=({}, {}, {}))
+        mock_get_doc = AsyncMock(return_value={
+            "id": 42,
+            "title": "Electric Bill",
+            "created": None,
+            "document_type": None,
+            "tag_names": [],
+            "correspondent": None,
+        })
+
+        with patch(
+            "doc_intelligence_hub.core.paperless.PaperlessClient.fetch_all_metadata",
+            mock_fetch,
+        ), patch(
+            "doc_intelligence_hub.core.paperless.PaperlessClient.get_document",
+            mock_get_doc,
+        ):
+            resp = seeded_client.get("/api/queue/actions/1/refresh")
+
+        assert resp.status_code == 200
+        action = resp.json()
+        assert action["correspondent"] is None
+        assert action["document_date"] is None
+        assert action["document_type"] is None
+        assert action["tags"] == []
+
+    def test_refresh_action_not_found(self, seeded_client):
+        resp = seeded_client.get("/api/queue/actions/999/refresh")
+        assert resp.status_code == 404
+
+    def test_refresh_action_surfaces_paperless_failure(self, seeded_client):
+        from unittest.mock import AsyncMock, patch
+
+        with patch(
+            "doc_intelligence_hub.core.paperless.PaperlessClient.fetch_all_metadata",
+            AsyncMock(side_effect=RuntimeError("Paperless unavailable")),
+        ):
+            resp = seeded_client.get("/api/queue/actions/1/refresh")
+
+        assert resp.status_code == 502
