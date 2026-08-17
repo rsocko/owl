@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
+import type { ColumnFiltersState, SortingState } from '@tanstack/react-table';
 import {
   Badge,
   Button,
@@ -299,6 +300,8 @@ export default function ActionQueue() {
   const [actions, setActions] = useState<ActionItem[]>([]);
   const [filter, setFilter] = useState<ActionFilter>('pending');
   const [search, setSearch] = useState('');
+  const [tableSorting, setTableSorting] = useState<SortingState>([]);
+  const [tableColumnFilters, setTableColumnFilters] = useState<ColumnFiltersState>([]);
   const [selectedActionId, setSelectedActionId] = useState<number | null>(null);
   const [drawerExpanded, setDrawerExpanded] = useState(false);
   const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
@@ -1464,6 +1467,10 @@ export default function ActionQueue() {
                 rowKey={(row) => String(row.id)}
                 emptyLabel="No actions found"
                 columns={actionTableColumns}
+                sorting={tableSorting}
+                onSortingChange={setTableSorting}
+                columnFilters={tableColumnFilters}
+                onColumnFiltersChange={setTableColumnFilters}
               />
             )}
           </Card>
