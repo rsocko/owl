@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import ActionQueue from './ActionQueue';
 import { customReminderUntil, reminderUntil } from './actionReminder';
 import { buildQueueRunBody } from './actionQueueRunBody';
@@ -76,6 +76,16 @@ const updatedAction = {
   amount: 123.45,
   urgency: 'HIGH',
 };
+
+beforeAll(() => {
+  if (!globalThis.ResizeObserver) {
+    globalThis.ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+  }
+});
 
 beforeEach(() => {
   statusMock.mockReset();
@@ -193,6 +203,24 @@ describe('ActionQueue', () => {
       expect(screen.getAllByText('Statement')).not.toHaveLength(0);
       expect(screen.getAllByText('Reviewed')).not.toHaveLength(0);
     });
+  });
+
+  it('keeps table sorting and column filters after taking action on an item', async () => {
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    const amountSort = await screen.findByRole('button', { name: 'Sort by Amount' });
+    fireEvent.click(amountSort);
+    fireEvent.click(screen.getByRole('button', { name: 'Filter by Type' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'PAY' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    await waitFor(() => {
+      expect(updateActionMock).toHaveBeenCalled();
+      expect(screen.getByText('No results match the current filters')).toBeTruthy();
+    });
+
+    expect(screen.getByRole('button', { name: 'Sort by Amount' })).toHaveTextContent('▼');
+    expect(screen.queryByText('Call utility company')).toBeNull();
   });
 });
 

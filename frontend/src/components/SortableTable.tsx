@@ -9,6 +9,7 @@ import {
   type SortingState,
   type ColumnFiltersState,
   type HeaderContext,
+  type OnChangeFn,
 } from '@tanstack/react-table';
 import * as Popover from '@radix-ui/react-popover';
 import { EmptyState } from './ui';
@@ -105,12 +106,27 @@ interface SortableTableProps<T> {
   columns: SortableColumnDef<T>[];
   rowKey: (row: T) => string;
   emptyLabel?: string;
+  sorting?: SortingState;
+  onSortingChange?: OnChangeFn<SortingState>;
+  columnFilters?: ColumnFiltersState;
+  onColumnFiltersChange?: OnChangeFn<ColumnFiltersState>;
   /** Optional extra content above each row (e.g. checkbox column) handled via columns */
 }
 
-export function SortableTable<T>({ data, columns, rowKey, emptyLabel = 'No data' }: SortableTableProps<T>) {
-  const [sorting, setSorting] = useState<SortingState>([]);
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+export function SortableTable<T>({
+  data,
+  columns,
+  rowKey,
+  emptyLabel = 'No data',
+  sorting: controlledSorting,
+  onSortingChange,
+  columnFilters: controlledColumnFilters,
+  onColumnFiltersChange,
+}: SortableTableProps<T>) {
+  const [internalSorting, setInternalSorting] = useState<SortingState>([]);
+  const [internalColumnFilters, setInternalColumnFilters] = useState<ColumnFiltersState>([]);
+  const sorting = controlledSorting ?? internalSorting;
+  const columnFilters = controlledColumnFilters ?? internalColumnFilters;
 
   const tanstackColumns: ColumnDef<T, unknown>[] = useMemo(
     () =>
@@ -144,8 +160,8 @@ export function SortableTable<T>({ data, columns, rowKey, emptyLabel = 'No data'
     data,
     columns: tanstackColumns,
     state: { sorting, columnFilters },
-    onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
+    onSortingChange: onSortingChange ?? setInternalSorting,
+    onColumnFiltersChange: onColumnFiltersChange ?? setInternalColumnFilters,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
