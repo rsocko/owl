@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
     "lint": "oxlint",
+    "normalize:lockfile-sources": "node scripts/normalize-lockfile-sources.mjs",
+    "check:lockfile-sources": "node scripts/check-lockfile-sources.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "preview": "vite preview"

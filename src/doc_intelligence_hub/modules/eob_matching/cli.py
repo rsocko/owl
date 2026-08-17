@@ -351,8 +351,8 @@ def purge_stale(ctx, dry_run):
 @click.option(
     "--bifrost-url",
     envvar="LLM_BASE_URL",
-    default="https://service-001.example.invalid/openai/v1",
-    help="Bifrost gateway URL",
+    default="http://localhost:11434/v1",
+    help="OpenAI-compatible LLM endpoint URL",
 )
 def benchmark(
     models,

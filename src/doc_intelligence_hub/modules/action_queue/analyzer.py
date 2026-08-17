@@ -109,9 +109,16 @@ Document content:
 # ------------------------------------------------------------------
 
 VALID_CTA_IDS = {
-    "pay-online", "open-document", "call-provider", "email-provider",
-    "schedule-event", "sign-document", "share-document", "archive",
-    "review-document", "create-task",
+    "pay-online",
+    "open-document",
+    "call-provider",
+    "email-provider",
+    "schedule-event",
+    "sign-document",
+    "share-document",
+    "archive",
+    "review-document",
+    "create-task",
 }
 
 # Default CTA mapping by action type (fallback when AI doesn't provide one)
@@ -138,7 +145,9 @@ def _normalize_cta(raw_cta: dict | str | None, action: dict, assessment: dict) -
     extracted = assessment.get("extracted_data", {}) or {}
 
     # Start with a default CTA for this action type
-    default = _DEFAULT_CTA_BY_ACTION_TYPE.get(action_type, {"id": "review-document", "label": "Review"})
+    default = _DEFAULT_CTA_BY_ACTION_TYPE.get(
+        action_type, {"id": "review-document", "label": "Review"}
+    )
     result = {**default, "url": None, "phone": None, "metadata": {}}
 
     # If the AI returned a structured CTA, merge it
@@ -289,7 +298,20 @@ class OllamaAnalyzer:
         """Validate the multi-action response format."""
         assessment = data.get("document_assessment", {})
 
-        valid_types = {"PAY", "RESPOND", "FILE", "REVIEW", "SHARE", "SCHEDULE", "SIGN", "ARCHIVE", "CANCEL", "RENEW", "DISPUTE", "TASK"}
+        valid_types = {
+            "PAY",
+            "RESPOND",
+            "FILE",
+            "REVIEW",
+            "SHARE",
+            "SCHEDULE",
+            "SIGN",
+            "ARCHIVE",
+            "CANCEL",
+            "RENEW",
+            "DISPUTE",
+            "TASK",
+        }
         valid_urgency = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 
         validated_actions = []
@@ -303,7 +325,9 @@ class OllamaAnalyzer:
             if action["urgency"] not in valid_urgency:
                 action["urgency"] = "MEDIUM"
             # Normalize CTA if present
-            action["recommended_cta"] = _normalize_cta(action.get("recommended_cta"), action, assessment)
+            action["recommended_cta"] = _normalize_cta(
+                action.get("recommended_cta"), action, assessment
+            )
             validated_actions.append(action)
 
         data["actions"] = validated_actions
@@ -319,7 +343,20 @@ class OllamaAnalyzer:
 
     def _convert_legacy_to_multi(self, data: dict) -> dict:
         """Convert old single-action format to multi-action format."""
-        valid_types = {"PAY", "RESPOND", "FILE", "REVIEW", "SHARE", "SCHEDULE", "SIGN", "ARCHIVE", "CANCEL", "RENEW", "DISPUTE", "TASK"}
+        valid_types = {
+            "PAY",
+            "RESPOND",
+            "FILE",
+            "REVIEW",
+            "SHARE",
+            "SCHEDULE",
+            "SIGN",
+            "ARCHIVE",
+            "CANCEL",
+            "RENEW",
+            "DISPUTE",
+            "TASK",
+        }
         valid_urgency = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 
         action_type = data.get("action_type", "TASK").upper()

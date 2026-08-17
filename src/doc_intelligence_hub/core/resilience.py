@@ -46,7 +46,11 @@ class ExternalServiceError(TransientError):
     def __init__(self, service: str, message: str, status_code: int | None = None):
         self.service = service
         self.status_code = status_code
-        super().__init__(f"[{service}] {message} (HTTP {status_code})" if status_code else f"[{service}] {message}")
+        super().__init__(
+            f"[{service}] {message} (HTTP {status_code})"
+            if status_code
+            else f"[{service}] {message}"
+        )
 
 
 class LLMError(TransientError):
@@ -60,7 +64,9 @@ class PaperlessError(TransientError):
 
     def __init__(self, message: str, status_code: int | None = None):
         self.status_code = status_code
-        super().__init__(f"Paperless: {message} (HTTP {status_code})" if status_code else f"Paperless: {message}")
+        super().__init__(
+            f"Paperless: {message} (HTTP {status_code})" if status_code else f"Paperless: {message}"
+        )
 
 
 class ConfigurationError(HubError):
@@ -247,8 +253,7 @@ class CircuitOpenError(TransientError):
     def __init__(self, breaker: CircuitBreaker):
         self.breaker = breaker
         super().__init__(
-            f"Circuit breaker '{breaker.name}' is OPEN "
-            f"(recovering in {breaker.recovery_timeout}s)"
+            f"Circuit breaker '{breaker.name}' is OPEN (recovering in {breaker.recovery_timeout}s)"
         )
 
 

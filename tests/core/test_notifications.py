@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from doc_intelligence_hub.core.notifications import (
     _GOTIFY_PRIORITY,
     _get_gotify_config,
@@ -45,9 +43,13 @@ class TestSendGotifyNotification:
 
     def test_sends_with_explicit_config(self):
         mock_resp = MagicMock(status_code=200)
-        with patch("doc_intelligence_hub.core.notifications.httpx.post", return_value=mock_resp) as mock_post:
+        with patch(
+            "doc_intelligence_hub.core.notifications.httpx.post", return_value=mock_resp
+        ) as mock_post:
             result = send_gotify_notification(
-                "Test", "Body", priority=8,
+                "Test",
+                "Body",
+                priority=8,
                 gotify_url="https://gotify.test",
                 gotify_token="tok",
             )
@@ -62,16 +64,20 @@ class TestSendGotifyNotification:
         mock_resp = MagicMock(status_code=401, text="Unauthorized")
         with patch("doc_intelligence_hub.core.notifications.httpx.post", return_value=mock_resp):
             result = send_gotify_notification(
-                "Test", "Body",
+                "Test",
+                "Body",
                 gotify_url="https://gotify.test",
                 gotify_token="tok",
             )
             assert result is False
 
     def test_returns_false_on_exception(self):
-        with patch("doc_intelligence_hub.core.notifications.httpx.post", side_effect=Exception("timeout")):
+        with patch(
+            "doc_intelligence_hub.core.notifications.httpx.post", side_effect=Exception("timeout")
+        ):
             result = send_gotify_notification(
-                "Test", "Body",
+                "Test",
+                "Body",
                 gotify_url="https://gotify.test",
                 gotify_token="tok",
             )
@@ -79,7 +85,9 @@ class TestSendGotifyNotification:
 
 
 class TestNotifyAlert:
-    def _make_alert(self, severity="high", title="Test", description=None, module="eob", action_url=None):
+    def _make_alert(
+        self, severity="high", title="Test", description=None, module="eob", action_url=None
+    ):
         alert = MagicMock()
         alert.severity = severity
         alert.title = title
@@ -90,7 +98,9 @@ class TestNotifyAlert:
 
     def test_sends_for_high_severity(self):
         alert = self._make_alert(severity="high", description="Overdue bill")
-        with patch("doc_intelligence_hub.core.notifications.send_gotify_notification", return_value=True) as mock_send:
+        with patch(
+            "doc_intelligence_hub.core.notifications.send_gotify_notification", return_value=True
+        ) as mock_send:
             result = notify_alert(alert)
             assert result is True
             args = mock_send.call_args
@@ -99,14 +109,18 @@ class TestNotifyAlert:
 
     def test_sends_for_critical_severity(self):
         alert = self._make_alert(severity="critical")
-        with patch("doc_intelligence_hub.core.notifications.send_gotify_notification", return_value=True) as mock_send:
+        with patch(
+            "doc_intelligence_hub.core.notifications.send_gotify_notification", return_value=True
+        ) as mock_send:
             result = notify_alert(alert)
             assert result is True
             assert mock_send.call_args[1]["priority"] == 10
 
     def test_includes_action_url(self):
         alert = self._make_alert(action_url="/eob/bills/42")
-        with patch("doc_intelligence_hub.core.notifications.send_gotify_notification", return_value=True) as mock_send:
+        with patch(
+            "doc_intelligence_hub.core.notifications.send_gotify_notification", return_value=True
+        ) as mock_send:
             notify_alert(alert)
             message = mock_send.call_args[0][1]
             assert "/eob/bills/42" in message

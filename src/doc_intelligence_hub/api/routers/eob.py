@@ -1363,8 +1363,8 @@ class BenchmarkRequest(BaseModel):
         default=None, description="Only docs created on/before this date (YYYY-MM-DD)"
     )
     bifrost_url: str = Field(
-        default="https://service-001.example.invalid/openai/v1",
-        description="Bifrost gateway URL override",
+        default="http://localhost:11434/v1",
+        description="OpenAI-compatible LLM endpoint URL override",
     )
     trigger: str = Field(
         default="manual",

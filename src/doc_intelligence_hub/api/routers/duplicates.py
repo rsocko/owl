@@ -90,9 +90,7 @@ async def get_duplicate_settings() -> dict[str, Any]:
 @router.put("/settings")
 async def update_duplicate_settings(body: DuplicateSettingsRequest) -> dict[str, Any]:
     """Update duplicate detection settings."""
-    set_triage_setting(
-        "duplicate_auto_detect", "true" if body.auto_detect_enabled else "false"
-    )
+    set_triage_setting("duplicate_auto_detect", "true" if body.auto_detect_enabled else "false")
     return {"auto_detect_enabled": body.auto_detect_enabled}
 
 

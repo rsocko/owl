@@ -156,7 +156,7 @@ Respond with JSON: { "changes_detected": bool, "changes": [...], "severity": "no
     id: uid(), name: 'Monarch Cross-Reference', type: 'n8n', enabled: true,
     description: 'Check if medical bills appear in Monarch Money transactions. Flag unpaid bills.',
     schedule: 'weekly', appliesTo: 'bills', routing: 'triage', hitsThisMonth: 2,
-    webhookUrl: 'https://n8n.local/webhook/di-monarch-xref',
+    webhookUrl: 'https://n8n.example.com/webhook/di-monarch-xref',
     n8nStatus: 'connected',
     n8nLastTriggered: '2 days ago (took 3.2s)',
     n8nFlowNodes: [
@@ -172,7 +172,7 @@ Respond with JSON: { "changes_detected": bool, "changes": [...], "severity": "no
     id: uid(), name: 'Provider Price Comparison', type: 'n8n', enabled: false,
     description: 'Cross-check billed amounts against fair-price databases (Healthcare Bluebook API)',
     schedule: 'on_ingest', appliesTo: 'bills', routing: 'insight', hitsThisMonth: 0,
-    webhookUrl: 'https://n8n.local/webhook/di-price-check',
+    webhookUrl: 'https://n8n.example.com/webhook/di-price-check',
     n8nStatus: 'error',
     n8nFlowNodes: [
       { label: 'Webhook', type: 'trigger' },
@@ -442,7 +442,7 @@ function N8nEditor({ rule, onChange }: { rule: Rule; onChange: (patch: Partial<R
             className="n8n-url-input"
             value={rule.webhookUrl ?? ''}
             onChange={(e) => onChange({ webhookUrl: e.target.value })}
-            placeholder="https://n8n.local/webhook/..."
+            placeholder="https://n8n.example.com/webhook/..."
           />
           <Button size="sm" onClick={handleTest} disabled={testing}>
             {testing ? '⏳ Testing…' : '🔍 Test'}

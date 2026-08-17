@@ -555,7 +555,7 @@ export default function Settings() {
                     id="llm-base-url"
                     value={llm.baseUrl}
                     onChange={(event) => setLlm((current) => ({ ...current, baseUrl: event.target.value }))}
-                    placeholder="https://service-001.example.invalid/openai/v1"
+                    placeholder="https://llm.example.com/v1"
                   />
                 </div>
                 <div className="form-group">
@@ -565,7 +565,7 @@ export default function Settings() {
                     list="llm-model-options"
                     value={llm.model}
                     onChange={(event) => setLlm((current) => ({ ...current, model: event.target.value }))}
-                    placeholder="azure/gpt-4o-mini"
+                    placeholder="gpt-4o-mini"
                   />
                   <datalist id="llm-model-options">
                     {modelOptions.map((model) => (

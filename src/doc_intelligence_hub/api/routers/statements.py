@@ -426,8 +426,7 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
 
             # Build minimal document list from sample_document_ids
             documents = [
-                {"document_id": str(doc_id), "series_id": series_id}
-                for doc_id in sample_ids
+                {"document_id": str(doc_id), "series_id": series_id} for doc_id in sample_ids
             ]
             similar = []
 
@@ -453,10 +452,12 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
                 group_doc_ids = [
                     d["document_id"] for d in documents if d.get("account_hint") == hint
                 ]
-                suggested_split_groups.append({
-                    "account_hint": hint,
-                    "document_ids": group_doc_ids,
-                })
+                suggested_split_groups.append(
+                    {
+                        "account_hint": hint,
+                        "document_ids": group_doc_ids,
+                    }
+                )
 
         return {
             "series": series,
@@ -760,7 +761,8 @@ async def rename_series(
         db.close()
 
     await _sync_to_paperless(
-        request, event_id,
+        request,
+        event_id,
         series_name=body.name,
         account_identifier=body.account_identifier,
     )

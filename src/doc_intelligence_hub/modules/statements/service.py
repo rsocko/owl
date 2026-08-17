@@ -233,9 +233,7 @@ async def _dispatch_recommendation_webhooks(result: RecommendationResult) -> Non
                 "latest_date": rec.latest_date.isoformat(),
             }
 
-            results = await dispatch_to_subscribers(
-                event_type, payload, db, extra_urls=extra_urls
-            )
+            await dispatch_to_subscribers(event_type, payload, db, extra_urls=extra_urls)
 
             # Mark as alerted regardless of delivery outcome to prevent
             # repeated fire-and-forget attempts on every cycle

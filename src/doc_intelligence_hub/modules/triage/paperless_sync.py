@@ -23,6 +23,8 @@ from typing import Any
 from doc_intelligence_hub.core.paperless import PaperlessClient
 from doc_intelligence_hub.modules.triage.database import (
     CorrectionEvent,
+)
+from doc_intelligence_hub.modules.triage.database import (
     get_session as get_triage_session,
 )
 
@@ -94,7 +96,10 @@ def sync_correction_to_paperless(event_id: str) -> dict[str, Any]:
         try:
             doc_id_int = int(document_id)
         except (ValueError, TypeError):
-            return {"synced": False, "error": f"target_id '{document_id}' is not a valid integer document ID"}
+            return {
+                "synced": False,
+                "error": f"target_id '{document_id}' is not a valid integer document ID",
+            }
 
         base_url, token = _get_paperless_config()
         if not base_url or not token:
@@ -198,7 +203,11 @@ def sync_all_pending() -> dict[str, Any]:
                 skipped += 1
             else:
                 synced += 1
-        elif result.get("error") and "No target_id" not in result["error"] and "not a valid integer" not in result["error"]:
+        elif (
+            result.get("error")
+            and "No target_id" not in result["error"]
+            and "not a valid integer" not in result["error"]
+        ):
             failed += 1
             errors.append({"event_id": eid, "error": result["error"]})
         else:
@@ -345,7 +354,9 @@ async def _sync_rename(
 
     for doc_id in doc_ids:
         try:
-            await _update_doc_fields(client, doc_id, field_ids, series_name=new_name, account_identifier=acct)
+            await _update_doc_fields(
+                client, doc_id, field_ids, series_name=new_name, account_identifier=acct
+            )
         except Exception:
             logger.exception("Failed to sync rename for document %s", doc_id)
             return False

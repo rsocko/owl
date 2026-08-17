@@ -154,7 +154,12 @@ class PaperlessClient:
                     if attempt < max_attempts and (is_idempotent or resp.status_code == 429):
                         logger.warning(
                             "Paperless %s %s returned %d (attempt %d/%d), retrying in %.1fs",
-                            method, path, resp.status_code, attempt, max_attempts, delay,
+                            method,
+                            path,
+                            resp.status_code,
+                            attempt,
+                            max_attempts,
+                            delay,
                         )
                         await asyncio.sleep(delay)
                         delay = min(delay * 2, 30.0)
@@ -174,7 +179,12 @@ class PaperlessClient:
                     ) from e
                 logger.warning(
                     "Paperless %s %s failed (attempt %d/%d): %s, retrying in %.1fs",
-                    method, path, attempt, max_attempts, e, delay,
+                    method,
+                    path,
+                    attempt,
+                    max_attempts,
+                    e,
+                    delay,
                 )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30.0)
@@ -395,7 +405,9 @@ class PaperlessClient:
             field_map[new_field["field"]] = new_field["value"]
 
         merged = [{"field": fid, "value": val} for fid, val in field_map.items()]
-        resp = await self._request("PATCH", f"/api/documents/{document_id}/", json={"custom_fields": merged})
+        resp = await self._request(
+            "PATCH", f"/api/documents/{document_id}/", json={"custom_fields": merged}
+        )
         resp.raise_for_status()
 
     # ------------------------------------------------------------------

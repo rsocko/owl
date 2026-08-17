@@ -1,16 +1,10 @@
-# Document Intelligence Hub — Homelab Deployment
-# Managed via Dockhand stack pointing to rsocko/ideation repo
-# Compose path: experiments/document-intelligence/docker-compose.yml
+# Document Intelligence Hub — local deployment
 #
 # Usage:
 #   docker compose up -d --build             # Build and start all services
 #   docker compose up -d --build hub         # Build and start just the hub
 #   docker compose logs -f                   # Follow logs
 #
-# Build modes:
-#   --build   → builds from local Dockerfile (dev/Dockhand stack)
-#   no --build → pulls pre-built image from service-007.example.invalid (production)
-
 services:
   # Document Intelligence Hub — unified API with /admin, /statements, /api/*
   hub:
@@ -21,7 +15,7 @@ services:
         BUILD_DATE: "${BUILD_DATE:-}"
         VCS_REF: "${VCS_REF:-}"
         VERSION: "${VERSION:-0.2.0}"
-    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    image: ${DOC_HUB_IMAGE:-doc-intelligence-hub:local}
     container_name: doc-intelligence-hub
     restart: unless-stopped
     stop_grace_period: 30s
@@ -30,10 +24,10 @@ services:
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
       STATEMENT_TRACKER_CONFIG: /app/config/config.docker.yaml
       WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-true}
-      # LLM via Bifrost gateway
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://service-001.example.invalid/openai/v1}
-      LLM_API_KEY: ${LLM_API_KEY:-bifrost}
-      LLM_MODEL: ${LLM_MODEL:-azure/gpt-4o-mini}
+      # Local OpenAI-compatible endpoint; override all LLM_* values for hosted providers.
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-local-development}
+      LLM_MODEL: ${LLM_MODEL:-phi3:mini}
       # Structured JSON logging for production
       LOG_FORMAT: ${LOG_FORMAT:-json}
     healthcheck:
@@ -55,7 +49,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    image: ${DOC_HUB_IMAGE:-doc-intelligence-hub:local}
     container_name: doc-intelligence-eob-matching
     restart: "no"
     entrypoint: ["/docker-entrypoint.sh", "eob-match"]
@@ -64,9 +58,9 @@ services:
       PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
       WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-false}
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://service-001.example.invalid/openai/v1}
-      LLM_API_KEY: ${LLM_API_KEY:-bifrost}
-      LLM_MODEL: ${LLM_MODEL:-azure/gpt-4o-mini}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-local-development}
+      LLM_MODEL: ${LLM_MODEL:-phi3:mini}
       LOG_FORMAT: ${LOG_FORMAT:-json}
     volumes:
       - hub-data:/app/data
@@ -80,7 +74,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    image: ${DOC_HUB_IMAGE:-doc-intelligence-hub:local}
     container_name: doc-intelligence-action-queue
     restart: "no"
     entrypoint: ["/docker-entrypoint.sh", "paq"]
@@ -88,9 +82,9 @@ services:
     environment:
       PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://service-001.example.invalid/openai/v1}
-      LLM_API_KEY: ${LLM_API_KEY:-bifrost}
-      LLM_MODEL: ${LLM_MODEL:-azure/gpt-4o-mini}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-local-development}
+      LLM_MODEL: ${LLM_MODEL:-phi3:mini}
       WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-true}
       LOG_FORMAT: ${LOG_FORMAT:-json}
     volumes:
@@ -107,7 +101,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    image: ${DOC_HUB_IMAGE:-doc-intelligence-hub:local}
     container_name: doc-intelligence-eob-scheduler
     restart: unless-stopped
     entrypoint: ["/docker-entrypoint.sh"]
@@ -116,9 +110,9 @@ services:
       PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
       WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-false}
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://service-001.example.invalid/openai/v1}
-      LLM_API_KEY: ${LLM_API_KEY:-bifrost}
-      LLM_MODEL: ${LLM_MODEL:-azure/gpt-4o-mini}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-local-development}
+      LLM_MODEL: ${LLM_MODEL:-phi3:mini}
       LOG_FORMAT: ${LOG_FORMAT:-json}
     volumes:
       - hub-data:/app/data
