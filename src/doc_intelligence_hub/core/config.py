@@ -42,7 +42,7 @@ class PaperlessConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM/AI gateway settings."""
 
-    base_url: str = "https://service-001.example.invalid/openai/v1"
+    base_url: str = "http://localhost:11434/v1"
     model: str = "gpt-4o-mini"
     timeout_seconds: float = 60.0
 
@@ -50,13 +50,15 @@ class LLMConfig(BaseModel):
 class EOBMatchingConfig(BaseModel):
     """EOB matching module settings."""
 
-    weights: dict[str, float] = Field(default_factory=lambda: {
-        "date": 0.30,
-        "provider": 0.25,
-        "patient": 0.20,
-        "amount": 0.15,
-        "procedures": 0.10,
-    })
+    weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "date": 0.30,
+            "provider": 0.25,
+            "patient": 0.20,
+            "amount": 0.15,
+            "procedures": 0.10,
+        }
+    )
     write_to_paperless: bool = True
     database_url: str = "sqlite:///data/eob_matching.db"
 

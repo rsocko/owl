@@ -9,7 +9,6 @@ from doc_intelligence_hub.core.resilience import (
     CircuitBreaker,
     CircuitOpenError,
     get_circuit_breaker,
-    retry_async,
 )
 
 
@@ -41,6 +40,6 @@ class BaseService:
             result = await coro
             breaker.record_success()
             return result
-        except Exception as exc:
+        except Exception:
             breaker.record_failure()
             raise

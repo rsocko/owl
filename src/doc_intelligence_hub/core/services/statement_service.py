@@ -7,7 +7,7 @@ from typing import Any
 
 from doc_intelligence_hub.core.resilience import retry_async
 from doc_intelligence_hub.core.services.base import BaseService
-from doc_intelligence_hub.modules.statements.config import AppConfig, load_config
+from doc_intelligence_hub.modules.statements.config import load_config
 from doc_intelligence_hub.modules.statements.database import Database
 from doc_intelligence_hub.modules.statements.models import (
     DiscoveryDiagnosticResult,
@@ -54,9 +54,7 @@ class StatementService(BaseService):
         return await run_discovery_debug(config_path, limit)
 
     @retry_async(max_attempts=2, base_delay=2.0)
-    async def get_recommendations(
-        self, config_path: str, as_of: date
-    ) -> RecommendationResult:
+    async def get_recommendations(self, config_path: str, as_of: date) -> RecommendationResult:
         """Run recommendations with retry for Paperless calls."""
         self.logger.info("Running recommendations (as_of=%s)", as_of)
         result = await self._call_with_breaker(

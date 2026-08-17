@@ -43,14 +43,11 @@ def _get_db() -> WebhookDB:
 class WebhookSubscriptionRequest(BaseModel):
     """Register a webhook subscription."""
 
-    url: str = Field(
-        ..., description="The callback URL to POST events to.", max_length=2048
-    )
+    url: str = Field(..., description="The callback URL to POST events to.", max_length=2048)
     event_type: str = Field(
         default="*",
         description=(
-            f"Event type to subscribe to. "
-            f"Valid values: {', '.join(_ALLOWED_EVENT_TYPES)}"
+            f"Event type to subscribe to. Valid values: {', '.join(_ALLOWED_EVENT_TYPES)}"
         ),
     )
     description: str | None = Field(
@@ -71,12 +68,8 @@ class WebhookSubscriptionResponse(BaseModel):
 class StatementFoundRequest(BaseModel):
     """Payload n8n sends when it has retrieved a missing statement."""
 
-    provider_key: str = Field(
-        ..., description="The provider key from the missing-statement alert."
-    )
-    expected_date: str = Field(
-        ..., description="The expected statement date (YYYY-MM-DD)."
-    )
+    provider_key: str = Field(..., description="The provider key from the missing-statement alert.")
+    expected_date: str = Field(..., description="The expected statement date (YYYY-MM-DD).")
     document_id: str | None = Field(
         default=None,
         description="Paperless document ID if the statement was ingested.",
@@ -109,22 +102,16 @@ class StatementMissingNotification(BaseModel):
 @router.get("/subscriptions", summary="List webhook subscriptions")
 async def list_subscriptions(
     event_type: str | None = Query(default=None, description="Filter by event type"),
-    include_inactive: bool = Query(
-        default=False, description="Include inactive subscriptions"
-    ),
+    include_inactive: bool = Query(default=False, description="Include inactive subscriptions"),
 ) -> list[dict[str, Any]]:
     db = _get_db()
     try:
-        return db.list_subscriptions(
-            event_type=event_type, active_only=not include_inactive
-        )
+        return db.list_subscriptions(event_type=event_type, active_only=not include_inactive)
     finally:
         db.close()
 
 
-@router.post(
-    "/subscriptions", summary="Register a webhook subscription", status_code=201
-)
+@router.post("/subscriptions", summary="Register a webhook subscription", status_code=201)
 async def create_subscription(
     body: WebhookSubscriptionRequest,
 ) -> WebhookSubscriptionResponse:
@@ -153,9 +140,7 @@ async def create_subscription(
         db.close()
 
 
-@router.delete(
-    "/subscriptions/{subscription_id}", summary="Remove a webhook subscription"
-)
+@router.delete("/subscriptions/{subscription_id}", summary="Remove a webhook subscription")
 async def delete_subscription(subscription_id: int) -> dict[str, Any]:
     db = _get_db()
     try:
@@ -173,9 +158,7 @@ async def delete_subscription(subscription_id: int) -> dict[str, Any]:
 )
 async def toggle_subscription(
     subscription_id: int,
-    active: bool = Query(
-        ..., description="Set to true to enable, false to disable"
-    ),
+    active: bool = Query(..., description="Set to true to enable, false to disable"),
 ) -> dict[str, Any]:
     db = _get_db()
     try:
@@ -223,9 +206,7 @@ async def notify_statement_missing(
         if n8n_url:
             extra_urls.append(n8n_url)
 
-        results = await dispatch_to_subscribers(
-            event_type, payload, db, extra_urls=extra_urls
-        )
+        results = await dispatch_to_subscribers(event_type, payload, db, extra_urls=extra_urls)
 
         # Mark as alerted regardless of delivery outcome to prevent repeated
         # fire-and-forget attempts on every cycle
@@ -287,9 +268,7 @@ async def statement_found(body: StatementFoundRequest) -> dict[str, Any]:
 
 @router.get("/logs", summary="View recent webhook delivery logs")
 async def get_webhook_logs(
-    limit: int = Query(
-        default=50, ge=1, le=500, description="Number of log entries to return"
-    ),
+    limit: int = Query(default=50, ge=1, le=500, description="Number of log entries to return"),
 ) -> list[dict[str, Any]]:
     db = _get_db()
     try:

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from doc_intelligence_hub.core.services.base import BaseService
 from doc_intelligence_hub.core.services.eob_service import EOBMatchingService
 from doc_intelligence_hub.modules.eob_matching.models import DocumentType

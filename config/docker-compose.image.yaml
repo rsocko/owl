@@ -1,6 +1,6 @@
 services:
   hub:
-    image: service-007.example.invalid/doc-intelligence-hub:${DOC_HUB_IMAGE_TAG:-latest}
+    image: ${DOC_HUB_IMAGE:-doc-intelligence-hub:local}
     container_name: doc-intelligence-hub
     restart: unless-stopped
     environment:

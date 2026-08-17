@@ -1,15 +1,11 @@
-"""Shared LLM client — OpenAI-compatible interface via Bifrost gateway.
+"""Shared client for OpenAI-compatible LLM endpoints.
 
-All modules should use `get_llm_client()` for LLM calls. This routes through
-Bifrost, which handles model routing, failover, and provider abstraction.
+All modules should use `get_llm_client()` for LLM calls.
 
 Environment variables:
-    LLM_BASE_URL: Bifrost gateway URL (default: https://service-001.example.invalid/openai/v1)
-    LLM_API_KEY: API key for Bifrost (default: "bifrost" — local gateway)
-    LLM_MODEL: Default model to use (default: azure/gpt-4o-mini — routed through Bifrost to Azure).
-        Bifrost matches routes by provider-prefixed model id (e.g. "azure/gpt-4o-mini",
-        "ollama/phi3:mini"). A bare model name like "gpt-4o-mini" or "phi3:mini" won't match
-        any Bifrost route and silently returns unparsable/garbage responses instead of erroring.
+    LLM_BASE_URL: Endpoint URL (default: local Ollama OpenAI compatibility API)
+    LLM_API_KEY: Provider API key (the local default is non-secret)
+    LLM_MODEL: Model identifier (default: phi3:mini)
     LLM_TIMEOUT: Request timeout in seconds (default: 120)
 """
 
@@ -19,7 +15,7 @@ import json
 import logging
 from typing import Any
 
-from openai import AsyncOpenAI, APIConnectionError, APITimeoutError, RateLimitError
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, RateLimitError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from doc_intelligence_hub.core.resilience import (
@@ -35,9 +31,9 @@ logger = logging.getLogger(__name__)
 class LLMSettings(BaseSettings):
     """LLM configuration — reads from environment with LLM_ prefix."""
 
-    base_url: str = "https://service-001.example.invalid/openai/v1"
-    api_key: str = "bifrost"
-    model: str = "azure/gpt-4o-mini"
+    base_url: str = "http://localhost:11434/v1"
+    api_key: str = "local-development"
+    model: str = "phi3:mini"
     timeout: float = 120.0
     temperature: float = 0.1
 
@@ -62,7 +58,7 @@ def get_llm_settings() -> LLMSettings:
 
 
 def get_llm_client(settings: LLMSettings | None = None) -> AsyncOpenAI:
-    """Get or create the singleton async OpenAI client pointed at Bifrost."""
+    """Get or create the singleton async OpenAI client."""
     global _client, _settings
     if settings is not None:
         _settings = settings
@@ -246,7 +242,7 @@ async def validate_model_availability() -> dict[str, Any]:
             result["message"] = (
                 f"Model '{settings.model}' is not listed by the LLM gateway at "
                 f"{settings.base_url}. Available models: {available_models}. "
-                f"Check Bifrost routing rules or change LLM_MODEL to a supported model."
+                f"Check the endpoint configuration or change LLM_MODEL to a supported model."
             )
         return result
 

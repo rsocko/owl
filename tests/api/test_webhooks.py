@@ -38,10 +38,17 @@ def client(_webhook_env, tmp_path):
     with (
         patch("doc_intelligence_hub.core.llm.get_llm_settings", return_value=mock_settings),
         patch("doc_intelligence_hub.core.llm.validate_model_availability", mock_validate),
-        patch("doc_intelligence_hub.core.llm.health_check", AsyncMock(return_value={"status": "ok"})),
-        patch("doc_intelligence_hub.api.routers.system.get_llm_settings", return_value=mock_settings),
+        patch(
+            "doc_intelligence_hub.core.llm.health_check", AsyncMock(return_value={"status": "ok"})
+        ),
+        patch(
+            "doc_intelligence_hub.api.routers.system.get_llm_settings", return_value=mock_settings
+        ),
         patch("doc_intelligence_hub.api.routers.system.validate_model_availability", mock_validate),
-        patch("doc_intelligence_hub.api.routers.system.llm_health_check", AsyncMock(return_value={"status": "ok"})),
+        patch(
+            "doc_intelligence_hub.api.routers.system.llm_health_check",
+            AsyncMock(return_value={"status": "ok"}),
+        ),
     ):
         app = create_app(settings)
         yield TestClient(app, raise_server_exceptions=False)

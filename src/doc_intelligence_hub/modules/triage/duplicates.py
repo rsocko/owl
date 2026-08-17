@@ -74,8 +74,8 @@ def _score_invoice_number(meta_a: dict, meta_b: dict) -> float:
 
 def _score_amount(meta_a: dict, meta_b: dict) -> float:
     """Score based on monetary amount match."""
-    amt_a = meta_a.get("amount") or meta_a.get("total_amount")
-    amt_b = meta_b.get("amount") or meta_b.get("total_amount")
+    amt_a = meta_a.get("amount") if meta_a.get("amount") is not None else meta_a.get("total_amount")
+    amt_b = meta_b.get("amount") if meta_b.get("amount") is not None else meta_b.get("total_amount")
     if amt_a is None or amt_b is None:
         return 0.0
     try:
@@ -386,7 +386,12 @@ def scan_all_duplicates() -> dict[str, Any]:
         )
     except ImportError:
         logger.warning("EOB matching module not available, skipping duplicate scan")
-        return {"pairs_found": 0, "pairs_created": 0, "triage_items_created": 0, "cleaned_invalid": cleaned}
+        return {
+            "pairs_found": 0,
+            "pairs_created": 0,
+            "triage_items_created": 0,
+            "cleaned_invalid": cleaned,
+        }
 
     eob_session = get_eob_session()
     all_doc_ids: list[int] = []
@@ -503,15 +508,18 @@ def on_document_ingested(document_id: int) -> dict[str, Any]:
     """
     enabled = get_triage_setting("duplicate_auto_detect", "false")
     if enabled != "true":
-        logger.debug(
-            "Auto-detect disabled, skipping duplicate check for doc %d", document_id
-        )
+        logger.debug("Auto-detect disabled, skipping duplicate check for doc %d", document_id)
         return {"document_id": document_id, "skipped": True, "reason": "auto_detect_disabled"}
 
     logger.info("Auto-detecting duplicates for newly ingested doc %d", document_id)
     matches = detect_duplicates(document_id)
     if not matches:
-        return {"document_id": document_id, "skipped": False, "pairs_created": 0, "triage_items_created": 0}
+        return {
+            "document_id": document_id,
+            "skipped": False,
+            "pairs_created": 0,
+            "triage_items_created": 0,
+        }
 
     meta_a = get_document_metadata(document_id)
     pairs_created = 0
@@ -536,7 +544,9 @@ def on_document_ingested(document_id: int) -> dict[str, Any]:
         )
         pairs_created += 1
 
-        provider_a = (meta_a or {}).get("provider") or (meta_a or {}).get("provider_name") or "Unknown"
+        provider_a = (
+            (meta_a or {}).get("provider") or (meta_a or {}).get("provider_name") or "Unknown"
+        )
         meta_b = match.get("metadata", {})
         provider_b = meta_b.get("provider") or meta_b.get("provider_name") or "Unknown"
         score_pct = round(overall * 100, 1)
@@ -804,9 +814,7 @@ def _resolve_triage_item(pair_id: str, resolution: str) -> None:
         session.close()
 
 
-def _verify_primary_metadata(
-    primary_doc_id: int, pre_merge_metadata: dict | None
-) -> None:
+def _verify_primary_metadata(primary_doc_id: int, pre_merge_metadata: dict | None) -> None:
     """Defensive check: verify that the primary document's metadata was not altered by the merge.
 
     Compares a snapshot taken before the merge with a fresh read afterwards.
@@ -864,6 +872,4 @@ def _verify_primary_metadata(
             ", ".join(changed_fields),
         )
     else:
-        logger.info(
-            "Primary doc %d metadata verified unchanged after merge", primary_doc_id
-        )
+        logger.info("Primary doc %d metadata verified unchanged after merge", primary_doc_id)

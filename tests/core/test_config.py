@@ -5,8 +5,6 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
-import pytest
-
 from doc_intelligence_hub.core.config import (
     ConfigProvider,
     HubConfig,
@@ -73,7 +71,7 @@ class TestConfigProvider:
     def test_reload_rebuilds_config(self):
         """Reload forces re-evaluation of all sources."""
         provider = ConfigProvider()
-        first_config = provider.config
+        assert provider.config.server.port == 8001
         # Set override and reload
         provider.set_override("server.port", 4000)
         reloaded = provider.reload()

@@ -28,6 +28,7 @@ console = Console(file=io.StringIO(), force_terminal=False, highlight=False)
 def _serialize_cta(cta: dict | str | None) -> str | None:
     """Serialize a CTA dict to a JSON string for database storage, or None."""
     import json
+
     if cta is None:
         return None
     if isinstance(cta, str):
@@ -489,9 +490,7 @@ class Pipeline:
                         doc_id,
                         success=sync_error is None,
                         disposition=(
-                            "no_action_needed"
-                            if sync_error is None
-                            else "no_action_sync_failed"
+                            "no_action_needed" if sync_error is None else "no_action_sync_failed"
                         ),
                         error=str(sync_error) if sync_error is not None else None,
                         text_metrics=text_metrics,
@@ -890,7 +889,9 @@ class Pipeline:
                         },
                     )
         except Exception:
-            logger.debug("Alert emission skipped (best-effort): circuit may be open or alert system unavailable")
+            logger.debug(
+                "Alert emission skipped (best-effort): circuit may be open or alert system unavailable"
+            )
 
     @staticmethod
     def _parse_date(date_str: str | None) -> date | None:

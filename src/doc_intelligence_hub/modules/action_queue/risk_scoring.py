@@ -13,7 +13,7 @@ The score is used to sort the Action Queue so highest-risk items surface first.
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
 logger = logging.getLogger(__name__)

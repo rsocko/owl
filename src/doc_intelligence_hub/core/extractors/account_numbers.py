@@ -38,7 +38,7 @@ ACCOUNT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "ending_in",
         re.compile(
-            r"(?:ending|last\s*4)\s+(?:in\s+)?(\d{4})",
+            r"(?:ending[\s.:]+(?:in[\s.:]+)?|last\s*4[\s.:]+(?:in[\s.:]+)?)(\d{4})",
             re.IGNORECASE,
         ),
     ),

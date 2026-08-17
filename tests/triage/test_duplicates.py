@@ -274,7 +274,10 @@ class TestOnDocumentIngested:
         assert result["skipped"] is True
 
     @patch("doc_intelligence_hub.modules.triage.duplicates.detect_duplicates", return_value=[])
-    @patch("doc_intelligence_hub.modules.triage.duplicates.get_document_metadata", return_value={"document_id": 123, "title": "Test"})
+    @patch(
+        "doc_intelligence_hub.modules.triage.duplicates.get_document_metadata",
+        return_value={"document_id": 123, "title": "Test"},
+    )
     def test_runs_when_enabled_no_matches(self, mock_meta, mock_detect, db):
         set_triage_setting("duplicate_auto_detect", "true")
         result = on_document_ingested(123)
@@ -304,11 +307,24 @@ class TestOnDocumentIngested:
 class TestVerifyPrimaryMetadata:
     """Tests for the _verify_primary_metadata defensive check."""
 
+    @pytest.fixture(autouse=True)
+    def capture_module_logs(self, caplog):
+        """Capture logs even after application logging disables root propagation."""
+        import logging
+
+        target_logger = logging.getLogger("doc_intelligence_hub.modules.triage.duplicates")
+        target_logger.addHandler(caplog.handler)
+        try:
+            yield
+        finally:
+            target_logger.removeHandler(caplog.handler)
+
     @patch("doc_intelligence_hub.modules.triage.duplicates.get_document_metadata")
     def test_no_warning_when_unchanged(self, mock_meta, caplog):
         pre = {"title": "Bill", "amount": 100, "provider": "Dr. X"}
         mock_meta.return_value = {"title": "Bill", "amount": 100, "provider": "Dr. X"}
         import logging
+
         with caplog.at_level(logging.INFO):
             _verify_primary_metadata(1, pre)
         assert "verified unchanged" in caplog.text
@@ -318,6 +334,7 @@ class TestVerifyPrimaryMetadata:
         pre = {"title": "Bill", "amount": 100, "provider": "Dr. X"}
         mock_meta.return_value = {"title": "Different Title", "amount": 100, "provider": "Dr. X"}
         import logging
+
         with caplog.at_level(logging.WARNING):
             _verify_primary_metadata(1, pre)
         assert "title" in caplog.text
@@ -325,13 +342,17 @@ class TestVerifyPrimaryMetadata:
 
     def test_skips_when_no_pre_metadata(self, caplog):
         import logging
+
         with caplog.at_level(logging.DEBUG):
             _verify_primary_metadata(1, None)
         # Should not raise
 
-    @patch("doc_intelligence_hub.modules.triage.duplicates.get_document_metadata", return_value=None)
+    @patch(
+        "doc_intelligence_hub.modules.triage.duplicates.get_document_metadata", return_value=None
+    )
     def test_warns_when_post_metadata_unavailable(self, mock_meta, caplog):
         import logging
+
         with caplog.at_level(logging.WARNING):
             _verify_primary_metadata(1, {"title": "Test"})
         assert "could not be verified" in caplog.text

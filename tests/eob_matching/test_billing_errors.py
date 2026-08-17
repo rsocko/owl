@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import date
-
-import pytest
-
 from doc_intelligence_hub.modules.eob_matching.billing_errors import (
     analyze_match_for_errors,
     detect_billing_errors,
@@ -37,9 +33,7 @@ def _make_match() -> MatchResult:
         bill_id="200",
         score=85.0,
         confidence=MatchConfidence.HIGH,
-        breakdown=MatchBreakdown(
-            date=1.0, provider=0.9, patient=0.9, amount=0.8, procedures=0.7
-        ),
+        breakdown=MatchBreakdown(date=1.0, provider=0.9, patient=0.9, amount=0.8, procedures=0.7),
     )
 
 
@@ -85,9 +79,7 @@ class TestBillingErrorDetection:
             ServiceLine(cpt_code="99213", description="Office visit duplicate"),
         ]
         eob = _make_eob(services=services, total_patient_responsibility=100.00)
-        bill = _make_bill(
-            services=services, balance_due=100.00
-        )
+        bill = _make_bill(services=services, balance_due=100.00)
         error_type, details = detect_billing_errors(eob, bill, _make_match())
         assert error_type == BillingErrorType.DUPLICATE_CHARGE
         assert "99213" in details

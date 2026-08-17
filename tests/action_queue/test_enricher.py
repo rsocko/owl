@@ -64,10 +64,7 @@ async def test_existing_action_status_field_gets_missing_lifecycle_options():
 
     update = enricher.client.update_custom_field.await_args.args
     assert update[0] == 7
-    labels = {
-        option["label"]
-        for option in update[1]["extra_data"]["select_options"]
-    }
+    labels = {option["label"] for option in update[1]["extra_data"]["select_options"]}
     assert {"acknowledged", "snoozed", "not_an_action"} <= labels
 
 
@@ -111,9 +108,7 @@ async def test_sync_status_propagates_tag_removal_failure(monkeypatch):
 
     enricher = PaperlessEnricher()
     enricher.client = AsyncMock()
-    enricher.client.remove_tags_from_document.side_effect = RuntimeError(
-        "Paperless unavailable"
-    )
+    enricher.client.remove_tags_from_document.side_effect = RuntimeError("Paperless unavailable")
     enricher._field_id_cache = {"Action Status": 7}
 
     with pytest.raises(RuntimeError, match="Paperless unavailable"):

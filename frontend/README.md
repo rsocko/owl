@@ -1,7 +1,6 @@
 # Document Intelligence Hub — Frontend
 
-React + TypeScript app built with Vite, replacing the previous vanilla HTML/CSS/JS
-hub UI (see issue [#857](https://github.com/rsocko/ideation/issues/857)).
+React + TypeScript app built with Vite for the Document Intelligence Hub.
 
 ## Stack
 
@@ -40,7 +39,8 @@ npm run build
 `vite.config.ts` emits the build directly into
 `../src/doc_intelligence_hub/api/static/`, which FastAPI serves at `/` (see
 `api/app.py`). The app uses a `HashRouter`, so no server-side catch-all route
-is needed for deep links — every route lives under the `#/...` fragment.
+is needed for deep links — every route lives under the `#/...` fragment. This
+directory is generated and intentionally ignored by Git.
 
 ## Pages
 
