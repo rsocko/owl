@@ -85,9 +85,7 @@ class PaperlessEnricher:
             if name in existing_by_name:
                 existing_field = existing_by_name[name]
                 if field_def.get("data_type") == "select":
-                    existing_field = await self._ensure_select_options(
-                        existing_field, field_def
-                    )
+                    existing_field = await self._ensure_select_options(existing_field, field_def)
                 field_map[name] = existing_field["id"]
                 # Cache select option IDs for existing fields
                 if field_def.get("data_type") == "select":
@@ -125,9 +123,7 @@ class PaperlessEnricher:
         existing_extra = existing.get("extra_data", {})
         existing_options = existing_extra.get("select_options", [])
         existing_labels = {
-            option.get("label")
-            for option in existing_options
-            if isinstance(option, dict)
+            option.get("label") for option in existing_options if isinstance(option, dict)
         }
         missing = [
             option

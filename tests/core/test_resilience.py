@@ -1,12 +1,9 @@
 """Tests for core.resilience — retry, circuit breaker, and typed exceptions."""
 
-import asyncio
-
 import pytest
 
 from doc_intelligence_hub.core.resilience import (
     CircuitBreaker,
-    CircuitOpenError,
     HubError,
     LLMError,
     PaperlessError,

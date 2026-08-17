@@ -47,13 +47,25 @@ class QueueRunRequest(BaseModel):
     dry_run: bool = True
     force: bool = False
     # Source overrides (for custom/ad-hoc runs)
-    tag_override: str | None = Field(default=None, description="Comma-separated tag names to override configured defaults")
-    saved_view_id: int | None = Field(default=None, description="Paperless saved view ID to use as document source")
+    tag_override: str | None = Field(
+        default=None, description="Comma-separated tag names to override configured defaults"
+    )
+    saved_view_id: int | None = Field(
+        default=None, description="Paperless saved view ID to use as document source"
+    )
     document_id: int | None = Field(default=None, description="Analyze a specific document by ID")
-    created_after: str | None = Field(default=None, description="Filter: document created after (YYYY-MM-DD)")
-    created_before: str | None = Field(default=None, description="Filter: document created before (YYYY-MM-DD)")
-    added_after: str | None = Field(default=None, description="Filter: added to Paperless after (YYYY-MM-DD)")
-    added_before: str | None = Field(default=None, description="Filter: added to Paperless before (YYYY-MM-DD)")
+    created_after: str | None = Field(
+        default=None, description="Filter: document created after (YYYY-MM-DD)"
+    )
+    created_before: str | None = Field(
+        default=None, description="Filter: document created before (YYYY-MM-DD)"
+    )
+    added_after: str | None = Field(
+        default=None, description="Filter: added to Paperless after (YYYY-MM-DD)"
+    )
+    added_before: str | None = Field(
+        default=None, description="Filter: added to Paperless before (YYYY-MM-DD)"
+    )
     correspondent: str | None = Field(default=None, description="Filter by correspondent name")
     document_type: str | None = Field(default=None, description="Filter by document type name")
 
@@ -64,8 +76,13 @@ class ActionUpdateRequest(BaseModel):
         pattern=r"^(completed|dismissed|pending|acknowledged|snoozed|not_an_action)$",
     )
     dry_run: bool = True
-    version: int | None = Field(default=None, description="Expected version for optimistic locking (returns 409 on mismatch)")
-    snoozed_until: str | None = Field(default=None, description="ISO timestamp for snooze expiry (required when status=snoozed)")
+    version: int | None = Field(
+        default=None,
+        description="Expected version for optimistic locking (returns 409 on mismatch)",
+    )
+    snoozed_until: str | None = Field(
+        default=None, description="ISO timestamp for snooze expiry (required when status=snoozed)"
+    )
     action_type: str | None = Field(default=None, description="Corrected action type")
     title: str | None = Field(default=None, description="Editable task title")
     summary: str | None = Field(default=None, description="Editable action summary")
@@ -142,14 +159,19 @@ class ActionUpdateRequest(BaseModel):
 
 class BulkActionRequest(BaseModel):
     action: str = Field(
-        ..., pattern=r"^(complete|dismiss|reopen|acknowledge|snooze|not_an_action)$",
+        ...,
+        pattern=r"^(complete|dismiss|reopen|acknowledge|snooze|not_an_action)$",
         description="Bulk action: 'complete', 'dismiss', 'reopen', 'acknowledge', 'snooze', or 'not_an_action'",
     )
     action_ids: list[int] = Field(
-        ..., min_length=1, max_length=200,
+        ...,
+        min_length=1,
+        max_length=200,
         description="List of action IDs to update (max 200)",
     )
-    snoozed_until: str | None = Field(default=None, description="ISO timestamp for snooze expiry (required for 'snooze' action)")
+    snoozed_until: str | None = Field(
+        default=None, description="ISO timestamp for snooze expiry (required for 'snooze' action)"
+    )
 
     @model_validator(mode="after")
     def _validate_snooze(self) -> "BulkActionRequest":
@@ -315,7 +337,9 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
     # Apply persisted source settings when no explicit overrides are provided
     saved_view_id = body.saved_view_id
     if not saved_view_id and not body.tag_override and not body.document_id:
-        if source_settings.get("scan_mode") == "saved_view" and source_settings.get("saved_view_id"):
+        if source_settings.get("scan_mode") == "saved_view" and source_settings.get(
+            "saved_view_id"
+        ):
             saved_view_id = source_settings["saved_view_id"]
 
     result = await run_pipeline(
@@ -360,6 +384,7 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
                 db.close()
         except Exception as exc:
             import logging
+
             logging.getLogger(__name__).debug("Alert emission failed (best-effort): %s", exc)
 
     status = {
@@ -392,6 +417,7 @@ async def queue_run_stream(
     current_status = getattr(request.app.state, "last_queue_status", None) or {}
     if current_status.get("status") == "running":
         from fastapi.responses import JSONResponse
+
         return JSONResponse(  # type: ignore[return-value]
             {"detail": {"message": "A pipeline run is already in progress."}},
             status_code=409,
@@ -400,7 +426,9 @@ async def queue_run_stream(
     # Apply persisted source settings when no explicit overrides are provided
     effective_saved_view_id = body.saved_view_id
     if not effective_saved_view_id and not body.tag_override and not body.document_id:
-        if source_settings.get("scan_mode") == "saved_view" and source_settings.get("saved_view_id"):
+        if source_settings.get("scan_mode") == "saved_view" and source_settings.get(
+            "saved_view_id"
+        ):
             effective_saved_view_id = source_settings["saved_view_id"]
 
     async def event_generator():
@@ -417,20 +445,22 @@ async def queue_run_stream(
         yield f"data: {json.dumps({'stage': 'starting', 'message': 'Pipeline starting…', 'current': 0, 'total': 0})}\n\n"
 
         # Start the pipeline in a background task
-        pipeline_task = asyncio.create_task(run_pipeline(
-            limit=effective_limit,
-            dry_run=body.dry_run,
-            force=body.force,
-            tag_override=body.tag_override,
-            saved_view_id=effective_saved_view_id,
-            document_id=body.document_id,
-            created_after=body.created_after,
-            created_before=body.created_before,
-            added_after=body.added_after,
-            added_before=body.added_before,
-            correspondent=body.correspondent,
-            document_type=body.document_type,
-        ))
+        pipeline_task = asyncio.create_task(
+            run_pipeline(
+                limit=effective_limit,
+                dry_run=body.dry_run,
+                force=body.force,
+                tag_override=body.tag_override,
+                saved_view_id=effective_saved_view_id,
+                document_id=body.document_id,
+                created_after=body.created_after,
+                created_before=body.created_before,
+                added_after=body.added_after,
+                added_before=body.added_before,
+                correspondent=body.correspondent,
+                document_type=body.document_type,
+            )
+        )
 
         last_progress = None
         try:
@@ -669,6 +699,7 @@ async def update_action(
             if "status" in supplied_fields or "snoozed_until" in supplied_fields:
                 if not body.snoozed_until:
                     from fastapi import HTTPException
+
                     raise HTTPException(
                         status_code=422,
                         detail="snoozed_until is required when status is 'snoozed'",
@@ -693,7 +724,11 @@ async def update_action(
         db.commit()
 
         # Sync status to Paperless (best-effort — don't fail the user action)
-        if action_queue_settings.write_to_paperless and action.document_id and "status" in supplied_fields:
+        if (
+            action_queue_settings.write_to_paperless
+            and action.document_id
+            and "status" in supplied_fields
+        ):
             try:
                 from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
 
@@ -703,9 +738,12 @@ async def update_action(
                 db.commit()
             except Exception as exc:
                 import logging
+
                 logging.getLogger(__name__).warning(
                     "Failed to sync status to Paperless for action %d (doc %d): %s",
-                    action_id, action.document_id, exc,
+                    action_id,
+                    action.document_id,
+                    exc,
                 )
 
         return _serialize_action(action)
@@ -725,9 +763,7 @@ _BULK_ACTION_STATUS: dict[str, str] = {
 
 
 @router.post("/actions/bulk")
-async def bulk_action(
-    request: Request, body: BulkActionRequest
-) -> dict[str, Any]:
+async def bulk_action(request: Request, body: BulkActionRequest) -> dict[str, Any]:
     """Apply an action to multiple action queue items at once.
 
     Also syncs status changes to Paperless custom fields (best-effort).
@@ -790,6 +826,7 @@ async def bulk_action(
         # Sync status to Paperless for affected actions (best-effort)
         if action_queue_settings.write_to_paperless and affected_actions:
             import logging
+
             log = logging.getLogger(__name__)
             try:
                 from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
@@ -804,7 +841,9 @@ async def bulk_action(
                     except Exception as exc:
                         log.warning(
                             "Bulk sync: failed for action %d (doc %d): %s",
-                            action.id, action.document_id, exc,
+                            action.id,
+                            action.document_id,
+                            exc,
                         )
                 db.commit()
             except Exception as exc:
@@ -866,10 +905,7 @@ def _resolve_document_tags(document: dict[str, Any], tags: dict[int, str]) -> li
     raw_tags = document.get("tags")
     if not isinstance(raw_tags, list):
         return []
-    return [
-        tags.get(tag, str(tag)) if isinstance(tag, int) else str(tag)
-        for tag in raw_tags
-    ]
+    return [tags.get(tag, str(tag)) if isinstance(tag, int) else str(tag) for tag in raw_tags]
 
 
 def _replace_action_metadata(
@@ -883,13 +919,9 @@ def _replace_action_metadata(
     document_title = document.get("title")
     if document_title is not None:
         action.document_title = str(document_title)
-    action.correspondent = _resolve_metadata_name(
-        document.get("correspondent"), correspondents
-    )
+    action.correspondent = _resolve_metadata_name(document.get("correspondent"), correspondents)
     action.document_date = _parse_date_safe(document.get("created"))
-    action.document_type = _resolve_metadata_name(
-        document.get("document_type"), document_types
-    )
+    action.document_type = _resolve_metadata_name(document.get("document_type"), document_types)
     action.tags = _resolve_document_tags(document, tags)
     action.updated_at = datetime.utcnow()
     action.version = (action.version or 1) + 1
@@ -1086,6 +1118,7 @@ def _parse_date_safe(date_str: str | None):
         return None
     try:
         from dateutil.parser import parse
+
         return parse(date_str).date()
     except (ValueError, TypeError):
         return None
@@ -1098,8 +1131,12 @@ class BackfillRequest(BaseModel):
         description="Only backfill actions with this status (default: all unsynced)",
     )
     limit: int | None = Field(default=None, ge=1, le=500, description="Max actions to backfill")
-    dry_run: bool = Field(default=True, description="Preview what would be written without modifying Paperless")
-    force: bool = Field(default=False, description="Re-sync even if last_synced_status is already set")
+    dry_run: bool = Field(
+        default=True, description="Preview what would be written without modifying Paperless"
+    )
+    force: bool = Field(
+        default=False, description="Re-sync even if last_synced_status is already set"
+    )
 
 
 @router.post("/actions/backfill")
@@ -1121,6 +1158,7 @@ async def backfill_paperless(request: Request, body: BackfillRequest) -> dict[st
 
     if not action_queue_settings.write_to_paperless and not body.dry_run:
         from fastapi import HTTPException
+
         raise HTTPException(
             status_code=400,
             detail="write_to_paperless is disabled in settings. Enable it or use dry_run mode.",
@@ -1198,18 +1236,24 @@ async def backfill_paperless(request: Request, body: BackfillRequest) -> dict[st
                 synced += 1
                 log.info(
                     "Backfill: doc_id=%s action_id=%s synced to Paperless (status=%s)",
-                    action.document_id, action.id, action.status,
+                    action.document_id,
+                    action.id,
+                    action.status,
                 )
             except Exception as exc:
                 failed += 1
-                errors.append({
-                    "action_id": action.id,
-                    "document_id": action.document_id,
-                    "error": str(exc),
-                })
+                errors.append(
+                    {
+                        "action_id": action.id,
+                        "document_id": action.document_id,
+                        "error": str(exc),
+                    }
+                )
                 log.warning(
                     "Backfill: doc_id=%s action_id=%s failed: %s",
-                    action.document_id, action.id, exc,
+                    action.document_id,
+                    action.id,
+                    exc,
                 )
 
             # Brief pause to avoid hammering Paperless
@@ -1235,7 +1279,8 @@ async def backfill_paperless(request: Request, body: BackfillRequest) -> dict[st
 
 class FeedbackRequest(BaseModel):
     feedback_type: str = Field(
-        ..., pattern=r"^(not_an_action|misclassified|wrong_urgency|wrong_amount)$",
+        ...,
+        pattern=r"^(not_an_action|misclassified|wrong_urgency|wrong_amount)$",
         description="Type of feedback signal",
     )
     corrected_action_type: str | None = Field(
@@ -1266,6 +1311,7 @@ async def submit_feedback(
         action = db.query(Action).filter_by(id=action_id).first()
         if not action:
             from fastapi import HTTPException
+
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
 
         # Record the feedback
@@ -1286,6 +1332,7 @@ async def submit_feedback(
         # If misclassified and a correction is provided, update the action type
         if body.feedback_type == "misclassified" and body.corrected_action_type:
             from doc_intelligence_hub.modules.action_queue.database import VALID_ACTION_TYPES
+
             if body.corrected_action_type.upper() in VALID_ACTION_TYPES:
                 action.action_type = body.corrected_action_type.upper()
                 action.version = (action.version or 1) + 1
@@ -1308,8 +1355,7 @@ async def submit_feedback(
                 import logging
 
                 logging.getLogger(__name__).warning(
-                    "Failed to sync no-action feedback to Paperless for action %d "
-                    "(doc %d): %s",
+                    "Failed to sync no-action feedback to Paperless for action %d (doc %d): %s",
                     action_id,
                     action.document_id,
                     exc,
@@ -1333,9 +1379,12 @@ async def get_feedback(request: Request, action_id: int) -> dict[str, Any]:
     init_db()
     db = get_session()
     try:
-        feedbacks = db.query(ActionFeedback).filter_by(action_id=action_id).order_by(
-            ActionFeedback.created_at.desc()
-        ).all()
+        feedbacks = (
+            db.query(ActionFeedback)
+            .filter_by(action_id=action_id)
+            .order_by(ActionFeedback.created_at.desc())
+            .all()
+        )
         return {
             "action_id": action_id,
             "feedback": [
@@ -1364,9 +1413,7 @@ class SnoozeRequest(BaseModel):
 
 
 @router.post("/actions/{action_id}/snooze")
-async def snooze_action(
-    request: Request, action_id: int, body: SnoozeRequest
-) -> dict[str, Any]:
+async def snooze_action(request: Request, action_id: int, body: SnoozeRequest) -> dict[str, Any]:
     """Snooze an action — defer it until a specified time.
 
     The action moves to 'snoozed' status and will resurface when the snooze expires.
@@ -1379,12 +1426,14 @@ async def snooze_action(
         action = db.query(Action).filter_by(id=action_id).first()
         if not action:
             from fastapi import HTTPException
+
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
 
         try:
             snooze_dt = datetime.fromisoformat(body.until)
         except (ValueError, TypeError) as err:
             from fastapi import HTTPException
+
             raise HTTPException(
                 status_code=422,
                 detail=f"Invalid ISO timestamp: {body.until}",
@@ -1414,6 +1463,7 @@ async def acknowledge_action(request: Request, action_id: int) -> dict[str, Any]
         action = db.query(Action).filter_by(id=action_id).first()
         if not action:
             from fastapi import HTTPException
+
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
 
         action.status = "acknowledged"
@@ -1432,7 +1482,9 @@ async def acknowledge_action(request: Request, action_id: int) -> dict[str, Any]
 
 
 class QueueSettingsResponse(BaseModel):
-    scan_mode: str = Field(default="tags", description="Default scan source: 'tags' or 'saved_view'")
+    scan_mode: str = Field(
+        default="tags", description="Default scan source: 'tags' or 'saved_view'"
+    )
     monitor_tags: list[str] = Field(default_factory=lambda: ["Inbox"])
     saved_view_id: int | None = None
     confidence_threshold: int = 70
@@ -1478,9 +1530,7 @@ def _get_queue_settings(request: Request) -> dict:
     action_queue_settings.tags_to_monitor = ",".join(values["monitor_tags"])
     action_queue_settings.confidence_threshold = values["confidence_threshold"]
     action_queue_settings.rate_limit_delay = values["rate_limit_delay"]
-    action_queue_settings.remove_source_tag_on_resolve = values[
-        "remove_source_tag_on_resolve"
-    ]
+    action_queue_settings.remove_source_tag_on_resolve = values["remove_source_tag_on_resolve"]
     return values
 
 
@@ -1567,9 +1617,7 @@ async def update_queue_settings(request: Request, body: QueueSettingsUpdate) -> 
     action_queue_settings.tags_to_monitor = ",".join(current["monitor_tags"])
     action_queue_settings.confidence_threshold = current["confidence_threshold"]
     action_queue_settings.rate_limit_delay = current["rate_limit_delay"]
-    action_queue_settings.remove_source_tag_on_resolve = current[
-        "remove_source_tag_on_resolve"
-    ]
+    action_queue_settings.remove_source_tag_on_resolve = current["remove_source_tag_on_resolve"]
     return {"status": "ok", "changed": changed, "settings": current}
 
 
@@ -1600,10 +1648,7 @@ async def list_paperless_saved_views(request: Request) -> dict[str, Any]:
         client = make_paperless_client(request, timeout=15.0)
         views = await client.list_saved_views()
         return {
-            "saved_views": [
-                {"id": v["id"], "name": v["name"]}
-                for v in views
-            ],
+            "saved_views": [{"id": v["id"], "name": v["name"]} for v in views],
         }
     except Exception as exc:
         return {"saved_views": [], "error": str(exc)}
@@ -1617,10 +1662,7 @@ async def list_paperless_correspondents(request: Request) -> dict[str, Any]:
         client = make_paperless_client(request, timeout=15.0)
         correspondents = await client.list_correspondents()
         return {
-            "correspondents": [
-                {"id": c["id"], "name": c["name"]}
-                for c in correspondents
-            ],
+            "correspondents": [{"id": c["id"], "name": c["name"]} for c in correspondents],
         }
     except Exception as exc:
         return {"correspondents": [], "error": str(exc)}

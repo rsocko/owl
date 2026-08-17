@@ -211,9 +211,7 @@ class TestPipelineErrorIsolation:
             lambda doc: no_action_extraction,
         )
         pipeline.enricher.ensure_custom_fields_exist = AsyncMock(return_value={})
-        pipeline.enricher.sync_status = AsyncMock(
-            side_effect=RuntimeError("Paperless unavailable")
-        )
+        pipeline.enricher.sync_status = AsyncMock(side_effect=RuntimeError("Paperless unavailable"))
 
         stats = await pipeline.run(force=True, dry_run=False)
 

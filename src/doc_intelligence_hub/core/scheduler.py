@@ -129,8 +129,9 @@ class HubScheduler:
         for key, config in self._schedules.items():
             entry = dict(config)
             job = self._scheduler.get_job(key)
-            if job and job.next_run_time:
-                entry["next_run"] = job.next_run_time.isoformat()
+            next_run_time = getattr(job, "next_run_time", None)
+            if next_run_time:
+                entry["next_run"] = next_run_time.isoformat()
             if key in self.last_runs:
                 entry["last_run"] = self.last_runs[key]
             result[key] = entry

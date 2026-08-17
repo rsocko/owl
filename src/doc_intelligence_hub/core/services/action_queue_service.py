@@ -37,7 +37,9 @@ class ActionQueueService(BaseService):
         """Run the action queue pipeline with retry support."""
         self.logger.info(
             "Running action queue pipeline (limit=%s, dry_run=%s, force=%s)",
-            limit, dry_run, force,
+            limit,
+            dry_run,
+            force,
         )
         result = await run_pipeline(limit=limit, dry_run=dry_run, force=force)
         self.logger.info("Pipeline complete: %s", result)
@@ -158,9 +160,7 @@ class ActionQueueService(BaseService):
                     )
                 affected += 1
             db.commit()
-            self.logger.info(
-                "Bulk update: %d actions set to %s", affected, target_status
-            )
+            self.logger.info("Bulk update: %d actions set to %s", affected, target_status)
             return affected
         finally:
             db.close()

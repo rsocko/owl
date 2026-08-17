@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
 from doc_intelligence_hub.core.webhooks import (
-    VALID_EVENT_TYPES,
     WebhookDB,
     dispatch_to_subscribers,
     dispatch_webhook,
@@ -132,7 +130,7 @@ class TestWebhookDBDeliveryLog:
         webhook_db.log_delivery(
             event_type="statement.missing",
             url="https://a.test",
-            payload='{}',
+            payload="{}",
             status_code=None,
             response_body=None,
             success=False,
@@ -238,9 +236,7 @@ class TestDispatchToSubscribers:
             MockClient.return_value.__aenter__ = AsyncMock(return_value=client_instance)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            results = await dispatch_to_subscribers(
-                "statement.missing", {"test": True}, webhook_db
-            )
+            results = await dispatch_to_subscribers("statement.missing", {"test": True}, webhook_db)
             assert len(results) == 2
             assert all(results.values())
 
@@ -263,7 +259,5 @@ class TestDispatchToSubscribers:
 
     @pytest.mark.asyncio
     async def test_no_subscribers(self, webhook_db: WebhookDB):
-        results = await dispatch_to_subscribers(
-            "statement.missing", {"test": True}, webhook_db
-        )
+        results = await dispatch_to_subscribers("statement.missing", {"test": True}, webhook_db)
         assert results == {}

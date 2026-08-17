@@ -14,10 +14,12 @@ from doc_intelligence_hub.modules.eob_matching.database import (
     BillRecord,
     EOBRecord,
     MatchEvent,
-    MatchRecord,
     MatchingRun,
-    get_session as get_db_session,
+    MatchRecord,
     init_db,
+)
+from doc_intelligence_hub.modules.eob_matching.database import (
+    get_session as get_db_session,
 )
 from doc_intelligence_hub.modules.eob_matching.llm_extractor import (
     extract_bill_llm,
@@ -44,11 +46,13 @@ class EOBMatchingService(BaseService):
         results: list[dict[str, Any]] = []
         for doc in documents:
             classification = classify_document(doc.get("content", ""))
-            results.append({
-                "document_id": doc["id"],
-                "title": doc.get("title"),
-                "classification": classification.model_dump(mode="json"),
-            })
+            results.append(
+                {
+                    "document_id": doc["id"],
+                    "title": doc.get("title"),
+                    "classification": classification.model_dump(mode="json"),
+                }
+            )
         self.logger.info(
             "Classification complete: %s",
             self._summarize_classifications(results),
@@ -131,65 +135,73 @@ class EOBMatchingService(BaseService):
                 try:
                     extracted = await self.extract_eob(content, document_id=str(doc["id"]))
                 except Exception as exc:
-                    self.logger.warning(
-                        "EOB extraction failed for doc %s: %s", doc["id"], exc
-                    )
+                    self.logger.warning("EOB extraction failed for doc %s: %s", doc["id"], exc)
                     classified_documents.append(item)
                     continue
                 extracted_eobs.append(extracted)
                 if verbose:
                     item["extracted"] = extracted.model_dump(mode="json")
 
-                db.add(EOBRecord(
-                    document_id=doc["id"],
-                    run_id=run_record.id,
-                    title=doc.get("title"),
-                    classification_score=classification.confidence_score,
-                    insurance_company=extracted.insurance_company,
-                    policy_number=extracted.policy_number,
-                    patient_name=extracted.patient_name,
-                    claim_number=extracted.claim_number,
-                    date_of_service=str(extracted.date_of_service) if extracted.date_of_service else None,
-                    provider_name=extracted.provider_name,
-                    total_billed=extracted.total_billed,
-                    total_allowed=extracted.total_allowed,
-                    total_plan_pays=extracted.total_plan_pays,
-                    total_patient_responsibility=extracted.total_patient_responsibility,
-                    services_json=json.dumps(
-                        [s.model_dump(mode="json") for s in extracted.services]
-                    ) if extracted.services else None,
-                ))
+                db.add(
+                    EOBRecord(
+                        document_id=doc["id"],
+                        run_id=run_record.id,
+                        title=doc.get("title"),
+                        classification_score=classification.confidence_score,
+                        insurance_company=extracted.insurance_company,
+                        policy_number=extracted.policy_number,
+                        patient_name=extracted.patient_name,
+                        claim_number=extracted.claim_number,
+                        date_of_service=str(extracted.date_of_service)
+                        if extracted.date_of_service
+                        else None,
+                        provider_name=extracted.provider_name,
+                        total_billed=extracted.total_billed,
+                        total_allowed=extracted.total_allowed,
+                        total_plan_pays=extracted.total_plan_pays,
+                        total_patient_responsibility=extracted.total_patient_responsibility,
+                        services_json=json.dumps(
+                            [s.model_dump(mode="json") for s in extracted.services]
+                        )
+                        if extracted.services
+                        else None,
+                    )
+                )
 
             elif classification.type == DocumentType.BILL:
                 try:
                     extracted = await self.extract_bill(content, document_id=str(doc["id"]))
                 except Exception as exc:
-                    self.logger.warning(
-                        "Bill extraction failed for doc %s: %s", doc["id"], exc
-                    )
+                    self.logger.warning("Bill extraction failed for doc %s: %s", doc["id"], exc)
                     classified_documents.append(item)
                     continue
                 extracted_bills.append(extracted)
                 if verbose:
                     item["extracted"] = extracted.model_dump(mode="json")
 
-                db.add(BillRecord(
-                    document_id=doc["id"],
-                    run_id=run_record.id,
-                    title=doc.get("title"),
-                    classification_score=classification.confidence_score,
-                    provider_name=extracted.provider_name,
-                    patient_name=extracted.patient_name,
-                    invoice_number=extracted.invoice_number,
-                    date_of_service=str(extracted.date_of_service) if extracted.date_of_service else None,
-                    due_date=str(extracted.due_date) if extracted.due_date else None,
-                    total_amount=extracted.total_amount,
-                    balance_due=extracted.balance_due,
-                    payment_status=extracted.payment_status,
-                    services_json=json.dumps(
-                        [s.model_dump(mode="json") for s in extracted.services]
-                    ) if extracted.services else None,
-                ))
+                db.add(
+                    BillRecord(
+                        document_id=doc["id"],
+                        run_id=run_record.id,
+                        title=doc.get("title"),
+                        classification_score=classification.confidence_score,
+                        provider_name=extracted.provider_name,
+                        patient_name=extracted.patient_name,
+                        invoice_number=extracted.invoice_number,
+                        date_of_service=str(extracted.date_of_service)
+                        if extracted.date_of_service
+                        else None,
+                        due_date=str(extracted.due_date) if extracted.due_date else None,
+                        total_amount=extracted.total_amount,
+                        balance_due=extracted.balance_due,
+                        payment_status=extracted.payment_status,
+                        services_json=json.dumps(
+                            [s.model_dump(mode="json") for s in extracted.services]
+                        )
+                        if extracted.services
+                        else None,
+                    )
+                )
 
             classified_documents.append(item)
 
@@ -220,19 +232,23 @@ class EOBMatchingService(BaseService):
             )
             db.add(match_rec)
             db.flush()
-            db.add(MatchEvent(
-                match_id=match_rec.id,
-                event_type="auto_matched",
-                actor="system",
-                detail=f"Auto-matched with {match.confidence.value} confidence ({match.score:.0f}%)",
-            ))
-            if match.confidence.value in ("LOW", "MEDIUM"):
-                db.add(MatchEvent(
+            db.add(
+                MatchEvent(
                     match_id=match_rec.id,
-                    event_type="flagged",
+                    event_type="auto_matched",
                     actor="system",
-                    detail=f"Flagged for review — {match.confidence.value.lower()} confidence",
-                ))
+                    detail=f"Auto-matched with {match.confidence.value} confidence ({match.score:.0f}%)",
+                )
+            )
+            if match.confidence.value in ("LOW", "MEDIUM"):
+                db.add(
+                    MatchEvent(
+                        match_id=match_rec.id,
+                        event_type="flagged",
+                        actor="system",
+                        detail=f"Flagged for review — {match.confidence.value.lower()} confidence",
+                    )
+                )
         db.commit()
 
         # Step 3: Write to Paperless (if enabled)

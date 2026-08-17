@@ -156,6 +156,7 @@ def _seed_eob_data(
                     title=f"Orphan EOB {i}",
                     provider_name="Orphan Provider",
                     date_of_service="2026-01-15",
+                    created_at=datetime(2026, 5, 1, tzinfo=UTC),
                 )
             )
             doc_id += 1

@@ -452,34 +452,41 @@ class TestRefreshMetadata:
         # Paperless but we verify it finds them.
         from unittest.mock import AsyncMock, patch
 
-        mock_fetch = AsyncMock(return_value=(
-            {1: "Power Co"},  # correspondents
-            {10: "Inbox", 11: "Todo"},  # tags
-            {5: "Bill"},  # doc_types
-        ))
-        mock_get_doc = AsyncMock(side_effect=[
-            {
-                "id": 42,
-                "created": "2026-01-10",
-                "document_type": 5,
-                "tags": [10, 11],
-                "correspondent": 1,
-            },
-            {
-                "id": 99,
-                "created": "2025-12-20",
-                "document_type": 5,
-                "tags": [10],
-                "correspondent": 1,
-            },
-        ])
+        mock_fetch = AsyncMock(
+            return_value=(
+                {1: "Power Co"},  # correspondents
+                {10: "Inbox", 11: "Todo"},  # tags
+                {5: "Bill"},  # doc_types
+            )
+        )
+        mock_get_doc = AsyncMock(
+            side_effect=[
+                {
+                    "id": 42,
+                    "created": "2026-01-10",
+                    "document_type": 5,
+                    "tags": [10, 11],
+                    "correspondent": 1,
+                },
+                {
+                    "id": 99,
+                    "created": "2025-12-20",
+                    "document_type": 5,
+                    "tags": [10],
+                    "correspondent": 1,
+                },
+            ]
+        )
 
-        with patch(
-            "doc_intelligence_hub.core.paperless.PaperlessClient.fetch_all_metadata",
-            mock_fetch,
-        ), patch(
-            "doc_intelligence_hub.core.paperless.PaperlessClient.get_document",
-            mock_get_doc,
+        with (
+            patch(
+                "doc_intelligence_hub.core.paperless.PaperlessClient.fetch_all_metadata",
+                mock_fetch,
+            ),
+            patch(
+                "doc_intelligence_hub.core.paperless.PaperlessClient.get_document",
+                mock_get_doc,
+            ),
         ):
             resp = seeded_client.post(
                 "/api/queue/actions/refresh-metadata",
@@ -506,26 +513,33 @@ class TestRefreshAction:
     def test_refresh_action_replaces_snapshot(self, seeded_client):
         from unittest.mock import AsyncMock, patch
 
-        mock_fetch = AsyncMock(return_value=(
-            {2: "Updated Utility"},
-            {12: "Reviewed"},
-            {6: "Statement"},
-        ))
-        mock_get_doc = AsyncMock(return_value={
-            "id": 42,
-            "title": "Corrected Electric Statement",
-            "created": "2026-02-03",
-            "document_type": 6,
-            "tags": [12],
-            "correspondent": 2,
-        })
+        mock_fetch = AsyncMock(
+            return_value=(
+                {2: "Updated Utility"},
+                {12: "Reviewed"},
+                {6: "Statement"},
+            )
+        )
+        mock_get_doc = AsyncMock(
+            return_value={
+                "id": 42,
+                "title": "Corrected Electric Statement",
+                "created": "2026-02-03",
+                "document_type": 6,
+                "tags": [12],
+                "correspondent": 2,
+            }
+        )
 
-        with patch(
-            "doc_intelligence_hub.core.paperless.PaperlessClient.fetch_all_metadata",
-            mock_fetch,
-        ), patch(
-            "doc_intelligence_hub.core.paperless.PaperlessClient.get_document",
-            mock_get_doc,
+        with (
+            patch(
+                "doc_intelligence_hub.core.paperless.PaperlessClient.fetch_all_metadata",
+                mock_fetch,
+            ),
+            patch(
+                "doc_intelligence_hub.core.paperless.PaperlessClient.get_document",
+                mock_get_doc,
+            ),
         ):
             resp = seeded_client.get("/api/queue/actions/1/refresh")
 
@@ -542,21 +556,26 @@ class TestRefreshAction:
         from unittest.mock import AsyncMock, patch
 
         mock_fetch = AsyncMock(return_value=({}, {}, {}))
-        mock_get_doc = AsyncMock(return_value={
-            "id": 42,
-            "title": "Electric Bill",
-            "created": None,
-            "document_type": None,
-            "tag_names": [],
-            "correspondent": None,
-        })
+        mock_get_doc = AsyncMock(
+            return_value={
+                "id": 42,
+                "title": "Electric Bill",
+                "created": None,
+                "document_type": None,
+                "tag_names": [],
+                "correspondent": None,
+            }
+        )
 
-        with patch(
-            "doc_intelligence_hub.core.paperless.PaperlessClient.fetch_all_metadata",
-            mock_fetch,
-        ), patch(
-            "doc_intelligence_hub.core.paperless.PaperlessClient.get_document",
-            mock_get_doc,
+        with (
+            patch(
+                "doc_intelligence_hub.core.paperless.PaperlessClient.fetch_all_metadata",
+                mock_fetch,
+            ),
+            patch(
+                "doc_intelligence_hub.core.paperless.PaperlessClient.get_document",
+                mock_get_doc,
+            ),
         ):
             resp = seeded_client.get("/api/queue/actions/1/refresh")
 

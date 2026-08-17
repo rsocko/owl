@@ -2,8 +2,6 @@
 
 from datetime import date, timedelta
 
-import pytest
-
 from doc_intelligence_hub.modules.action_queue.risk_scoring import (
     compute_risk_score,
     recalculate_risk_scores,
@@ -20,18 +18,16 @@ class TestComputeRiskScore:
 
     def test_critical_urgency_high_base(self):
         """CRITICAL urgency should produce a high base score."""
-        score = compute_risk_score(urgency="CRITICAL", action_type="REVIEW", as_of=date(2026, 1, 15))
+        score = compute_risk_score(
+            urgency="CRITICAL", action_type="REVIEW", as_of=date(2026, 1, 15)
+        )
         assert score >= 40
 
     def test_overdue_increases_score(self):
         """An overdue action should score higher than one due in the future."""
         as_of = date(2026, 7, 20)
-        overdue = compute_risk_score(
-            urgency="MEDIUM", due_date=date(2026, 7, 10), as_of=as_of
-        )
-        future = compute_risk_score(
-            urgency="MEDIUM", due_date=date(2026, 8, 20), as_of=as_of
-        )
+        overdue = compute_risk_score(urgency="MEDIUM", due_date=date(2026, 7, 10), as_of=as_of)
+        future = compute_risk_score(urgency="MEDIUM", due_date=date(2026, 8, 20), as_of=as_of)
         assert overdue > future
 
     def test_due_today_scores_high(self):

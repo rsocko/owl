@@ -109,9 +109,7 @@ class WebhookDB:
 
     def remove_subscription(self, subscription_id: int) -> bool:
         conn = self.connect()
-        cursor = conn.execute(
-            "DELETE FROM webhook_subscriptions WHERE id = ?", (subscription_id,)
-        )
+        cursor = conn.execute("DELETE FROM webhook_subscriptions WHERE id = ?", (subscription_id,))
         conn.commit()
         return cursor.rowcount > 0
 
@@ -180,9 +178,7 @@ class WebhookDB:
 
     # -- Alert de-duplication state ------------------------------------------
 
-    def was_already_alerted(
-        self, provider_key: str, expected_date: str, event_type: str
-    ) -> bool:
+    def was_already_alerted(self, provider_key: str, expected_date: str, event_type: str) -> bool:
         conn = self.connect()
         row = conn.execute(
             "SELECT 1 FROM webhook_alert_state "
@@ -191,9 +187,7 @@ class WebhookDB:
         ).fetchone()
         return row is not None
 
-    def mark_alerted(
-        self, provider_key: str, expected_date: str, event_type: str
-    ) -> None:
+    def mark_alerted(self, provider_key: str, expected_date: str, event_type: str) -> None:
         conn = self.connect()
         conn.execute(
             "INSERT OR IGNORE INTO webhook_alert_state "
@@ -202,9 +196,7 @@ class WebhookDB:
         )
         conn.commit()
 
-    def clear_alert_state(
-        self, provider_key: str, expected_date: str | None = None
-    ) -> int:
+    def clear_alert_state(self, provider_key: str, expected_date: str | None = None) -> int:
         """Clear alert state for a provider (optionally for a specific date)."""
         conn = self.connect()
         if expected_date:
@@ -272,13 +264,20 @@ async def dispatch_webhook(
             error_msg = "Request timed out"
             logger.warning(
                 "Webhook timeout (attempt %d/%d): %s -> %s",
-                attempt, max_retries, event_type, url,
+                attempt,
+                max_retries,
+                event_type,
+                url,
             )
         except Exception as exc:
             error_msg = str(exc)[:500]
             logger.warning(
                 "Webhook error (attempt %d/%d): %s -> %s: %s",
-                attempt, max_retries, event_type, url, exc,
+                attempt,
+                max_retries,
+                event_type,
+                url,
+                exc,
             )
 
         if db:
@@ -299,7 +298,9 @@ async def dispatch_webhook(
 
     logger.error(
         "Webhook delivery failed after %d attempts: %s -> %s",
-        max_retries, event_type, url,
+        max_retries,
+        event_type,
+        url,
     )
     return False
 

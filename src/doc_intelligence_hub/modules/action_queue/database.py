@@ -25,7 +25,17 @@ VALID_STATUSES = {"pending", "acknowledged", "completed", "snoozed", "dismissed"
 VALID_SEVERITIES = {"critical", "focus", "safe"}
 
 # Valid action types
-VALID_ACTION_TYPES = {"PAY", "RESPOND", "FILE", "REVIEW", "SHARE", "SCHEDULE", "SIGN", "ARCHIVE", "TASK"}
+VALID_ACTION_TYPES = {
+    "PAY",
+    "RESPOND",
+    "FILE",
+    "REVIEW",
+    "SHARE",
+    "SCHEDULE",
+    "SIGN",
+    "ARCHIVE",
+    "TASK",
+}
 
 
 class Base(DeclarativeBase):
@@ -49,7 +59,9 @@ class Action(Base):
     severity = Column(String, default="safe")  # critical, focus, safe (3-tier display bucket)
     confidence = Column(Integer, default=0)
     risk_score = Column(Integer, default=0)  # 0-100 composite risk score
-    status = Column(String, default="pending", index=True)  # pending, acknowledged, completed, snoozed, dismissed, not_an_action
+    status = Column(
+        String, default="pending", index=True
+    )  # pending, acknowledged, completed, snoozed, dismissed, not_an_action
     last_synced_status = Column(String, nullable=True)  # What we last wrote to Paperless
     correspondent = Column(String, nullable=True)
     document_date = Column(Date, nullable=True)  # Paperless "created" date (document date)
@@ -57,7 +69,9 @@ class Action(Base):
     tags = Column(JSON, nullable=True)  # Paperless tags as JSON array of strings
     extracted_data = Column(JSON, nullable=True)  # Full extraction payload from Ollama
     ai_reasoning = Column(Text, nullable=True)
-    recommended_cta = Column(String, nullable=True)  # AI-recommended call-to-action (e.g., "pay-online", "open-document")
+    recommended_cta = Column(
+        String, nullable=True
+    )  # AI-recommended call-to-action (e.g., "pay-online", "open-document")
     version = Column(Integer, default=1, nullable=False)  # Optimistic locking
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -77,9 +91,13 @@ class ActionFeedback(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     action_id = Column(Integer, nullable=False, index=True)
-    feedback_type = Column(String, nullable=False)  # not_an_action, misclassified, wrong_urgency, wrong_amount
+    feedback_type = Column(
+        String, nullable=False
+    )  # not_an_action, misclassified, wrong_urgency, wrong_amount
     original_action_type = Column(String, nullable=True)  # What it was classified as
-    corrected_action_type = Column(String, nullable=True)  # What user says it should be (if misclassified)
+    corrected_action_type = Column(
+        String, nullable=True
+    )  # What user says it should be (if misclassified)
     reason = Column(Text, nullable=True)  # Optional user explanation
     created_at = Column(DateTime, default=datetime.utcnow)
 

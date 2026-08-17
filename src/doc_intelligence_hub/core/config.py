@@ -50,13 +50,15 @@ class LLMConfig(BaseModel):
 class EOBMatchingConfig(BaseModel):
     """EOB matching module settings."""
 
-    weights: dict[str, float] = Field(default_factory=lambda: {
-        "date": 0.30,
-        "provider": 0.25,
-        "patient": 0.20,
-        "amount": 0.15,
-        "procedures": 0.10,
-    })
+    weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "date": 0.30,
+            "provider": 0.25,
+            "patient": 0.20,
+            "amount": 0.15,
+            "procedures": 0.10,
+        }
+    )
     write_to_paperless: bool = True
     database_url: str = "sqlite:///data/eob_matching.db"
 

@@ -85,9 +85,7 @@ def send_gotify_notification(
             logger.info("Gotify notification sent: %s", title)
             return True
         else:
-            logger.warning(
-                "Gotify returned HTTP %d: %s", resp.status_code, resp.text[:200]
-            )
+            logger.warning("Gotify returned HTTP %d: %s", resp.status_code, resp.text[:200])
             return False
     except Exception:
         logger.exception("Failed to send Gotify notification")

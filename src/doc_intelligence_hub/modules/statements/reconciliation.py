@@ -7,9 +7,8 @@ series with financial fields populated.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
-from doc_intelligence_hub.modules.statements.models import SeriesDocument, TimelineEntry
+from doc_intelligence_hub.modules.statements.models import SeriesDocument
 
 
 @dataclass
@@ -104,17 +103,19 @@ def reconcile_series(
         deviation = abs(doc.statement_amount - avg)
         if threshold > 0 and deviation > threshold:
             severity = "high" if deviation > 3 * variance else "medium"
-            anomalies.append(ReconciliationAnomaly(
-                document_id=doc.document_id,
-                anomaly_type="amount_spike",
-                description=(
-                    f"Amount ${doc.statement_amount:.2f} deviates from average "
-                    f"${avg:.2f} by ${deviation:.2f}"
-                ),
-                severity=severity,
-                expected_value=avg,
-                actual_value=doc.statement_amount,
-            ))
+            anomalies.append(
+                ReconciliationAnomaly(
+                    document_id=doc.document_id,
+                    anomaly_type="amount_spike",
+                    description=(
+                        f"Amount ${doc.statement_amount:.2f} deviates from average "
+                        f"${avg:.2f} by ${deviation:.2f}"
+                    ),
+                    severity=severity,
+                    expected_value=avg,
+                    actual_value=doc.statement_amount,
+                )
+            )
 
     # Check balance continuity
     balance_checks = 0
@@ -133,17 +134,19 @@ def reconcile_series(
             if gap < 0.01:
                 balance_matches += 1
             else:
-                anomalies.append(ReconciliationAnomaly(
-                    document_id=curr.document_id,
-                    anomaly_type="balance_gap",
-                    description=(
-                        f"Opening balance ${curr.opening_balance:.2f} doesn't match "
-                        f"previous closing balance ${prev.closing_balance:.2f} (gap: ${gap:.2f})"
-                    ),
-                    severity="high" if gap > avg * 0.1 else "medium",
-                    expected_value=prev.closing_balance,
-                    actual_value=curr.opening_balance,
-                ))
+                anomalies.append(
+                    ReconciliationAnomaly(
+                        document_id=curr.document_id,
+                        anomaly_type="balance_gap",
+                        description=(
+                            f"Opening balance ${curr.opening_balance:.2f} doesn't match "
+                            f"previous closing balance ${prev.closing_balance:.2f} (gap: ${gap:.2f})"
+                        ),
+                        severity="high" if gap > avg * 0.1 else "medium",
+                        expected_value=prev.closing_balance,
+                        actual_value=curr.opening_balance,
+                    )
+                )
 
     continuity_score = (balance_matches / balance_checks) if balance_checks > 0 else 0.0
 

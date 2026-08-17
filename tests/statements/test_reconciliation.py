@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from doc_intelligence_hub.modules.statements.models import SeriesDocument, TimelineEntry
 from doc_intelligence_hub.modules.statements.reconciliation import (
-    ReconciliationAnomaly,
     reconcile_series,
 )
 

@@ -34,6 +34,11 @@ class TestExtractAccountNumbers:
         matches = extract_account_numbers(text)
         assert any(m["normalized"] == "5555" for m in matches)
 
+    def test_last4_in_variant(self):
+        text = "last 4 in 5555"
+        matches = extract_account_numbers(text)
+        assert any(m["normalized"] == "5555" for m in matches)
+
     def test_card_number(self):
         text = "Card #****1234"
         matches = extract_account_numbers(text)

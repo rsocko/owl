@@ -138,7 +138,6 @@ class TestUpdateAction:
         data = resp.json()
         assert data["status"] == "dismissed"
 
-
     def test_reopen_action(self, client, seed_actions):
         actions = client.get("/api/queue/actions?status=completed").json()
         action_id = actions["actions"][0]["id"]
@@ -252,9 +251,7 @@ class TestActionFeedbackSync:
 
         assert resp.status_code == 200
         assert resp.json()["action_status"] == "not_an_action"
-        mock_enricher.sync_status.assert_awaited_once_with(
-            action["document_id"], "not_an_action"
-        )
+        mock_enricher.sync_status.assert_awaited_once_with(action["document_id"], "not_an_action")
 
 
 class TestBulkAction:
@@ -313,9 +310,7 @@ class TestBulkAction:
 
         snoozed = client.get("/api/queue/actions?status=snoozed").json()
         assert snoozed["total"] == 2
-        assert {action["snoozed_until"] for action in snoozed["actions"]} == {
-            snoozed_until
-        }
+        assert {action["snoozed_until"] for action in snoozed["actions"]} == {snoozed_until}
 
     def test_bulk_no_action_needed_records_feedback(self, client, seed_actions):
         actions = client.get("/api/queue/actions?status=pending").json()
@@ -396,9 +391,7 @@ class TestFeedback:
             )
 
         assert resp.status_code == 200
-        enricher.sync_status.assert_awaited_once_with(
-            action["document_id"], "not_an_action"
-        )
+        enricher.sync_status.assert_awaited_once_with(action["document_id"], "not_an_action")
 
 
 class TestBackfill:
