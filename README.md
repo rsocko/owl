@@ -8,7 +8,7 @@ This replaces the previous approach of building three separate services (Stateme
 
 ## Problem Statement
 
-Three experiments in this repo all solve related problems around **Paperless-ngx document intelligence**:
+Three modules in this repository solve related problems around **Paperless-ngx document intelligence**:
 
 | Experiment | Purpose | Issue |
 |-----------|---------|-------|
@@ -177,7 +177,7 @@ action_feedback     -- user corrections (for future ML learning)
 ## Project Structure
 
 ```
-experiments/document-intelligence/
+owl/
 ├── README.md                          # This file (architecture overview)
 ├── .gitignore                         # Protects secrets, DB files, etc.
 │

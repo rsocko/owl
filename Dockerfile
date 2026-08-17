@@ -36,9 +36,8 @@ RUN pip install --no-cache-dir build
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-# Overlay the freshly-built frontend on top of whatever's committed under
-# api/static/, so the wheel always ships the current frontend build rather
-# than whatever happened to be committed to source control.
+# Add the freshly-built frontend to the wheel without retaining generated
+# bundles in source control.
 COPY --from=frontend-build /frontend-dist ./src/doc_intelligence_hub/api/static
 
 # Build wheel
@@ -57,7 +56,7 @@ LABEL org.opencontainers.image.title="Document Intelligence Hub" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.source="https://github.com/rsocko/ideation" \
+      org.opencontainers.image.source="https://github.com/rsocko/owl" \
       org.opencontainers.image.description="Unified Paperless-ngx document analysis platform"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

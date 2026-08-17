@@ -40,3 +40,6 @@ Thumbs.db
 
 # ─── Node (if using React frontend) ─────────
 node_modules/
+
+# ─── Generated frontend bundle ──────────────
+src/doc_intelligence_hub/api/static/

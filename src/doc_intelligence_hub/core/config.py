@@ -42,7 +42,7 @@ class PaperlessConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM/AI gateway settings."""
 
-    base_url: str = "https://service-001.example.invalid/openai/v1"
+    base_url: str = "http://localhost:11434/v1"
     model: str = "gpt-4o-mini"
     timeout_seconds: float = 60.0
 
