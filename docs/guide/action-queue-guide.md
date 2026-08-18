@@ -119,7 +119,7 @@ CTAs can include a `url` (deep link to pay/sign/view) and/or `phone` number extr
 ### Check System Health
 
 ```bash
-***REMOVED*** http://service-005.example.invalid/api/queue/check
+curl http://service-005.example.invalid/api/queue/check
 ```
 
 Returns connectivity status for Paperless and the LLM backend:
@@ -137,7 +137,7 @@ Returns connectivity status for Paperless and the LLM backend:
 ### Run the Classification Pipeline
 
 ```bash
-***REMOVED*** -X POST http://service-005.example.invalid/api/queue/run \
+curl -X POST http://service-005.example.invalid/api/queue/run \
   -H "Content-Type: application/json" \
   -d '{"dry_run": false, "limit": 50}'
 ```
@@ -155,7 +155,7 @@ Returns connectivity status for Paperless and the LLM backend:
 ### List Actions
 
 ```bash
-***REMOVED*** http://service-005.example.invalid/api/queue/actions
+curl http://service-005.example.invalid/api/queue/actions
 ```
 
 Returns all pending actions sorted by urgency descending.
@@ -163,7 +163,7 @@ Returns all pending actions sorted by urgency descending.
 ### Update an Action
 
 ```bash
-***REMOVED*** -X PATCH http://service-005.example.invalid/api/queue/actions/42 \
+curl -X PATCH http://service-005.example.invalid/api/queue/actions/42 \
   -H "Content-Type: application/json" \
   -d '{"status": "completed", "dry_run": false}'
 ```
@@ -175,7 +175,7 @@ When setting status to `snoozed`, include `"snoozed_until": "2026-08-01T09:00:00
 ### Set a Reminder
 
 ```bash
-***REMOVED*** -X PATCH http://service-005.example.invalid/api/queue/actions/42 \
+curl -X PATCH http://service-005.example.invalid/api/queue/actions/42 \
   -H "Content-Type: application/json" \
   -d '{"status": "snoozed", "snoozed_until": "2026-08-20T09:00:00", "dry_run": false}'
 ```
@@ -185,7 +185,7 @@ Removes the action from the active queue until the specified date and time.
 ### Snooze an Action
 
 ```bash
-***REMOVED*** -X POST http://service-005.example.invalid/api/queue/actions/42/snooze \
+curl -X POST http://service-005.example.invalid/api/queue/actions/42/snooze \
   -H "Content-Type: application/json" \
   -d '{"until": "2026-08-01T09:00:00Z"}'
 ```
@@ -195,7 +195,7 @@ Defers the action until the specified time. Use `GET /api/queue/actions/expired-
 ### Submit Feedback (False Positive / Misclassification)
 
 ```bash
-***REMOVED*** -X POST http://service-005.example.invalid/api/queue/actions/42/feedback \
+curl -X POST http://service-005.example.invalid/api/queue/actions/42/feedback \
   -H "Content-Type: application/json" \
   -d '{"feedback_type": "not_an_action", "reason": "This is just an ad mailer"}'
 ```
@@ -212,7 +212,7 @@ Feedback trains the classifier over time and is stored for analysis.
 ### Pipeline Progress (SSE)
 
 ```bash
-***REMOVED*** http://service-005.example.invalid/api/queue/progress
+curl http://service-005.example.invalid/api/queue/progress
 ```
 
 Server-sent events stream for real-time pipeline progress during a run.
@@ -238,7 +238,7 @@ If the LLM is unavailable, OWL falls back to a **rule-based classifier** that us
 Use the admin API to configure automatic runs:
 
 ```bash
-***REMOVED*** -X PUT http://service-005.example.invalid/api/admin/schedules/action_queue \
+curl -X PUT http://service-005.example.invalid/api/admin/schedules/action_queue \
   -H "Content-Type: application/json" \
   -d '{"enabled": true, "cron": "0 6 * * *"}'
 ```

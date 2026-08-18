@@ -14,7 +14,7 @@ First, confirm OWL is running and can reach its dependencies:
 
 ```bash
 # Basic health check
-***REMOVED*** http://localhost:8071/health
+curl http://localhost:8071/health
 ```
 
 Expected response:
@@ -29,7 +29,7 @@ Next, check that OWL can reach both Paperless and your LLM:
 
 ```bash
 # Check upstream service connectivity
-***REMOVED*** http://localhost:8071/api/queue/check
+curl http://localhost:8071/api/queue/check
 ```
 
 Expected response:
@@ -43,7 +43,7 @@ Expected response:
 :::danger Connection Failures
 If either service shows `"status": "disconnected"`:
 - **Paperless**: Verify `PAPERLESS_URL` is reachable from inside the container and your API token is valid
-- **LLM**: Verify `LLM_BASE_URL` and `LLM_API_KEY` are correct. Try `***REMOVED*** $LLM_BASE_URL/models` from the host to test.
+- **LLM**: Verify `LLM_BASE_URL` and `LLM_API_KEY` are correct. Try `curl $LLM_BASE_URL/models` from the host to test.
 :::
 
 ## Step 2: Run Your First Action Queue Scan
@@ -53,7 +53,7 @@ The Action Queue (PAQ) is OWL's document triage pipeline. It scans Paperless for
 Start with a **dry run** to see what OWL would do without writing anything:
 
 ```bash
-***REMOVED*** -X POST http://localhost:8071/api/queue/run \
+curl -X POST http://localhost:8071/api/queue/run \
   -H "Content-Type: application/json" \
   -d '{"dry_run": true}'
 ```
@@ -79,7 +79,7 @@ Expected response:
 :::tip
 The dry run shows you exactly what OWL wants to do. Review the output before running a live pass. When you're satisfied:
 ```bash
-***REMOVED*** -X POST http://localhost:8071/api/queue/run \
+curl -X POST http://localhost:8071/api/queue/run \
   -H "Content-Type: application/json" \
   -d '{"dry_run": false}'
 ```
@@ -94,7 +94,7 @@ The Action Queue requires LLM access for document classification. If your LLM is
 Statement Discovery scans your documents to find recurring bills and statements, building a timeline of what you owe and when.
 
 ```bash
-***REMOVED*** -X POST http://localhost:8071/api/statements/discovery/run
+curl -X POST http://localhost:8071/api/statements/discovery/run
 ```
 
 This endpoint uses **Server-Sent Events (SSE)** to stream progress in real-time:
@@ -112,9 +112,9 @@ data: {"event": "discovery_complete", "statements_found": 12, "vendors_identifie
 ```
 
 :::info SSE Streaming
-The response streams as events — your terminal will show them as they arrive. Use `***REMOVED*** -N` (no-buffer) if events seem delayed:
+The response streams as events — your terminal will show them as they arrive. Use `curl -N` (no-buffer) if events seem delayed:
 ```bash
-***REMOVED*** -N -X POST http://localhost:8071/api/statements/discovery/run
+curl -N -X POST http://localhost:8071/api/statements/discovery/run
 ```
 :::
 
@@ -125,7 +125,7 @@ Discovery builds a persistent database of your statements in the `/app/data` vol
 Once Discovery has found your recurring statements, check if any are overdue:
 
 ```bash
-***REMOVED*** -X POST http://localhost:8071/api/statements/recommendations/run
+curl -X POST http://localhost:8071/api/statements/recommendations/run
 ```
 
 Expected response:
@@ -153,7 +153,7 @@ This helps you catch statements that should have arrived but haven't been scanne
 If you have medical documents (Explanation of Benefits, medical bills), OWL can match EOBs to their corresponding bills:
 
 ```bash
-***REMOVED*** -X POST http://localhost:8071/api/eob/run
+curl -X POST http://localhost:8071/api/eob/run
 ```
 
 Expected response:
@@ -183,7 +183,7 @@ If you don't have EOBs or medical bills in Paperless, this endpoint will return 
 OWL aggregates insights and alerts from all its modules. Check the summary:
 
 ```bash
-***REMOVED*** http://localhost:8071/api/insights/alerts/summary
+curl http://localhost:8071/api/insights/alerts/summary
 ```
 
 Expected response:

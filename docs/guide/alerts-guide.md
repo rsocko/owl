@@ -38,7 +38,7 @@ Preview the insights & alerts UI: [Insights Tab](../../mockups/triage-correction
 ### List Alerts
 
 ```bash
-***REMOVED*** "http://service-005.example.invalid/api/insights/alerts?module=statements&severity=high"
+curl "http://service-005.example.invalid/api/insights/alerts?module=statements&severity=high"
 ```
 
 | Parameter | Type | Description |
@@ -76,7 +76,7 @@ Response:
 ### Alert Summary
 
 ```bash
-***REMOVED*** http://service-005.example.invalid/api/insights/alerts/summary
+curl http://service-005.example.invalid/api/insights/alerts/summary
 ```
 
 Returns counts grouped by severity and module — useful for dashboard badges:
@@ -92,7 +92,7 @@ Returns counts grouped by severity and module — useful for dashboard badges:
 ### Acknowledge an Alert
 
 ```bash
-***REMOVED*** -X PATCH http://service-005.example.invalid/api/insights/alerts/alert-uuid-456/acknowledge
+curl -X PATCH http://service-005.example.invalid/api/insights/alerts/alert-uuid-456/acknowledge
 ```
 
 Acknowledging an alert marks it as seen without resolving the underlying issue. Acknowledged alerts remain visible but are de-prioritized in Mission Control.

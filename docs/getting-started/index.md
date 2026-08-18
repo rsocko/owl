@@ -69,7 +69,7 @@ OWL's health check and basic connectivity will work without an LLM configured, b
 Once the container is running, verify it's healthy:
 
 ```bash
-***REMOVED*** http://localhost:8071/health
+curl http://localhost:8071/health
 ```
 
 Expected response:

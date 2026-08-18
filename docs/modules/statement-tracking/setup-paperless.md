@@ -53,7 +53,7 @@ python manage.py create_api_token statement_tracker
 
 ## Step 2: Test API Access
 
-### Test with ***REMOVED***
+### Test with curl
 
 ```bash
 # Replace with your paperless URL and token
@@ -61,13 +61,13 @@ export PAPERLESS_URL="http://localhost:8000"
 export PAPERLESS_TOKEN="your-token-here"
 
 # Test basic connectivity
-***REMOVED*** -H "Authorization: Token $PAPERLESS_TOKEN" \
+curl -H "Authorization: Token $PAPERLESS_TOKEN" \
      "$PAPERLESS_URL/api/"
 
 # Expected output: JSON with API version info
 
 # Test document access
-***REMOVED*** -H "Authorization: Token $PAPERLESS_TOKEN" \
+curl -H "Authorization: Token $PAPERLESS_TOKEN" \
      "$PAPERLESS_URL/api/documents/?page=1&page_size=5"
 
 # Expected output: JSON with document list
@@ -219,11 +219,11 @@ Check that your documents have the necessary metadata:
 
 ```bash
 # List documents with metadata
-***REMOVED*** -H "Authorization: Token $PAPERLESS_TOKEN" \
+curl -H "Authorization: Token $PAPERLESS_TOKEN" \
      "$PAPERLESS_URL/api/documents/?page=1&page_size=10" | jq
 
 # Check specific document
-***REMOVED*** -H "Authorization: Token $PAPERLESS_TOKEN" \
+curl -H "Authorization: Token $PAPERLESS_TOKEN" \
      "$PAPERLESS_URL/api/documents/123/" | jq
 
 # Important fields:
@@ -355,7 +355,7 @@ GET /api/document_types/
 **Solutions:**
 1. Verify documents exist: Check paperless web interface
 2. Check API token permissions
-3. Try fetching documents directly via ***REMOVED***
+3. Try fetching documents directly via curl
 4. Review paperless logs
 
 ### Error: "Timeout"

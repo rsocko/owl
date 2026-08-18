@@ -63,7 +63,7 @@ A composite score of **0.0–1.0** is computed. Scores above 0.8 auto-confirm; s
 ### 1. Run the Matching Pipeline
 
 ```bash
-***REMOVED*** -X POST http://service-005.example.invalid/api/eob/run \
+curl -X POST http://service-005.example.invalid/api/eob/run \
   -H "Content-Type: application/json" \
   -d '{"limit": 50, "verbose": true}'
 ```
@@ -81,7 +81,7 @@ A composite score of **0.0–1.0** is computed. Scores above 0.8 auto-confirm; s
 ### 2. Review Matches
 
 ```bash
-***REMOVED*** http://service-005.example.invalid/api/eob/matches?status=pending_review
+curl http://service-005.example.invalid/api/eob/matches?status=pending_review
 ```
 
 Response:
@@ -113,12 +113,12 @@ Response:
 
 ```bash
 # Confirm a match
-***REMOVED*** -X POST http://service-005.example.invalid/api/eob/matches/match-uuid-123/confirm \
+curl -X POST http://service-005.example.invalid/api/eob/matches/match-uuid-123/confirm \
   -H "Content-Type: application/json" \
   -d '{"notes": "Verified amounts match after insurance adjustment"}'
 
 # Reject a match
-***REMOVED*** -X POST http://service-005.example.invalid/api/eob/matches/match-uuid-123/reject \
+curl -X POST http://service-005.example.invalid/api/eob/matches/match-uuid-123/reject \
   -H "Content-Type: application/json" \
   -d '{"reason": "Different patient - spouse vs primary"}'
 ```
@@ -128,7 +128,7 @@ Response:
 Once matched, track payment status:
 
 ```bash
-***REMOVED*** -X POST http://service-005.example.invalid/api/eob/matches/match-uuid-123/payment \
+curl -X POST http://service-005.example.invalid/api/eob/matches/match-uuid-123/payment \
   -H "Content-Type: application/json" \
   -d '{"status": "paid", "amount_paid": 45.00, "paid_date": "2026-06-01"}'
 ```
@@ -164,7 +164,7 @@ stateDiagram-v2
 Documents classified as EOB or Bill that have no match after a configurable period are surfaced as orphans:
 
 ```bash
-***REMOVED*** http://service-005.example.invalid/api/eob/documents?status=unmatched
+curl http://service-005.example.invalid/api/eob/documents?status=unmatched
 ```
 
 ### 6. Manual Match
@@ -172,7 +172,7 @@ Documents classified as EOB or Bill that have no match after a configurable peri
 For difficult cases, manually pair documents:
 
 ```bash
-***REMOVED*** -X POST http://service-005.example.invalid/api/eob/matches/manual \
+curl -X POST http://service-005.example.invalid/api/eob/matches/manual \
   -H "Content-Type: application/json" \
   -d '{"eob_doc_id": 201, "bill_doc_id": 189, "notes": "Manual match - different provider name on EOB"}'
 ```
@@ -198,7 +198,7 @@ For difficult cases, manually pair documents:
 Adjust matching weights via the admin API:
 
 ```bash
-***REMOVED*** -X PUT http://service-005.example.invalid/api/admin/weights/eob \
+curl -X PUT http://service-005.example.invalid/api/admin/weights/eob \
   -H "Content-Type: application/json" \
   -d '{
     "date": 0.30,
@@ -212,7 +212,7 @@ Adjust matching weights via the admin API:
 ### Auto-Confirm Threshold
 
 ```bash
-***REMOVED*** -X PUT http://service-005.example.invalid/api/admin/config/eob \
+curl -X PUT http://service-005.example.invalid/api/admin/config/eob \
   -H "Content-Type: application/json" \
   -d '{"auto_confirm_threshold": 0.85}'
 ```

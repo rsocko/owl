@@ -49,7 +49,7 @@ sequenceDiagram
 Discovery scans your Paperless archive and identifies providers that send recurring documents:
 
 ```bash
-***REMOVED*** -X POST http://service-005.example.invalid/api/statements/discovery/run
+curl -X POST http://service-005.example.invalid/api/statements/discovery/run
 ```
 
 This returns a Server-Sent Events (SSE) stream with progress updates. Discovery groups documents by correspondent and date, then infers the sending frequency.
@@ -61,7 +61,7 @@ Discovery requires **sufficient document history** to detect patterns. A provide
 ### 2. Review Discovered Providers
 
 ```bash
-***REMOVED*** http://service-005.example.invalid/api/statements/providers
+curl http://service-005.example.invalid/api/statements/providers
 ```
 
 Response:
@@ -88,7 +88,7 @@ Response:
 Check which providers are overdue:
 
 ```bash
-***REMOVED*** -X POST http://service-005.example.invalid/api/statements/recommendations/run
+curl -X POST http://service-005.example.invalid/api/statements/recommendations/run
 ```
 
 This compares expected arrival dates against actual documents and identifies gaps.
@@ -102,7 +102,7 @@ Recommendations surface in the unified alerts system and through the statements 
 If auto-detection gets a provider wrong, you can supply manual hints:
 
 ```bash
-***REMOVED*** -X PUT http://service-005.example.invalid/api/statements/providers/chase-visa/override \
+curl -X PUT http://service-005.example.invalid/api/statements/providers/chase-visa/override \
   -H "Content-Type: application/json" \
   -d '{
     "frequency": "monthly",

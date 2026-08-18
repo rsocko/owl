@@ -120,15 +120,15 @@ Runtime configuration can be adjusted without restarting the container.
 
 ```bash
 # Get all schedules
-***REMOVED*** http://service-005.example.invalid/api/admin/schedules
+curl http://service-005.example.invalid/api/admin/schedules
 
 # Update action queue schedule
-***REMOVED*** -X PUT http://service-005.example.invalid/api/admin/schedules/action_queue \
+curl -X PUT http://service-005.example.invalid/api/admin/schedules/action_queue \
   -H "Content-Type: application/json" \
   -d '{"enabled": true, "cron": "0 6 * * *"}'
 
 # Update statement discovery schedule
-***REMOVED*** -X PUT http://service-005.example.invalid/api/admin/schedules/statement_discovery \
+curl -X PUT http://service-005.example.invalid/api/admin/schedules/statement_discovery \
   -H "Content-Type: application/json" \
   -d '{"enabled": true, "cron": "0 3 * * 0"}'
 ```
@@ -136,7 +136,7 @@ Runtime configuration can be adjusted without restarting the container.
 ### EOB Matching Weights
 
 ```bash
-***REMOVED*** -X PUT http://service-005.example.invalid/api/admin/weights/eob \
+curl -X PUT http://service-005.example.invalid/api/admin/weights/eob \
   -H "Content-Type: application/json" \
   -d '{
     "date": 0.30,
@@ -154,7 +154,7 @@ Weights must sum to 1.0. The API validates this and returns a 422 error if they 
 ### Hub Settings
 
 ```bash
-***REMOVED*** http://service-005.example.invalid/api/admin/settings
+curl http://service-005.example.invalid/api/admin/settings
 ```
 
 Returns current runtime settings including write mode, connected services, and module status.
@@ -190,7 +190,7 @@ For production, the hub runs behind Traefik with the hostname `service-005.examp
 ## Health Check
 
 ```bash
-***REMOVED*** http://service-005.example.invalid/health
+curl http://service-005.example.invalid/health
 ```
 
 Returns overall system health and per-module status. Use this for Docker health checks and monitoring.

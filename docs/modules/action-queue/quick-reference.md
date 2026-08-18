@@ -207,10 +207,10 @@ trainer.save_model('models/classifier/')
 ### Manual Document Analysis
 ```bash
 # Analyze specific document
-***REMOVED*** -X POST http://localhost:8000/documents/12345/analyze
+curl -X POST http://localhost:8000/documents/12345/analyze
 
 # Force re-analysis of all documents
-***REMOVED*** -X POST http://localhost:8000/admin/sync?force=true
+curl -X POST http://localhost:8000/admin/sync?force=true
 ```
 
 ## Troubleshooting
@@ -331,10 +331,10 @@ pytest -m "not ml"
 ### Health Check
 ```bash
 # API health
-***REMOVED*** http://localhost:8000/health
+curl http://localhost:8000/health
 
 # ML service health
-***REMOVED*** http://localhost:8001/health
+curl http://localhost:8001/health
 
 # Database health
 psql -U user -d paperless_actions -c "SELECT 1"
@@ -443,17 +443,17 @@ OCR_WEBHOOK_SECRET=random_secret_string
 
 ```bash
 # Score a specific document (force re-assess)
-***REMOVED*** -X POST https://n8n.yourhomelab/webhook/ocr-manual \
+curl -X POST https://n8n.yourhomelab/webhook/ocr-manual \
   -H "Content-Type: application/json" \
   -d '{"document_id": 1234, "action": "score", "secret": "YOUR_SECRET"}'
 
 # Trigger remediation (auto-tier)
-***REMOVED*** -X POST https://n8n.yourhomelab/webhook/ocr-manual \
+curl -X POST https://n8n.yourhomelab/webhook/ocr-manual \
   -H "Content-Type: application/json" \
   -d '{"document_id": 1234, "action": "remediate", "secret": "YOUR_SECRET"}'
 
 # Force Azure Tier 2 directly
-***REMOVED*** -X POST https://n8n.yourhomelab/webhook/ocr-manual \
+curl -X POST https://n8n.yourhomelab/webhook/ocr-manual \
   -H "Content-Type: application/json" \
   -d '{"document_id": 1234, "action": "remediate_azure", "secret": "YOUR_SECRET"}'
 ```

@@ -32,7 +32,7 @@
 # PUT  /api/admin/schedules       — update & reschedule (takes effect immediately)
 #
 # Example:
-#   ***REMOVED*** -X PUT http://localhost:8071/api/admin/schedules \
+#   curl -X PUT http://localhost:8071/api/admin/schedules \
 #     -H 'Content-Type: application/json' \
 #     -d '{"eob_matching": {"cron": "0 10 * * 1", "enabled": true}}'
 #
@@ -63,7 +63,7 @@
 #   doc-hub cleanup                # Actually delete stale records
 #
 # --- Fallback: Crontab ---
-#   0 2 * * 0 ***REMOVED*** -s -X POST http://localhost:8071/api/admin/cleanup \
+#   0 2 * * 0 curl -s -X POST http://localhost:8071/api/admin/cleanup \
 #     -H 'Content-Type: application/json' -d '{"dry_run": false}'
 #
 # ===================================================================
@@ -72,7 +72,7 @@
 #
 # For environments where the built-in scheduler is not suitable,
 # config/crontab.example provides equivalent cron entries that call
-# the hub API via ***REMOVED***. Copy them into your crontab:
+# the hub API via curl. Copy them into your crontab:
 #
 #   crontab -e
 #   # Paste entries from config/crontab.example

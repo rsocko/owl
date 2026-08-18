@@ -68,7 +68,7 @@ PAPERLESS_BASE_URL=http://your-paperless-url
 ### Step 3: Test API Access
 
 ```bash
-# Test with ***REMOVED***
+# Test with curl
 Authorization: ${PAPERLESS_AUTH_HEADER} \
   http://your-paperless-url/api/documents/ | jq
 

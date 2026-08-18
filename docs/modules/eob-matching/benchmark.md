@@ -69,7 +69,7 @@ We benchmarked 6 LLM models for EOB (Explanation of Benefits) document extractio
 
 ```bash
 # Quick test — 2 models, 5 recent docs
-***REMOVED*** -X POST https://service-002.example.invalid/api/eob/benchmark \
+curl -X POST https://service-002.example.invalid/api/eob/benchmark \
   -H "Content-Type: application/json" \
   -d '{
     "models": ["gpt-4o-mini", "gpt-4o"],
@@ -77,7 +77,7 @@ We benchmarked 6 LLM models for EOB (Explanation of Benefits) document extractio
   }'
 
 # Full benchmark with date range (avoid processing years of history)
-***REMOVED*** -X POST https://service-002.example.invalid/api/eob/benchmark \
+curl -X POST https://service-002.example.invalid/api/eob/benchmark \
   -H "Content-Type: application/json" \
   -d '{
     "models": ["gpt-4o-mini", "gpt-4o", "llama3.1:8b"],
@@ -87,7 +87,7 @@ We benchmarked 6 LLM models for EOB (Explanation of Benefits) document extractio
   }'
 
 # Test a new local model after adding GPU
-***REMOVED*** -X POST https://service-002.example.invalid/api/eob/benchmark \
+curl -X POST https://service-002.example.invalid/api/eob/benchmark \
   -H "Content-Type: application/json" \
   -d '{
     "models": ["gpt-4o-mini", "llama3.1:8b", "mistral-nemo:latest"],

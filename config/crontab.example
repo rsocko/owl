@@ -12,24 +12,24 @@ HUB_URL=http://localhost:8071
 # --- Statement Tracker ---
 
 # Statement Discovery — daily at 9:00 AM
-0 9 * * *   ***REMOVED*** -sf -X POST "$HUB_URL/api/statements/discovery/run" -o /dev/null && echo "[$(date)] Statement discovery OK" >> /var/log/doc-intelligence-cron.log
+0 9 * * *   curl -sf -X POST "$HUB_URL/api/statements/discovery/run" -o /dev/null && echo "[$(date)] Statement discovery OK" >> /var/log/doc-intelligence-cron.log
 
 # Statement Gap Check — daily at 9:30 AM (uses today's date)
-30 9 * * *  ***REMOVED*** -sf -X POST "$HUB_URL/api/statements/recommendations/run?as_of=$(date +\%Y-\%m-\%d)" -o /dev/null && echo "[$(date)] Gap check OK" >> /var/log/doc-intelligence-cron.log
+30 9 * * *  curl -sf -X POST "$HUB_URL/api/statements/recommendations/run?as_of=$(date +\%Y-\%m-\%d)" -o /dev/null && echo "[$(date)] Gap check OK" >> /var/log/doc-intelligence-cron.log
 
 # --- EOB Matching ---
 
 # EOB Matching pipeline — daily at 10:00 AM (incremental: since last run)
-0 10 * * *  ***REMOVED*** -sf -X POST "$HUB_URL/api/eob/run" -H 'Content-Type: application/json' -d '{"limit":200,"tags":["medical"],"since_last_run":true}' -o /dev/null && echo "[$(date)] EOB matching OK" >> /var/log/doc-intelligence-cron.log
+0 10 * * *  curl -sf -X POST "$HUB_URL/api/eob/run" -H 'Content-Type: application/json' -d '{"limit":200,"tags":["medical"],"since_last_run":true}' -o /dev/null && echo "[$(date)] EOB matching OK" >> /var/log/doc-intelligence-cron.log
 
 # EOB Benchmark — weekly on Monday at 6:00 AM
-0 6 * * 1   ***REMOVED*** -sf -X POST "$HUB_URL/api/eob/benchmark" -H 'Content-Type: application/json' -d '{"models":["phi3:mini","gpt-4o-mini","gpt-4o"],"limit":5,"trigger":"scheduled"}' -o /dev/null && echo "[$(date)] EOB benchmark OK" >> /var/log/doc-intelligence-cron.log
+0 6 * * 1   curl -sf -X POST "$HUB_URL/api/eob/benchmark" -H 'Content-Type: application/json' -d '{"models":["phi3:mini","gpt-4o-mini","gpt-4o"],"limit":5,"trigger":"scheduled"}' -o /dev/null && echo "[$(date)] EOB benchmark OK" >> /var/log/doc-intelligence-cron.log
 
 # --- Action Queue ---
 
 # Action Queue processing — daily at 8:00 AM and 2:00 PM
-0 8 * * *   ***REMOVED*** -sf -X POST "$HUB_URL/api/queue/run" -H 'Content-Type: application/json' -d '{"dry_run":false,"limit":50}' -o /dev/null && echo "[$(date)] Action queue (AM) OK" >> /var/log/doc-intelligence-cron.log
-0 14 * * *  ***REMOVED*** -sf -X POST "$HUB_URL/api/queue/run" -H 'Content-Type: application/json' -d '{"dry_run":false,"limit":50}' -o /dev/null && echo "[$(date)] Action queue (PM) OK" >> /var/log/doc-intelligence-cron.log
+0 8 * * *   curl -sf -X POST "$HUB_URL/api/queue/run" -H 'Content-Type: application/json' -d '{"dry_run":false,"limit":50}' -o /dev/null && echo "[$(date)] Action queue (AM) OK" >> /var/log/doc-intelligence-cron.log
+0 14 * * *  curl -sf -X POST "$HUB_URL/api/queue/run" -H 'Content-Type: application/json' -d '{"dry_run":false,"limit":50}' -o /dev/null && echo "[$(date)] Action queue (PM) OK" >> /var/log/doc-intelligence-cron.log
 
 # --- Alternative: Docker Compose one-shot jobs ---
 # Use these if the hub API is not reachable from the cron host:
