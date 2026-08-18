@@ -1,0 +1,38 @@
+name: Reproducible defect
+description: Report a reproducible OWL defect; this is not a support request.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Issues feed an internally managed backlog and do not guarantee a response or fix. Do not include secrets, personal documents, or security vulnerabilities.
+  - type: textarea
+    id: description
+    attributes:
+      label: Defect
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide the smallest safe sequence that reproduces the defect.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: 0.2.0 or a full commit SHA
+    validations:
+      required: true
+  - type: checkboxes
+    id: policy
+    attributes:
+      label: Policy confirmation
+      options:
+        - label: I removed secrets and personal document content.
+          required: true
+        - label: This is not a support request or security vulnerability.
+          required: true
