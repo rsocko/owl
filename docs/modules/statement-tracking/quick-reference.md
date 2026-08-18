@@ -23,8 +23,8 @@ pytest
 If PowerShell blocks venv activation on Windows, call the interpreter directly instead of running `Activate.ps1`:
 
 ```powershell
-c:/dev/ideation/.venv/Scripts/python.exe -m pip install -e .[dev]
-c:/dev/ideation/.venv/Scripts/python.exe -m pytest
+.venv/Scripts/python.exe -m pip install -e .[dev]
+.venv/Scripts/python.exe -m pytest
 ```
 
 ---

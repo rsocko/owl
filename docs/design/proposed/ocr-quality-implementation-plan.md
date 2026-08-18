@@ -176,4 +176,4 @@ If the plugin architecture is NOT implemented, the OCR module follows the same m
 - [Feature Roadmap — OCR Quality System](./../../feature-roadmap.md#ocr-quality-system) — Roadmap entry with issue links
 - [Audit Findings — ARCH-03](./../../design/active/audit-findings.md#priority-2-critical-architecture-gaps) — Original audit finding
 - [Audit Findings — Priority 5](./../../design/active/audit-findings.md#priority-5-observations--future-considerations) — Observation on design docs accelerating implementation
-- [Action Queue Pipeline — `_compute_text_quality`](https://github.com/rsocko/ideation/blob/main/experiments/document-intelligence/src/doc_intelligence_hub/modules/action_queue/pipeline.py) — Existing text quality heuristic
+- [Action Queue Pipeline — `_compute_text_quality`](https://github.com/rsocko/owl/blob/main/src/doc_intelligence_hub/modules/action_queue/pipeline.py) — Existing text quality heuristic

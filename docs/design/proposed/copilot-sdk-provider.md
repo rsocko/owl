@@ -16,9 +16,8 @@ related:
 tracking:
   github_label: "copilot-sdk-provider"
   repos:
-    - rsocko/ideation
+    - rsocko/owl
     - rsocko/mission-control
-    - rsocko/homelab-config
 ---
 
 # GitHub Copilot SDK as Server-Side AI Provider

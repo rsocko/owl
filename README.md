@@ -10,11 +10,11 @@ This replaces the previous approach of building three separate services (Stateme
 
 Three modules in this repository solve related problems around **Paperless-ngx document intelligence**:
 
-| Experiment | Purpose | Issue |
-|-----------|---------|-------|
-| **Statement Tracking** (#11) | Track recurring statements, detect gaps | [#11](https://github.com/rsocko/ideation/issues/11) |
-| **Medical EOB Matching** (#10, #27) | Match EOBs to bills, surface unmatched | [#10](https://github.com/rsocko/ideation/issues/10), [#27](https://github.com/rsocko/ideation/issues/27) |
-| **Paperless Action Queue** (#26) | Triage documents needing action | [#26](https://github.com/rsocko/ideation/issues/26) |
+| Experiment | Purpose |
+|-----------|---------|
+| **Statement Tracking** | Track recurring statements, detect gaps |
+| **Medical EOB Matching** | Match EOBs to bills, surface unmatched |
+| **Paperless Action Queue** | Triage documents needing action |
 
 All three share:
 - The same Paperless-ngx API client
@@ -406,17 +406,9 @@ The API integration tests (`tests/api/`) use **FastAPI TestClient** with fully m
 
 ## Related Issues
 
-- [#10](https://github.com/rsocko/ideation/issues/10) — Medical EOB & Bill matching
-- [#11](https://github.com/rsocko/ideation/issues/11) — Statement tracking
-- [#26](https://github.com/rsocko/ideation/issues/26) — Queue of TODO documents
-- [#27](https://github.com/rsocko/ideation/issues/27) — Show unmatched EOB/Bill items
-- [#160](https://github.com/rsocko/ideation/issues/160) — Paperless Enhanced OCR
-
-## Source Experiments (now deprecated — design docs consolidated here)
-
-- `experiments/home-automation/statement-tracking/` — Phase 1 code still lives here (migrate in Phase 2)
-- `experiments/home-automation/medical-eob-matching/` — Design complete, docs moved here
-- `experiments/home-automation/paperless-action-queue/` — Design complete, docs moved here
+Work items for these areas — Medical EOB & bill matching, statement tracking, the
+queue of TODO documents, unmatched EOB/bill surfacing, and enhanced OCR — are tracked
+in [OWL's issue tracker](https://github.com/rsocko/owl/issues).
 
 ---
 

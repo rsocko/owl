@@ -55,7 +55,7 @@ That review covers UI ownership (MC is the primary user surface; DI is a headles
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **Project structure** | ✅ Complete | Clean monorepo under `experiments/document-intelligence/` |
+| **Project structure** | ✅ Complete | Clean, self-contained repository layout |
 | **pyproject.toml** | ✅ Complete | All deps declared, CLI entry points defined |
 | **Dockerfile** | ✅ Complete | Python 3.12-slim, multi-entrypoint |
 | **docker-compose.yml** | ✅ Complete | Statement Tracker (always-on), EOB + AQ as job profiles |
@@ -155,7 +155,7 @@ All design docs are comprehensive and implementation-ready:
 
 ### ✅ API Integration Test Suite (Added July 2026)
 
-A comprehensive integration test suite covering all DI Hub REST endpoints was added in [#856](https://github.com/rsocko/ideation/issues/856):
+A comprehensive integration test suite covering all DI Hub REST endpoints was added:
 
 | Test File | Endpoints | Tests |
 |-----------|-----------|-------|

@@ -17,9 +17,8 @@ related:
 tracking:
   github_label: "ecosystem-research"
   repos:
-    - rsocko/homelab-config
+    - rsocko/owl
     - rsocko/mission-control
-    - rsocko/ideation
 ---
 
 # Paperless-ngx Ecosystem — Capability Assessment & Integration Strategy
@@ -225,7 +224,7 @@ Interesting ecosystem projects to track but not actionable for us now.
 | **paperless2papra** | Migration CLI | Only relevant if we leave Paperless-ngx |
 | **Eppascan / brother-scan** | Scanner hardware bridges | Our scanner already dumps to consume folder |
 | **Helm charts** (multiple) | Kubernetes deployment | We're Docker Compose on homelab |
-| **mash-playbook** (⭐1,092) | Ansible deployment | Already have homelab-config |
+| **mash-playbook** (⭐1,092) | Ansible deployment | Already have Ansible-based config management |
 | **Papermerge** (⭐2,935) | Alternative DMS | Committed to Paperless-ngx |
 | **Mayan EDMS** | Enterprise DMS | Overkill for our needs |
 | **notionless** | Notion → Paperless sync | Don't use Notion for docs |
