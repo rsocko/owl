@@ -654,6 +654,13 @@ CREATE INDEX idx_corrections_field ON extraction_corrections(field_name, correct
 
 ### Paperless Custom Fields Written
 
+> **Superseded naming guidance:** The table below documents the OWL `0.2.0`
+> implementation. New work must follow the canonical registry and
+> dual-read/single-write migration in
+> [Paperless Metadata and Document Summary Design](../../design/active/paperless-metadata-and-document-summary.md).
+> The `di_*` names remain read aliases only; new writes use the canonical
+> Paperless names.
+
 | DI Field | Paperless Custom Field | Written When |
 |----------|----------------------|--------------|
 | patient_name | `di_patient_name` | Corrected or newly extracted |
