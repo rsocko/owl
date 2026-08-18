@@ -608,4 +608,4 @@ The next step is for you to review this design, choose your preferred approach, 
 **Last Updated:** 2026-02-14  
 **Status:** ✅ Design Phase Complete - Ready for Implementation Decision  
 **Design Author:** AI Assistant  
-**For:** rsocko/ideation - Statement Tracking Experiment
+**For:** OWL — Statement Tracking Experiment

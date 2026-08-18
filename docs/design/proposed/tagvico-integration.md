@@ -9,17 +9,16 @@ label: tagvico-integration
 sources:
   - "https://github.com/arturict/tagvico-ai"
   - "https://tagvico.arturf.ch/docs/"
-  - "ideation#804 - REVIEW: Paperless Triage Tool"
+  - "Prior review: Paperless triage tool evaluation"
 related:
   - "[DI ↔ MC Unified Integration Plan](./copilot-sdk-provider.md)"
   - "[Connector Expansion Review](../active/current-state-assessment.md)"
-  - "[Tagvico Comparative Assessment](https://github.com/rsocko/ideation/issues/804#issuecomment-5074558128)"
+  - "Tagvico Comparative Assessment (internal review notes)"
 tracking:
   github_label: "tagvico-integration"
   repos:
-    - rsocko/homelab-config
+    - rsocko/owl
     - rsocko/mission-control
-    - rsocko/ideation
 ---
 
 # Tagvico Integration — Architecture & Deployment Plan
@@ -156,7 +155,7 @@ Two methods (both stateless, no browser session required):
 
 ---
 
-## Deployment Plan (homelab-config)
+## Deployment Plan (infrastructure config repository)
 
 ### Docker Compose Service
 

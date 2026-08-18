@@ -82,7 +82,7 @@ LOG_FORMAT=json                 # Structured logging for production
 ### Docker Compose
 
 ```bash
-cd experiments/document-intelligence
+cd owl
 docker compose up -d --build
 ```
 

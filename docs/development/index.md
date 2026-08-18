@@ -20,8 +20,8 @@ This guide covers everything you need to contribute to the Document Intelligence
 
 ```bash
 # Clone the repository
-git clone https://github.com/rsocko/ideation.git
-cd ideation/experiments/document-intelligence
+git clone https://github.com/rsocko/owl.git
+cd owl
 
 # Create a virtual environment
 python -m venv .venv
@@ -59,7 +59,7 @@ Key variables:
 ## Project Structure
 
 ```
-experiments/document-intelligence/
+owl/
 ├── src/doc_intelligence_hub/
 │   ├── api/                    # FastAPI application & routers
 │   │   ├── app.py             # App factory, lifespan, middleware

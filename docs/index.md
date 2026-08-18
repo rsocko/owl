@@ -25,8 +25,8 @@ OWL transforms a passive document archive into an actionable intelligence layer 
 ## Quick Links
 
 - **API Base:** `http://service-005.example.invalid` (production) / `http://localhost:8071` (dev)
-- **Source:** [`experiments/document-intelligence/`](https://github.com/rsocko/ideation/tree/main/experiments/document-intelligence)
-- **Issues:** [GitHub Issues](https://github.com/rsocko/ideation/issues?q=label%3Adoc-intelligence)
+- **Source:** [`rsocko/owl`](https://github.com/rsocko/owl)
+- **Issues:** [GitHub Issues](https://github.com/rsocko/owl/issues)
 - **Docker:** `service-007.example.invalid/doc-intelligence-hub:latest`
 
 ## Interactive Mockups

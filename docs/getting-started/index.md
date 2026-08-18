@@ -25,8 +25,8 @@ OWL needs a token with access to documents, tags, custom fields, and corresponde
 
 ```bash
 # Clone the repository
-git clone https://github.com/rsocko/ideation.git
-cd ideation/experiments/document-intelligence
+git clone https://github.com/rsocko/owl.git
+cd owl
 
 # Create your environment file
 cp .env.example .env

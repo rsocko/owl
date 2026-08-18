@@ -402,7 +402,7 @@ if __name__ == "__main__":
 ### Install Dependencies
 
 ```bash
-cd experiments/home-automation/paperless-action-queue
+cd owl
 python -m venv .venv
 .venv/Scripts/activate        # Windows
 # or: source .venv/bin/activate   # Mac/Linux
