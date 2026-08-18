@@ -139,7 +139,7 @@ PAPERLESS_POST_CONSUME_SCRIPT=/usr/local/bin/paperless-post-consume.sh
 #!/bin/bash
 # Called by Paperless after a document is consumed
 # Environment variables available: DOCUMENT_ID, DOCUMENT_FILE_NAME, DOCUMENT_CREATED, etc.
-***REMOVED*** -s -X POST \
+curl -s -X POST \
   -H "X-OCR-Webhook-Secret: ${OCR_WEBHOOK_SECRET}" \
   -H "Content-Type: application/json" \
   -d "{\"document_id\": ${DOCUMENT_ID}, \"filename\": \"${DOCUMENT_FILE_NAME}\"}" \
@@ -312,7 +312,7 @@ return [{ json: { message: lines.join("\n") } }];
 
 ### Purpose
 
-Allows ad-hoc triggering of scoring or remediation for a specific document from Home Assistant, a dashboard, or a direct ***REMOVED*** call.
+Allows ad-hoc triggering of scoring or remediation for a specific document from Home Assistant, a dashboard, or a direct curl call.
 
 ### Trigger
 

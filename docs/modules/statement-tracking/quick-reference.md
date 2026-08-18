@@ -58,9 +58,9 @@ Expected artifacts:
 With the service running:
 
 ```bash
-***REMOVED*** http://localhost:8001/health
-***REMOVED*** -X POST http://localhost:8001/api/discovery/run
-***REMOVED*** -X POST "http://localhost:8001/api/recommendations/run?as_of=2026-05-12"
+curl http://localhost:8001/health
+curl -X POST http://localhost:8001/api/discovery/run
+curl -X POST "http://localhost:8001/api/recommendations/run?as_of=2026-05-12"
 ```
 
 ---
@@ -285,14 +285,14 @@ Authorization: ${PAPERLESS_AUTH_HEADER} \
 
 **Check for missing statements:**
 ```bash
-***REMOVED***
+curl
 Authorization: ${PAPERLESS_AUTH_HEADER} \
      http://localhost:8001/api/analysis/check-missing
 ```
 
 **Confirm statement period:**
 ```bash
-***REMOVED***
+curl
 Authorization: ${PAPERLESS_AUTH_HEADER} \
      -H "Content-Type: application/json" \
      -d '{"period_start": "2025-01-01", "period_end": "2025-01-31"}' \
@@ -434,9 +434,9 @@ statement-tracker analyze --provider "Chase Visa" --reindex
 **Solutions:**
 ```bash
 # Verify paperless is running
-***REMOVED***
+curl
 
-***REMOVED***
+curl
 Authorization: ${PAPERLESS_AUTH_HEADER} \
      http://localhost:8000/api/documents/?page=1&page_size=1
 

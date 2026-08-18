@@ -42,7 +42,7 @@ webhook subscriptions.
 Use the subscriptions API to register extra webhook URLs:
 
 ```bash
-***REMOVED*** -X POST http://localhost:8001/api/webhooks/subscriptions \
+curl -X POST http://localhost:8001/api/webhooks/subscriptions \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://n8n.example.com/webhook/other-workflow",

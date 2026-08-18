@@ -296,15 +296,15 @@ The scheduler starts automatically when the hub boots. It calls the hub's own AP
 
 ```bash
 # View current schedules (includes next_run, last_run info)
-***REMOVED*** http://localhost:8071/api/admin/schedules
+curl http://localhost:8071/api/admin/schedules
 
 # Update a schedule (takes effect immediately)
-***REMOVED*** -X PUT http://localhost:8071/api/admin/schedules \
+curl -X PUT http://localhost:8071/api/admin/schedules \
   -H 'Content-Type: application/json' \
   -d '{"statement_discovery": {"cron": "0 8 * * *", "enabled": true}}'
 
 # Disable a schedule
-***REMOVED*** -X PUT http://localhost:8071/api/admin/schedules \
+curl -X PUT http://localhost:8071/api/admin/schedules \
   -H 'Content-Type: application/json' \
   -d '{"eob_matching": {"enabled": false}}'
 ```
@@ -320,7 +320,7 @@ The **Scan Schedules** page in the admin panel (`/admin` → 🕐) shows all fou
 
 ### Fallback: Crontab
 
-For environments where the built-in scheduler is not suitable, `config/crontab.example` provides equivalent cron entries that call the hub API via `***REMOVED***`.
+For environments where the built-in scheduler is not suitable, `config/crontab.example` provides equivalent cron entries that call the hub API via `curl`.
 
 ## What Changes from Existing Designs
 

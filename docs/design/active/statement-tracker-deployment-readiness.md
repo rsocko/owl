@@ -47,7 +47,7 @@ The Statement Tracker will connect to the existing Paperless instance at `servic
 1. **Build and push image** — Trigger the `Build Document Intelligence Hub Image` workflow from GitHub Actions (or let it auto-build on merge)
 2. **Set environment** — Copy `config/.env.docker` to the deployment host and fill in `PAPERLESS_API_TOKEN`
 3. **Deploy** — `docker compose up -d statement-tracker` from the deployment directory
-4. **Verify** — `***REMOVED*** http://localhost:8001/health` should return `{"status": "ok"}`
+4. **Verify** — `curl http://localhost:8001/health` should return `{"status": "ok"}`
 
 ## What the Hub API Exposes (for MC Integration)
 

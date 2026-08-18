@@ -255,7 +255,7 @@ predicted_class = torch.argmax(outputs.logits)
 
 ```python
 # Installation
-# ***REMOVED*** -fsSL https://ollama.com/install.sh | sh
+# curl -fsSL https://ollama.com/install.sh | sh
 # ollama pull phi3
 
 import requests

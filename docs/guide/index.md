@@ -89,7 +89,7 @@ docker compose up -d --build
 The hub starts on port **8071** by default. Verify it's running:
 
 ```bash
-***REMOVED*** http://localhost:8071/health
+curl http://localhost:8071/health
 ```
 
 :::tip
