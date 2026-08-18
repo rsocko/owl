@@ -49,14 +49,14 @@ RUN python -m build --wheel --outdir /build/dist
 FROM python:3.12-slim AS runtime
 
 # Build-time labels (OCI standard)
-ARG BUILD_DATE
 ARG VCS_REF
 ARG VERSION=0.2.0
-LABEL org.opencontainers.image.title="Document Intelligence Hub" \
+LABEL org.opencontainers.image.title="OWL" \
       org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.source="https://github.com/rsocko/owl" \
+      org.opencontainers.image.url="https://github.com/rsocko/owl" \
+      org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.description="Unified Paperless-ngx document analysis platform"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

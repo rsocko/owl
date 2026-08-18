@@ -8,6 +8,16 @@ version = "0.2.0"
 description = "Document Intelligence Hub — unified Paperless-ngx document analysis platform"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+authors = [
+  { name = "Ryan Sockalosky" },
+]
+keywords = ["document-intelligence", "paperless-ngx", "fastapi"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
 dependencies = [
   "fastapi>=0.115.0",
   "httpx>=0.28.0",
@@ -24,6 +34,11 @@ dependencies = [
   "rich>=13.0",
   "apscheduler>=3.10,<4",
 ]
+
+[project.urls]
+Homepage = "https://github.com/rsocko/owl"
+Issues = "https://github.com/rsocko/owl/issues"
+Repository = "https://github.com/rsocko/owl"
 
 [project.optional-dependencies]
 dev = [
