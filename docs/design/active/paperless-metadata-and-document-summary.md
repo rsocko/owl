@@ -379,4 +379,3 @@ metadata before completion.
 - Migration and merge operations are dry-runnable, auditable, idempotent, and
   reviewable.
 - The rollout describes how deployed OWL `0.2.0` data remains readable.
-
