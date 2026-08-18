@@ -44,3 +44,8 @@ def test_publisher_only_follows_successful_same_repository_main_ci() -> None:
     assert "--attest type=sbom" in source
     assert "actions/attest@" in source
     assert "sha_tag=sha-${SOURCE_SHA}" in source
+
+
+def test_codeql_waits_for_public_cutover() -> None:
+    workflow = load_workflow(WORKFLOWS / "codeql.yml")
+    assert workflow["jobs"]["analyze"]["if"] == "github.event.repository.visibility == 'public'"
