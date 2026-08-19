@@ -1,5 +1,7 @@
 """Tests for the shared Paperless-ngx client."""
 
+import json
+
 import httpx
 import pytest
 
@@ -210,14 +212,31 @@ def _make_saved_view_client(monkeypatch, definition, *, detail_status=200):
     return PaperlessClient(base_url="https://paperless.test", token="test-token"), requests_seen
 
 
+def _nested_custom_field_query(depth):
+    query = ["Account Identifier", "exists", False]
+    for _ in range(depth - 1):
+        query = ["NOT", query]
+    return query
+
+
 @pytest.mark.asyncio
 async def test_saved_view_rules_are_translated_before_querying_documents(monkeypatch):
+    custom_field_query = json.dumps(
+        [
+            "OR",
+            [
+                ["Account Identifier", "exists", False],
+                ["Account Identifier", "exact", ""],
+                ["Account Identifier", "isnull", True],
+            ],
+        ]
+    )
     definition = {
         "id": 7,
         "name": "Deployment-managed view",
         "filter_rules": [
             {"rule_type": 3, "value": None},
-            {"rule_type": 4, "value": None},
+            {"rule_type": 4, "value": "14"},
             {"rule_type": 6, "value": "11,12"},
             {"rule_type": 6, "value": "13"},
             {"rule_type": 7, "value": "false"},
@@ -227,6 +246,7 @@ async def test_saved_view_rules_are_translated_before_querying_documents(monkeyp
             {"rule_type": 25, "value": None},
             {"rule_type": 26, "value": "31"},
             {"rule_type": 26, "value": "32"},
+            {"rule_type": 42, "value": custom_field_query},
         ],
     }
     client, requests_seen = _make_saved_view_client(monkeypatch, definition)
@@ -241,15 +261,119 @@ async def test_saved_view_rules_are_translated_before_querying_documents(monkeyp
     assert dict(document_request.url.params) == {
         "page_size": "100",
         "correspondent__isnull": "1",
-        "document_type__isnull": "1",
+        "document_type__id": "14",
         "is_tagged": "0",
         "query": "added:[-30 day to now]",
         "storage_path__isnull": "1",
         "tags__id__all": "11,12,13",
         "tags__id__none": "21,22",
         "correspondent__id__in": "31,32",
+        "custom_field_query": custom_field_query,
         "page": "1",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "value",
+    [
+        "not-json",
+        json.dumps({"field": "Account Identifier"}),
+        json.dumps(["XOR", [["Account Identifier", "exists", False]]]),
+        json.dumps(["Account Identifier", "regex", "secret-value"]),
+        json.dumps([7, "exists", False]),
+        json.dumps(["Account Identifier", "exists", "false"]),
+        json.dumps(["AND", []]),
+        json.dumps(["NOT", [["Account Identifier", "exists", False]]]),
+        json.dumps(float("nan")),
+    ],
+)
+async def test_saved_view_invalid_custom_field_queries_fail_closed(monkeypatch, value):
+    client, requests_seen = _make_saved_view_client(
+        monkeypatch,
+        {
+            "id": 7,
+            "name": "Unsafe custom field query",
+            "filter_rules": [{"rule_type": 42, "value": value}],
+        },
+    )
+
+    with pytest.raises(PaperlessError) as exc_info:
+        await client.list_documents(saved_view=7)
+
+    assert "secret-value" not in str(exc_info.value)
+    assert not any(request.url.path == "/api/documents/" for request in requests_seen)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "value",
+    [
+        json.dumps(_nested_custom_field_query(10)),
+        json.dumps(["AND", [["Account Identifier", "exact", str(index)] for index in range(20)]]),
+    ],
+)
+async def test_saved_view_custom_field_query_accepts_paperless_limits(monkeypatch, value):
+    client, requests_seen = _make_saved_view_client(
+        monkeypatch,
+        {
+            "id": 7,
+            "name": "Bounded custom field query",
+            "filter_rules": [{"rule_type": 42, "value": value}],
+        },
+    )
+
+    await client.list_documents(saved_view=7)
+
+    document_request = next(
+        request for request in requests_seen if request.url.path == "/api/documents/"
+    )
+    assert document_request.url.params["custom_field_query"] == value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "value",
+    [
+        json.dumps(["AND", [["Account Identifier", "exact", str(index)] for index in range(21)]]),
+        json.dumps(_nested_custom_field_query(11)),
+    ],
+)
+async def test_saved_view_oversized_custom_field_queries_fail_closed(monkeypatch, value):
+    client, requests_seen = _make_saved_view_client(
+        monkeypatch,
+        {
+            "id": 7,
+            "name": "Oversized custom field query",
+            "filter_rules": [{"rule_type": 42, "value": value}],
+        },
+    )
+
+    with pytest.raises(PaperlessError):
+        await client.list_documents(saved_view=7)
+
+    assert not any(request.url.path == "/api/documents/" for request in requests_seen)
+
+
+@pytest.mark.asyncio
+async def test_saved_view_duplicate_custom_field_query_fails_closed(monkeypatch):
+    value = json.dumps(["Account Identifier", "exists", False])
+    client, requests_seen = _make_saved_view_client(
+        monkeypatch,
+        {
+            "id": 7,
+            "name": "Duplicate custom field query",
+            "filter_rules": [
+                {"rule_type": 42, "value": value},
+                {"rule_type": 42, "value": value},
+            ],
+        },
+    )
+
+    with pytest.raises(PaperlessError, match="duplicates rule type 42"):
+        await client.list_documents(saved_view=7)
+
+    assert not any(request.url.path == "/api/documents/" for request in requests_seen)
 
 
 @pytest.mark.asyncio
