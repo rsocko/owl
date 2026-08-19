@@ -18,7 +18,8 @@ OWL will:
 2. define Paperless custom fields in one metadata schema registry;
 3. use human-readable canonical Paperless field names without a `di_` prefix;
 4. read canonical and legacy names, but write only canonical names;
-5. store only masked account identifiers and expose them according to the current review context;
+5. preserve useful archive identifiers in Paperless, mask financial credentials,
+   and expose only display-safe account context outside the Paperless trust boundary;
 6. retain match confidence and triage analytics in OWL while projecting durable, user-facing metadata to Paperless only when it improves the archive; and
 7. migrate metadata through reviewable queues and reversible, type-safe operations.
 
@@ -34,7 +35,7 @@ field naming, types, privacy, and migration behavior difficult to change safely.
 
 The frontend has a similar consistency problem. Several workflows identify a
 document using only its title or Paperless ID even when provider, date, type,
-amount, patient, and masked account context are available elsewhere. This
+amount, patient, and display-safe account context are available elsewhere. This
 increases the chance of selecting the wrong document during correction, split,
 merge, duplicate, and matching operations.
 
@@ -44,8 +45,8 @@ merge, duplicate, and matching operations.
 - Establish one typed source of truth for Paperless metadata.
 - Replace implementation-oriented `di_*` names with user-facing canonical names.
 - Preserve access to metadata produced by OWL `0.2.0`.
-- Prevent full account numbers and unnecessary medical identity data from
-  spreading through APIs, logs, analytics, or general-purpose UI.
+- Prevent exact account identifiers and unnecessary medical identity data from
+  spreading beyond Paperless through APIs, logs, analytics, or general-purpose UI.
 - Separate durable archive metadata from OWL's operational and analytical state.
 - Make metadata cleanup observable, reviewable, idempotent, and reversible.
 
@@ -75,7 +76,7 @@ The model should support:
 | Source | correspondent or provider | Show when known |
 | Date | created date, document date, statement date, or date of service | Use a labeled, context-appropriate date |
 | Financial | patient responsibility, invoice amount, or balance | Show one labeled amount when relevant |
-| Account | masked Account Identifier | Never show an unmasked value |
+| Account | display-safe Account Identifier | Mask exact values before returning them from the API |
 | Clinical | Patient Name | Only in medical workflows that already require patient identity |
 | Navigation | Paperless detail or OWL preview URL | Preserve the current workflow's navigation behavior |
 
@@ -120,6 +121,8 @@ The frontend must not reconstruct summaries independently from action, EOB,
 statement, and triage response shapes. APIs should return a shared summary model
 or a shared adapter should normalize those responses at the API boundary.
 Formatting, masking, field precedence, and privacy flags belong in shared code.
+The normalized model exposes `account_identifier_display`, never the canonical
+Paperless value. It is omitted outside named account-review contexts.
 
 ## 2. Central Paperless Metadata Schema Registry
 
@@ -185,45 +188,63 @@ an explicit, separately reviewed retirement decision.
 
 ## 3. Account Identifier Extraction and Privacy
 
-### Stored Value
+### Paperless Value
 
-`Account Identifier` is a disambiguator, not a secret store. OWL may persist:
+Paperless is the document archive and the trust boundary for document-derived
+metadata. A user who can read `Account Identifier` must already be authorized to
+read the source document. Within that boundary, preserving an exact, clearly
+labeled provider account, member, or policy identifier improves filtering and
+avoids collisions caused by suffix-only values.
 
-- `ending 4321`;
-- `member ending A7K9` when an alphanumeric suffix is necessary; or
-- another explicitly masked token that cannot be used as the full credential.
+Payment-card and bank-account identifiers remain masked even in Paperless.
+Their full values are financial credentials rather than useful archive
+metadata. Claim Number and Invoice Number have dedicated canonical fields and
+must not be selected as account fallbacks.
 
-OWL must not persist a full bank account, card, member, policy, claim, or other
-credential-like number in `Account Identifier`. Claim Number has its own
-canonical field and must not be selected as an account fallback.
+The registry assigns each identifier class a storage policy:
+
+| Identifier class | Paperless value | Outside Paperless |
+|---|---|---|
+| Provider or service account | Exact when confidently labeled | Masked display value |
+| Member or policy identifier | Exact when confidently labeled | Masked display value |
+| Bank account or payment card | Masked only | Masked display value |
+| Claim or invoice | Dedicated canonical field | Governed by that field's policy |
+| Ambiguous generic sequence | Do not write | Do not expose |
 
 ### Extraction
 
 The extraction pipeline should:
 
 1. inspect OCR text inside the trusted OWL processing boundary;
-2. prefer already-masked source values and explicit "ending in" patterns;
-3. convert a confidently located full identifier to an approved masked suffix
-   in memory;
-4. reject ambiguous generic digit sequences;
-5. record extraction method and confidence in OWL-local state; and
-6. write only the masked value to Paperless after policy and confidence checks.
+2. identify the label and identifier class rather than relying on digit shape;
+3. reject ambiguous generic digit sequences;
+4. apply the registry's Paperless storage policy in memory;
+5. record extraction method, class, and confidence in OWL-local state without
+   retaining the exact candidate; and
+6. write the policy-approved value directly to Paperless after confidence checks.
 
 Low-confidence, conflicting, or multiple plausible account identifiers enter
 the metadata-quality queue instead of being written automatically.
 
-### Privacy Boundaries
+### Privacy and API Boundaries
 
-- Raw identifiers and surrounding OCR text must not enter application logs,
-  telemetry, analytics events, queue titles, URLs, or browser storage.
-- API responses expose only the masked value unless a narrowly scoped endpoint
-  has a separately approved need.
+- Exact identifiers and surrounding OCR text must not enter OWL persistence,
+  application logs, telemetry, analytics events, queue titles, URLs, browser
+  storage, Mission Control, Tyrion, GitHub, or other external projections.
+- General API responses never expose the canonical Paperless
+  `Account Identifier` value. Named account-review responses may expose only
+  `account_identifier_display`, masked by shared server-side policy.
+- A narrowly scoped correction endpoint may accept an exact archive identifier
+  for immediate write-through to Paperless. It must not echo the value or place
+  request bodies in logs, audit records, retries, or durable OWL state.
 - General-purpose summaries omit Patient Name and Account Identifier by
   default. Callers opt into those fields through a named medical or account
   review context, never an arbitrary boolean.
-- Search indexes may include the masked identifier but not raw candidates.
-- Correction and migration audit records store old/new masked values, field
-  IDs, actor, and reason; they do not store raw OCR evidence.
+- OWL search indexes may include the masked display value but not exact values
+  or raw candidates. Paperless-native indexing remains inside the archive
+  boundary and follows Paperless access controls.
+- Correction and migration audit records store masked old/new display values,
+  field IDs, actor, and reason; they do not store exact values or raw OCR evidence.
 
 ## 4. EOB Data Placement
 
@@ -254,7 +275,7 @@ understandable to a Paperless user, and safe to expose:
 - Patient Responsibility;
 - Claim Number;
 - Invoice Number;
-- masked Account Identifier; and
+- policy-approved Account Identifier; and
 - Normalized Document Type.
 
 Projection is not automatic merely because a value was extracted. Registry
@@ -359,7 +380,7 @@ supported deployment still depends on them.
 |---|---|
 | 1. Registry and compatibility | Typed registry, schema diagnostics, dual-read/single-write behavior |
 | 2. Safe canonical migration | Canonical fields, dry-run/backfill tooling, conflict queue |
-| 3. Privacy-safe enrichment | Masked Account Identifier extraction and projection policy |
+| 3. Privacy-safe enrichment | Classified Account Identifier extraction, Paperless storage policy, and egress masking |
 | 4. Shared UI | Normalized summary API model and `DocumentSummary` adoption |
 | 5. Quality operations | Metadata-quality and correspondent merge review queues |
 | 6. EOB projection hardening | Registry-driven durable EOB projection; analytics remain OWL-local |
@@ -373,7 +394,9 @@ metadata before completion.
 - All eight canonical field names are defined without a `di_` prefix.
 - Legacy aliases and deterministic conflict behavior are explicit.
 - No initial migration step deletes or renames a deployed field in place.
-- Full account identifiers cannot cross the processing boundary.
+- Exact account identifiers are retained only in Paperless; financial
+  credentials remain masked there, and all OWL/external projections are
+  display-safe.
 - OWL-local and Paperless-projected EOB data are clearly separated.
 - Every title- or ID-only document surface has an adoption disposition.
 - Migration and merge operations are dry-runnable, auditable, idempotent, and

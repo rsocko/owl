@@ -617,6 +617,13 @@ When user saves corrections:
 2. Corresponding Paperless document metadata updated (title, correspondent, date, etc. where applicable)
 3. Correction event stored in `correction_events` table with before/after values
 
+Account Identifier is a special case: the correction API may accept an exact
+provider account, member, or policy identifier only for immediate write-through
+to Paperless. Responses and correction events contain a server-masked display
+value, never the exact identifier. Bank-account and payment-card values are
+masked before Paperless writeback. See the canonical registry design for the
+identifier classification and egress policy.
+
 ### Training Data Loop
 
 Corrections serve as training data for future extraction:
@@ -669,7 +676,7 @@ CREATE INDEX idx_corrections_field ON extraction_corrections(field_name, correct
 | patient_responsibility | `di_patient_resp` | Corrected or newly extracted |
 | claim_number | `di_claim_number` | Corrected or newly extracted |
 | invoice_number | `di_invoice_number` | Corrected or newly extracted |
-| account_identifier | `di_account_id` | Extracted or user-provided |
+| account_identifier | `di_account_id` | Extracted or user-provided; governed by identifier class |
 | document_classification | `di_doc_type` | EOB, Bill, Statement |
 
 ---
