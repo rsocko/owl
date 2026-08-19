@@ -25,9 +25,7 @@ _EOB_FIELDS = (
 )
 
 # Backward-compatible public constant; definitions are owned by the shared registry.
-CUSTOM_FIELD_DEFINITIONS = [
-    get_metadata_field_spec(key).create_definition() for key in _EOB_FIELDS
-]
+CUSTOM_FIELD_DEFINITIONS = [get_metadata_field_spec(key).create_definition() for key in _EOB_FIELDS]
 
 
 class EOBEnricher:
@@ -112,9 +110,7 @@ class EOBEnricher:
         return [
             build_metadata_update(MetadataFieldKey.EOB_MATCH_STATUS, "matched", schema),
             build_metadata_update(MetadataFieldKey.EOB_MATCH_SCORE, round(score, 1), schema),
-            build_metadata_update(
-                MetadataFieldKey.EOB_MATCH_CONFIDENCE, confidence, schema
-            ),
+            build_metadata_update(MetadataFieldKey.EOB_MATCH_CONFIDENCE, confidence, schema),
             build_metadata_update(
                 MetadataFieldKey.EOB_MATCHED_DOCUMENT,
                 matched_document_id,

@@ -97,9 +97,7 @@ class PaperlessEnricher:
                     schema,
                 )
             )
-        updates.append(
-            build_metadata_update(MetadataFieldKey.ACTION_STATUS, "pending", schema)
-        )
+        updates.append(build_metadata_update(MetadataFieldKey.ACTION_STATUS, "pending", schema))
         updates.append(
             build_metadata_update(
                 MetadataFieldKey.ACTION_ANALYZED,

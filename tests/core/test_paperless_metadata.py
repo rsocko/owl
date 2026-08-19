@@ -49,9 +49,7 @@ def _definition(
     }
     if options:
         result["extra_data"] = {
-            "select_options": [
-                {"id": option_id, "label": label} for option_id, label in options
-            ]
+            "select_options": [{"id": option_id, "label": label} for option_id, label in options]
         }
     return result
 
@@ -59,8 +57,7 @@ def _definition(
 def test_registry_contains_all_design_fields_without_di_prefix() -> None:
     assert set(CANONICAL_KEYS) <= set(PAPERLESS_METADATA_REGISTRY)
     assert all(
-        not get_metadata_field_spec(key).canonical_name.startswith("di_")
-        for key in CANONICAL_KEYS
+        not get_metadata_field_spec(key).canonical_name.startswith("di_") for key in CANONICAL_KEYS
     )
     assert all(get_metadata_field_spec(key).compatibility_read for key in CANONICAL_KEYS)
 
@@ -408,9 +405,7 @@ async def test_resolver_ensure_does_not_mutate_incompatible_canonical_field() ->
         {"id": 100, "name": "Date of Service", "data_type": "string"}
     ]
 
-    schema = await PaperlessMetadataResolver(client).ensure(
-        (MetadataFieldKey.DATE_OF_SERVICE,)
-    )
+    schema = await PaperlessMetadataResolver(client).ensure((MetadataFieldKey.DATE_OF_SERVICE,))
 
     assert not schema.field(MetadataFieldKey.DATE_OF_SERVICE).is_compatible
     assert any(

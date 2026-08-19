@@ -464,8 +464,7 @@ class ResolvedMetadataSchema:
             return resolved.select_option_ids[normalized_label]
         except KeyError as exc:
             raise MetadataValueError(
-                f"Unknown deployed option {normalized_label!r} for "
-                f"{resolved.spec.canonical_name!r}"
+                f"Unknown deployed option {normalized_label!r} for {resolved.spec.canonical_name!r}"
             ) from exc
 
 
@@ -639,9 +638,7 @@ class PaperlessMetadataResolver:
         definitions = await self.client.list_custom_fields()
         return resolve_metadata_schema(definitions, keys)
 
-    async def ensure(
-        self, keys: Iterable[MetadataFieldKey | str]
-    ) -> ResolvedMetadataSchema:
+    async def ensure(self, keys: Iterable[MetadataFieldKey | str]) -> ResolvedMetadataSchema:
         specs = tuple(get_metadata_field_spec(key) for key in keys)
         schema = await self.resolve(spec.key for spec in specs)
         changed = False
@@ -666,12 +663,9 @@ class PaperlessMetadataResolver:
                     changed = True
                 continue
 
-            if (
-                spec.select_options
-                and not any(
-                    diagnostic.code is MetadataDiagnosticCode.INCOMPATIBLE_TYPE
-                    for diagnostic in resolved.diagnostics
-                )
+            if spec.select_options and not any(
+                diagnostic.code is MetadataDiagnosticCode.INCOMPATIBLE_TYPE
+                for diagnostic in resolved.diagnostics
             ):
                 missing = [
                     diagnostic.option_label
@@ -761,16 +755,12 @@ def _normalize_value(spec: MetadataFieldSpec, value: Any) -> Any:
         try:
             return Decimal(str(value).strip()).normalize()
         except (InvalidOperation, ValueError) as exc:
-            raise MetadataValueError(
-                f"Invalid numeric value for {spec.key.value}"
-            ) from exc
+            raise MetadataValueError(f"Invalid numeric value for {spec.key.value}") from exc
     if spec.normalization is MetadataNormalization.DOCUMENT_LINK:
         try:
             return int(value)
         except (TypeError, ValueError) as exc:
-            raise MetadataValueError(
-                f"Invalid document link for {spec.key.value}"
-            ) from exc
+            raise MetadataValueError(f"Invalid document link for {spec.key.value}") from exc
     raise MetadataValueError(f"Unsupported normalization for {spec.key.value}")
 
 
@@ -841,14 +831,10 @@ def resolve_metadata_value(
     )
 
 
-def _normalize_read_value(
-    resolved: ResolvedMetadataField, value: Any
-) -> tuple[Any, str | None]:
+def _normalize_read_value(resolved: ResolvedMetadataField, value: Any) -> tuple[Any, str | None]:
     spec = resolved.spec
     if resolved.data_type is PaperlessFieldType.SELECT and resolved.select_option_ids:
-        id_to_label = {
-            option_id: label for label, option_id in resolved.select_option_ids.items()
-        }
+        id_to_label = {option_id: label for label, option_id in resolved.select_option_ids.items()}
         try:
             numeric_value = int(value)
         except (TypeError, ValueError):
@@ -856,9 +842,7 @@ def _normalize_read_value(
         if numeric_value is not None:
             label = id_to_label.get(numeric_value)
             if label is None:
-                return value, (
-                    f"Unknown deployed select option ID for {spec.canonical_name!r}"
-                )
+                return value, (f"Unknown deployed select option ID for {spec.canonical_name!r}")
             return label, None
     try:
         normalized = _normalize_value(spec, value)
@@ -892,6 +876,8 @@ def build_metadata_update(
     elif isinstance(normalized, Decimal):
         normalized = float(normalized)
     return {"field": field_id, "value": normalized}
+
+
 def _validate_write_value(spec: MetadataFieldSpec, value: Any) -> None:
     if spec.key is not MetadataFieldKey.ACCOUNT_IDENTIFIER or value is None:
         return
