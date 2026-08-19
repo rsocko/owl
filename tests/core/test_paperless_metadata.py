@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -318,6 +319,24 @@ def test_normalized_document_type_remains_inventory_gated() -> None:
     assert spec.create_type is None
 
 
+def test_unambiguous_canonical_fields_are_creation_enabled() -> None:
+    expected_types = {
+        MetadataFieldKey.ACCOUNT_IDENTIFIER: "string",
+        MetadataFieldKey.PATIENT_NAME: "string",
+        MetadataFieldKey.PROVIDER_NAME: "string",
+        MetadataFieldKey.DATE_OF_SERVICE: "date",
+        MetadataFieldKey.PATIENT_RESPONSIBILITY: "monetary",
+        MetadataFieldKey.CLAIM_NUMBER: "string",
+        MetadataFieldKey.INVOICE_NUMBER: "string",
+    }
+
+    for key, expected_type in expected_types.items():
+        spec = get_metadata_field_spec(key)
+        assert spec.create_policy is MetadataCreatePolicy.IF_MISSING
+        assert spec.create_type is not None
+        assert spec.create_type.value == expected_type
+
+
 def test_deployed_select_document_type_uses_existing_option_ids() -> None:
     schema = resolve_metadata_schema(
         [
@@ -339,7 +358,7 @@ def test_deployed_select_document_type_uses_existing_option_ids() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolver_ensure_creates_only_policy_enabled_fields() -> None:
+async def test_resolver_ensure_creates_seven_unambiguous_canonical_fields() -> None:
     class StubClient:
         def __init__(self) -> None:
             self.definitions: list[dict] = []
@@ -366,18 +385,37 @@ async def test_resolver_ensure_creates_only_policy_enabled_fields() -> None:
 
     client = StubClient()
     resolver = PaperlessMetadataResolver(client)
-    schema = await resolver.ensure(
-        (
-            MetadataFieldKey.DOCUMENT_AMOUNT,
-            MetadataFieldKey.ACTION_STATUS,
-            MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE,
-        )
-    )
+    schema = await resolver.ensure(CANONICAL_KEYS)
 
-    assert schema.field(MetadataFieldKey.DOCUMENT_AMOUNT).is_compatible
-    assert schema.field(MetadataFieldKey.ACTION_STATUS).is_compatible
+    for key in CANONICAL_KEYS[:-1]:
+        assert schema.field(key).is_compatible
     assert schema.field(MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE).canonical_id is None
     assert [definition["name"] for definition in client.definitions] == [
-        "Document Amount",
-        "Action Status",
+        "Account Identifier",
+        "Patient Name",
+        "Provider Name",
+        "Date of Service",
+        "Patient Responsibility",
+        "Claim Number",
+        "Invoice Number",
     ]
+
+
+@pytest.mark.asyncio
+async def test_resolver_ensure_does_not_mutate_incompatible_canonical_field() -> None:
+    client = AsyncMock()
+    client.list_custom_fields.return_value = [
+        {"id": 100, "name": "Date of Service", "data_type": "string"}
+    ]
+
+    schema = await PaperlessMetadataResolver(client).ensure(
+        (MetadataFieldKey.DATE_OF_SERVICE,)
+    )
+
+    assert not schema.field(MetadataFieldKey.DATE_OF_SERVICE).is_compatible
+    assert any(
+        diagnostic.code is MetadataDiagnosticCode.INCOMPATIBLE_TYPE
+        for diagnostic in schema.diagnostics
+    )
+    client.create_custom_field.assert_not_awaited()
+    client.update_custom_field.assert_not_awaited()

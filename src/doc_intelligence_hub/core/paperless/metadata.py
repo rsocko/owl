@@ -144,6 +144,8 @@ _REGISTRY_ENTRIES = (
         aliases=("di_account_id",),
         sensitivity=MetadataSensitivity.FINANCIAL,
         projection_policy=_DURABLE,
+        create_policy=_CREATE,
+        create_type=PaperlessFieldType.TEXT,
         compatibility_read=True,
     ),
     _spec(
@@ -154,6 +156,8 @@ _REGISTRY_ENTRIES = (
         aliases=("di_patient_name",),
         sensitivity=MetadataSensitivity.MEDICAL,
         projection_policy=_DURABLE,
+        create_policy=_CREATE,
+        create_type=PaperlessFieldType.TEXT,
         compatibility_read=True,
     ),
     _spec(
@@ -164,6 +168,8 @@ _REGISTRY_ENTRIES = (
         aliases=("di_provider_name",),
         sensitivity=MetadataSensitivity.MEDICAL,
         projection_policy=_DURABLE,
+        create_policy=_CREATE,
+        create_type=PaperlessFieldType.TEXT,
         compatibility_read=True,
     ),
     _spec(
@@ -174,6 +180,8 @@ _REGISTRY_ENTRIES = (
         aliases=("di_date_of_service",),
         sensitivity=MetadataSensitivity.MEDICAL,
         projection_policy=_DURABLE,
+        create_policy=_CREATE,
+        create_type=PaperlessFieldType.DATE,
         compatibility_read=True,
     ),
     _spec(
@@ -184,6 +192,8 @@ _REGISTRY_ENTRIES = (
         aliases=("di_patient_resp",),
         sensitivity=MetadataSensitivity.MEDICAL,
         projection_policy=_DURABLE,
+        create_policy=_CREATE,
+        create_type=PaperlessFieldType.MONETARY,
         compatibility_read=True,
     ),
     _spec(
@@ -194,6 +204,8 @@ _REGISTRY_ENTRIES = (
         aliases=("di_claim_number",),
         sensitivity=MetadataSensitivity.MEDICAL,
         projection_policy=_DURABLE,
+        create_policy=_CREATE,
+        create_type=PaperlessFieldType.TEXT,
         compatibility_read=True,
     ),
     _spec(
@@ -204,6 +216,8 @@ _REGISTRY_ENTRIES = (
         aliases=("di_invoice_number",),
         sensitivity=MetadataSensitivity.FINANCIAL,
         projection_policy=_DURABLE,
+        create_policy=_CREATE,
+        create_type=PaperlessFieldType.TEXT,
         compatibility_read=True,
     ),
     _spec(
