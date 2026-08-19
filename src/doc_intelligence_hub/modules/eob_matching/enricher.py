@@ -1,53 +1,31 @@
-"""Paperless custom field enricher for EOB Matching — writes match metadata to documents."""
+"""Paperless custom-field enrichment for EOB matching."""
 
 from __future__ import annotations
 
-from doc_intelligence_hub.core.paperless import PaperlessClient
+from datetime import date
 
-# Custom field definitions for EOB matching
-CUSTOM_FIELD_DEFINITIONS = [
-    {
-        "name": "EOB Match Status",
-        "data_type": "select",
-        "extra_data": {
-            "select_options": [
-                {"label": "matched"},
-                {"label": "unmatched"},
-                {"label": "review_needed"},
-            ],
-        },
-    },
-    {
-        "name": "EOB Match Score",
-        "data_type": "decimal",
-    },
-    {
-        "name": "EOB Match Confidence",
-        "data_type": "select",
-        "extra_data": {
-            "select_options": [{"label": "HIGH"}, {"label": "MEDIUM"}, {"label": "LOW"}],
-        },
-    },
-    {
-        "name": "EOB Matched Document",
-        "data_type": "document_link",
-    },
-    {
-        "name": "EOB Document Type",
-        "data_type": "select",
-        "extra_data": {
-            "select_options": [{"label": "EOB"}, {"label": "BILL"}],
-        },
-    },
-    {
-        "name": "EOB Patient Responsibility",
-        "data_type": "decimal",
-    },
-    {
-        "name": "EOB Analyzed",
-        "data_type": "date",
-    },
-]
+from doc_intelligence_hub.core.paperless import (
+    MetadataFieldKey,
+    MetadataSchemaError,
+    PaperlessClient,
+    PaperlessMetadataResolver,
+    ResolvedMetadataSchema,
+    build_metadata_update,
+    get_metadata_field_spec,
+)
+
+_EOB_FIELDS = (
+    MetadataFieldKey.EOB_MATCH_STATUS,
+    MetadataFieldKey.EOB_MATCH_SCORE,
+    MetadataFieldKey.EOB_MATCH_CONFIDENCE,
+    MetadataFieldKey.EOB_MATCHED_DOCUMENT,
+    MetadataFieldKey.EOB_DOCUMENT_TYPE,
+    MetadataFieldKey.EOB_PATIENT_RESPONSIBILITY,
+    MetadataFieldKey.EOB_ANALYZED,
+)
+
+# Backward-compatible public constant; definitions are owned by the shared registry.
+CUSTOM_FIELD_DEFINITIONS = [get_metadata_field_spec(key).create_definition() for key in _EOB_FIELDS]
 
 
 class EOBEnricher:
@@ -55,54 +33,29 @@ class EOBEnricher:
 
     def __init__(self, client: PaperlessClient):
         self.client = client
-        self._field_id_cache: dict[str, int] = {}
-        self._select_option_cache: dict[str, dict[str, int]] = {}
+        self._schema: ResolvedMetadataSchema | None = None
+        self._field_id_cache: dict[MetadataFieldKey, int] = {}
 
-    async def ensure_custom_fields_exist(self) -> dict[str, int]:
-        """Create custom fields in Paperless if they don't exist."""
-        existing = await self.client.list_custom_fields()
-        existing_by_name = {f["name"]: f for f in existing}
+    async def ensure_custom_fields_exist(self) -> dict[MetadataFieldKey, int]:
+        schema = await PaperlessMetadataResolver(self.client).ensure(_EOB_FIELDS)
+        self._schema = schema
+        self._field_id_cache = {
+            key: resolved.canonical_id
+            for key, resolved in schema.fields.items()
+            if resolved.canonical_id is not None and resolved.is_compatible
+        }
+        return dict(self._field_id_cache)
 
-        field_map = {}
-        for field_def in CUSTOM_FIELD_DEFINITIONS:
-            name = field_def["name"]
-            if name in existing_by_name:
-                field_map[name] = existing_by_name[name]["id"]
-                if field_def.get("data_type") == "select":
-                    self._cache_select_options(name, existing_by_name[name])
-            else:
-                created = await self.client.create_custom_field(field_def)
-                field_map[name] = created["id"]
-                if field_def.get("data_type") == "select":
-                    self._cache_select_options(name, created)
-
-        self._field_id_cache = field_map
-        return field_map
-
-    def _cache_select_options(self, field_name: str, field_data: dict) -> None:
-        """Build label -> option_id mapping for a select field."""
-        extra_data = field_data.get("extra_data", {})
-        options = extra_data.get("select_options", [])
-        option_map = {}
-        for opt in options:
-            if isinstance(opt, dict):
-                label = opt.get("label", "")
-                opt_id = opt.get("id")
-                if label and opt_id is not None:
-                    option_map[label] = opt_id
-        self._select_option_cache[field_name] = option_map
-
-    def _resolve_select_value(self, field_name: str, label: str) -> int | str:
-        """Resolve a select option label to its ID. Falls back to label if not cached."""
-        option_map = self._select_option_cache.get(field_name, {})
-        if label in option_map:
-            return option_map[label]
-        return label
-
-    async def get_field_ids(self) -> dict[str, int]:
-        if not self._field_id_cache:
+    async def get_schema(self) -> ResolvedMetadataSchema:
+        if self._schema is None:
             await self.ensure_custom_fields_exist()
-        return self._field_id_cache
+        if self._schema is None:
+            raise MetadataSchemaError("EOB metadata schema was not initialized")
+        return self._schema
+
+    async def get_field_ids(self) -> dict[MetadataFieldKey, int]:
+        await self.get_schema()
+        return dict(self._field_id_cache)
 
     async def link_match(
         self,
@@ -112,72 +65,85 @@ class EOBEnricher:
         confidence: str,
         patient_responsibility: float | None = None,
     ) -> None:
-        """Write match relationship to both EOB and Bill documents in Paperless."""
-        from datetime import date
-
-        field_ids = await self.get_field_ids()
+        """Write match relationship to both EOB and bill documents."""
+        schema = await self.get_schema()
         today = date.today().isoformat()
 
-        # Tag the EOB document
-        eob_fields = [
-            {
-                "field": field_ids["EOB Match Status"],
-                "value": self._resolve_select_value("EOB Match Status", "matched"),
-            },
-            {"field": field_ids["EOB Match Score"], "value": round(score, 1)},
-            {
-                "field": field_ids["EOB Match Confidence"],
-                "value": self._resolve_select_value("EOB Match Confidence", confidence),
-            },
-            {"field": field_ids["EOB Matched Document"], "value": bill_document_id},
-            {
-                "field": field_ids["EOB Document Type"],
-                "value": self._resolve_select_value("EOB Document Type", "EOB"),
-            },
-            {"field": field_ids["EOB Analyzed"], "value": today},
-        ]
+        eob_fields = self._match_fields(
+            schema,
+            matched_document_id=bill_document_id,
+            score=score,
+            confidence=confidence,
+            document_type="EOB",
+            analyzed=today,
+        )
         if patient_responsibility is not None:
             eob_fields.append(
-                {"field": field_ids["EOB Patient Responsibility"], "value": patient_responsibility}
+                build_metadata_update(
+                    MetadataFieldKey.EOB_PATIENT_RESPONSIBILITY,
+                    patient_responsibility,
+                    schema,
+                )
             )
         await self.client.update_custom_fields(eob_document_id, eob_fields)
 
-        # Tag the Bill document
-        bill_fields = [
-            {
-                "field": field_ids["EOB Match Status"],
-                "value": self._resolve_select_value("EOB Match Status", "matched"),
-            },
-            {"field": field_ids["EOB Match Score"], "value": round(score, 1)},
-            {
-                "field": field_ids["EOB Match Confidence"],
-                "value": self._resolve_select_value("EOB Match Confidence", confidence),
-            },
-            {"field": field_ids["EOB Matched Document"], "value": eob_document_id},
-            {
-                "field": field_ids["EOB Document Type"],
-                "value": self._resolve_select_value("EOB Document Type", "BILL"),
-            },
-            {"field": field_ids["EOB Analyzed"], "value": today},
-        ]
+        bill_fields = self._match_fields(
+            schema,
+            matched_document_id=eob_document_id,
+            score=score,
+            confidence=confidence,
+            document_type="BILL",
+            analyzed=today,
+        )
         await self.client.update_custom_fields(bill_document_id, bill_fields)
 
-    async def mark_unmatched(self, document_id: int, doc_type: str) -> None:
-        """Tag a document as unmatched after analysis."""
-        from datetime import date
+    @staticmethod
+    def _match_fields(
+        schema: ResolvedMetadataSchema,
+        *,
+        matched_document_id: int,
+        score: float,
+        confidence: str,
+        document_type: str,
+        analyzed: str,
+    ) -> list[dict]:
+        return [
+            build_metadata_update(MetadataFieldKey.EOB_MATCH_STATUS, "matched", schema),
+            build_metadata_update(MetadataFieldKey.EOB_MATCH_SCORE, round(score, 1), schema),
+            build_metadata_update(MetadataFieldKey.EOB_MATCH_CONFIDENCE, confidence, schema),
+            build_metadata_update(
+                MetadataFieldKey.EOB_MATCHED_DOCUMENT,
+                matched_document_id,
+                schema,
+            ),
+            build_metadata_update(
+                MetadataFieldKey.EOB_DOCUMENT_TYPE,
+                document_type,
+                schema,
+            ),
+            build_metadata_update(MetadataFieldKey.EOB_ANALYZED, analyzed, schema),
+        ]
 
-        field_ids = await self.get_field_ids()
+    async def mark_unmatched(self, document_id: int, doc_type: str) -> None:
+        """Mark a document as unmatched after analysis."""
+        schema = await self.get_schema()
         await self.client.update_custom_fields(
             document_id,
             [
-                {
-                    "field": field_ids["EOB Match Status"],
-                    "value": self._resolve_select_value("EOB Match Status", "unmatched"),
-                },
-                {
-                    "field": field_ids["EOB Document Type"],
-                    "value": self._resolve_select_value("EOB Document Type", doc_type),
-                },
-                {"field": field_ids["EOB Analyzed"], "value": date.today().isoformat()},
+                build_metadata_update(
+                    MetadataFieldKey.EOB_MATCH_STATUS,
+                    "unmatched",
+                    schema,
+                ),
+                build_metadata_update(
+                    MetadataFieldKey.EOB_DOCUMENT_TYPE,
+                    doc_type.upper(),
+                    schema,
+                ),
+                build_metadata_update(
+                    MetadataFieldKey.EOB_ANALYZED,
+                    date.today().isoformat(),
+                    schema,
+                ),
             ],
         )

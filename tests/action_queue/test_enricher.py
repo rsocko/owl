@@ -4,11 +4,59 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from doc_intelligence_hub.core.paperless import (
+    MetadataFieldKey,
+    resolve_metadata_schema,
+)
 from doc_intelligence_hub.modules.action_queue.config import settings
 from doc_intelligence_hub.modules.action_queue.enricher import (
     CUSTOM_FIELD_DEFINITIONS,
     PaperlessEnricher,
 )
+
+_ACTION_KEYS = (
+    MetadataFieldKey.DOCUMENT_AMOUNT,
+    MetadataFieldKey.ACTION_STATUS,
+    MetadataFieldKey.ACTION_ANALYZED,
+    MetadataFieldKey.LEGACY_ACTION_TYPE,
+    MetadataFieldKey.LEGACY_ACTION_DUE_DATE,
+    MetadataFieldKey.LEGACY_ACTION_URGENCY,
+    MetadataFieldKey.LEGACY_ACTION_SUMMARY,
+    MetadataFieldKey.LEGACY_ACTION_COUNT,
+)
+
+
+def _prime_schema(enricher: PaperlessEnricher, *, include_legacy: bool = False) -> None:
+    definitions = [
+        {"id": 1, "name": "Document Amount", "data_type": "float"},
+        {
+            "id": 2,
+            "name": "Action Status",
+            "data_type": "select",
+            "extra_data": {
+                "select_options": [
+                    {"id": 20, "label": "pending"},
+                    {"id": 21, "label": "acknowledged"},
+                    {"id": 22, "label": "completed"},
+                    {"id": 23, "label": "snoozed"},
+                    {"id": 24, "label": "dismissed"},
+                    {"id": 25, "label": "not_an_action"},
+                ]
+            },
+        },
+        {"id": 3, "name": "Action Analyzed", "data_type": "date"},
+    ]
+    if include_legacy:
+        definitions.extend(
+            [
+                {"id": 5, "name": "Action Type", "data_type": "select"},
+                {"id": 6, "name": "Action Due Date", "data_type": "date"},
+                {"id": 7, "name": "Action Urgency", "data_type": "select"},
+                {"id": 8, "name": "Action Summary", "data_type": "string"},
+                {"id": 9, "name": "Action Count", "data_type": "integer"},
+            ]
+        )
+    enricher._set_schema(resolve_metadata_schema(definitions, _ACTION_KEYS))
 
 
 def test_action_status_field_supports_full_lifecycle():
@@ -76,7 +124,7 @@ async def test_sync_status_removes_monitored_tags_when_enabled(monkeypatch):
 
     enricher = PaperlessEnricher()
     enricher.client = AsyncMock()
-    enricher._field_id_cache = {"Action Status": 7}
+    _prime_schema(enricher)
 
     await enricher.sync_status(42, "not_an_action")
 
@@ -92,7 +140,7 @@ async def test_sync_status_keeps_monitored_tags_when_disabled(monkeypatch):
 
     enricher = PaperlessEnricher()
     enricher.client = AsyncMock()
-    enricher._field_id_cache = {"Action Status": 7}
+    _prime_schema(enricher)
 
     await enricher.sync_status(42, "completed")
 
@@ -109,7 +157,7 @@ async def test_sync_status_propagates_tag_removal_failure(monkeypatch):
     enricher = PaperlessEnricher()
     enricher.client = AsyncMock()
     enricher.client.remove_tags_from_document.side_effect = RuntimeError("Paperless unavailable")
-    enricher._field_id_cache = {"Action Status": 7}
+    _prime_schema(enricher)
 
     with pytest.raises(RuntimeError, match="Paperless unavailable"):
         await enricher.sync_status(42, "completed")
@@ -132,16 +180,7 @@ def enricher(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_enrich_document_writes_only_neutral_metadata(enricher):
-    enricher._field_id_cache = {
-        "Document Amount": 1,
-        "Action Status": 2,
-        "Action Analyzed": 3,
-        "Action Type": 5,
-        "Action Due Date": 6,
-        "Action Urgency": 7,
-        "Action Summary": 8,
-        "Action Count": 9,
-    }
+    _prime_schema(enricher, include_legacy=True)
 
     await enricher.enrich_document(
         42,
@@ -157,28 +196,20 @@ async def test_enrich_document_writes_only_neutral_metadata(enricher):
     fields = enricher.client.update_custom_fields.await_args.args[1]
     values = {field["field"]: field["value"] for field in fields}
     assert values[1] == 123.45
-    assert values[2] == "pending"
+    assert values[2] == 20
     assert not {5, 6, 7, 8, 9}.intersection(values)
 
 
 @pytest.mark.asyncio
 async def test_not_an_action_clears_legacy_inferred_fields_but_keeps_amount(enricher):
-    enricher._field_id_cache = {
-        "Document Amount": 1,
-        "Action Status": 2,
-        "Action Type": 5,
-        "Action Due Date": 6,
-        "Action Urgency": 7,
-        "Action Summary": 8,
-        "Action Count": 9,
-    }
+    _prime_schema(enricher, include_legacy=True)
 
     await enricher.sync_status(42, "not_an_action")
 
     fields = enricher.client.update_custom_fields.await_args.args[1]
     values = {field["field"]: field["value"] for field in fields}
     assert values == {
-        2: "not_an_action",
+        2: 25,
         5: None,
         6: None,
         7: None,
@@ -190,7 +221,7 @@ async def test_not_an_action_clears_legacy_inferred_fields_but_keeps_amount(enri
 
 @pytest.mark.asyncio
 async def test_existing_action_amount_field_is_renamed(enricher):
-    enricher.client.list_custom_fields.return_value = [
+    initial_definitions = [
         {"id": 1, "name": "Action Amount", "data_type": "float"},
         {
             "id": 2,
@@ -205,6 +236,30 @@ async def test_existing_action_amount_field_is_renamed(enricher):
             },
         },
         {"id": 3, "name": "Action Analyzed", "data_type": "date"},
+    ]
+    final_definitions = [
+        {"id": 1, "name": "Document Amount", "data_type": "float"},
+        {
+            "id": 2,
+            "name": "Action Status",
+            "data_type": "select",
+            "extra_data": {
+                "select_options": [
+                    {"id": 20, "label": "pending"},
+                    {"id": 21, "label": "completed"},
+                    {"id": 22, "label": "dismissed"},
+                    {"id": 23, "label": "acknowledged"},
+                    {"id": 24, "label": "snoozed"},
+                    {"id": 25, "label": "not_an_action"},
+                ]
+            },
+        },
+        {"id": 3, "name": "Action Analyzed", "data_type": "date"},
+    ]
+    enricher.client.list_custom_fields.side_effect = [
+        initial_definitions,
+        initial_definitions,
+        final_definitions,
     ]
     enricher.client.update_custom_field.side_effect = [
         {"id": 1, "name": "Document Amount", "data_type": "float"},
@@ -227,7 +282,7 @@ async def test_existing_action_amount_field_is_renamed(enricher):
 
     field_ids = await enricher.ensure_custom_fields_exist()
 
-    assert field_ids["Document Amount"] == 1
+    assert field_ids[MetadataFieldKey.DOCUMENT_AMOUNT] == 1
     assert enricher.client.update_custom_field.await_args_list[0].args == (
         1,
         {"name": "Document Amount"},

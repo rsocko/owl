@@ -20,7 +20,13 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from doc_intelligence_hub.core.paperless import PaperlessClient
+from doc_intelligence_hub.core.paperless import (
+    MetadataFieldKey,
+    PaperlessClient,
+    PaperlessMetadataResolver,
+    ResolvedMetadataSchema,
+    build_metadata_update,
+)
 from doc_intelligence_hub.modules.triage.database import (
     CorrectionEvent,
 )
@@ -30,9 +36,10 @@ from doc_intelligence_hub.modules.triage.database import (
 
 logger = logging.getLogger(__name__)
 
-# Custom field names used in Paperless-ngx (matched by name, resolved to ID at runtime)
-_SERIES_NAME_FIELD = "Series Name"
-_ACCOUNT_ID_FIELD = "Account Identifier"
+_SERIES_FIELDS = (
+    MetadataFieldKey.SERIES_NAME,
+    MetadataFieldKey.ACCOUNT_IDENTIFIER,
+)
 
 
 # ------------------------------------------------------------------
@@ -227,17 +234,21 @@ def sync_all_pending() -> dict[str, Any]:
 # ------------------------------------------------------------------
 
 
-async def _resolve_field_ids(client: PaperlessClient) -> dict[str, int]:
-    """Resolve custom field names to their Paperless IDs.
+async def _resolve_field_ids(client: PaperlessClient) -> dict[MetadataFieldKey, int]:
+    """Resolve registered series fields to canonical Paperless IDs.
 
-    Returns a mapping of field name -> field ID. Missing fields are omitted.
+    Missing or incompatible fields are omitted.
     """
-    fields = await client.list_custom_fields()
+    schema = await _resolve_field_schema(client)
     return {
-        f["name"]: f["id"]
-        for f in fields
-        if f.get("name") in (_SERIES_NAME_FIELD, _ACCOUNT_ID_FIELD)
+        key: resolved.canonical_id
+        for key, resolved in schema.fields.items()
+        if resolved.canonical_id is not None and resolved.is_compatible
     }
+
+
+async def _resolve_field_schema(client: PaperlessClient) -> ResolvedMetadataSchema:
+    return await PaperlessMetadataResolver(client).resolve(_SERIES_FIELDS)
 
 
 async def sync_correction_event(
@@ -267,9 +278,9 @@ async def sync_correction_event(
             return True  # Already synced
 
         payload = json.loads(event.payload_json) if event.payload_json else {}
-        field_ids = await _resolve_field_ids(client)
+        schema = await _resolve_field_schema(client)
 
-        if not field_ids:
+        if not any(resolved.is_compatible for resolved in schema.fields.values()):
             logger.info("No Paperless custom fields configured for series sync; skipping")
             return False
 
@@ -277,7 +288,7 @@ async def sync_correction_event(
             client,
             event.event_type,
             payload,
-            field_ids,
+            schema,
             series_name=series_name,
             account_identifier=account_identifier,
             target_series_name=target_series_name,
@@ -302,7 +313,7 @@ async def _sync_by_event_type(
     client: PaperlessClient,
     event_type: str,
     payload: dict,
-    field_ids: dict[str, int],
+    schema: ResolvedMetadataSchema,
     *,
     series_name: str | None = None,
     account_identifier: str | None = None,
@@ -310,13 +321,13 @@ async def _sync_by_event_type(
 ) -> bool:
     """Dispatch to the correct sync handler based on event type."""
     if event_type == "series_rename":
-        return await _sync_rename(client, payload, field_ids, series_name, account_identifier)
+        return await _sync_rename(client, payload, schema, series_name, account_identifier)
     elif event_type == "series_split":
-        return await _sync_split(client, payload, field_ids, series_name)
+        return await _sync_split(client, payload, schema, series_name)
     elif event_type == "series_merge":
-        return await _sync_merge(client, payload, field_ids, target_series_name)
+        return await _sync_merge(client, payload, schema, target_series_name)
     elif event_type == "series_reassign":
-        return await _sync_reassign(client, payload, field_ids, target_series_name)
+        return await _sync_reassign(client, payload, schema, target_series_name)
     else:
         logger.debug("Event type '%s' does not require Paperless sync", event_type)
         return True
@@ -325,16 +336,27 @@ async def _sync_by_event_type(
 async def _update_doc_fields(
     client: PaperlessClient,
     document_id: str,
-    field_ids: dict[str, int],
+    schema: ResolvedMetadataSchema,
     series_name: str | None = None,
     account_identifier: str | None = None,
 ) -> None:
     """Update the custom fields for a single Paperless document."""
     custom_fields: list[dict] = []
-    if series_name is not None and _SERIES_NAME_FIELD in field_ids:
-        custom_fields.append({"field": field_ids[_SERIES_NAME_FIELD], "value": series_name})
-    if account_identifier is not None and _ACCOUNT_ID_FIELD in field_ids:
-        custom_fields.append({"field": field_ids[_ACCOUNT_ID_FIELD], "value": account_identifier})
+    if series_name is not None and schema.field(MetadataFieldKey.SERIES_NAME).is_compatible:
+        custom_fields.append(
+            build_metadata_update(MetadataFieldKey.SERIES_NAME, series_name, schema)
+        )
+    if (
+        account_identifier is not None
+        and schema.field(MetadataFieldKey.ACCOUNT_IDENTIFIER).is_compatible
+    ):
+        custom_fields.append(
+            build_metadata_update(
+                MetadataFieldKey.ACCOUNT_IDENTIFIER,
+                account_identifier,
+                schema,
+            )
+        )
 
     if custom_fields:
         await client.update_custom_fields(int(document_id), custom_fields)
@@ -343,7 +365,7 @@ async def _update_doc_fields(
 async def _sync_rename(
     client: PaperlessClient,
     payload: dict,
-    field_ids: dict[str, int],
+    schema: ResolvedMetadataSchema,
     series_name: str | None,
     account_identifier: str | None,
 ) -> bool:
@@ -355,7 +377,7 @@ async def _sync_rename(
     for doc_id in doc_ids:
         try:
             await _update_doc_fields(
-                client, doc_id, field_ids, series_name=new_name, account_identifier=acct
+                client, doc_id, schema, series_name=new_name, account_identifier=acct
             )
         except Exception:
             logger.exception("Failed to sync rename for document %s", doc_id)
@@ -366,14 +388,14 @@ async def _sync_rename(
 async def _sync_split(
     client: PaperlessClient,
     payload: dict,
-    field_ids: dict[str, int],
+    schema: ResolvedMetadataSchema,
     new_series_name: str | None,
 ) -> bool:
     """Split: update moved documents' series name to the new series."""
     doc_ids = payload.get("document_ids", [])
     for doc_id in doc_ids:
         try:
-            await _update_doc_fields(client, doc_id, field_ids, series_name=new_series_name)
+            await _update_doc_fields(client, doc_id, schema, series_name=new_series_name)
         except Exception:
             logger.exception("Failed to sync split for document %s", doc_id)
             return False
@@ -383,14 +405,14 @@ async def _sync_split(
 async def _sync_merge(
     client: PaperlessClient,
     payload: dict,
-    field_ids: dict[str, int],
+    schema: ResolvedMetadataSchema,
     target_series_name: str | None,
 ) -> bool:
     """Merge: update source documents' series name to the target series name."""
     doc_ids = payload.get("document_ids", [])
     for doc_id in doc_ids:
         try:
-            await _update_doc_fields(client, doc_id, field_ids, series_name=target_series_name)
+            await _update_doc_fields(client, doc_id, schema, series_name=target_series_name)
         except Exception:
             logger.exception("Failed to sync merge for document %s", doc_id)
             return False
@@ -400,7 +422,7 @@ async def _sync_merge(
 async def _sync_reassign(
     client: PaperlessClient,
     payload: dict,
-    field_ids: dict[str, int],
+    schema: ResolvedMetadataSchema,
     target_series_name: str | None,
 ) -> bool:
     """Reassign: update the moved document's series name."""
@@ -408,7 +430,7 @@ async def _sync_reassign(
     if not doc_id:
         return True
     try:
-        await _update_doc_fields(client, doc_id, field_ids, series_name=target_series_name)
+        await _update_doc_fields(client, doc_id, schema, series_name=target_series_name)
     except Exception:
         logger.exception("Failed to sync reassign for document %s", doc_id)
         return False

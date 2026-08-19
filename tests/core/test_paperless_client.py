@@ -4,6 +4,17 @@ import httpx
 import pytest
 
 from doc_intelligence_hub.core.paperless import PaperlessClient, load_fixture
+from doc_intelligence_hub.core.resilience import (
+    PaperlessError,
+    reset_circuit_breakers,
+)
+
+
+@pytest.fixture(autouse=True)
+def isolate_circuit_breakers():
+    reset_circuit_breakers()
+    yield
+    reset_circuit_breakers()
 
 
 def _mock_transport():
@@ -291,6 +302,23 @@ class TestFetchWithLimit:
         assert len(doc_requests) == 3
 
     @pytest.mark.asyncio
+    async def test_iter_document_pages_uses_restart_cursor_and_stable_ordering(self, monkeypatch):
+        client, requests_seen = _make_client_with_pages(monkeypatch, num_docs=250, page_size=100)
+
+        pages = [page async for page in client.iter_document_pages(page_size=100, cursor="2")]
+
+        assert [len(page.results) for page in pages] == [100, 50]
+        assert pages[0].next_cursor == "3"
+        doc_requests = [r for r in requests_seen if r.url.path == "/api/documents/"]
+        assert doc_requests[0].url.params.get("page") == "2"
+        assert doc_requests[0].url.params.get("ordering") == "id"
+
+    @pytest.mark.asyncio
+    async def test_list_document_page_rejects_invalid_cursor(self, client):
+        with pytest.raises(ValueError, match="cursor"):
+            await client.list_document_page(cursor="not-a-page")
+
+    @pytest.mark.asyncio
     async def test_list_documents_by_tag_ids_single_page_with_huge_collection(self, monkeypatch):
         """Even with 5000+ documents sharing the requested tags, a small
         `limit` must result in exactly one /api/documents/ request — no
@@ -384,6 +412,142 @@ class TestHttpxTimeoutConfig:
             assert async_client.timeout.read == 45.0
         finally:
             await async_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_list_custom_fields_follows_pagination(monkeypatch):
+    requests_seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests_seen.append(request)
+        page = int(request.url.params.get("page", "1"))
+        if page == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "count": 2,
+                    "results": [{"id": 1, "name": "Field A", "data_type": "string"}],
+                    "next": "https://paperless.test/api/custom_fields/?page=2",
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "count": 2,
+                "results": [{"id": 2, "name": "Field B", "data_type": "date"}],
+                "next": None,
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    client = PaperlessClient(base_url="https://paperless.test", token="test-token")
+
+    fields = await client.list_custom_fields()
+
+    assert [field["id"] for field in fields] == [1, 2]
+    assert len(requests_seen) == 2
+
+
+@pytest.mark.asyncio
+async def test_update_custom_fields_verified_detects_readback_mismatch(monkeypatch):
+    get_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal get_count
+        if request.url.path == "/api/documents/7/" and request.method == "GET":
+            get_count += 1
+            value = "before" if get_count == 1 else "unexpected"
+            return httpx.Response(
+                200,
+                json={"id": 7, "custom_fields": [{"field": 2, "value": value}]},
+            )
+        if request.url.path == "/api/documents/7/" and request.method == "PATCH":
+            return httpx.Response(200, json={"id": 7})
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    client = PaperlessClient(base_url="https://paperless.test", token="test-token")
+
+    with pytest.raises(PaperlessError, match="verification failed"):
+        await client.update_custom_fields_verified(7, [{"field": 2, "value": "expected"}])
+
+
+@pytest.mark.asyncio
+async def test_update_custom_fields_verified_normalizes_numeric_readback(monkeypatch):
+    get_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal get_count
+        if request.url.path == "/api/documents/8/" and request.method == "GET":
+            get_count += 1
+            value = "0" if get_count == 1 else "12.50"
+            return httpx.Response(
+                200,
+                json={"id": 8, "custom_fields": [{"field": 3, "value": value}]},
+            )
+        if request.url.path == "/api/documents/8/" and request.method == "PATCH":
+            return httpx.Response(200, json={"id": 8})
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    client = PaperlessClient(base_url="https://paperless.test", token="test-token")
+
+    verified = await client.update_custom_fields_verified(
+        8, [{"field": 3, "value": 12.5}], numeric_field_ids={3}
+    )
+    assert verified["custom_fields"][0]["value"] == "12.50"
+
+
+@pytest.mark.asyncio
+async def test_update_custom_fields_verified_requires_exact_text_readback(monkeypatch):
+    get_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal get_count
+        if request.url.path == "/api/documents/9/" and request.method == "GET":
+            get_count += 1
+            value = "old" if get_count == 1 else "123"
+            return httpx.Response(
+                200,
+                json={"id": 9, "custom_fields": [{"field": 4, "value": value}]},
+            )
+        if request.url.path == "/api/documents/9/" and request.method == "PATCH":
+            return httpx.Response(200, json={"id": 9})
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    client = PaperlessClient(base_url="https://paperless.test", token="test-token")
+
+    with pytest.raises(PaperlessError, match="verification failed"):
+        await client.update_custom_fields_verified(9, [{"field": 4, "value": "00123"}])
 
 
 class TestFetchPerformanceLogging:
