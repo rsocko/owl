@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
+import { useSearchParams } from 'react-router-dom';
 import {
   Badge,
   Button,
@@ -59,6 +60,20 @@ interface StatsResponse {
 type ItemTypeFilter = 'all' | 'eob_match_review' | 'grouping_anomaly' | 'orphan_document' | 'duplicate_document';
 type StatusFilter = 'pending' | 'deferred' | 'resolved';
 type ToastState = { message: string; tone?: 'success' | 'error'; undoId?: string } | null;
+
+const ITEM_TYPE_FILTERS: ReadonlySet<ItemTypeFilter> = new Set([
+  'all',
+  'eob_match_review',
+  'grouping_anomaly',
+  'orphan_document',
+  'duplicate_document',
+]);
+
+function itemTypeFilterFromQuery(value: string | null): ItemTypeFilter {
+  return value !== null && ITEM_TYPE_FILTERS.has(value as ItemTypeFilter)
+    ? value as ItemTypeFilter
+    : 'all';
+}
 
 // ------------------------------------------------------------------
 // Helpers
@@ -203,6 +218,9 @@ function reviewActionLabel(action: string): string {
 // ------------------------------------------------------------------
 
 export default function TriageQueue() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryTypeFilter = itemTypeFilterFromQuery(searchParams.get('type'));
+
   // Data state
   const [items, setItems] = useState<TriageItem[]>([]);
   const [stats, setStats] = useState<StatsResponse | null>(null);
@@ -210,7 +228,7 @@ export default function TriageQueue() {
   const [error, setError] = useState<string | null>(null);
 
   // Filters
-  const [typeFilter, setTypeFilter] = useState<ItemTypeFilter>('all');
+  const typeFilter = queryTypeFilter;
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
 
   // Selection
@@ -229,6 +247,17 @@ export default function TriageQueue() {
   const [pendingBulkAction, setPendingBulkAction] = useState<{ action: string; ids: string[] } | null>(null);
   const [thresholdPct, setThresholdPct] = useState(90);
   const [pendingThreshold, setPendingThreshold] = useState(false);
+
+  const handleTypeFilterChange = (value: string) => {
+    const nextType = itemTypeFilterFromQuery(value);
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextType === 'all') {
+      nextParams.delete('type');
+    } else {
+      nextParams.set('type', nextType);
+    }
+    setSearchParams(nextParams, { replace: true });
+  };
 
   // ------------------------------------------------------------------
   // Data loading
@@ -566,7 +595,7 @@ export default function TriageQueue() {
                 {/* Type filter tabs */}
                 <Tabs
                   active={typeFilter}
-                  onChange={(v) => setTypeFilter(v as ItemTypeFilter)}
+                  onChange={handleTypeFilterChange}
                   tabs={[
                     { key: 'all', label: `All (${stats?.total ?? 0})` },
                     { key: 'eob_match_review', label: `EOB (${typeCounts.eob_match_review ?? 0})` },

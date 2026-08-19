@@ -47,7 +47,12 @@ from doc_intelligence_hub.modules.triage.paperless_sync import (
 router = APIRouter(prefix="/api/triage", tags=["triage"])
 
 # Valid enum values for input validation
-_VALID_ITEM_TYPES = {"eob_match_review", "grouping_anomaly", "orphan_document"}
+_VALID_ITEM_TYPES = {
+    "duplicate_document",
+    "eob_match_review",
+    "grouping_anomaly",
+    "orphan_document",
+}
 _VALID_STATUSES = {"pending", "deferred", "resolved", "dismissed"}
 _VALID_SORTS = {"priority", "created_at", "type"}
 

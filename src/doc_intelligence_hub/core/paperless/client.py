@@ -27,6 +27,7 @@ import httpx
 from doc_intelligence_hub.core.resilience import (
     CircuitOpenError,
     PaperlessError,
+    UnsupportedSavedViewError,
     get_circuit_breaker,
 )
 
@@ -618,6 +619,31 @@ class PaperlessClient:
             client, "/api/documents/", params, limit=limit, on_progress=on_progress
         )
 
+    async def count_documents_for_saved_view(self, view_id: int) -> int:
+        """Return Paperless's server-side count for one saved-view definition."""
+        view = await self.get_saved_view(view_id)
+        try:
+            filter_params = _saved_view_filter_params(view.get("filter_rules"))
+        except PaperlessError as exc:
+            raise UnsupportedSavedViewError(str(exc)) from exc
+        params = {
+            "page": 1,
+            "page_size": 1,
+            **filter_params,
+        }
+        resp = await self._request("GET", "/api/documents/", params=params)
+        resp.raise_for_status()
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise PaperlessError(
+                f"Saved view {view_id} document query returned malformed JSON"
+            ) from exc
+        count = payload.get("count") if isinstance(payload, dict) else None
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise PaperlessError(f"Saved view {view_id} document query returned an invalid count")
+        return count
+
     async def list_documents_by_tag_ids(
         self, tag_ids: list[int], *, page_size: int = 100, limit: int | None = None
     ) -> list[dict]:
@@ -893,7 +919,10 @@ class PaperlessClient:
             raise PaperlessError("Saved view ID must be a positive integer")
         resp = await self._request("GET", f"/api/saved_views/{view_id}/")
         resp.raise_for_status()
-        data = resp.json()
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise PaperlessError(f"Saved view {view_id} returned malformed JSON") from exc
         if not isinstance(data, dict):
             raise PaperlessError(f"Saved view {view_id} returned a malformed definition")
         actual_id = data.get("id")

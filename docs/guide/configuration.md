@@ -21,6 +21,7 @@ Preview the rules configuration UI: [Rules Config](../../mockups/triage-correcti
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `PAPERLESS_URL` | Paperless-ngx base URL | `http://paperless:8000` |
+| `PAPERLESS_BROWSER_URL` | Browser-reachable Paperless origin for Document Views links | `https://paperless.example.com` |
 | `PAPERLESS_API_TOKEN` | Paperless API authentication token | `abc123...` |
 
 ### LLM Configuration
@@ -42,6 +43,7 @@ OWL uses an OpenAI-compatible API. Any endpoint that supports the chat completio
 | `WRITE_TO_PAPERLESS` | Allow OWL to write tags/custom fields back to Paperless | `true` |
 | `LOG_FORMAT` | Logging format: `json` (structured) or `text` (human-readable) | `json` |
 | `STATEMENT_TRACKER_CONFIG` | Path to statement tracker YAML config | `/app/config/config.docker.yaml` |
+| `DOCUMENT_VIEWS_CONFIG` | Optional path to the grouped Document Views allowlist | unset |
 
 ### Networking
 
@@ -51,6 +53,37 @@ OWL uses an OpenAI-compatible API. Any endpoint that supports the chat completio
 | `DOC_HUB_IMAGE_TAG` | Docker image tag | `latest` |
 
 ## YAML Configuration
+
+### Document Views Catalog
+
+Set `DOCUMENT_VIEWS_CONFIG` to a deployment-managed YAML file. Start from
+`config/document-views.example.yaml`, replace its synthetic Paperless IDs, and
+mount the resulting untracked file into the OWL container. Set
+`PAPERLESS_BROWSER_URL` to the origin users open in a browser; do not use an
+internal Docker service URL such as `http://paperless:8000`.
+
+```yaml
+groups:
+  - id: daily-review
+    label: Daily Review
+    default_expanded: true
+    views:
+      - id: inbox
+        label: Inbox
+        provider: paperless
+        source_id: 17
+
+      - id: needs-review
+        label: Needs Review
+        provider: owl
+        source_id: triage.pending
+```
+
+Paperless view names are presentation labels, not identifiers. Paperless-backed
+views open Paperless unless `launch: owl` and an internal `owl_route` are
+configured for a purpose-built workflow. See
+[Document Views and Metadata Quality](../design/active/document-views-and-metadata-quality.md)
+for provider semantics, permissions, freshness, and extension rules.
 
 ### Statement Tracker Config
 

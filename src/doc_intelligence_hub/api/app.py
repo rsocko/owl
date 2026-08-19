@@ -5,6 +5,7 @@ import signal
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -12,7 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from doc_intelligence_hub.api.routers import (
@@ -22,6 +23,7 @@ from doc_intelligence_hub.api.routers import (
     analysis,
     dashboard,
     document_types,
+    document_views,
     duplicates,
     eob,
     extraction,
@@ -33,6 +35,10 @@ from doc_intelligence_hub.api.routers import (
     system,
     triage,
     webhooks,
+)
+from doc_intelligence_hub.core.document_views import (
+    DocumentViewCatalogConfig,
+    load_document_view_catalog,
 )
 from doc_intelligence_hub.core.llm import get_llm_settings, validate_model_availability
 from doc_intelligence_hub.core.logging_config import configure_logging
@@ -57,9 +63,11 @@ def _default_statement_tracker_config() -> str:
 
 class HubSettings(BaseSettings):
     paperless_url: str | None = None
+    paperless_browser_url: str | None = None
     paperless_token: str | None = None
     paperless_api_token: str | None = None
     statement_tracker_config: str = Field(default_factory=_default_statement_tracker_config)
+    document_views_config: str | None = None
     write_to_paperless: bool = True
     # LLM settings (used by admin UI status display; actual LLM config lives in LLM_* env vars)
     llm_base_url: str = "http://localhost:11434/v1"
@@ -72,6 +80,30 @@ class HubSettings(BaseSettings):
     port: int = 8001
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @field_validator("document_views_config", "paperless_browser_url", mode="before")
+    @classmethod
+    def normalize_optional_setting(cls, value: Any) -> Any:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("paperless_browser_url")
+    @classmethod
+    def validate_paperless_browser_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("paperless_browser_url must be an absolute HTTP(S) URL")
+        return value.rstrip("/")
 
     @property
     def resolved_paperless_token(self) -> str | None:
@@ -255,6 +287,10 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
                 "name": "stats",
                 "description": "Aggregate statistics across all DI modules for MC integration.",
             },
+            {
+                "name": "document-views",
+                "description": "Allowlisted Paperless and OWL review-view launcher.",
+            },
         ],
         lifespan=lifespan,
     )
@@ -263,6 +299,12 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.state.statement_tracker_config = settings.statement_tracker_config
     app.state.statement_tracker_config_loaded = _load_statement_tracker_config(
         settings.statement_tracker_config
+    )
+    app.state.document_views_configured = settings.document_views_config is not None
+    app.state.document_views_config = (
+        load_document_view_catalog(settings.document_views_config)
+        if settings.document_views_config is not None
+        else DocumentViewCatalogConfig()
     )
     app.state.last_queue_status = {
         "status": "idle",
@@ -293,6 +335,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(alerts.router)
     app.include_router(admin.router)
     app.include_router(document_types.router)
+    app.include_router(document_views.router)
     app.include_router(stats.router)
     app.include_router(mc_connector.router)
     app.include_router(triage.router)

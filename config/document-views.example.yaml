@@ -1,0 +1,61 @@
+groups:
+  - id: daily-review
+    label: Daily Review
+    description: High-frequency archive checks and incoming-document review.
+    default_expanded: true
+    views:
+      - id: inbox
+        label: Inbox
+        description: Documents currently in the Paperless inbox.
+        provider: paperless
+        source_id: 101
+      - id: recently-added-review
+        label: Recently Added Review
+        provider: paperless
+        source_id: 102
+
+  - id: missing-metadata
+    label: Missing Metadata
+    views:
+      - id: missing-correspondent
+        label: Missing correspondent
+        provider: paperless
+        source_id: 201
+      - id: missing-document-type
+        label: Missing document type
+        provider: paperless
+        source_id: 202
+      - id: no-tags
+        label: No tags
+        provider: paperless
+        source_id: 203
+
+  - id: taxonomy-cleanup
+    label: Taxonomy Cleanup
+    views:
+      - id: record-review
+        label: Record review
+        provider: paperless
+        source_id: 301
+      - id: other-review
+        label: Other review
+        provider: paperless
+        source_id: 302
+
+  - id: specialized-review
+    label: Specialized Review
+    description: Purpose-built OWL workflows for derived or cross-document state.
+    views:
+      - id: manuals-missing-storage-path
+        label: Manuals missing storage path
+        provider: paperless
+        source_id: 401
+      - id: needs-review
+        label: Needs Review
+        description: Pending items in OWL's local review queue.
+        provider: owl
+        source_id: triage.pending
+      - id: eob-match-review
+        label: EOB match review
+        provider: owl
+        source_id: triage.eob-match-review

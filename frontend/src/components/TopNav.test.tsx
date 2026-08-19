@@ -21,4 +21,19 @@ describe('TopNav', () => {
     expect(screen.getByRole('menuitem', { name: 'Needs Review' })).toBeInTheDocument();
     expect(screen.queryByText('Triage')).not.toBeInTheDocument();
   });
+
+  it('links to the grouped Document Views launcher', () => {
+    render(
+      <MemoryRouter initialEntries={['/document-views']}>
+        <TopNav />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Documents' }));
+
+    expect(screen.getByRole('menuitem', { name: 'Document Views' })).toHaveAttribute(
+      'href',
+      '/document-views',
+    );
+  });
 });

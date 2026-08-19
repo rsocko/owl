@@ -78,6 +78,7 @@ RUN pip install --no-cache-dir /tmp/*.whl && rm -rf /tmp/*.whl && \
 
 # Copy runtime config, scheduler crontab, and entrypoint
 COPY config/config.docker.yaml ./config/config.docker.yaml
+COPY config/document-views.example.yaml ./config/document-views.example.yaml
 COPY config/crontab.eob-scheduler ./config/crontab.eob-scheduler
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh

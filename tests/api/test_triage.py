@@ -72,6 +72,11 @@ class TestTriageQueueList:
         assert data["count"] == 1
         assert data["items"][0]["item_type"] == "orphan_document"
 
+    def test_filter_accepts_duplicate_document_type(self, client):
+        resp = client.get("/api/triage/queue?type=duplicate_document")
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 0
+
     def test_invalid_type_returns_400(self, client):
         resp = client.get("/api/triage/queue?type=invalid_type")
         assert resp.status_code == 400

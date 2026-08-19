@@ -5,8 +5,10 @@ services:
     restart: unless-stopped
     environment:
       PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
+      PAPERLESS_BROWSER_URL: ${PAPERLESS_BROWSER_URL:-}
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
       STATEMENT_TRACKER_CONFIG: /app/config/config.paperless.yaml
+      DOCUMENT_VIEWS_CONFIG: ${DOCUMENT_VIEWS_CONFIG:-}
     ports:
       - "8001:8001"
     volumes:
