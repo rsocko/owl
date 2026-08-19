@@ -27,9 +27,7 @@ def test_normalizes_document_summary_fields() -> None:
 
 
 def test_omits_account_outside_named_review_context() -> None:
-    summary = build_document_summary(
-        {"document_id": 7, "account_identifier": "EXACT-123456789"}
-    )
+    summary = build_document_summary({"document_id": 7, "account_identifier": "EXACT-123456789"})
 
     assert "account_identifier_display" not in summary
     assert "EXACT-123456789" not in str(summary)

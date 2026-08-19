@@ -124,12 +124,8 @@ async def get_duplicate(pair_id: str) -> dict[str, Any]:
         **pair,
         "doc_a_metadata": doc_a_meta,
         "doc_b_metadata": doc_b_meta,
-        "doc_a_summary": build_document_summary(
-            doc_a_meta or {"document_id": pair["doc_a_id"]}
-        ),
-        "doc_b_summary": build_document_summary(
-            doc_b_meta or {"document_id": pair["doc_b_id"]}
-        ),
+        "doc_a_summary": build_document_summary(doc_a_meta or {"document_id": pair["doc_a_id"]}),
+        "doc_b_summary": build_document_summary(doc_b_meta or {"document_id": pair["doc_b_id"]}),
     }
 
 

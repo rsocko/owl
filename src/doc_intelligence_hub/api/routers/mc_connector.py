@@ -192,25 +192,25 @@ async def mc_unmatched_eobs(
                     continue
                 eob_status = getattr(eob, "status", None) or "unmatched"
                 result = {
-                        "id": str(eob.id),
-                        "document_id": eob.document_id,
-                        "title": eob.title,
-                        "provider": eob.provider_name or "Unknown",
-                        "amount": eob.total_billed or 0.0,
-                        "date_of_service": eob.date_of_service.isoformat()
-                        if eob.date_of_service
-                        else "",
-                        "patient_responsibility": eob.total_patient_responsibility or 0.0,
-                        "document_url": f"{base_url}/documents/{eob.document_id}/details"
-                        if base_url and eob.document_id
-                        else None,
-                        "created_at": eob.created_at.isoformat()
-                        if hasattr(eob, "created_at") and eob.created_at
-                        else None,
-                        "doc_type": "eob",
-                        "orphaned": eob_status == "orphan",
-                        "status": eob_status,
-                    }
+                    "id": str(eob.id),
+                    "document_id": eob.document_id,
+                    "title": eob.title,
+                    "provider": eob.provider_name or "Unknown",
+                    "amount": eob.total_billed or 0.0,
+                    "date_of_service": eob.date_of_service.isoformat()
+                    if eob.date_of_service
+                    else "",
+                    "patient_responsibility": eob.total_patient_responsibility or 0.0,
+                    "document_url": f"{base_url}/documents/{eob.document_id}/details"
+                    if base_url and eob.document_id
+                    else None,
+                    "created_at": eob.created_at.isoformat()
+                    if hasattr(eob, "created_at") and eob.created_at
+                    else None,
+                    "doc_type": "eob",
+                    "orphaned": eob_status == "orphan",
+                    "status": eob_status,
+                }
                 result["document_summary"] = build_document_summary(result)
                 results.append(result)
 
