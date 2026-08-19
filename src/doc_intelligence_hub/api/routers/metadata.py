@@ -17,6 +17,16 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.api.routers import make_paperless_client
+from doc_intelligence_hub.core.paperless import (
+    MetadataFieldKey,
+    MetadataSchemaError,
+    MetadataValueError,
+    PaperlessMetadataResolver,
+    build_metadata_update,
+    get_metadata_field_spec,
+    resolve_metadata_schema,
+    resolve_metadata_value,
+)
 from doc_intelligence_hub.modules.triage.database import (
     create_extraction_correction,
     get_corrections_for_document,
@@ -27,20 +37,22 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/metadata", tags=["metadata"])
 
-# DI field name → Paperless custom field name
-FIELD_TO_PAPERLESS: dict[str, str] = {
-    "patient_name": "di_patient_name",
-    "provider_name": "di_provider_name",
-    "date_of_service": "di_date_of_service",
-    "patient_responsibility": "di_patient_resp",
-    "claim_number": "di_claim_number",
-    "invoice_number": "di_invoice_number",
-    "account_identifier": "di_account_id",
-    "document_classification": "di_doc_type",
+_API_FIELD_KEYS: dict[str, MetadataFieldKey] = {
+    MetadataFieldKey.PATIENT_NAME.value: MetadataFieldKey.PATIENT_NAME,
+    MetadataFieldKey.PROVIDER_NAME.value: MetadataFieldKey.PROVIDER_NAME,
+    MetadataFieldKey.DATE_OF_SERVICE.value: MetadataFieldKey.DATE_OF_SERVICE,
+    MetadataFieldKey.PATIENT_RESPONSIBILITY.value: MetadataFieldKey.PATIENT_RESPONSIBILITY,
+    MetadataFieldKey.CLAIM_NUMBER.value: MetadataFieldKey.CLAIM_NUMBER,
+    MetadataFieldKey.INVOICE_NUMBER.value: MetadataFieldKey.INVOICE_NUMBER,
+    MetadataFieldKey.ACCOUNT_IDENTIFIER.value: MetadataFieldKey.ACCOUNT_IDENTIFIER,
+    "document_classification": MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE,
 }
 
-
-VALID_FIELD_NAMES = set(FIELD_TO_PAPERLESS.keys())
+FIELD_TO_PAPERLESS: dict[str, str] = {
+    api_name: get_metadata_field_spec(key).canonical_name
+    for api_name, key in _API_FIELD_KEYS.items()
+}
+VALID_FIELD_NAMES = set(_API_FIELD_KEYS)
 
 
 # ------------------------------------------------------------------
@@ -108,32 +120,47 @@ async def get_document_metadata(doc_id: int, request: Request) -> dict[str, Any]
             status_code=502, detail=f"Failed to fetch document {doc_id} from Paperless: {exc}"
         ) from exc
 
-    # Build extracted fields from Paperless custom fields
-    custom_field_values = {cf["field"]: cf["value"] for cf in doc.get("custom_fields", [])}
-
-    # Resolve custom field names
     try:
         field_defs = await client.list_custom_fields()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to resolve Paperless metadata schema: %s", exc)
         field_defs = []
-    field_id_to_name = {f["id"]: f["name"] for f in field_defs}
+    schema = resolve_metadata_schema(field_defs, _API_FIELD_KEYS.values())
 
-    # Build a map of Paperless field name → value
-    paperless_values: dict[str, Any] = {}
-    for fid, val in custom_field_values.items():
-        fname = field_id_to_name.get(fid, str(fid))
-        paperless_values[fname] = val
-
-    # Map to DI fields
     extracted_fields: list[dict[str, Any]] = []
-    for di_field, paperless_field in FIELD_TO_PAPERLESS.items():
-        value = paperless_values.get(paperless_field)
+    conflicts: list[dict[str, Any]] = []
+    value_diagnostics: list[dict[str, str]] = []
+    for api_name, key in _API_FIELD_KEYS.items():
+        resolved_value = resolve_metadata_value(key, doc.get("custom_fields", []), schema)
+        conflict = resolved_value.conflict
+        if conflict is not None:
+            conflicts.append(
+                {
+                    "field_name": api_name,
+                    "selected_source": conflict.selected_source_name,
+                    "conflicting_sources": [
+                        {"source": source, "value": value}
+                        for source, value in conflict.conflicting_sources
+                    ],
+                }
+            )
+        if resolved_value.validation_error is not None:
+            value_diagnostics.append(
+                {
+                    "field_name": api_name,
+                    "source_field": resolved_value.source_name or "",
+                    "message": resolved_value.validation_error,
+                }
+            )
         extracted_fields.append(
             {
-                "field_name": di_field,
-                "paperless_field": paperless_field,
-                "value": value,
-                "has_value": value is not None and value != "",
+                "field_name": api_name,
+                "paperless_field": get_metadata_field_spec(key).canonical_name,
+                "value": resolved_value.value,
+                "has_value": resolved_value.value is not None,
+                "source_field": resolved_value.source_name,
+                "conflict": conflict is not None,
+                "validation_error": resolved_value.validation_error,
             }
         )
 
@@ -155,6 +182,16 @@ async def get_document_metadata(doc_id: int, request: Request) -> dict[str, Any]
         "corrections": corrections,
         "latest_corrections": latest_corrections,
         "field_mapping": FIELD_TO_PAPERLESS,
+        "metadata_conflicts": conflicts,
+        "metadata_value_diagnostics": value_diagnostics,
+        "schema_diagnostics": [
+            {
+                "field_name": diagnostic.key.value,
+                "code": diagnostic.code.value,
+                "message": diagnostic.message,
+            }
+            for diagnostic in schema.diagnostics
+        ],
     }
 
 
@@ -223,32 +260,28 @@ async def writeback_to_paperless(doc_id: int, request: Request) -> dict[str, Any
 
     client = make_paperless_client(request)
 
-    # Resolve Paperless custom field IDs
     try:
-        field_defs = await client.list_custom_fields()
+        schema = await PaperlessMetadataResolver(client).resolve(_API_FIELD_KEYS.values())
     except Exception as exc:
         raise HTTPException(
             status_code=502,
             detail=f"Failed to list Paperless custom fields: {exc}",
         ) from exc
 
-    field_name_to_id = {f["name"]: f["id"] for f in field_defs}
-
-    # Build custom field updates
     updates: list[dict] = []
     written_fields: list[str] = []
     missing_fields: list[str] = []
 
     for di_field, value in latest_per_field.items():
-        paperless_name = FIELD_TO_PAPERLESS.get(di_field)
-        if not paperless_name:
+        key = _API_FIELD_KEYS.get(di_field)
+        if key is None:
             missing_fields.append(di_field)
             continue
-        field_id = field_name_to_id.get(paperless_name)
-        if field_id is None:
-            missing_fields.append(f"{di_field} (Paperless field '{paperless_name}' not found)")
+        try:
+            updates.append(build_metadata_update(key, value, schema))
+        except (MetadataSchemaError, MetadataValueError) as exc:
+            missing_fields.append(f"{di_field} ({exc})")
             continue
-        updates.append({"field": field_id, "value": value})
         written_fields.append(di_field)
 
     if not updates:

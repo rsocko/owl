@@ -1,7 +1,7 @@
 """Account number extraction pipeline.
 
 Extracts account numbers/identifiers from document OCR text using regex patterns
-and optionally LLM fallback. Writes results to Paperless custom field `di_account_id`.
+and optionally LLM fallback. Writes masked results through the metadata registry.
 
 Patterns target common formats found in financial/medical statements:
   - Account #...4321, Account Number: 4321
@@ -15,6 +15,12 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+
+from doc_intelligence_hub.core.paperless import (
+    MetadataFieldKey,
+    PaperlessMetadataResolver,
+    build_metadata_update,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -207,22 +213,37 @@ async def write_account_to_paperless(
     account_identifier: str,
     paperless_client: object,
 ) -> bool:
-    """Write extracted account identifier to Paperless custom field."""
+    """Write a masked account identifier to the canonical Paperless field."""
     try:
+        if getattr(paperless_client, "list_custom_fields", None) is None:
+            logger.warning("Paperless client cannot resolve custom-field definitions")
+            return False
+        schema = await PaperlessMetadataResolver(paperless_client).resolve(
+            (MetadataFieldKey.ACCOUNT_IDENTIFIER,)
+        )
+        update = build_metadata_update(
+            MetadataFieldKey.ACCOUNT_IDENTIFIER,
+            account_identifier,
+            schema,
+        )
+
+        update_fields_fn = getattr(paperless_client, "update_custom_fields", None)
+        if update_fields_fn is not None:
+            await _call_sync_or_async(update_fields_fn, document_id, [update])
+            logger.info("Wrote masked account identifier to Paperless doc %d", document_id)
+            return True
+
         patch_fn = getattr(paperless_client, "patch", None)
         if patch_fn is None:
-            logger.warning("Paperless client has no patch() method")
+            logger.warning("Paperless client cannot update custom fields")
             return False
 
-        # Write to custom field via Paperless API
         await _call_sync_or_async(
             patch_fn,
             f"/api/documents/{document_id}/",
-            {"custom_fields": [{"field": "di_account_id", "value": account_identifier}]},
+            {"custom_fields": [update]},
         )
-        logger.info(
-            "Wrote account_identifier '%s' to Paperless doc %d", account_identifier, document_id
-        )
+        logger.info("Wrote masked account identifier to Paperless doc %d", document_id)
         return True
     except Exception as exc:
         logger.error("Failed to write account to Paperless doc %d: %s", document_id, exc)

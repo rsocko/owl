@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
+import pytest
+
 from doc_intelligence_hub.core.extractors.account_numbers import (
     ExtractionResult,
     extract_account_numbers,
     pick_best_account_identifier,
+    write_account_to_paperless,
 )
 
 
@@ -121,3 +126,30 @@ class TestExtractionResult:
         assert r.account_numbers == []
         assert r.success is False
         assert r.error is None
+
+
+@pytest.mark.asyncio
+async def test_write_account_uses_canonical_numeric_field_id() -> None:
+    client = AsyncMock()
+    client.list_custom_fields.return_value = [
+        {"id": 42, "name": "Account Identifier", "data_type": "string"},
+        {"id": 7, "name": "di_account_id", "data_type": "string"},
+    ]
+
+    assert await write_account_to_paperless(100, "ending 4321", client) is True
+
+    client.update_custom_fields.assert_awaited_once_with(
+        100,
+        [{"field": 42, "value": "ending 4321"}],
+    )
+
+
+@pytest.mark.asyncio
+async def test_write_account_rejects_unmasked_value() -> None:
+    client = AsyncMock()
+    client.list_custom_fields.return_value = [
+        {"id": 42, "name": "Account Identifier", "data_type": "string"}
+    ]
+
+    assert await write_account_to_paperless(100, "SAMPLE123456789", client) is False
+    client.update_custom_fields.assert_not_awaited()
