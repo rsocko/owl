@@ -50,6 +50,39 @@ _SAVED_VIEW_MULTI_ID_RULES = {
 }
 _SAVED_VIEW_BOOLEAN_RULES = {7: "is_tagged"}
 _SAVED_VIEW_STRING_RULES = {20: "query"}
+_SAVED_VIEW_CUSTOM_FIELD_QUERY_RULE = 42
+_CUSTOM_FIELD_QUERY_MAX_DEPTH = 10
+_CUSTOM_FIELD_QUERY_MAX_ATOMS = 20
+_CUSTOM_FIELD_QUERY_LOGICAL_OPERATORS = frozenset({"and", "or", "not"})
+_CUSTOM_FIELD_QUERY_OPERATORS = frozenset(
+    {
+        "contains",
+        "exact",
+        "exists",
+        "gt",
+        "gte",
+        "icontains",
+        "iendswith",
+        "in",
+        "isnull",
+        "istartswith",
+        "lt",
+        "lte",
+        "range",
+    }
+)
+_CUSTOM_FIELD_QUERY_DATE_COMPONENTS = frozenset(
+    {
+        "day",
+        "iso_week_day",
+        "iso_year",
+        "month",
+        "quarter",
+        "week",
+        "week_day",
+        "year",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -138,10 +171,136 @@ def _saved_view_filter_params(filter_rules: Any) -> dict[str, Any]:
             params[target_param] = value.strip()
             continue
 
+        if rule_type == _SAVED_VIEW_CUSTOM_FIELD_QUERY_RULE:
+            target_param = "custom_field_query"
+            if target_param in params:
+                raise PaperlessError(f"Saved view rule {index} duplicates rule type {rule_type}")
+            params[target_param] = _validated_custom_field_query(value, index)
+            continue
+
         raise PaperlessError(f"Saved view rule type {rule_type} is not supported")
 
     params.update({key: ",".join(values) for key, values in multi_values.items()})
     return params
+
+
+def _validated_custom_field_query(value: Any, rule_index: int) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise PaperlessError(f"Saved view rule {rule_index} has an invalid custom field query")
+
+    try:
+        expression = json.loads(
+            value,
+            parse_constant=lambda _constant: (_ for _ in ()).throw(ValueError()),
+        )
+    except (json.JSONDecodeError, ValueError):
+        raise PaperlessError(
+            f"Saved view rule {rule_index} has an invalid custom field query"
+        ) from None
+
+    atom_count = 0
+
+    def validate(node: Any, depth: int) -> None:
+        nonlocal atom_count
+        if depth > _CUSTOM_FIELD_QUERY_MAX_DEPTH:
+            raise PaperlessError(
+                f"Saved view rule {rule_index} custom field query exceeds maximum depth"
+            )
+        if not isinstance(node, list):
+            raise PaperlessError(
+                f"Saved view rule {rule_index} has an invalid custom field query expression"
+            )
+
+        if len(node) == 2:
+            logical_operator, operands = node
+            if (
+                not isinstance(logical_operator, str)
+                or logical_operator.lower() not in _CUSTOM_FIELD_QUERY_LOGICAL_OPERATORS
+            ):
+                raise PaperlessError(
+                    f"Saved view rule {rule_index} has an unsupported logical operator"
+                )
+            if logical_operator.lower() == "not":
+                validate(operands, depth + 1)
+                return
+            if not isinstance(operands, list) or not operands:
+                raise PaperlessError(
+                    f"Saved view rule {rule_index} has an invalid custom field query expression"
+                )
+            for operand in operands:
+                validate(operand, depth + 1)
+            return
+
+        if len(node) != 3:
+            raise PaperlessError(
+                f"Saved view rule {rule_index} has an invalid custom field query expression"
+            )
+
+        field_name, operator_name, operand = node
+        if not isinstance(field_name, str) or not field_name:
+            raise PaperlessError(
+                f"Saved view rule {rule_index} custom field query requires a field name"
+            )
+        if not isinstance(operator_name, str):
+            raise PaperlessError(
+                f"Saved view rule {rule_index} has an unsupported custom field operator"
+            )
+
+        operator_parts = operator_name.split("__")
+        if len(operator_parts) == 1:
+            operator = operator_parts[0]
+        elif len(operator_parts) == 2 and operator_parts[0] in _CUSTOM_FIELD_QUERY_DATE_COMPONENTS:
+            operator = operator_parts[1]
+        else:
+            raise PaperlessError(
+                f"Saved view rule {rule_index} has an unsupported custom field operator"
+            )
+        if operator not in _CUSTOM_FIELD_QUERY_OPERATORS:
+            raise PaperlessError(
+                f"Saved view rule {rule_index} has an unsupported custom field operator"
+            )
+
+        if operator in {"exists", "isnull"}:
+            valid_operand = isinstance(operand, bool)
+        elif operator in {"icontains", "iendswith", "istartswith"}:
+            valid_operand = isinstance(operand, str)
+        elif operator == "in":
+            valid_operand = (
+                isinstance(operand, list)
+                and bool(operand)
+                and all(_is_custom_field_query_scalar(item) for item in operand)
+            )
+        elif operator == "range":
+            valid_operand = (
+                isinstance(operand, list)
+                and len(operand) == 2
+                and all(_is_custom_field_query_scalar(item) for item in operand)
+            )
+        elif operator == "contains":
+            valid_operand = isinstance(operand, list) and all(
+                isinstance(item, int) and not isinstance(item, bool) for item in operand
+            )
+        else:
+            valid_operand = _is_custom_field_query_scalar(operand)
+        if not valid_operand:
+            raise PaperlessError(
+                f"Saved view rule {rule_index} has an invalid custom field query operand"
+            )
+
+        atom_count += 1
+        if atom_count > _CUSTOM_FIELD_QUERY_MAX_ATOMS:
+            raise PaperlessError(
+                f"Saved view rule {rule_index} custom field query has too many conditions"
+            )
+
+    validate(expression, 1)
+    return value
+
+
+def _is_custom_field_query_scalar(value: Any) -> bool:
+    return isinstance(value, (str, int, float, bool)) and not (
+        isinstance(value, float) and not (-float("inf") < value < float("inf"))
+    )
 
 
 def _saved_view_positive_ids(value: Any, rule_index: int, *, allow_multiple: bool) -> list[str]:
