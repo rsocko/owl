@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.api.routers import make_paperless_client, raise_api_error
+from doc_intelligence_hub.core.paperless import AccountIdentifierClass, mask_account_identifier
 from doc_intelligence_hub.modules.eob_matching.classifier import classify_document
 from doc_intelligence_hub.modules.eob_matching.database import (
     BenchmarkModelResult,
@@ -119,6 +120,51 @@ def _is_write_enabled(request: Request) -> bool:
     return getattr(request.app.state.hub_settings, "write_to_paperless", False)
 
 
+def _safe_eob_dump(eob) -> dict[str, Any]:
+    data = eob.model_dump(mode="json")
+    data["policy_number"] = mask_account_identifier(
+        data.get("policy_number"),
+        AccountIdentifierClass.POLICY,
+    )
+    return data
+
+
+async def _project_confirmed_match(
+    request: Request,
+    db,
+    match: MatchRecord,
+    *,
+    actor: str,
+    reason: str,
+) -> bool:
+    eob = (
+        db.query(EOBRecord)
+        .filter_by(document_id=match.eob_document_id)
+        .order_by(EOBRecord.id.desc())
+        .first()
+    )
+    bill = (
+        db.query(BillRecord)
+        .filter_by(document_id=match.bill_document_id)
+        .order_by(BillRecord.id.desc())
+        .first()
+    )
+    client = make_paperless_client(request, timeout=30.0)
+    enricher = EOBEnricher(client, audit_session=db)
+    records = await enricher.link_match(
+        eob_document_id=match.eob_document_id,
+        bill_document_id=match.bill_document_id,
+        score=match.score,
+        confidence=match.confidence,
+        eob=eob,
+        bill=bill,
+        confirmed=True,
+        actor=actor,
+        reason=reason,
+    )
+    return bool(records)
+
+
 async def _load_documents(
     request: Request,
     *,
@@ -198,7 +244,10 @@ def _serialize_eob_full(eob: EOBRecord | None) -> dict[str, Any] | None:
         "title": eob.title,
         "classification_score": eob.classification_score,
         "insurance_company": eob.insurance_company,
-        "policy_number": eob.policy_number,
+        "policy_number": mask_account_identifier(
+            eob.policy_number,
+            AccountIdentifierClass.POLICY,
+        ),
         "patient_name": eob.patient_name,
         "claim_number": eob.claim_number,
         "date_of_service": eob.date_of_service,
@@ -452,7 +501,7 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
                 extracted = await extract_eob_llm(content, document_id=str(document["id"]))
                 extracted_eobs.append(extracted)
                 if body.verbose:
-                    item["extracted"] = extracted.model_dump(mode="json")
+                    item["extracted"] = _safe_eob_dump(extracted)
 
                 # Persist EOB record
                 db.add(
@@ -462,7 +511,10 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
                         title=document.get("title"),
                         classification_score=classification.confidence_score,
                         insurance_company=extracted.insurance_company,
-                        policy_number=extracted.policy_number,
+                        policy_number=mask_account_identifier(
+                            extracted.policy_number,
+                            AccountIdentifierClass.POLICY,
+                        ),
                         patient_name=extracted.patient_name,
                         claim_number=extracted.claim_number,
                         date_of_service=str(extracted.date_of_service)
@@ -565,28 +617,23 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
         linked_count = 0
         if write_enabled and matches:
             client = make_paperless_client(request, timeout=30.0)
-            enricher = EOBEnricher(client)
+            enricher = EOBEnricher(client, audit_session=db)
             eob_lookup = {e.document_id: e for e in extracted_eobs}
+            bill_lookup = {b.document_id: b for b in extracted_bills}
             for match in matches:
                 try:
                     eob_data = eob_lookup.get(match.eob_id)
-                    patient_resp = eob_data.total_patient_responsibility if eob_data else None
-                    await enricher.link_match(
+                    audit_records = await enricher.link_match(
                         eob_document_id=int(match.eob_id),
                         bill_document_id=int(match.bill_id),
                         score=match.score,
                         confidence=match.confidence.value,
-                        patient_responsibility=patient_resp,
+                        eob=eob_data,
+                        bill=bill_lookup.get(match.bill_id),
                     )
-                    linked_count += 1
+                    linked_count += bool(audit_records)
                 except Exception:
                     pass  # Non-fatal: match is still persisted in DB
-
-            # Update linked status in DB
-            if linked_count > 0:
-                for match_rec in db.query(MatchRecord).filter_by(run_id=run_record.id).all():
-                    match_rec.linked_in_paperless = 1
-                db.commit()
 
         # Finalize run record
         run_record.documents_scanned = len(documents)
@@ -672,9 +719,7 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
             },
             "classifications": classified_documents,
             "matches": [match.model_dump(mode="json") for match in matches],
-            "extracted_eobs": [e.model_dump(mode="json") for e in extracted_eobs]
-            if body.verbose
-            else [],
+            "extracted_eobs": [_safe_eob_dump(e) for e in extracted_eobs] if body.verbose else [],
             "extracted_bills": [b.model_dump(mode="json") for b in extracted_bills]
             if body.verbose
             else [],
@@ -881,17 +926,16 @@ async def update_match(
             match.confirmed_at = datetime.now(UTC)
 
             # Write to Paperless if enabled and not already linked
-            if _is_write_enabled(request) and not match.linked_in_paperless:
+            if _is_write_enabled(request):
                 try:
-                    client = make_paperless_client(request, timeout=30.0)
-                    enricher = EOBEnricher(client)
-                    await enricher.link_match(
-                        eob_document_id=match.eob_document_id,
-                        bill_document_id=match.bill_document_id,
-                        score=match.score,
-                        confidence=match.confidence,
+                    projected = await _project_confirmed_match(
+                        request,
+                        db,
+                        match,
+                        actor="user",
+                        reason="match_confirmed",
                     )
-                    match.linked_in_paperless = 1
+                    match.linked_in_paperless = int(projected)
                 except Exception:
                     pass  # Non-fatal
         elif body.status == "candidate":
@@ -1139,17 +1183,16 @@ async def confirm_match(
         )
 
         # Write to Paperless if enabled
-        if _is_write_enabled(request) and not match.linked_in_paperless:
+        if _is_write_enabled(request):
             try:
-                client = make_paperless_client(request, timeout=30.0)
-                enricher = EOBEnricher(client)
-                await enricher.link_match(
-                    eob_document_id=match.eob_document_id,
-                    bill_document_id=match.bill_document_id,
-                    score=match.score,
-                    confidence=match.confidence,
+                projected = await _project_confirmed_match(
+                    request,
+                    db,
+                    match,
+                    actor="user",
+                    reason="match_confirmed",
                 )
-                match.linked_in_paperless = 1
+                match.linked_in_paperless = int(projected)
             except Exception:
                 pass  # Non-fatal
 
@@ -1272,17 +1315,16 @@ async def create_manual_match(request: Request, body: ManualMatchRequest) -> dic
         )
 
         # Write to Paperless if enabled
-        if _is_write_enabled(request) and not match.linked_in_paperless:
+        if _is_write_enabled(request):
             try:
-                client = make_paperless_client(request, timeout=30.0)
-                enricher = EOBEnricher(client)
-                await enricher.link_match(
-                    eob_document_id=match.eob_document_id,
-                    bill_document_id=match.bill_document_id,
-                    score=match.score,
-                    confidence=match.confidence,
+                projected = await _project_confirmed_match(
+                    request,
+                    db,
+                    match,
+                    actor="user",
+                    reason="manual_match",
                 )
-                match.linked_in_paperless = 1
+                match.linked_in_paperless = int(projected)
             except Exception:
                 pass  # Non-fatal
 

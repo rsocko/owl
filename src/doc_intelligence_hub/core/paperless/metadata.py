@@ -119,6 +119,9 @@ class MetadataFieldSpec:
     create_type: PaperlessFieldType | None = None
     compatibility_read: bool = False
     eligible_document_types: frozenset[str] = frozenset()
+    auto_projection_min_confidence: float | None = None
+    confirmation_required: bool = False
+    confirmation_bypasses_confidence: bool = True
     schema_version: str = "1.0"
 
     def create_definition(self) -> dict[str, Any]:
@@ -168,6 +171,9 @@ _REGISTRY_ENTRIES = (
         create_policy=_CREATE,
         create_type=PaperlessFieldType.TEXT,
         compatibility_read=True,
+        eligible_document_types=frozenset({"EOB", "BILL"}),
+        auto_projection_min_confidence=0.95,
+        confirmation_bypasses_confidence=False,
     ),
     _spec(
         MetadataFieldKey.PATIENT_NAME,
@@ -180,6 +186,8 @@ _REGISTRY_ENTRIES = (
         create_policy=_CREATE,
         create_type=PaperlessFieldType.TEXT,
         compatibility_read=True,
+        eligible_document_types=frozenset({"EOB", "BILL"}),
+        confirmation_required=True,
     ),
     _spec(
         MetadataFieldKey.PROVIDER_NAME,
@@ -192,6 +200,8 @@ _REGISTRY_ENTRIES = (
         create_policy=_CREATE,
         create_type=PaperlessFieldType.TEXT,
         compatibility_read=True,
+        eligible_document_types=frozenset({"EOB", "BILL"}),
+        confirmation_required=True,
     ),
     _spec(
         MetadataFieldKey.DATE_OF_SERVICE,
@@ -204,6 +214,8 @@ _REGISTRY_ENTRIES = (
         create_policy=_CREATE,
         create_type=PaperlessFieldType.DATE,
         compatibility_read=True,
+        eligible_document_types=frozenset({"EOB", "BILL"}),
+        auto_projection_min_confidence=0.85,
     ),
     _spec(
         MetadataFieldKey.PATIENT_RESPONSIBILITY,
@@ -216,6 +228,8 @@ _REGISTRY_ENTRIES = (
         create_policy=_CREATE,
         create_type=PaperlessFieldType.MONETARY,
         compatibility_read=True,
+        eligible_document_types=frozenset({"EOB"}),
+        auto_projection_min_confidence=0.85,
     ),
     _spec(
         MetadataFieldKey.CLAIM_NUMBER,
@@ -228,6 +242,8 @@ _REGISTRY_ENTRIES = (
         create_policy=_CREATE,
         create_type=PaperlessFieldType.TEXT,
         compatibility_read=True,
+        eligible_document_types=frozenset({"EOB"}),
+        confirmation_required=True,
     ),
     _spec(
         MetadataFieldKey.INVOICE_NUMBER,
@@ -240,6 +256,8 @@ _REGISTRY_ENTRIES = (
         create_policy=_CREATE,
         create_type=PaperlessFieldType.TEXT,
         compatibility_read=True,
+        eligible_document_types=frozenset({"BILL"}),
+        confirmation_required=True,
     ),
     _spec(
         MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE,
@@ -249,6 +267,8 @@ _REGISTRY_ENTRIES = (
         aliases=("di_doc_type",),
         projection_policy=_DURABLE,
         compatibility_read=True,
+        eligible_document_types=frozenset({"EOB", "BILL"}),
+        auto_projection_min_confidence=0.85,
     ),
     _spec(
         MetadataFieldKey.SERIES_NAME,
@@ -337,16 +357,14 @@ _REGISTRY_ENTRIES = (
         PaperlessFieldType.SELECT,
         MetadataNormalization.SELECT,
         select_options=("matched", "unmatched", "review_needed"),
-        create_policy=_CREATE,
-        create_type=PaperlessFieldType.SELECT,
+        write_policy=MetadataWritePolicy.DISABLED,
     ),
     _spec(
         MetadataFieldKey.EOB_MATCH_SCORE,
         "EOB Match Score",
         PaperlessFieldType.DECIMAL,
         MetadataNormalization.NUMBER,
-        create_policy=_CREATE,
-        create_type=PaperlessFieldType.DECIMAL,
+        write_policy=MetadataWritePolicy.DISABLED,
     ),
     _spec(
         MetadataFieldKey.EOB_MATCH_CONFIDENCE,
@@ -354,16 +372,14 @@ _REGISTRY_ENTRIES = (
         PaperlessFieldType.SELECT,
         MetadataNormalization.SELECT,
         select_options=("HIGH", "MEDIUM", "LOW"),
-        create_policy=_CREATE,
-        create_type=PaperlessFieldType.SELECT,
+        write_policy=MetadataWritePolicy.DISABLED,
     ),
     _spec(
         MetadataFieldKey.EOB_MATCHED_DOCUMENT,
         "EOB Matched Document",
         PaperlessFieldType.DOCUMENT_LINK,
         MetadataNormalization.DOCUMENT_LINK,
-        create_policy=_CREATE,
-        create_type=PaperlessFieldType.DOCUMENT_LINK,
+        write_policy=MetadataWritePolicy.DISABLED,
     ),
     _spec(
         MetadataFieldKey.EOB_DOCUMENT_TYPE,
@@ -371,8 +387,7 @@ _REGISTRY_ENTRIES = (
         PaperlessFieldType.SELECT,
         MetadataNormalization.SELECT,
         select_options=("EOB", "BILL"),
-        create_policy=_CREATE,
-        create_type=PaperlessFieldType.SELECT,
+        write_policy=MetadataWritePolicy.DISABLED,
     ),
     _spec(
         MetadataFieldKey.EOB_PATIENT_RESPONSIBILITY,
@@ -380,16 +395,14 @@ _REGISTRY_ENTRIES = (
         PaperlessFieldType.DECIMAL,
         MetadataNormalization.NUMBER,
         sensitivity=MetadataSensitivity.MEDICAL,
-        create_policy=_CREATE,
-        create_type=PaperlessFieldType.DECIMAL,
+        write_policy=MetadataWritePolicy.DISABLED,
     ),
     _spec(
         MetadataFieldKey.EOB_ANALYZED,
         "EOB Analyzed",
         PaperlessFieldType.DATE,
         MetadataNormalization.DATE,
-        create_policy=_CREATE,
-        create_type=PaperlessFieldType.DATE,
+        write_policy=MetadataWritePolicy.DISABLED,
     ),
 )
 

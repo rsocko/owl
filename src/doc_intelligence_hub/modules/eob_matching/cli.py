@@ -13,7 +13,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from doc_intelligence_hub.core.paperless import PaperlessClient
+from doc_intelligence_hub.core.paperless import (
+    AccountIdentifierClass,
+    PaperlessClient,
+    mask_account_identifier,
+)
 from doc_intelligence_hub.modules.eob_matching.classifier import classify_document
 from doc_intelligence_hub.modules.eob_matching.extractor import extract_bill, extract_eob
 from doc_intelligence_hub.modules.eob_matching.llm_extractor import (
@@ -810,7 +814,10 @@ async def _run_pipeline(
                 title=doc.get("title"),
                 classification_score=classification.confidence_score,
                 insurance_company=extracted.insurance_company,
-                policy_number=extracted.policy_number,
+                policy_number=mask_account_identifier(
+                    extracted.policy_number,
+                    AccountIdentifierClass.POLICY,
+                ),
                 patient_name=extracted.patient_name,
                 claim_number=extracted.claim_number,
                 date_of_service=str(extracted.date_of_service)
@@ -972,29 +979,30 @@ async def _run_pipeline(
         from doc_intelligence_hub.modules.eob_matching.enricher import EOBEnricher
 
         console.print("\n[bold]Step 4b:[/bold] Writing match results to Paperless...")
-        enricher = EOBEnricher(client)
+        enricher = EOBEnricher(client, audit_session=db)
         eob_lookup = {e.document_id: e for e in extracted_eobs}
+        bill_lookup = {b.document_id: b for b in extracted_bills}
         linked = 0
         for match in stored_matches:
             try:
                 eob_data = eob_lookup.get(match.eob_id)
-                patient_resp = eob_data.total_patient_responsibility if eob_data else None
-                await enricher.link_match(
+                audit_records = await enricher.link_match(
                     eob_document_id=int(match.eob_id),
                     bill_document_id=int(match.bill_id),
                     score=match.score,
                     confidence=match.confidence.value,
-                    patient_responsibility=patient_resp,
+                    eob=eob_data,
+                    bill=bill_lookup.get(match.bill_id),
                 )
-                linked += 1
+                linked += bool(audit_records)
                 console.print(
-                    f"  [green]✓[/green] Linked EOB #{match.eob_id} ↔ Bill #{match.bill_id}"
+                    f"  [green]✓[/green] Projected durable metadata for EOB #{match.eob_id}"
                 )
             except Exception as e:
                 console.print(
                     f"  [red]✗[/red] Failed to link #{match.eob_id} ↔ #{match.bill_id}: {e}"
                 )
-        console.print(f"  Linked {linked}/{len(stored_matches)} matches in Paperless")
+        console.print(f"  Projected durable metadata for {linked}/{len(stored_matches)} matches")
 
     # Step 5: Summary
     console.print()

@@ -166,6 +166,22 @@ class MatchEvent(Base):
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
 
 
+class ProjectionAudit(Base):
+    """Canonical Paperless projection audit with privacy-safe display values."""
+
+    __tablename__ = "projection_audits"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    document_id = Column(Integer, nullable=False, index=True)
+    stable_key = Column(String, nullable=False)
+    field_id = Column(Integer, nullable=False)
+    value_display = Column(String, nullable=True)
+    actor = Column(String, nullable=False)
+    reason = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="pending")
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
+
+
 class BenchmarkRun(Base):
     """Record of each benchmark execution (manual or scheduled)."""
 
@@ -260,6 +276,9 @@ def _migrate_missing_columns(engine):
         ],
         "bill_records": [
             ("last_processed_at", "DATETIME"),
+        ],
+        "projection_audits": [
+            ("status", "TEXT NOT NULL DEFAULT 'pending'"),
         ],
     }
 
