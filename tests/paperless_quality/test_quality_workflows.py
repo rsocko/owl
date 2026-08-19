@@ -109,20 +109,14 @@ class FakeClient:
             return 1
         if params.get("document_type__id") == "11":
             return 1
-        if (
-            params.get("document_type__id") == "12"
-            and params.get("storage_path__isnull") == 1
-        ):
+        if params.get("document_type__id") == "12" and params.get("storage_path__isnull") == 1:
             return 1
         if "custom_field_query" in params:
             return 2
         return 0
 
     async def list_documents_filtered(self, params):
-        if (
-            params.get("document_type__id") == "12"
-            and params.get("storage_path__isnull") == 1
-        ):
+        if params.get("document_type__id") == "12" and params.get("storage_path__isnull") == 1:
             return [deepcopy(self.documents[100])]
         return []
 
@@ -173,8 +167,7 @@ async def test_plan_is_get_only_redacted_and_locks_private_details(tmp_path: Pat
     account = next(
         item
         for item in summary.views
-        if item["stable_key"]
-        == QualityViewKey.ACCOUNT_IDENTIFIER_MISSING_OR_CONFLICTING.value
+        if item["stable_key"] == QualityViewKey.ACCOUNT_IDENTIFIER_MISSING_OR_CONFLICTING.value
     )
     assert account["observed_count"] == 2
     assert account["exact_count"] == 2
@@ -302,9 +295,7 @@ async def test_plan_reports_sort_drift_as_update(tmp_path: Path):
         }
     )
 
-    summary = await _service(client).plan(
-        protected_output=tmp_path / "quality-plan.json"
-    )
+    summary = await _service(client).plan(protected_output=tmp_path / "quality-plan.json")
 
     inbox = next(item for item in summary.views if item["stable_key"] == "inbox")
     assert inbox["action"] == "update"

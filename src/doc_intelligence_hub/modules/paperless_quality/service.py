@@ -179,9 +179,7 @@ class PaperlessQualityService:
                 _rule(4, self.config.document_types.eob),
                 *(_rule(17, tag_id) for tag_id in self.config.household_member_tag_ids),
             ),
-            QualityViewKey.ACCOUNT_IDENTIFIER_MISSING_OR_CONFLICTING: (
-                _rule(42, account_query),
-            ),
+            QualityViewKey.ACCOUNT_IDENTIFIER_MISSING_OR_CONFLICTING: (_rule(42, account_query),),
             QualityViewKey.DUPLICATE_CORRESPONDENT_CANDIDATES: tuple(
                 _rule(26, item) for item in self.config.duplicate_correspondent_ids
             ),
@@ -222,10 +220,7 @@ class PaperlessQualityService:
                 action, reason = "none", "already_current"
             else:
                 action, reason = "update", "definition_drift"
-            if (
-                key is QualityViewKey.DUPLICATE_CORRESPONDENT_CANDIDATES
-                and not rules
-            ):
+            if key is QualityViewKey.DUPLICATE_CORRESPONDENT_CANDIDATES and not rules:
                 action, reason = "review", "candidate_inventory_required"
             observed = await self.client.count_documents(_query_params(rules)) if rules else 0
             exact = observed
@@ -258,8 +253,7 @@ class PaperlessQualityService:
         account_exact = await self._account_exact_count()
         view_plans = [
             replace(item, exact_count=account_exact)
-            if item.stable_key
-            == QualityViewKey.ACCOUNT_IDENTIFIER_MISSING_OR_CONFLICTING.value
+            if item.stable_key == QualityViewKey.ACCOUNT_IDENTIFIER_MISSING_OR_CONFLICTING.value
             else item
             for item in view_plans
         ]
@@ -354,7 +348,9 @@ class PaperlessQualityService:
                     result, reason = MigrationResult.REVIEW_REQUIRED, ReasonCode.VALUE_CONFLICT
                 else:
                     if matches and item.existing_view_id == int(matches[0]["id"]):
-                        updated = await self.client.update_saved_view(int(matches[0]["id"]), definition)
+                        updated = await self.client.update_saved_view(
+                            int(matches[0]["id"]), definition
+                        )
                     elif not matches and item.existing_view_id is None:
                         updated = await self.client.create_saved_view(definition)
                     else:
@@ -386,7 +382,8 @@ class PaperlessQualityService:
                     MigrationAction.REVIEW
                     if result is MigrationResult.REVIEW_REQUIRED
                     else MigrationAction.NONE
-                    if result in {
+                    if result
+                    in {
                         MigrationResult.SKIPPED,
                         MigrationResult.RECONCILED,
                     }
@@ -402,7 +399,9 @@ class PaperlessQualityService:
             )
             state_store.record_and_checkpoint(run_id, record, str(index + 1))
             counts[result.value] += 1
-        completion = "review_required" if counts[MigrationResult.REVIEW_REQUIRED.value] else "completed"
+        completion = (
+            "review_required" if counts[MigrationResult.REVIEW_REQUIRED.value] else "completed"
+        )
         state_store.finish_run(run_id, completion)
         return self._apply_summary(plan, counts, completion)
 
@@ -548,10 +547,7 @@ class PaperlessQualityService:
     @staticmethod
     def _view_matches(actual: dict, expected: dict) -> bool:
         return (
-            all(
-            actual.get(key) == expected[key]
-                for key in ("name", "sort_field", "sort_reverse")
-            )
+            all(actual.get(key) == expected[key] for key in ("name", "sort_field", "sort_reverse"))
             and _owner_id(actual.get("owner")) == _owner_id(expected["owner"])
             and _normalized_rules(actual.get("filter_rules"))
             == _normalized_rules(expected["filter_rules"])

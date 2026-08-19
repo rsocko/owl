@@ -64,9 +64,11 @@ def _require_apply_gates(
         except ValueError as exc:
             raise click.UsageError("Backup verification timestamps must be RFC 3339") from exc
         age = now - timestamp.astimezone(UTC) if timestamp.tzinfo is not None else None
-        if age is None or age.total_seconds() < 0 or age > __import__(
-            "datetime"
-        ).timedelta(hours=24):
+        if (
+            age is None
+            or age.total_seconds() < 0
+            or age > __import__("datetime").timedelta(hours=24)
+        ):
             raise click.UsageError("Backup verification must be timezone-aware and under 24h old")
 
 
@@ -77,7 +79,9 @@ def cli() -> None:
 
 @cli.command()
 @_connection_options
-@click.option("--config", "config_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option(
+    "--config", "config_path", type=click.Path(exists=True, dir_okay=False), required=True
+)
 @click.option("--protected-output", type=click.Path(dir_okay=False), required=True)
 def plan(
     paperless_url: str,
@@ -102,7 +106,9 @@ def plan(
 
 @cli.command("apply-views")
 @_connection_options
-@click.option("--config", "config_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option(
+    "--config", "config_path", type=click.Path(exists=True, dir_okay=False), required=True
+)
 @click.option("--plan", "plan_path", type=click.Path(exists=True, dir_okay=False), required=True)
 @click.option("--plan-digest", required=True)
 @click.option("--approval", required=True)
@@ -147,7 +153,9 @@ def apply_views(
 
 @cli.command("apply-manual-storage-path")
 @_connection_options
-@click.option("--config", "config_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option(
+    "--config", "config_path", type=click.Path(exists=True, dir_okay=False), required=True
+)
 @click.option("--plan", "plan_path", type=click.Path(exists=True, dir_okay=False), required=True)
 @click.option("--plan-digest", required=True)
 @click.option("--approval", required=True)
@@ -195,8 +203,10 @@ def apply_manual_storage_path(
                 state_store=store,
                 batch_size=batch_size,
             )
-            status = 1 if summary.completion_state == "failed" else (
-                2 if summary.completion_state in {"review_required", "partial"} else 0
+            status = (
+                1
+                if summary.completion_state == "failed"
+                else (2 if summary.completion_state in {"review_required", "partial"} else 0)
             )
             return summary.to_json(), status
 
