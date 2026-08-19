@@ -60,9 +60,7 @@ def registry_digest() -> str:
         }
         for spec in (PAPERLESS_METADATA_REGISTRY[key] for key in MIGRATION_KEYS)
     ]
-    return hashlib.sha256(
-        json.dumps(material, sort_keys=True).encode("utf-8")
-    ).hexdigest()
+    return hashlib.sha256(json.dumps(material, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def _digest(value: Any) -> str:
@@ -141,9 +139,7 @@ class MetadataMigrationService:
             for key in MIGRATION_KEYS
             if schema.field(key).canonical_id is None
             and schema.field(key).spec.create_policy is MetadataCreatePolicy.IF_MISSING
-            and {
-                diagnostic.code for diagnostic in schema.field(key).diagnostics
-            }
+            and {diagnostic.code for diagnostic in schema.field(key).diagnostics}
             == {MetadataDiagnosticCode.MISSING_FIELD}
         ]
         for key in MIGRATION_KEYS:
@@ -226,9 +222,7 @@ class MetadataMigrationService:
                     mode=RunMode.BACKFILL.value,
                 )
 
-        async for page in self.client.iter_document_pages(
-            page_size=batch_size, cursor=cursor
-        ):
+        async for page in self.client.iter_document_pages(page_size=batch_size, cursor=cursor):
             current_cursor = cursor
             for document in page.results:
                 for record in self._plan_document(document, schema):
@@ -241,9 +235,7 @@ class MetadataMigrationService:
                         )
                     summary.add(final.stable_key, final.result, final.reason_code)
                     if apply and state_store is not None:
-                        state_store.record_and_checkpoint(
-                            run_id, final, current_cursor
-                        )
+                        state_store.record_and_checkpoint(run_id, final, current_cursor)
             cursor = page.next_cursor
             if apply and state_store is not None:
                 state_store.checkpoint(run_id, cursor)
@@ -251,9 +243,7 @@ class MetadataMigrationService:
         if apply and state_store is not None:
             totals, grouped = state_store.sanitized_counts(run_id)
             summary.counts = Counter(totals)
-            summary.counts_by_key = {
-                key: Counter(values) for key, values in grouped.items()
-            }
+            summary.counts_by_key = {key: Counter(values) for key, values in grouped.items()}
             self._add_schema_outcomes(summary, schema)
         summary.finish()
         if apply and state_store is not None:
@@ -429,9 +419,7 @@ class MetadataMigrationService:
                 FieldCompatibility(
                     stable_key=key.value,
                     canonical_present=resolved.canonical_id is not None,
-                    expected_types=tuple(
-                        item.value for item in resolved.spec.compatible_types
-                    ),
+                    expected_types=tuple(item.value for item in resolved.spec.compatible_types),
                     observed_type=resolved.data_type.value if resolved.data_type else None,
                     alias_count=len(resolved.alias_ids),
                     diagnostic_codes=tuple(
@@ -444,9 +432,7 @@ class MetadataMigrationService:
         return compatibility
 
     @staticmethod
-    def _add_schema_outcomes(
-        summary: SanitizedSummary, schema: ResolvedMetadataSchema
-    ) -> None:
+    def _add_schema_outcomes(summary: SanitizedSummary, schema: ResolvedMetadataSchema) -> None:
         for key in MIGRATION_KEYS:
             resolved = schema.field(key)
             if resolved.canonical_id is not None and not resolved.is_compatible:
@@ -456,9 +442,7 @@ class MetadataMigrationService:
                     ReasonCode.INCOMPATIBLE_SCHEMA,
                 )
             elif resolved.canonical_id is None:
-                diagnostic_codes = {
-                    diagnostic.code for diagnostic in resolved.diagnostics
-                }
+                diagnostic_codes = {diagnostic.code for diagnostic in resolved.diagnostics}
                 if diagnostic_codes != {MetadataDiagnosticCode.MISSING_FIELD}:
                     summary.add(
                         key.value,

@@ -84,9 +84,7 @@ class ProtectedRecord:
     error_code: str | None = None
     retry_eligible: bool = False
     retry_count: int = 0
-    recorded_at: str = dataclasses.field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    recorded_at: str = dataclasses.field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 @dataclasses.dataclass

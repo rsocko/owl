@@ -48,13 +48,13 @@ class PaperlessPage:
     total_count: int
 
 
-def _equivalent_field_value(
-    actual: Any, expected: Any, *, numeric: bool = False
-) -> bool:
+def _equivalent_field_value(actual: Any, expected: Any, *, numeric: bool = False) -> bool:
     if actual == expected:
         return True
-    if numeric and isinstance(actual, (str, int, float)) and isinstance(
-        expected, (str, int, float)
+    if (
+        numeric
+        and isinstance(actual, (str, int, float))
+        and isinstance(expected, (str, int, float))
     ):
         try:
             return Decimal(str(actual)) == Decimal(str(expected))

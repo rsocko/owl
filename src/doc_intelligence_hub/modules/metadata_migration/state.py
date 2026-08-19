@@ -41,9 +41,7 @@ class MigrationStateStore(Protocol):
 
     def checkpoint(self, run_id: str, cursor: str | None) -> None: ...
 
-    def sanitized_counts(
-        self, run_id: str
-    ) -> tuple[dict[str, int], dict[str, dict[str, int]]]: ...
+    def sanitized_counts(self, run_id: str) -> tuple[dict[str, int], dict[str, dict[str, int]]]: ...
 
     def finish_run(self, run_id: str, completion_state: str) -> None: ...
 
@@ -225,9 +223,7 @@ class SQLiteMigrationStateStore:
                 (cursor, run_id),
             )
 
-    def sanitized_counts(
-        self, run_id: str
-    ) -> tuple[dict[str, int], dict[str, dict[str, int]]]:
+    def sanitized_counts(self, run_id: str) -> tuple[dict[str, int], dict[str, dict[str, int]]]:
         totals: dict[str, int] = {}
         grouped: dict[str, dict[str, int]] = {}
         rows = self.connection.execute(
@@ -261,10 +257,6 @@ class SQLiteMigrationStateStore:
                 )
             ]
             for run_id in run_ids:
-                self.connection.execute(
-                    "DELETE FROM migration_results WHERE run_id = ?", (run_id,)
-                )
-                self.connection.execute(
-                    "DELETE FROM migration_runs WHERE run_id = ?", (run_id,)
-                )
+                self.connection.execute("DELETE FROM migration_results WHERE run_id = ?", (run_id,))
+                self.connection.execute("DELETE FROM migration_runs WHERE run_id = ?", (run_id,))
         return len(run_ids)

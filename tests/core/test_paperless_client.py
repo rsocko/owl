@@ -292,17 +292,10 @@ class TestFetchWithLimit:
         assert len(doc_requests) == 3
 
     @pytest.mark.asyncio
-    async def test_iter_document_pages_uses_restart_cursor_and_stable_ordering(
-        self, monkeypatch
-    ):
-        client, requests_seen = _make_client_with_pages(
-            monkeypatch, num_docs=250, page_size=100
-        )
+    async def test_iter_document_pages_uses_restart_cursor_and_stable_ordering(self, monkeypatch):
+        client, requests_seen = _make_client_with_pages(monkeypatch, num_docs=250, page_size=100)
 
-        pages = [
-            page
-            async for page in client.iter_document_pages(page_size=100, cursor="2")
-        ]
+        pages = [page async for page in client.iter_document_pages(page_size=100, cursor="2")]
 
         assert [len(page.results) for page in pages] == [100, 50]
         assert pages[0].next_cursor == "3"
@@ -480,9 +473,7 @@ async def test_update_custom_fields_verified_detects_readback_mismatch(monkeypat
     client = PaperlessClient(base_url="https://paperless.test", token="test-token")
 
     with pytest.raises(PaperlessError, match="verification failed"):
-        await client.update_custom_fields_verified(
-            7, [{"field": 2, "value": "expected"}]
-        )
+        await client.update_custom_fields_verified(7, [{"field": 2, "value": "expected"}])
 
 
 @pytest.mark.asyncio
@@ -546,9 +537,7 @@ async def test_update_custom_fields_verified_requires_exact_text_readback(monkey
     client = PaperlessClient(base_url="https://paperless.test", token="test-token")
 
     with pytest.raises(PaperlessError, match="verification failed"):
-        await client.update_custom_fields_verified(
-            9, [{"field": 4, "value": "00123"}]
-        )
+        await client.update_custom_fields_verified(9, [{"field": 4, "value": "00123"}])
 
 
 class TestFetchPerformanceLogging:

@@ -26,14 +26,10 @@ def _run_command(coroutine) -> tuple[str, int]:
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     except (PaperlessError, httpx.HTTPError) as exc:
-        raise click.ClickException(
-            "Paperless operation failed without a success result."
-        ) from exc
+        raise click.ClickException("Paperless operation failed without a success result.") from exc
 
 
-def _require_apply_preflight(
-    apply: bool, external_writers_disabled: bool
-) -> None:
+def _require_apply_preflight(apply: bool, external_writers_disabled: bool) -> None:
     if not apply:
         return
     if not external_writers_disabled:

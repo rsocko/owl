@@ -34,10 +34,12 @@ def _definitions(*, include_provider: bool = True) -> list[dict]:
         if key is MetadataFieldKey.PROVIDER_NAME and not include_provider:
             field_id += 2
             continue
-        data_type = spec.compatible_types[-1].value if key is MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE else spec.compatible_types[0].value
-        definitions.append(
-            {"id": field_id, "name": spec.canonical_name, "data_type": data_type}
+        data_type = (
+            spec.compatible_types[-1].value
+            if key is MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE
+            else spec.compatible_types[0].value
         )
+        definitions.append({"id": field_id, "name": spec.canonical_name, "data_type": data_type})
         if spec.aliases:
             definitions.append(
                 {
@@ -76,9 +78,7 @@ class FakeClient:
         start = int(cursor or "1") - 1
         for offset in range(start, len(documents), page_size):
             page_number = offset // page_size + 1
-            next_cursor = (
-                str(page_number + 1) if offset + page_size < len(documents) else None
-            )
+            next_cursor = str(page_number + 1) if offset + page_size < len(documents) else None
             yield PaperlessPage(
                 tuple(documents[offset : offset + page_size]),
                 next_cursor,
@@ -97,10 +97,7 @@ class FakeClient:
     ) -> dict:
         self.updates.append((document_id, custom_fields))
         document = self.documents[document_id]
-        values = {
-            int(item["field"]): item["value"]
-            for item in document.get("custom_fields", [])
-        }
+        values = {int(item["field"]): item["value"] for item in document.get("custom_fields", [])}
         values.update({int(item["field"]): item["value"] for item in custom_fields})
         document["custom_fields"] = [
             {"field": field_id, "value": value} for field_id, value in values.items()
@@ -190,9 +187,7 @@ async def test_prepare_creates_only_unambiguous_missing_canonical_fields():
 
     assert [item["name"] for item in client.created] == ["Provider Name"]
     assert client.created[0]["data_type"] == "string"
-    normalized = PAPERLESS_METADATA_REGISTRY[
-        MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE
-    ]
+    normalized = PAPERLESS_METADATA_REGISTRY[MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE]
     assert normalized.create_type is None
     assert any(
         item.stable_key == MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE.value
@@ -205,9 +200,7 @@ async def test_prepare_creates_only_unambiguous_missing_canonical_fields():
 async def test_prepare_refuses_undecided_normalized_document_type_creation():
     spec = PAPERLESS_METADATA_REGISTRY[MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE]
     definitions = [
-        item
-        for item in _definitions()
-        if item["name"] not in {spec.canonical_name, *spec.aliases}
+        item for item in _definitions() if item["name"] not in {spec.canonical_name, *spec.aliases}
     ]
     client = FakeClient(definitions, [])
 
@@ -226,9 +219,7 @@ async def test_prepare_refuses_undecided_normalized_document_type_creation():
 async def test_prepare_does_not_create_over_duplicate_canonical_fields():
     definitions = _definitions()
     spec = PAPERLESS_METADATA_REGISTRY[MetadataFieldKey.PROVIDER_NAME]
-    definitions.append(
-        {"id": 999, "name": spec.canonical_name, "data_type": "string"}
-    )
+    definitions.append({"id": 999, "name": spec.canonical_name, "data_type": "string"})
     client = FakeClient(definitions, [])
 
     summary = await MetadataMigrationService(client).prepare(apply=True)
@@ -254,9 +245,7 @@ async def test_inventory_marks_incompatible_schema_as_review_required():
 def test_idempotency_key_is_stable_across_numeric_write_representation():
     definitions = _definitions()
     spec = PAPERLESS_METADATA_REGISTRY[MetadataFieldKey.PATIENT_RESPONSIBILITY]
-    canonical_id = next(
-        item["id"] for item in definitions if item["name"] == spec.canonical_name
-    )
+    canonical_id = next(item["id"] for item in definitions if item["name"] == spec.canonical_name)
     alias_id = next(item["id"] for item in definitions if item["name"] == spec.aliases[0])
     client = FakeClient(definitions, [])
     service = MetadataMigrationService(client)
@@ -310,13 +299,16 @@ def test_resume_refuses_changed_registry_or_configuration(tmp_path: Path):
         idempotency_key="idempotent",
     )
     store.record_and_checkpoint("run-1", record, "2")
-    assert store.validate_resume(
-        "run-1",
-        registry_digest="registry-a",
-        config_digest="config-a",
-        instance_digest="instance-a",
-        mode="backfill",
-    ) == "2"
+    assert (
+        store.validate_resume(
+            "run-1",
+            registry_digest="registry-a",
+            config_digest="config-a",
+            instance_digest="instance-a",
+            mode="backfill",
+        )
+        == "2"
+    )
     with pytest.raises(ValueError, match="Resume refused"):
         store.validate_resume(
             "run-1",
@@ -368,9 +360,12 @@ def test_latest_outcome_supersedes_review_in_reconciliation(tmp_path: Path):
 
     totals, _ = store.sanitized_counts("run-2")
     assert totals == {MigrationResult.APPLIED.value: 1}
-    assert store.connection.execute(
-        "SELECT COUNT(*) FROM migration_results WHERE run_id = 'run-2'"
-    ).fetchone()[0] == 2
+    assert (
+        store.connection.execute(
+            "SELECT COUNT(*) FROM migration_results WHERE run_id = 'run-2'"
+        ).fetchone()[0]
+        == 2
+    )
 
 
 def test_cli_apply_requires_single_writer_preflight(monkeypatch):
