@@ -16,7 +16,9 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Callable, Coroutine
+from collections.abc import AsyncIterator, Callable, Coroutine
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +37,30 @@ _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "PUT", "DELETE", "OPTIONS"})
 
 # Status codes that indicate transient server issues
 _TRANSIENT_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
+
+
+@dataclass(frozen=True)
+class PaperlessPage:
+    """One bounded page from a Paperless list endpoint."""
+
+    results: tuple[dict, ...]
+    next_cursor: str | None
+    total_count: int
+
+
+def _equivalent_field_value(
+    actual: Any, expected: Any, *, numeric: bool = False
+) -> bool:
+    if actual == expected:
+        return True
+    if numeric and isinstance(actual, (str, int, float)) and isinstance(
+        expected, (str, int, float)
+    ):
+        try:
+            return Decimal(str(actual)) == Decimal(str(expected))
+        except InvalidOperation:
+            return False
+    return False
 
 
 class PaperlessClient:
@@ -348,6 +374,57 @@ class PaperlessClient:
         }
         return await self._paginate(client, "/api/documents/", params, limit=limit)
 
+    async def list_document_page(
+        self,
+        *,
+        page_size: int = 100,
+        cursor: str | None = None,
+    ) -> PaperlessPage:
+        """Fetch one deterministically ordered document page.
+
+        The cursor is intentionally an opaque string to callers. It currently
+        encodes the Paperless page number and can be persisted in protected
+        restart state without retaining a deployment URL.
+        """
+        if page_size < 1:
+            raise ValueError("page_size must be at least 1")
+        try:
+            page = int(cursor) if cursor is not None else 1
+        except ValueError as exc:
+            raise ValueError("Invalid Paperless pagination cursor") from exc
+        if page < 1:
+            raise ValueError("Invalid Paperless pagination cursor")
+
+        resp = await self._request(
+            "GET",
+            "/api/documents/",
+            params={"page": page, "page_size": page_size, "ordering": "id"},
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        results = tuple(payload.get("results", ()))
+        next_cursor = str(page + 1) if payload.get("next") else None
+        return PaperlessPage(
+            results=results,
+            next_cursor=next_cursor,
+            total_count=int(payload.get("count", len(results))),
+        )
+
+    async def iter_document_pages(
+        self,
+        *,
+        page_size: int = 100,
+        cursor: str | None = None,
+    ) -> AsyncIterator[PaperlessPage]:
+        """Yield bounded document pages from an optional restart cursor."""
+        next_cursor = cursor
+        while True:
+            page = await self.list_document_page(page_size=page_size, cursor=next_cursor)
+            yield page
+            if page.next_cursor is None:
+                return
+            next_cursor = page.next_cursor
+
     async def get_document(self, document_id: int) -> dict:
         """Get full document metadata by ID."""
         resp = await self._request("GET", f"/api/documents/{document_id}/")
@@ -410,6 +487,35 @@ class PaperlessClient:
         )
         resp.raise_for_status()
 
+    async def update_custom_fields_verified(
+        self,
+        document_id: int,
+        custom_fields: list[dict],
+        *,
+        numeric_field_ids: set[int] | None = None,
+    ) -> dict:
+        """Merge custom fields and verify the requested values by reading them back."""
+        numeric_field_ids = numeric_field_ids or set()
+        await self.update_custom_fields(document_id, custom_fields)
+        verified = await self.get_document(document_id)
+        actual = {
+            int(item["field"]): item.get("value")
+            for item in verified.get("custom_fields", [])
+            if isinstance(item, dict) and str(item.get("field", "")).isdigit()
+        }
+        expected = {int(item["field"]): item.get("value") for item in custom_fields}
+        if any(
+            not _equivalent_field_value(
+                actual.get(field_id), value, numeric=field_id in numeric_field_ids
+            )
+            for field_id, value in expected.items()
+        ):
+            raise PaperlessError(
+                f"Paperless custom-field verification failed for document {document_id}",
+                status_code=None,
+            )
+        return verified
+
     # ------------------------------------------------------------------
     # Tags
     # ------------------------------------------------------------------
@@ -464,13 +570,15 @@ class PaperlessClient:
     # ------------------------------------------------------------------
 
     async def list_custom_fields(self) -> list[dict]:
-        """List all defined custom field definitions."""
-        client = self._get_client()
-        resp = await client.get("/api/custom_fields/")
+        """List all custom-field definitions, following paginated responses."""
+        page_size = 100
+        resp = await self._request(
+            "GET", "/api/custom_fields/", params={"page": 1, "page_size": page_size}
+        )
         if resp.status_code == 500:
-            # Paperless may have internal issues with custom_fields endpoint;
-            # try paginated format as fallback
-            resp2 = await client.get("/api/custom_fields/?page=1&page_size=100")
+            resp2 = await self._request(
+                "GET", "/api/custom_fields/", params={"page": 1, "page_size": page_size}
+            )
             if resp2.status_code == 500:
                 raise RuntimeError(
                     "Paperless /api/custom_fields/ returns 500. "
@@ -481,7 +589,19 @@ class PaperlessClient:
         resp.raise_for_status()
         data = resp.json()
         if isinstance(data, dict) and "results" in data:
-            return data["results"]
+            results = list(data["results"])
+            page = 1
+            while data.get("next"):
+                page += 1
+                resp = await self._request(
+                    "GET",
+                    "/api/custom_fields/",
+                    params={"page": page, "page_size": page_size},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                results.extend(data.get("results", []))
+            return results
         return data
 
     async def create_custom_field(self, field_def: dict) -> dict:

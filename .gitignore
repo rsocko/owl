@@ -15,6 +15,7 @@ config/config.paperless.yaml
 # ─── Runtime Data ────────────────────────────
 data/*
 !data/.gitkeep
+*.metadata-migration.json
 
 # ─── Python ──────────────────────────────────
 __pycache__/
