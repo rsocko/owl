@@ -7,6 +7,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
+from doc_intelligence_hub.core.paperless import AccountIdentifierClass, mask_account_identifier
 from doc_intelligence_hub.core.resilience import retry_async
 from doc_intelligence_hub.core.services.base import BaseService
 from doc_intelligence_hub.modules.eob_matching.classifier import classify_document
@@ -141,6 +142,10 @@ class EOBMatchingService(BaseService):
                 extracted_eobs.append(extracted)
                 if verbose:
                     item["extracted"] = extracted.model_dump(mode="json")
+                    item["extracted"]["policy_number"] = mask_account_identifier(
+                        extracted.policy_number,
+                        AccountIdentifierClass.POLICY,
+                    )
 
                 db.add(
                     EOBRecord(
@@ -149,7 +154,10 @@ class EOBMatchingService(BaseService):
                         title=doc.get("title"),
                         classification_score=classification.confidence_score,
                         insurance_company=extracted.insurance_company,
-                        policy_number=extracted.policy_number,
+                        policy_number=mask_account_identifier(
+                            extracted.policy_number,
+                            AccountIdentifierClass.POLICY,
+                        ),
                         patient_name=extracted.patient_name,
                         claim_number=extracted.claim_number,
                         date_of_service=str(extracted.date_of_service)
@@ -254,26 +262,24 @@ class EOBMatchingService(BaseService):
         # Step 3: Write to Paperless (if enabled)
         linked_count = 0
         if write_enabled and enricher and matches:
+            if getattr(enricher, "audit_session", None) is None:
+                enricher.audit_session = db
             eob_lookup = {e.document_id: e for e in extracted_eobs}
+            bill_lookup = {b.document_id: b for b in extracted_bills}
             for match in matches:
                 try:
                     eob_data = eob_lookup.get(match.eob_id)
-                    patient_resp = eob_data.total_patient_responsibility if eob_data else None
-                    await enricher.link_match(
+                    audit_records = await enricher.link_match(
                         eob_document_id=int(match.eob_id),
                         bill_document_id=int(match.bill_id),
                         score=match.score,
                         confidence=match.confidence.value,
-                        patient_responsibility=patient_resp,
+                        eob=eob_data,
+                        bill=bill_lookup.get(match.bill_id),
                     )
-                    linked_count += 1
+                    linked_count += bool(audit_records)
                 except Exception as exc:
                     self.logger.debug("Paperless link failed for match: %s", exc)
-
-            if linked_count > 0:
-                for match_rec in db.query(MatchRecord).filter_by(run_id=run_record.id).all():
-                    match_rec.linked_in_paperless = 1
-                db.commit()
 
         # Finalize run record
         run_record.documents_scanned = len(documents)
