@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from doc_intelligence_hub.modules.statements.database import Database
@@ -93,6 +94,76 @@ def test_database_creates_schema(tmp_path) -> None:
         assert "schema_version" in table_names
     finally:
         db.close()
+
+
+def test_statement_storage_and_reads_mask_account_identifiers(tmp_path) -> None:
+    db = Database(str(tmp_path / "test.db"))
+    try:
+        series = db.create_series(
+            "series-1",
+            "Provider Statement",
+            "Provider",
+            account_identifier="SENSITIVE123456",
+        )
+        db.add_documents_to_series(
+            "series-1",
+            [{"document_id": "100", "account_hint": "ANOTHER987654"}],
+        )
+
+        assert series["account_identifier"] == "ending 3456"
+        assert db.get_series_documents("series-1")[0]["account_hint"] == "ending 7654"
+        stored = (
+            db.connect()
+            .execute("SELECT account_identifier FROM statement_series WHERE id = 'series-1'")
+            .fetchone()
+        )
+        assert stored["account_identifier"] == "ending 3456"
+    finally:
+        db.close()
+
+
+def test_schema_upgrade_masks_legacy_statement_account_data(tmp_path) -> None:
+    path = tmp_path / "test.db"
+    db = Database(str(path))
+    try:
+        conn = db.connect()
+        conn.execute(
+            """
+            INSERT INTO statement_series
+                (id, name, correspondent_name, account_identifier, manually_curated)
+            VALUES ('legacy', 'Legacy', 'Provider', 'SENSITIVE123456', 1)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO series_documents (series_id, document_id, account_hint)
+            VALUES ('legacy', '100', 'ANOTHER987654')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO series_overrides (id, series_id, override_type, payload)
+            VALUES ('override', 'legacy', 'rename',
+                    '{"account_identifier":"OVERRIDE112233"}')
+            """
+        )
+        conn.execute("UPDATE schema_version SET version = 3")
+        conn.commit()
+    finally:
+        db.close()
+
+    upgraded = Database(str(path))
+    try:
+        conn = upgraded.connect()
+        assert upgraded.get_series("legacy")["account_identifier"] == "ending 3456"
+        assert upgraded.get_series_documents("legacy")[0]["account_hint"] == "ending 7654"
+        override = conn.execute(
+            "SELECT payload FROM series_overrides WHERE id = 'override'"
+        ).fetchone()
+        assert json.loads(override["payload"])["account_identifier"] == "ending 2233"
+        assert conn.execute("SELECT version FROM schema_version").fetchone()["version"] == 4
+    finally:
+        upgraded.close()
 
 
 def test_save_and_load_discovery(tmp_path) -> None:

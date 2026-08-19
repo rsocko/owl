@@ -8,7 +8,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from doc_intelligence_hub.modules.triage.database import (
+    CorrectionEvent,
+    ExtractionCorrection,
     configure,
+    create_extraction_correction,
     create_queue_item,
     defer_queue_item,
     dismiss_queue_item,
@@ -74,6 +77,60 @@ class TestCreateAndGet:
             target_id="eob-99",
         )
         assert item["metadata"] is None
+
+    def test_account_correction_never_persists_exact_value_or_source_region(self, db):
+        correction = create_extraction_correction(
+            document_id=99,
+            field_name="account_identifier",
+            original_value="ORIGINAL123456",
+            corrected_value="CORRECTED987654",
+            correction_type="corrected",
+            source_region={"text": "Account Number: CORRECTED987654"},
+            notes="Exact value CORRECTED987654",
+        )
+
+        assert correction["original_value"] == "ending 3456"
+        assert correction["corrected_value"] == "ending 7654"
+        assert correction["source_region"] is None
+        assert correction["notes"] is None
+        assert "ORIGINAL123456" not in str(correction)
+        assert "CORRECTED987654" not in str(correction)
+
+    def test_startup_masks_legacy_account_corrections_and_audits(self, db):
+        db.add(
+            ExtractionCorrection(
+                id="legacy-account",
+                document_id=100,
+                field_name="account_identifier",
+                original_value="ORIGINAL123456",
+                corrected_value="CORRECTED987654",
+                confidence=99,
+                correction_type="corrected",
+                source_region_json='{"text":"CORRECTED987654"}',
+                notes="CORRECTED987654",
+            )
+        )
+        db.add(
+            CorrectionEvent(
+                id="legacy-event",
+                event_type="legacy",
+                target_type="document",
+                target_id="100",
+                payload_json='{"field_name":"account_identifier","account_identifier":"CORRECTED987654","notes":"CORRECTED987654"}',
+            )
+        )
+        db.commit()
+
+        init_db()
+        db.expire_all()
+
+        correction = db.get(ExtractionCorrection, "legacy-account")
+        event = db.get(CorrectionEvent, "legacy-event")
+        assert correction.original_value == "ending 3456"
+        assert correction.corrected_value == "ending 7654"
+        assert correction.source_region_json is None
+        assert correction.notes is None
+        assert "CORRECTED987654" not in event.payload_json
 
 
 class TestListWithFilters:

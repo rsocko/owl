@@ -8,6 +8,8 @@ from doc_intelligence_hub.core.paperless.client import (
 )
 from doc_intelligence_hub.core.paperless.metadata import (
     PAPERLESS_METADATA_REGISTRY,
+    AccountIdentifierClass,
+    AccountIdentifierProjection,
     MetadataConflict,
     MetadataCreatePolicy,
     MetadataDiagnostic,
@@ -25,13 +27,18 @@ from doc_intelligence_hub.core.paperless.metadata import (
     ResolvedMetadataField,
     ResolvedMetadataSchema,
     ResolvedMetadataValue,
+    build_account_identifier_update,
     build_metadata_update,
     get_metadata_field_spec,
+    govern_account_identifier,
+    mask_account_identifier,
     resolve_metadata_schema,
     resolve_metadata_value,
 )
 
 __all__ = [
+    "AccountIdentifierClass",
+    "AccountIdentifierProjection",
     "PAPERLESS_METADATA_REGISTRY",
     "MetadataConflict",
     "MetadataCreatePolicy",
@@ -54,7 +61,10 @@ __all__ = [
     "ResolvedMetadataSchema",
     "ResolvedMetadataValue",
     "build_metadata_update",
+    "build_account_identifier_update",
+    "govern_account_identifier",
     "get_metadata_field_spec",
+    "mask_account_identifier",
     "load_fixture",
     "resolve_metadata_schema",
     "resolve_metadata_value",

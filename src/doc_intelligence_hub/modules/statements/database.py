@@ -11,6 +11,7 @@ import sqlite3
 from datetime import date
 from pathlib import Path
 
+from doc_intelligence_hub.core.paperless import mask_account_identifier
 from doc_intelligence_hub.modules.statements.models import (
     AnalysisPattern,
     DiscoveryResult,
@@ -19,7 +20,7 @@ from doc_intelligence_hub.modules.statements.models import (
     RecommendationResult,
 )
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -165,10 +166,48 @@ class Database:
     def _initialize_schema(self) -> None:
         conn = self._conn
         conn.executescript(_SCHEMA_SQL)
-        row = conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()
-        if row[0] == 0:
+        row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
+        if row is None:
             conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
-            conn.commit()
+        elif row["version"] < 4:
+            self._mask_legacy_account_data()
+            conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
+        conn.commit()
+
+    def _mask_legacy_account_data(self) -> None:
+        """Mask exact account values left by pre-governance statement storage."""
+        conn = self._conn
+        for table, id_columns, value_column in (
+            ("statement_series", ("id",), "account_identifier"),
+            ("series_documents", ("series_id", "document_id"), "account_hint"),
+        ):
+            rows = conn.execute(
+                f"SELECT {', '.join((*id_columns, value_column))} "
+                f"FROM {table} WHERE {value_column} IS NOT NULL"
+            ).fetchall()
+            for row in rows:
+                where = " AND ".join(f"{column} = ?" for column in id_columns)
+                conn.execute(
+                    f"UPDATE {table} SET {value_column} = ? WHERE {where}",
+                    (
+                        mask_account_identifier(row[value_column]),
+                        *(row[column] for column in id_columns),
+                    ),
+                )
+
+        rows = conn.execute("SELECT id, payload FROM series_overrides").fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if "account_identifier" not in payload:
+                continue
+            payload["account_identifier"] = mask_account_identifier(payload["account_identifier"])
+            conn.execute(
+                "UPDATE series_overrides SET payload = ? WHERE id = ?",
+                (json.dumps(payload), row["id"]),
+            )
 
     # ----- Discovery persistence -----
 
@@ -461,7 +500,10 @@ class Database:
             "SELECT * FROM series_documents WHERE series_id = ? ORDER BY statement_date ASC",
             (series_id,),
         ).fetchall()
-        return [dict(row) for row in rows]
+        documents = [dict(row) for row in rows]
+        for document in documents:
+            document["account_hint"] = mask_account_identifier(document.get("account_hint"))
+        return documents
 
     def get_similar_series(self, series_id: str) -> list[dict]:
         """Get other series from the same correspondent."""
@@ -482,6 +524,7 @@ class Database:
         """Convert a series row to a dict with proper boolean for manually_curated."""
         d = dict(row)
         d["manually_curated"] = bool(d.get("manually_curated"))
+        d["account_identifier"] = mask_account_identifier(d.get("account_identifier"))
         return d
 
     def create_series(
@@ -494,6 +537,7 @@ class Database:
         account_identifier: str | None = None,
     ) -> dict:
         """Create a new statement series."""
+        account_identifier = mask_account_identifier(account_identifier)
         conn = self.connect()
         conn.execute(
             """INSERT INTO statement_series
@@ -520,7 +564,7 @@ class Database:
             params.append(name)
         if account_identifier is not None:
             updates.append("account_identifier = ?")
-            params.append(account_identifier)
+            params.append(mask_account_identifier(account_identifier))
         if manually_curated is not None:
             updates.append("manually_curated = ?")
             params.append(1 if manually_curated else 0)
@@ -557,7 +601,7 @@ class Database:
                     doc.get("title"),
                     doc.get("statement_date"),
                     doc.get("period_label"),
-                    doc.get("account_hint"),
+                    mask_account_identifier(doc.get("account_hint")),
                 ),
             )
         self._refresh_series_counts(series_id)

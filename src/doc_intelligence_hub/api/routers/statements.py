@@ -15,6 +15,7 @@ from doc_intelligence_hub.api.routers import (
     make_paperless_client,
     raise_api_error,
 )
+from doc_intelligence_hub.core.paperless import mask_account_identifier
 from doc_intelligence_hub.modules.statements.api import (
     _discovery_event_generator,
     _recommendations_event_generator,
@@ -510,6 +511,8 @@ async def split_series(
                 400, "documents_not_found", "None of the specified documents belong to this series"
             )
 
+        account_identifier_display = mask_account_identifier(body.account_identifier)
+
         # Create new series
         new_id = uuid.uuid4().hex[:12]
         db.create_series(
@@ -518,7 +521,7 @@ async def split_series(
             correspondent_name=series["correspondent_name"],
             correspondent_id=series.get("correspondent_id"),
             frequency=series.get("frequency", "monthly"),
-            account_identifier=body.account_identifier,
+            account_identifier=account_identifier_display,
         )
 
         # Move documents to new series
@@ -535,7 +538,7 @@ async def split_series(
                 "new_series_id": new_id,
                 "new_series_name": body.new_series_name,
                 "document_ids": body.document_ids,
-                "account_identifier": body.account_identifier,
+                "account_identifier": account_identifier_display,
             },
         )
 
@@ -563,7 +566,12 @@ async def split_series(
     finally:
         db.close()
 
-    await _sync_to_paperless(request, event_id, series_name=body.new_series_name)
+    await _sync_to_paperless(
+        request,
+        event_id,
+        series_name=body.new_series_name,
+        account_identifier=account_identifier_display,
+    )
     return result
 
 
@@ -720,10 +728,11 @@ async def rename_series(
             raise_api_error(404, "series_not_found", f"Series '{series_id}' not found")
 
         old_name = series["name"]
+        account_identifier_display = mask_account_identifier(body.account_identifier)
         updated = db.update_series(
             series_id,
             name=body.name,
-            account_identifier=body.account_identifier,
+            account_identifier=account_identifier_display,
             manually_curated=True,
         )
 
@@ -736,7 +745,7 @@ async def rename_series(
             {
                 "old_name": old_name,
                 "new_name": body.name,
-                "account_identifier": body.account_identifier,
+                "account_identifier": account_identifier_display,
             },
         )
 
@@ -764,6 +773,6 @@ async def rename_series(
         request,
         event_id,
         series_name=body.name,
-        account_identifier=body.account_identifier,
+        account_identifier=account_identifier_display,
     )
     return result

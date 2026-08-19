@@ -24,6 +24,7 @@ from doc_intelligence_hub.core.paperless import (
     PaperlessMetadataResolver,
     ResolvedMetadataSchema,
     build_metadata_update,
+    mask_account_identifier,
     resolve_metadata_value,
 )
 from doc_intelligence_hub.core.resilience import PaperlessError
@@ -381,6 +382,10 @@ class MetadataMigrationService:
                     "normalized_value": value.value,
                 }
             )
+            before_value = value.value
+            if key is MetadataFieldKey.ACCOUNT_IDENTIFIER:
+                before_value = mask_account_identifier(before_value)
+                after_value = mask_account_identifier(after_value)
             records.append(
                 ProtectedRecord(
                     document_id=document_id,
@@ -391,7 +396,7 @@ class MetadataMigrationService:
                     idempotency_key=idempotency_key,
                     source_field_id=value.source_id,
                     target_field_id=target_id,
-                    before_value=value.value,
+                    before_value=before_value,
                     after_value=after_value,
                 )
             )

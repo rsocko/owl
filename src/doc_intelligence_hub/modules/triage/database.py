@@ -173,6 +173,7 @@ def init_db():
     engine = get_engine()
     Base.metadata.create_all(engine)
     _migrate_missing_columns(engine)
+    _sanitize_persisted_account_data(engine)
 
 
 def _migrate_missing_columns(engine):
@@ -203,6 +204,79 @@ def _migrate_missing_columns(engine):
             for col_name, col_ddl in columns:
                 if col_name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_ddl}"))
+
+
+def _sanitize_account_payload(value: Any) -> Any:
+    """Mask account values in legacy JSON payloads without retaining free-form evidence."""
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in {"account_identifier", "account_identifier_display", "account_hint"}:
+                from doc_intelligence_hub.core.paperless import mask_account_identifier
+
+                sanitized[key] = mask_account_identifier(item)
+            elif (
+                key in {"notes", "source_region"}
+                and value.get("field_name") == "account_identifier"
+            ):
+                sanitized[key] = None
+            else:
+                sanitized[key] = _sanitize_account_payload(item)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_account_payload(item) for item in value]
+    return value
+
+
+def _sanitize_persisted_account_data(engine: Any) -> None:
+    """Idempotently remove exact Account Identifier values from legacy OWL rows."""
+    import json
+
+    from sqlalchemy import text
+
+    from doc_intelligence_hub.core.paperless import mask_account_identifier
+
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT id, original_value, corrected_value
+                FROM extraction_corrections
+                WHERE field_name = 'account_identifier'
+                """
+            )
+        )
+        for row in rows:
+            conn.execute(
+                text(
+                    """
+                    UPDATE extraction_corrections
+                    SET original_value = :original_value,
+                        corrected_value = :corrected_value,
+                        source_region = NULL,
+                        notes = NULL
+                    WHERE id = :id
+                    """
+                ),
+                {
+                    "id": row.id,
+                    "original_value": mask_account_identifier(row.original_value),
+                    "corrected_value": mask_account_identifier(row.corrected_value),
+                },
+            )
+
+        event_rows = conn.execute(text("SELECT id, payload FROM correction_events"))
+        for row in event_rows:
+            try:
+                payload = json.loads(row.payload)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            sanitized = _sanitize_account_payload(payload)
+            if sanitized != payload:
+                conn.execute(
+                    text("UPDATE correction_events SET payload = :payload WHERE id = :id"),
+                    {"id": row.id, "payload": json.dumps(sanitized)},
+                )
 
 
 # ------------------------------------------------------------------
@@ -775,6 +849,14 @@ def create_extraction_correction(
 ) -> dict[str, Any]:
     """Create an extraction correction record."""
     import json
+
+    if field_name == "account_identifier":
+        from doc_intelligence_hub.core.paperless import mask_account_identifier
+
+        original_value = mask_account_identifier(original_value)
+        corrected_value = mask_account_identifier(corrected_value)
+        source_region = None
+        notes = None
 
     session = get_session()
     try:
