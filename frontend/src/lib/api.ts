@@ -15,6 +15,16 @@ export class ApiError extends Error {
   }
 }
 
+export interface DocumentSummaryModel {
+  document_id: number | string;
+  title?: string | null;
+  correspondent?: string | null;
+  document_type?: string | null;
+  document_date?: string | null;
+  tags?: string[];
+  account_identifier_display?: string | null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
@@ -105,7 +115,7 @@ export const endpoints = {
       api.get(`/api/eob/candidates/${docId}${params ? `?${params}` : ''}`),
     matchDetail: (matchId: string) => api.get(`/api/eob/matches/${matchId}/detail`),
     recordDetail: (docId: string) => api.get(`/api/eob/records/${docId}`),
-    unmatched: () => api.get('/api/eob/unmatched'),
+    unmatched: () => api.get('/api/eob/unmatched?include_bills=true'),
     bulkUpdate: (body: { ids: string[]; action: 'mark_orphan' | 'mark_paid' }) =>
       api.post('/api/eob/bulk-update', body),
     purgeStale: () => api.post('/api/eob/purge-stale'),

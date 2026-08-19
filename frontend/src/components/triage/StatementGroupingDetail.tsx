@@ -6,7 +6,8 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Badge, Button, Card } from '../ui';
-import { endpoints } from '../../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../../lib/api';
+import DocumentSummary from '../DocumentSummary';
 import { SplitSeriesFlow } from './SplitSeriesFlow';
 import { MergeSeriesFlow } from './MergeSeriesFlow';
 import { SeriesTimeline } from './SeriesTimeline';
@@ -36,6 +37,7 @@ export interface SeriesDoc {
   statement_date: string | null;
   period_label: string | null;
   account_hint: string | null;
+  document_summary: DocumentSummaryModel;
 }
 
 export interface TimelineEntry {
@@ -45,6 +47,7 @@ export interface TimelineEntry {
   period_label: string | null;
   account_hint: string | null;
   gap_before_days: number | null;
+  document_summary: DocumentSummaryModel;
 }
 
 interface SeriesDetailResponse {
@@ -365,18 +368,9 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
                 )}
                 <div className="sg-doc-color" style={{ background: acctColor }} />
                 <div className="sg-doc-info">
-                  <div className="sg-doc-title">{doc.title || `Document ${doc.document_id}`}</div>
-                  <div className="sg-doc-meta">
-                    ID: {doc.document_id}
-                    {doc.statement_date && ` · ${doc.statement_date}`}
-                    {doc.period_label && ` · ${doc.period_label}`}
-                  </div>
+                  <DocumentSummary summary={doc.document_summary} />
+                  {doc.period_label && <div className="sg-doc-meta">{doc.period_label}</div>}
                 </div>
-                {doc.account_hint && (
-                  <span className="sg-doc-account" style={{ background: `${acctColor}22`, color: acctColor }}>
-                    {doc.account_hint}
-                  </span>
-                )}
                 {/* Reassign button — move document to another series */}
                 {activeFlow === 'none' && similar_series.length > 0 && (
                   <div className="sg-doc-reassign-wrap">

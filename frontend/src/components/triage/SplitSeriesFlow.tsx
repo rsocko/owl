@@ -7,6 +7,7 @@
 import { useMemo, useState } from 'react';
 import { Button, Card } from '../ui';
 import { endpoints } from '../../lib/api';
+import DocumentSummary from '../DocumentSummary';
 import { SeriesTimeline } from './SeriesTimeline';
 import type { SeriesInfo, SeriesDoc, TimelineEntry } from './StatementGroupingDetail';
 
@@ -50,6 +51,7 @@ function docsToTimeline(docs: SeriesDoc[]): TimelineEntry[] {
       period_label: d.period_label,
       account_hint: d.account_hint,
       gap_before_days: gapDays,
+      document_summary: d.document_summary,
     };
   });
 }
@@ -209,16 +211,7 @@ export function SplitSeriesFlow({
                   <ul className="sg-split-doc-list">
                     {remainingDocs.slice(0, 5).map(d => (
                       <li key={d.document_id}>
-                        {d.title || `Doc ${d.document_id}`}
-                        {d.account_hint && (
-                          <span className="sg-doc-account" style={{
-                            background: `${accountColorMap[d.account_hint] || 'var(--muted)'}22`,
-                            color: accountColorMap[d.account_hint] || 'var(--muted)',
-                            marginLeft: 4,
-                          }}>
-                            {d.account_hint}
-                          </span>
-                        )}
+                        <DocumentSummary summary={d.document_summary} />
                       </li>
                     ))}
                     {remainingDocs.length > 5 && (
@@ -231,16 +224,7 @@ export function SplitSeriesFlow({
                   <ul className="sg-split-doc-list">
                     {selectedDocs.slice(0, 5).map(d => (
                       <li key={d.document_id}>
-                        {d.title || `Doc ${d.document_id}`}
-                        {d.account_hint && (
-                          <span className="sg-doc-account" style={{
-                            background: `${accountColorMap[d.account_hint] || 'var(--muted)'}22`,
-                            color: accountColorMap[d.account_hint] || 'var(--muted)',
-                            marginLeft: 4,
-                          }}>
-                            {d.account_hint}
-                          </span>
-                        )}
+                        <DocumentSummary summary={d.document_summary} />
                       </li>
                     ))}
                     {selectedDocs.length > 5 && (

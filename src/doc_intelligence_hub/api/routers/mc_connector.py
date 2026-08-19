@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
+from doc_intelligence_hub.api.document_summary import build_document_summary
 from doc_intelligence_hub.api.routers import get_loaded_statement_config
 from doc_intelligence_hub.modules.action_queue.database import (
     Action,
@@ -21,6 +22,7 @@ from doc_intelligence_hub.modules.action_queue.database import (
     init_db as aq_init_db,
 )
 from doc_intelligence_hub.modules.eob_matching.database import (
+    BillRecord,
     EOBRecord,
     MatchRecord,
 )
@@ -160,7 +162,10 @@ async def mc_missing_statements(request: Request) -> list[dict[str, Any]]:
 
 
 @router.get("/api/eob/unmatched")
-async def mc_unmatched_eobs(request: Request) -> list[dict[str, Any]]:
+async def mc_unmatched_eobs(
+    request: Request,
+    include_bills: bool = False,
+) -> list[dict[str, Any]]:
     """Return unmatched EOBs for Mission Control alerts.
 
     Returns EOB records that have no confirmed match, formatted as
@@ -186,9 +191,10 @@ async def mc_unmatched_eobs(request: Request) -> list[dict[str, Any]]:
                 if eob.document_id in confirmed_eob_ids:
                     continue
                 eob_status = getattr(eob, "status", None) or "unmatched"
-                results.append(
-                    {
+                result = {
                         "id": str(eob.id),
+                        "document_id": eob.document_id,
+                        "title": eob.title,
                         "provider": eob.provider_name or "Unknown",
                         "amount": eob.total_billed or 0.0,
                         "date_of_service": eob.date_of_service.isoformat()
@@ -205,7 +211,46 @@ async def mc_unmatched_eobs(request: Request) -> list[dict[str, Any]]:
                         "orphaned": eob_status == "orphan",
                         "status": eob_status,
                     }
-                )
+                result["document_summary"] = build_document_summary(result)
+                results.append(result)
+
+            if include_bills:
+                confirmed_bill_ids = {
+                    r.bill_document_id
+                    for r in db.query(MatchRecord.bill_document_id)
+                    .filter_by(status="confirmed")
+                    .all()
+                }
+                for bill in db.query(BillRecord).all():
+                    if bill.document_id in confirmed_bill_ids:
+                        continue
+                    bill_status = getattr(bill, "status", None) or "unmatched"
+                    result = {
+                        "id": f"bill-{bill.id}",
+                        "document_id": bill.document_id,
+                        "title": bill.title,
+                        "provider": bill.provider_name or "Unknown",
+                        "amount": bill.balance_due or bill.total_amount or 0.0,
+                        "date_of_service": (
+                            bill.date_of_service.isoformat() if bill.date_of_service else ""
+                        ),
+                        "patient_responsibility": bill.balance_due or 0.0,
+                        "document_url": (
+                            f"{base_url}/documents/{bill.document_id}/details"
+                            if base_url and bill.document_id
+                            else None
+                        ),
+                        "created_at": (
+                            bill.created_at.isoformat()
+                            if hasattr(bill, "created_at") and bill.created_at
+                            else None
+                        ),
+                        "doc_type": "bill",
+                        "orphaned": bill_status == "orphan",
+                        "status": bill_status,
+                    }
+                    result["document_summary"] = build_document_summary(result)
+                    results.append(result)
 
             return results
         finally:

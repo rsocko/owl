@@ -137,6 +137,7 @@ class TestListActions:
             "completed_at",
             "acknowledged_at",
             "snoozed_until",
+            "document_summary",
         }
         assert set(action.keys()) == expected_fields
 

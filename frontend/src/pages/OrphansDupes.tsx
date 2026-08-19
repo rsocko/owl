@@ -14,7 +14,8 @@ import {
   Toast,
 } from '../components/ui';
 import OrphanDetail from '../components/triage/OrphanDetail';
-import { endpoints } from '../lib/api';
+import DocumentSummary from '../components/DocumentSummary';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 
 type ToastState = {
@@ -36,6 +37,7 @@ type TriageItem = {
   resolved_at: string | null;
   resolved_action: string | null;
   created_at: string | null;
+  document_summary?: DocumentSummaryModel;
 };
 
 type TriageQueueResponse = {
@@ -54,6 +56,7 @@ type QueueAction = {
   urgency?: string | null;
   status?: string | null;
   created_at?: string | null;
+  document_summary?: DocumentSummaryModel;
 };
 
 type QueueActionsResponse = {
@@ -83,6 +86,7 @@ type OrphanItem = {
   detailLabel: string;
   detailValue: string;
   triageItem: TriageItem;
+  documentSummary?: DocumentSummaryModel;
 };
 
 type DuplicateItem = {
@@ -96,6 +100,7 @@ type DuplicateItem = {
   previewUrl?: string | null;
   actionUrl?: string | null;
   status: 'pending' | 'merged' | 'dismissed';
+  documentSummary?: DocumentSummaryModel;
 };
 
 function getErrorMessage(error: unknown) {
@@ -183,6 +188,7 @@ export default function OrphansDupes() {
           detailLabel: documentType === 'eob' ? 'Patient responsibility' : 'Amount',
           detailValue: formatCurrency(amount),
           triageItem: item,
+          documentSummary: item.document_summary,
         };
       });
 
@@ -198,6 +204,7 @@ export default function OrphansDupes() {
           actionId: action.id,
           previewUrl: action.preview_url,
           status: 'pending' as const,
+          documentSummary: action.document_summary,
         }));
 
       const alertDuplicateRows = alerts
@@ -373,7 +380,7 @@ export default function OrphansDupes() {
                         header: 'Item',
                         render: (row) => (
                           <div>
-                            <div style={{ fontWeight: 700 }}>{row.title}</div>
+                            {row.documentSummary ? <DocumentSummary summary={row.documentSummary} /> : <div style={{ fontWeight: 700 }}>{row.title}</div>}
                             <div className="text-muted" style={{ fontSize: '0.82rem', marginTop: 4 }}>{row.subtitle}</div>
                           </div>
                         ),
@@ -431,7 +438,7 @@ export default function OrphansDupes() {
                         header: 'Candidate',
                         render: (row) => (
                           <div>
-                            <div style={{ fontWeight: 700 }}>{row.title}</div>
+                            {row.documentSummary ? <DocumentSummary summary={row.documentSummary} /> : <div style={{ fontWeight: 700 }}>{row.title}</div>}
                             <div className="text-muted" style={{ fontSize: '0.82rem', marginTop: 4 }}>{row.reason}</div>
                           </div>
                         ),
@@ -507,6 +514,7 @@ export default function OrphansDupes() {
       {selectedDuplicateLive && (
         <SidePanel title={selectedDuplicateLive.title} onClose={() => setSelectedDuplicate(null)}>
           <div style={{ display: 'grid', gap: 16 }}>
+            {selectedDuplicateLive.documentSummary && <DocumentSummary summary={selectedDuplicateLive.documentSummary} density="review" />}
             <div>
               <Badge tone="warning">Duplicate signal</Badge>
               <div className="text-muted" style={{ fontSize: '0.85rem', marginTop: 10 }}>{selectedDuplicateLive.reason}</div>

@@ -6,6 +6,7 @@ import { getToastDuration } from '../lib/toast';
 import { SeriesTimeline } from '../components/triage/SeriesTimeline';
 import { SplitSeriesFlow } from '../components/triage/SplitSeriesFlow';
 import { MergeSeriesFlow } from '../components/triage/MergeSeriesFlow';
+import DocumentSummary from '../components/DocumentSummary';
 import type { SeriesInfo, SeriesDoc, TimelineEntry } from '../components/triage/StatementGroupingDetail';
 import '../styles/statement-series-detail.css';
 
@@ -436,23 +437,9 @@ export default function StatementSeriesDetail() {
                           )}
                           <span className="statement-series-doc-color" style={{ background: acctColor }} />
                           <div>
-                            <div className="statement-series-list-title">
-                              {doc.title || `Document ${doc.document_id}`}
-                            </div>
-                            <div className="statement-series-list-meta">
-                              ID: {doc.document_id}
-                              {doc.statement_date && ` · ${doc.statement_date}`}
-                              {doc.period_label && ` · ${doc.period_label}`}
-                            </div>
+                            <DocumentSummary summary={doc.document_summary} />
+                            {doc.period_label && <div className="statement-series-list-meta">{doc.period_label}</div>}
                           </div>
-                          {doc.account_hint && (
-                            <span
-                              className="statement-series-account-badge"
-                              style={{ background: `${acctColor}22`, color: acctColor }}
-                            >
-                              {doc.account_hint}
-                            </span>
-                          )}
                         </div>
                       );
                     })}

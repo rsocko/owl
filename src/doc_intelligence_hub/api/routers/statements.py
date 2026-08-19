@@ -9,6 +9,10 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response
 from starlette.responses import StreamingResponse
 
+from doc_intelligence_hub.api.document_summary import (
+    DocumentSummaryContext,
+    build_document_summary,
+)
 from doc_intelligence_hub.api.routers import (
     get_statement_config_path,
     load_statement_config_from_request,
@@ -215,16 +219,18 @@ def _build_timeline(documents: list[dict]) -> list[dict]:
         if stmt_date_str:
             with contextlib.suppress(ValueError, TypeError):
                 prev_date = date_type.fromisoformat(stmt_date_str)
-        timeline.append(
-            {
-                "document_id": doc["document_id"],
-                "title": doc.get("title"),
-                "statement_date": stmt_date_str,
-                "period_label": doc.get("period_label"),
-                "account_hint": doc.get("account_hint"),
-                "gap_before_days": gap_days,
-            }
+        entry = {
+            "document_id": doc["document_id"],
+            "title": doc.get("title"),
+            "statement_date": stmt_date_str,
+            "period_label": doc.get("period_label"),
+            "account_hint": doc.get("account_hint"),
+            "gap_before_days": gap_days,
+        }
+        entry["document_summary"] = doc.get("document_summary") or build_document_summary(
+            entry, context=DocumentSummaryContext.ACCOUNT_REVIEW
         )
+        timeline.append(entry)
     return timeline
 
 
@@ -431,6 +437,20 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
             ]
             similar = []
 
+        documents = [
+            {
+                **document,
+                "document_summary": build_document_summary(
+                    {
+                        **document,
+                        "correspondent_name": series.get("correspondent_name"),
+                        "document_type": "statement",
+                    },
+                    context=DocumentSummaryContext.ACCOUNT_REVIEW,
+                ),
+            }
+            for document in documents
+        ]
         timeline = _build_timeline(documents)
 
         # Derive anomaly indicators from the data
@@ -481,7 +501,20 @@ async def get_series_timeline(request: Request, series_id: str) -> dict[str, Any
         if not series:
             raise_api_error(404, "series_not_found", f"Series '{series_id}' not found")
 
-        documents = db.get_series_documents(series_id)
+        documents = [
+            {
+                **document,
+                "document_summary": build_document_summary(
+                    {
+                        **document,
+                        "correspondent_name": series.get("correspondent_name"),
+                        "document_type": "statement",
+                    },
+                    context=DocumentSummaryContext.ACCOUNT_REVIEW,
+                ),
+            }
+            for document in db.get_series_documents(series_id)
+        ]
         timeline = _build_timeline(documents)
         return {"series_id": series_id, "timeline": timeline}
     finally:
