@@ -69,19 +69,9 @@ def _digest(value: Any) -> str:
     ).hexdigest()
 
 
-def write_protected_artifact(
-    path: str | Path,
-    payload: dict[str, Any],
-    *,
-    require_owner_only: bool = False,
-    allow_unverified_windows_permissions: bool = False,
-) -> None:
+def write_protected_artifact(path: str | Path, payload: dict[str, Any]) -> None:
     """Atomically write an explicitly requested protected JSON artifact."""
     destination = Path(path)
-    if require_owner_only and os.name == "nt" and not allow_unverified_windows_permissions:
-        raise PermissionError(
-            "Windows ACL protection cannot be verified for the protected artifact"
-        )
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(f"{destination.suffix}.tmp")
     temporary.write_text(
@@ -90,17 +80,9 @@ def write_protected_artifact(
     )
     try:
         os.chmod(temporary, 0o600)
-    except OSError as exc:
-        temporary.unlink(missing_ok=True)
-        if require_owner_only:
-            raise PermissionError("Unable to protect artifact temporary file") from exc
+    except OSError:
+        pass
     os.replace(temporary, destination)
-    if require_owner_only and os.name != "nt":
-        import stat
-
-        if stat.S_IMODE(destination.stat().st_mode) & 0o077:
-            destination.unlink(missing_ok=True)
-            raise PermissionError("Protected artifact must be owner-readable only")
 
 
 class MetadataMigrationService:

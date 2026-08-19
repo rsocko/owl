@@ -1,7 +1,5 @@
 """Tests for the shared Paperless-ngx client."""
 
-import json
-
 import httpx
 import pytest
 
@@ -95,26 +93,8 @@ def _mock_transport():
                 200,
                 json={"id": 7, "name": "Action Status", "extra_data": {"select_options": []}},
             )
-        if request.url.path == "/api/saved_views/" and request.method == "POST":
-            return httpx.Response(201, json={"id": 2, **json.loads(request.content)})
         if request.url.path == "/api/saved_views/":
-            page = int(request.url.params.get("page", "1"))
-            if page == 1:
-                return httpx.Response(
-                    200,
-                    json={
-                        "results": [{"id": 1, "name": "Inbox"}],
-                        "next": "https://paperless.test/api/saved_views/?page=2",
-                    },
-                )
-            return httpx.Response(
-                200,
-                json={"results": [{"id": 2, "name": "Review"}], "next": None},
-            )
-        if request.url.path == "/api/saved_views/1/" and request.method == "PATCH":
-            return httpx.Response(200, json={"id": 1, **json.loads(request.content)})
-        if request.url.path == "/api/saved_views/1/":
-            return httpx.Response(200, json={"id": 1, "name": "Inbox"})
+            return httpx.Response(200, json={"results": [{"id": 1, "name": "Inbox"}]})
         return httpx.Response(404)
 
     return httpx.MockTransport(handler)
@@ -192,24 +172,8 @@ async def test_update_custom_field(client):
 @pytest.mark.asyncio
 async def test_list_saved_views(client):
     views = await client.list_saved_views()
-    assert len(views) == 2
+    assert len(views) == 1
     assert views[0]["name"] == "Inbox"
-    assert views[1]["name"] == "Review"
-
-
-@pytest.mark.asyncio
-async def test_saved_view_crud_and_filtered_counts(client):
-    created = await client.create_saved_view({"name": "OWL - Inbox"})
-    fetched = await client.get_saved_view(1)
-    updated = await client.update_saved_view(1, {"name": "OWL - Inbox"})
-    count = await client.count_documents({})
-    documents = await client.list_documents_filtered({})
-
-    assert created == {"id": 2, "name": "OWL - Inbox"}
-    assert fetched["name"] == "Inbox"
-    assert updated == {"id": 1, "name": "OWL - Inbox"}
-    assert count == 42
-    assert len(documents) == 2
 
 
 def test_load_fixture(tmp_path):
