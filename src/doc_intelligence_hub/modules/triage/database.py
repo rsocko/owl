@@ -357,6 +357,20 @@ def get_queue_stats() -> dict[str, Any]:
         session.close()
 
 
+def count_queue_items(*, item_type: str | None = None, status: str = "pending") -> int:
+    """Count queue items matching one exact OWL-native view contract."""
+    session = get_session()
+    try:
+        query = session.query(func.count(TriageQueueItem.id)).filter(
+            TriageQueueItem.status == status
+        )
+        if item_type is not None:
+            query = query.filter(TriageQueueItem.item_type == item_type)
+        return int(query.scalar() or 0)
+    finally:
+        session.close()
+
+
 def create_queue_item(
     *,
     item_type: str,

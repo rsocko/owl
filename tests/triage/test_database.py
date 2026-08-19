@@ -9,6 +9,7 @@ import pytest
 
 from doc_intelligence_hub.modules.triage.database import (
     configure,
+    count_queue_items,
     create_queue_item,
     defer_queue_item,
     dismiss_queue_item,
@@ -231,3 +232,13 @@ class TestStats:
         assert stats["pending"] == 2
         assert stats["by_status"]["pending"] == 2
         assert stats["by_status"]["dismissed"] == 1
+
+    def test_exact_pending_count(self, db):
+        first = _create_sample_item(item_type="eob_match_review", target_id="1")
+        _create_sample_item(item_type="eob_match_review", target_id="2")
+        _create_sample_item(item_type="orphan_document", target_id="3", target_type="document")
+        dismiss_queue_item(first["id"])
+
+        assert count_queue_items() == 2
+        assert count_queue_items(item_type="eob_match_review") == 1
+        assert count_queue_items(item_type="orphan_document") == 1

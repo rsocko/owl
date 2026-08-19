@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import TriageQueue from './TriageQueue';
 
 const { queueMock, statsMock } = vi.hoisted(() => ({
@@ -63,7 +64,11 @@ beforeEach(() => {
 
 describe('Needs Review actions', () => {
   it('uses decision language and keeps Dismiss under More', async () => {
-    render(<TriageQueue />);
+    render(
+      <MemoryRouter>
+        <TriageQueue />
+      </MemoryRouter>,
+    );
 
     const item = await screen.findByText('OTHER: target-1');
     fireEvent.click(item);
@@ -78,5 +83,29 @@ describe('Needs Review actions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'More…' }));
     expect(await screen.findByRole('button', { name: 'Dismiss' })).toBeTruthy();
+  });
+
+  it('initializes the queue filter from a validated type query parameter', async () => {
+    render(
+      <MemoryRouter initialEntries={['/triage?type=eob_match_review']}>
+        <TriageQueue />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(queueMock).toHaveBeenCalledWith('type=eob_match_review&status=pending&limit=200');
+    });
+  });
+
+  it('ignores unknown type query parameters', async () => {
+    render(
+      <MemoryRouter initialEntries={['/triage?type=not-a-real-queue']}>
+        <TriageQueue />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(queueMock).toHaveBeenCalledWith('status=pending&limit=200');
+    });
   });
 });

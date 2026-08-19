@@ -178,14 +178,25 @@ async def test_list_saved_views(client):
     assert views[0]["name"] == "Inbox"
 
 
-def _make_saved_view_client(monkeypatch, definition, *, detail_status=200):
+def _make_saved_view_client(
+    monkeypatch,
+    definition,
+    *,
+    detail_status=200,
+    detail_content=None,
+    document_content=None,
+):
     requests_seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests_seen.append(request)
         if request.url.path == "/api/saved_views/7/":
+            if detail_content is not None:
+                return httpx.Response(detail_status, content=detail_content)
             return httpx.Response(detail_status, json=definition)
         if request.url.path == "/api/documents/":
+            if document_content is not None:
+                return httpx.Response(200, content=document_content)
             if request.url.params.get("saved_view") == "7":
                 return httpx.Response(
                     200,
@@ -271,6 +282,53 @@ async def test_saved_view_rules_are_translated_before_querying_documents(monkeyp
         "custom_field_query": custom_field_query,
         "page": "1",
     }
+
+
+@pytest.mark.asyncio
+async def test_saved_view_count_uses_one_bounded_server_side_query(monkeypatch):
+    definition = {
+        "id": 7,
+        "name": "Missing correspondent",
+        "filter_rules": [{"rule_type": 3, "value": None}],
+    }
+    client, requests_seen = _make_saved_view_client(monkeypatch, definition)
+
+    count = await client.count_documents_for_saved_view(7)
+
+    assert count == 2
+    document_requests = [
+        request for request in requests_seen if request.url.path == "/api/documents/"
+    ]
+    assert len(document_requests) == 1
+    assert dict(document_requests[0].url.params) == {
+        "page": "1",
+        "page_size": "1",
+        "correspondent__isnull": "1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_saved_view_count_normalizes_malformed_definition_json(monkeypatch):
+    client, _ = _make_saved_view_client(
+        monkeypatch,
+        {},
+        detail_content=b"{not-json",
+    )
+
+    with pytest.raises(PaperlessError, match="returned malformed JSON"):
+        await client.count_documents_for_saved_view(7)
+
+
+@pytest.mark.asyncio
+async def test_saved_view_count_normalizes_malformed_document_json(monkeypatch):
+    client, _ = _make_saved_view_client(
+        monkeypatch,
+        {"id": 7, "filter_rules": [{"rule_type": 3, "value": None}]},
+        document_content=b"{not-json",
+    )
+
+    with pytest.raises(PaperlessError, match="document query returned malformed JSON"):
+        await client.count_documents_for_saved_view(7)
 
 
 @pytest.mark.asyncio

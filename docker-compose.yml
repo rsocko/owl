@@ -21,8 +21,10 @@ services:
     stop_grace_period: 30s
     environment:
       PAPERLESS_URL: ${PAPERLESS_URL:-http://paperless:8000}
+      PAPERLESS_BROWSER_URL: ${PAPERLESS_BROWSER_URL:-}
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
       STATEMENT_TRACKER_CONFIG: /app/config/config.docker.yaml
+      DOCUMENT_VIEWS_CONFIG: ${DOCUMENT_VIEWS_CONFIG:-}
       WRITE_TO_PAPERLESS: ${WRITE_TO_PAPERLESS:-true}
       # Local OpenAI-compatible endpoint; override all LLM_* values for hosted providers.
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
@@ -39,6 +41,7 @@ services:
     ports:
       - "${STATEMENT_TRACKER_PORT:-8071}:8001"
     volumes:
+      - ./config:/app/config:ro
       - hub-data:/app/data
     networks:
       - doc-intelligence

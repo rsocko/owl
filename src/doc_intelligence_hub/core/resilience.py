@@ -69,6 +69,12 @@ class PaperlessError(TransientError):
         )
 
 
+class UnsupportedSavedViewError(PaperlessError):
+    """A Paperless saved view uses rules OWL cannot safely translate."""
+
+    pass
+
+
 class ConfigurationError(HubError):
     """Invalid or missing configuration."""
 
@@ -285,6 +291,7 @@ __all__ = [
     "HubError",
     "LLMError",
     "PaperlessError",
+    "UnsupportedSavedViewError",
     "TransientError",
     "VersionConflictError",
     "get_circuit_breaker",

@@ -54,6 +54,9 @@ export const endpoints = {
   health: () => api.get('/health'),
   status: () => api.get('/api/status'),
   stats: () => api.get('/api/stats'),
+  documentViews: {
+    list: () => api.get('/api/document-views'),
+  },
   paperlessHealth: () => api.get('/api/paperless/health'),
   settings: {
     get: () => api.get('/api/settings'),

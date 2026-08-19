@@ -18,6 +18,7 @@ import History from './pages/History';
 import OrphansDupes from './pages/OrphansDupes';
 import Settings from './pages/Settings';
 import NotFound from './pages/NotFound';
+import DocumentViews from './pages/DocumentViews';
 
 /** Redirect legacy /eob/matches/:matchId to the unified workspace. */
 function EobMatchRedirect() {
@@ -35,6 +36,7 @@ function App() {
           <Routes>
             <Route path="/" element={<OverviewDashboard />} />
             <Route path="/dashboard-view" element={<DashboardView />} />
+            <Route path="/document-views" element={<DocumentViews />} />
             <Route path="/corrections" element={<CorrectionHistory />} />
             <Route path="/statements" element={<Statements />} />
             <Route path="/statements/:seriesId" element={<StatementSeriesDetail />} />
