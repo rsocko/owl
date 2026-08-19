@@ -1,10 +1,12 @@
 import { useCallback, useEffect } from 'react';
-import { endpoints } from '../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
+import DocumentSummary, { documentSummaryLabel } from './DocumentSummary';
 import '../styles/document-preview.css';
 
 export interface DocumentPane {
   documentId: number;
   title?: string;
+  summary?: DocumentSummaryModel;
   paperlessUrl?: string | null;
 }
 
@@ -73,14 +75,15 @@ export default function SideBySideViewerModal({
   );
 }
 
-function PdfPane({ documentId, title, paperlessUrl }: DocumentPane) {
+function PdfPane({ documentId, title, summary, paperlessUrl }: DocumentPane) {
   const previewSrc = endpoints.documents.previewUrl(documentId);
   const downloadUrl = endpoints.documents.downloadUrl(documentId);
+  const effectiveSummary = summary ?? { document_id: documentId, title };
 
   return (
     <div className="doc-sbs-pane">
       <div className="doc-sbs-pane-header">
-        <span className="doc-sbs-pane-title">{title ?? `Document #${documentId}`}</span>
+        <DocumentSummary summary={effectiveSummary} />
         <div className="doc-sbs-pane-actions">
           {paperlessUrl && (
             <a href={paperlessUrl} target="_blank" rel="noreferrer" title="View in Paperless">
@@ -95,7 +98,7 @@ function PdfPane({ documentId, title, paperlessUrl }: DocumentPane) {
           </a>
         </div>
       </div>
-      <iframe className="doc-sbs-pane-iframe" src={previewSrc} title={title ?? 'Document preview'} />
+      <iframe className="doc-sbs-pane-iframe" src={previewSrc} title={`${documentSummaryLabel(effectiveSummary)} preview`} />
     </div>
   );
 }

@@ -16,6 +16,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from doc_intelligence_hub.api.document_summary import (
+    DocumentSummaryContext,
+    build_document_summary,
+)
 from doc_intelligence_hub.api.routers import make_paperless_client
 from doc_intelligence_hub.core.paperless import (
     AccountIdentifierClass,
@@ -141,6 +145,7 @@ async def get_document_metadata(
     schema = resolve_metadata_schema(field_defs, _API_FIELD_KEYS.values())
 
     extracted_fields: list[dict[str, Any]] = []
+    summary_metadata: dict[str, Any] = {}
     conflicts: list[dict[str, Any]] = []
     value_diagnostics: list[dict[str, str]] = []
     for api_name, key in _API_FIELD_KEYS.items():
@@ -183,11 +188,12 @@ async def get_document_metadata(
             "validation_error": resolved_value.validation_error,
         }
         if key is MetadataFieldKey.ACCOUNT_IDENTIFIER:
-            field_payload["account_identifier_display"] = mask_account_identifier(
-                resolved_value.value
-            )
+            account_display = mask_account_identifier(resolved_value.value)
+            field_payload["account_identifier_display"] = account_display
+            summary_metadata["account_identifier_display"] = account_display
         else:
             field_payload["value"] = resolved_value.value
+            summary_metadata[api_name] = resolved_value.value
         extracted_fields.append(field_payload)
 
     # Get corrections
@@ -202,10 +208,24 @@ async def get_document_metadata(
         if fn not in latest_corrections:
             latest_corrections[fn] = c
 
+    summary_context = (
+        DocumentSummaryContext.ACCOUNT_REVIEW
+        if context == DocumentSummaryContext.ACCOUNT_REVIEW
+        else DocumentSummaryContext.GENERAL
+    )
     return {
         "document_id": doc_id,
         "title": doc.get("title", ""),
         "paperless_url": f"/documents/{doc_id}/details",
+        "document_summary": build_document_summary(
+            {
+                **doc,
+                **summary_metadata,
+                "document_id": doc_id,
+                "document_type": summary_metadata.get("document_classification"),
+            },
+            context=summary_context,
+        ),
         "extracted_fields": extracted_fields,
         "corrections": corrections,
         "latest_corrections": latest_corrections,

@@ -15,13 +15,15 @@ import {
   Toast,
   confidenceTone,
 } from '../components/ui';
-import { endpoints } from '../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
+import DocumentSummary from '../components/DocumentSummary';
 import { getToastDuration } from '../lib/toast';
 import ConfirmModal from '../components/ConfirmModal';
 import '../styles/eob-pages.css';
 
 interface UnmatchedEobItem {
   id: string;
+  document_id: number;
   provider?: string | null;
   amount?: number | null;
   date_of_service?: string | null;
@@ -30,6 +32,7 @@ interface UnmatchedEobItem {
   created_at?: string | null;
   doc_type?: string | null;
   orphaned?: boolean | null;
+  document_summary: DocumentSummaryModel;
 }
 
 interface SuggestedMatch {
@@ -44,6 +47,8 @@ interface SuggestedMatch {
   bill_amount?: number | null;
   eob_date?: string | null;
   bill_date?: string | null;
+  eob_summary: DocumentSummaryModel;
+  bill_summary: DocumentSummaryModel;
 }
 
 interface EobMatchesResponse {
@@ -242,10 +247,13 @@ export default function EobUnmatched({
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === filteredItems.length) {
+    const eligibleIds = filteredItems
+      .filter((item) => inferDocType(item) === 'eob')
+      .map((item) => item.id);
+    if (selectedIds.size === eligibleIds.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(filteredItems.map((item) => item.id)));
+      setSelectedIds(new Set(eligibleIds));
     }
   };
 
@@ -448,6 +456,8 @@ export default function EobUnmatched({
                         type="checkbox"
                         checked={selectedIds.has(item.id)}
                         onChange={() => toggleSelection(item.id)}
+                        disabled={inferDocType(item) === 'bill'}
+                        aria-label={inferDocType(item) === 'bill' ? 'Bulk updates are unavailable for bills' : undefined}
                       />
                     ),
                   },
@@ -456,9 +466,9 @@ export default function EobUnmatched({
                     header: 'Document',
                     render: (item) => (
                       <div className="eob-table-primary">
-                        <strong>{item.provider || 'Unknown provider'}</strong>
+                        <DocumentSummary summary={item.document_summary} />
                         <span className="eob-table-secondary">
-                          {inferDocType(item) === 'eob' ? '📋' : '🧾'} {inferDocType(item).toUpperCase()} #{item.id}
+                          {inferDocType(item) === 'eob' ? '📋' : '🧾'} {inferDocType(item).toUpperCase()}
                         </span>
                       </div>
                     ),
@@ -497,7 +507,7 @@ export default function EobUnmatched({
                     width: '220px',
                     render: (item) => {
                       const params = new URLSearchParams();
-                      params.set('docId', item.id);
+                      params.set('docId', String(item.document_id));
                       if (item.provider) params.set('provider', item.provider);
                       if (typeof item.patient_responsibility === 'number') {
                         params.set('patientResponsibility', String(item.patient_responsibility));
@@ -564,13 +574,13 @@ export default function EobUnmatched({
                   <div key={sm.id} className="eob-suggested-row">
                     <div className="eob-suggested-pair">
                       <div>
-                        <div className="eob-field-value">{sm.eob_provider || `EOB #${sm.eob_document_id ?? '—'}`}</div>
+                        <DocumentSummary summary={sm.eob_summary} />
                         <div className="eob-field-note">
                           {formatDate(sm.eob_date)} · {formatCurrency(sm.eob_amount)}
                         </div>
                       </div>
                       <div>
-                        <div className="eob-field-value">{sm.bill_provider || `Bill #${sm.bill_document_id ?? '—'}`}</div>
+                        <DocumentSummary summary={sm.bill_summary} />
                         <div className="eob-field-note">
                           {formatDate(sm.bill_date)} · {formatCurrency(sm.bill_amount)}
                         </div>

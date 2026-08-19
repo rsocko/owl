@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Card } from '../ui';
 import { endpoints } from '../../lib/api';
+import DocumentSummary from '../DocumentSummary';
 import { SeriesTimeline } from './SeriesTimeline';
 import type { SeriesInfo, SeriesDoc, TimelineEntry } from './StatementGroupingDetail';
 
@@ -62,6 +63,7 @@ export function MergeSeriesFlow({ series, documents, similarSeries, sourceTimeli
       period_label: d.period_label,
       account_hint: d.account_hint,
       gap_before_days: null,
+      document_summary: d.document_summary,
     }));
   }, [sourceTimeline, documents]);
 
@@ -258,17 +260,7 @@ export function MergeSeriesFlow({ series, documents, similarSeries, sourceTimeli
                 <div className="sg-merge-side-docs">
                   {documents.slice(0, 5).map(d => (
                     <div key={d.document_id} className="sg-merge-doc-item">
-                      {d.title || `Doc ${d.document_id}`}
-                      <span className="text-muted"> · {d.statement_date}</span>
-                      {d.account_hint && (
-                        <span className="sg-doc-account" style={{
-                          background: `${sourceColorMap[d.account_hint] || 'var(--muted)'}22`,
-                          color: sourceColorMap[d.account_hint] || 'var(--muted)',
-                          marginLeft: 4,
-                        }}>
-                          {d.account_hint}
-                        </span>
-                      )}
+                      <DocumentSummary summary={d.document_summary} />
                     </div>
                   ))}
                   {documents.length > 5 && (
@@ -290,17 +282,7 @@ export function MergeSeriesFlow({ series, documents, similarSeries, sourceTimeli
                 <div className="sg-merge-side-docs">
                   {targetDetail.documents.slice(0, 5).map(d => (
                     <div key={d.document_id} className="sg-merge-doc-item">
-                      {d.title || `Doc ${d.document_id}`}
-                      <span className="text-muted"> · {d.statement_date}</span>
-                      {d.account_hint && (
-                        <span className="sg-doc-account" style={{
-                          background: `${targetColorMap[d.account_hint] || 'var(--muted)'}22`,
-                          color: targetColorMap[d.account_hint] || 'var(--muted)',
-                          marginLeft: 4,
-                        }}>
-                          {d.account_hint}
-                        </span>
-                      )}
+                      <DocumentSummary summary={d.document_summary} />
                     </div>
                   ))}
                   {targetDetail.documents.length > 5 && (

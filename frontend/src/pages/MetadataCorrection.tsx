@@ -13,7 +13,8 @@ import {
   SkeletonLoader,
   Toast,
 } from '../components/ui';
-import { endpoints } from '../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
+import DocumentSummary from '../components/DocumentSummary';
 import { getToastDuration } from '../lib/toast';
 import '../styles/metadata-correction.css';
 
@@ -46,6 +47,7 @@ interface MetadataResponse {
   document_id: number;
   title: string;
   paperless_url: string;
+  document_summary: DocumentSummaryModel;
   extracted_fields: ExtractedField[];
   corrections: CorrectionRecord[];
   latest_corrections: Record<string, CorrectionRecord>;
@@ -147,7 +149,7 @@ export default function MetadataCorrection() {
     setLoading(true);
     setError(null);
     try {
-      const res = (await endpoints.metadata.get(docId)) as MetadataResponse;
+      const res = (await endpoints.metadata.get(`${docId}?context=account_review`)) as MetadataResponse;
       setData(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load document metadata.');
@@ -347,8 +349,8 @@ export default function MetadataCorrection() {
         ]}
       />
       <PageHeader
-        title={`Metadata Correction: ${data.title || `Document #${data.document_id}`}`}
-        desc={`Paperless #${data.document_id}`}
+        title="Metadata Correction"
+        desc={<DocumentSummary summary={data.document_summary} density="review" />}
         actions={
           <div className="metadata-header-actions">
             <Button variant="ghost" size="sm" onClick={() => setShowHistory(true)}>
@@ -518,12 +520,7 @@ export default function MetadataCorrection() {
         <div>
           <Card title="🔍 Source Document" className="meta-doc-card">
             <div className="meta-doc-info">
-              <p>
-                <strong>Document:</strong> {data.title || `#${data.document_id}`}
-              </p>
-              <p>
-                <strong>Paperless ID:</strong> #{data.document_id}
-              </p>
+              <DocumentSummary summary={data.document_summary} density="review" />
               <div className="meta-doc-link">
                 <a
                   href={`/api/documents/${data.document_id}/download`}

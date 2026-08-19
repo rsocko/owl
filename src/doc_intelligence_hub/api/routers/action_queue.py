@@ -11,6 +11,7 @@ from pydantic_core import PydanticCustomError
 from sqlalchemy import String as SAString
 from starlette.responses import StreamingResponse
 
+from doc_intelligence_hub.api.document_summary import build_document_summary
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
 from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer
 from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
@@ -232,7 +233,7 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         except (json.JSONDecodeError, TypeError):
             pass  # Keep as string if not valid JSON
 
-    return {
+    payload = {
         "id": a.id,
         "document_id": a.document_id,
         "document_title": a.document_title,
@@ -259,6 +260,9 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         "acknowledged_at": a.acknowledged_at.isoformat() if a.acknowledged_at else None,
         "snoozed_until": a.snoozed_until.isoformat() if a.snoozed_until else None,
     }
+    if a.document_id:
+        payload["document_summary"] = build_document_summary(payload)
+    return payload
 
 
 def _urgency_to_severity(urgency: str | None) -> str:

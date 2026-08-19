@@ -20,8 +20,9 @@ import {
 } from '../components/ui';
 import { SortableTable, type SortableColumnDef } from '../components/SortableTable';
 import DocumentViewerModal from '../components/DocumentViewerModal';
+import DocumentSummary from '../components/DocumentSummary';
 import { useStreamingAction } from '../hooks/useStreamingAction';
-import { endpoints } from '../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import '../styles/action-queue.css';
 import '../styles/sortable-table.css';
@@ -88,6 +89,7 @@ interface ActionItem {
   snoozed_until?: string | null;
   severity?: string | null;
   recommended_cta?: { id: string; label: string; url?: string | null; phone?: string | null } | null;
+  document_summary?: DocumentSummaryModel;
 }
 
 interface ActionListResponse {
@@ -934,7 +936,7 @@ export default function ActionQueue() {
                   {row.title || row.document_title || `Action #${row.id}`}
                 </div>
               </div>
-              <div className="text-muted">{row.correspondent || row.document_title || 'No document metadata'}</div>
+              {row.document_summary && <DocumentSummary summary={row.document_summary} />}
             </button>
           );
         },
@@ -1731,7 +1733,7 @@ export default function ActionQueue() {
                   {pdfViewerOpen && (
                     <DocumentViewerModal
                       documentId={selectedAction.document_id}
-                      title={selectedAction.document_title || selectedAction.correspondent || `Document #${selectedAction.document_id}`}
+                      summary={selectedAction.document_summary}
                       paperlessUrl={selectedAction.preview_url}
                       onClose={() => setPdfViewerOpen(false)}
                     />
@@ -1763,11 +1765,12 @@ export default function ActionQueue() {
                 </Button>
               </div>
               <div className="aq-meta-list">
-                <div className="aq-meta-row"><span>Document</span><span>{selectedAction.document_title || `#${selectedAction.document_id ?? '—'}`}</span></div>
-                <div className="aq-meta-row"><span>Correspondent</span><span>{selectedAction.correspondent || '—'}</span></div>
-                <div className="aq-meta-row"><span>Document date</span><span>{formatDate(selectedAction.document_date)}</span></div>
-                <div className="aq-meta-row"><span>Document type</span><span>{selectedAction.document_type || '—'}</span></div>
-                <div className="aq-meta-row"><span>Tags</span><span>{selectedAction.tags?.join(', ') || '—'}</span></div>
+                {selectedAction.document_summary && (
+                  <DocumentSummary summary={selectedAction.document_summary} density="review" />
+                )}
+                {!selectedAction.document_summary && selectedAction.document_title && (
+                  <div>{selectedAction.document_title}</div>
+                )}
                 <div className="aq-meta-row"><span>Amount</span><span>{formatCurrency(selectedAction.amount)}</span></div>
                 <div className="aq-meta-row"><span>Due date</span><span>{formatDate(selectedAction.due_date)}</span></div>
                 <div className="aq-meta-row"><span>Severity</span><span><Badge tone={selectedAction.severity === 'critical' ? 'danger' : selectedAction.severity === 'focus' ? 'warning' : 'success'}>{selectedAction.severity ?? 'safe'}</Badge></span></div>

@@ -17,7 +17,8 @@ import {
   Toast,
   confidenceTone,
 } from './ui';
-import { endpoints } from '../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
+import DocumentSummary from './DocumentSummary';
 import { getToastDuration } from '../lib/toast';
 import ManualMatchModal from './ManualMatchModal';
 import ConfirmModal from './ConfirmModal';
@@ -97,6 +98,8 @@ interface EobMatch {
   user_notes?: string | null;
   eob_details?: EobDetails | null;
   bill_details?: BillDetails | null;
+  eob_summary: DocumentSummaryModel;
+  bill_summary: DocumentSummaryModel;
 }
 
 interface MatchHistoryEvent {
@@ -590,9 +593,7 @@ export default function EobMatchDetail({
       {/* Header with match info and action buttons */}
       <div className="eob-detail-header">
         <div>
-          <div className="eob-detail-title">
-            Match #{match.id}: EOB #{match.eob_document_id ?? '—'} ↔ Bill #{match.bill_document_id ?? '—'}
-          </div>
+          <div className="eob-detail-title">Match #{match.id}</div>
           <div className="eob-meta-row">
             <Badge tone={statusTone(match.status)}>{statusLabel(match.status)}</Badge>
             {(match.status || '').toLowerCase() === 'confirmed' && (
@@ -757,6 +758,7 @@ export default function EobMatchDetail({
       <Card title="Document comparison">
         <div className="eob-compare-grid">
           <div className="eob-compare-col">
+            <DocumentSummary summary={match.eob_summary} density="review" />
             <div className="eob-compare-header">
               <span>EOB document</span>
               <Badge tone="info">#{match.eob_document_id ?? '—'}</Badge>
@@ -795,6 +797,7 @@ export default function EobMatchDetail({
           </div>
 
           <div className="eob-compare-col">
+            <DocumentSummary summary={match.bill_summary} density="review" />
             <div className="eob-compare-header">
               <span>Candidate bill</span>
               <Badge tone="info">#{match.bill_document_id ?? '—'}</Badge>
@@ -878,12 +881,12 @@ export default function EobMatchDetail({
           heading="EOB ↔ Bill Comparison"
           left={{
             documentId: match.eob_document_id,
-            title: 'EOB',
+            summary: match.eob_summary,
             paperlessUrl: match.eob_preview_url,
           }}
           right={{
             documentId: match.bill_document_id,
-            title: 'Bill',
+            summary: match.bill_summary,
             paperlessUrl: match.bill_preview_url,
           }}
           onClose={() => setSideBySideOpen(false)}
@@ -980,8 +983,9 @@ export default function EobMatchDetail({
                     <div className="eob-alt-card-header">
                       <div>
                         <div className="eob-field-value">
-                          Match #{item.id}: EOB #{item.eob_document_id ?? '—'} ↔ Bill #
-                          {item.bill_document_id ?? '—'}
+                          Match #{item.id}
+                          <DocumentSummary summary={item.eob_summary} />
+                          <DocumentSummary summary={item.bill_summary} />
                         </div>
                         <div className="eob-field-note">
                           Status {statusLabel(item.status)} · Run #{item.run_id ?? '—'}
@@ -1080,12 +1084,13 @@ export default function EobMatchDetail({
       <ConfirmModal
         open={pendingAction === 'confirm'}
         title="Confirm this match?"
-        description={
-          <>
-            This will mark <strong>EOB #{match?.eob_document_id ?? '—'} ↔ Bill #{match?.bill_document_id ?? '—'}</strong> as
-            confirmed and link the documents in Paperless. This action cannot be easily undone.
-          </>
-        }
+        description={match ? (
+          <div className="eob-card-stack">
+            <DocumentSummary summary={match.eob_summary} />
+            <DocumentSummary summary={match.bill_summary} />
+            <span>This will confirm and link these documents in Paperless. This action cannot be easily undone.</span>
+          </div>
+        ) : null}
         confirmLabel="Confirm match"
         confirmVariant="success"
         busy={saving === 'confirm'}
@@ -1095,12 +1100,13 @@ export default function EobMatchDetail({
       <ConfirmModal
         open={pendingAction === 'reject'}
         title="Reject this match?"
-        description={
-          <>
-            This will reject <strong>EOB #{match?.eob_document_id ?? '—'} ↔ Bill #{match?.bill_document_id ?? '—'}</strong>.
-            The documents will need to be re-matched manually if this rejection is incorrect.
-          </>
-        }
+        description={match ? (
+          <div className="eob-card-stack">
+            <DocumentSummary summary={match.eob_summary} />
+            <DocumentSummary summary={match.bill_summary} />
+            <span>This will reject these documents. They will need to be re-matched manually if this is incorrect.</span>
+          </div>
+        ) : null}
         confirmLabel="Reject match"
         confirmVariant="danger"
         busy={saving === 'reject'}

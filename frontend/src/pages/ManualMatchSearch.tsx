@@ -12,7 +12,8 @@ import {
   Toast,
 } from '../components/ui';
 import DocumentPreview from '../components/DocumentPreview';
-import { endpoints } from '../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
+import DocumentSummary from '../components/DocumentSummary';
 import { getToastDuration } from '../lib/toast';
 import '../styles/manual-match-search.css';
 
@@ -36,6 +37,8 @@ interface MatchRecord {
   eob_preview_url?: string | null;
   bill_preview_url?: string | null;
   created_at?: string | null;
+  eob_summary: DocumentSummaryModel;
+  bill_summary: DocumentSummaryModel;
 }
 
 interface MatchesResponse {
@@ -251,7 +254,10 @@ export default function ManualMatchSearch() {
             {selectedMatch ? (
               <Card title="Selected candidate">
                 <div className="manual-selected-summary">
-                  <div className="manual-selected-title">EOB #{selectedMatch.eob_document_id ?? '—'} ↔ Bill #{selectedMatch.bill_document_id ?? '—'}</div>
+                  <div className="manual-selected-title">
+                    <DocumentSummary summary={selectedMatch.eob_summary} />
+                    <DocumentSummary summary={selectedMatch.bill_summary} />
+                  </div>
                   <div className="manual-selected-badges">
                     <Badge tone={scoreTone(selectedMatch.score)}>{valueToPercent(selectedMatch.score)}% match</Badge>
                     <Badge tone="muted">{selectedMatch.confidence ?? 'Candidate'}</Badge>
@@ -411,7 +417,10 @@ export default function ManualMatchSearch() {
                   >
                     <div className="manual-result-top">
                       <div>
-                        <div className="manual-result-title">EOB #{match.eob_document_id ?? '—'} ↔ Bill #{match.bill_document_id ?? '—'}</div>
+                        <div className="manual-result-title">
+                          <DocumentSummary summary={match.eob_summary} />
+                          <DocumentSummary summary={match.bill_summary} />
+                        </div>
                         <div className="text-muted">Match #{match.id} · {formatDateTime(match.created_at)}</div>
                       </div>
                       <Badge tone={scoreTone(match.score)}>{valueToPercent(match.score)}% match</Badge>

@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from doc_intelligence_hub.api.document_summary import build_document_summary
 from doc_intelligence_hub.api.routers import make_paperless_client, raise_api_error
 from doc_intelligence_hub.core.paperless import AccountIdentifierClass, mask_account_identifier
 from doc_intelligence_hub.modules.eob_matching.classifier import classify_document
@@ -305,7 +306,7 @@ def _serialize_match(
     detailed: bool = False,
 ) -> dict[str, Any]:
     base_url = paperless_url.rstrip("/") if paperless_url else ""
-    return {
+    payload = {
         "id": m.id,
         "run_id": m.run_id,
         "eob_document_id": m.eob_document_id,
@@ -339,6 +340,25 @@ def _serialize_match(
         "eob_details": _serialize_eob_full(eob) if detailed else _serialize_eob_details(eob),
         "bill_details": _serialize_bill_full(bill) if detailed else _serialize_bill_details(bill),
     }
+    payload["eob_summary"] = build_document_summary(
+        {
+            "document_id": m.eob_document_id,
+            "title": eob.title if eob else None,
+            "provider_name": eob.provider_name if eob else None,
+            "document_type": "EOB",
+            "date_of_service": eob.date_of_service if eob else None,
+        }
+    )
+    payload["bill_summary"] = build_document_summary(
+        {
+            "document_id": m.bill_document_id,
+            "title": bill.title if bill else None,
+            "provider_name": bill.provider_name if bill else None,
+            "document_type": "Bill",
+            "date_of_service": bill.date_of_service if bill else None,
+        }
+    )
+    return payload
 
 
 def _batch_load_records(

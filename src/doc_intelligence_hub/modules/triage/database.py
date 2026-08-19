@@ -635,7 +635,7 @@ def _item_to_dict(item: TriageQueueItem) -> dict[str, Any]:
         except (json.JSONDecodeError, TypeError):
             metadata = item.metadata_json
 
-    return {
+    payload = {
         "id": item.id,
         "item_type": item.item_type,
         "priority": item.priority,
@@ -650,6 +650,11 @@ def _item_to_dict(item: TriageQueueItem) -> dict[str, Any]:
         "resolved_action": item.resolved_action,
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }
+    if isinstance(metadata, dict) and metadata.get("document_id") is not None:
+        from doc_intelligence_hub.api.document_summary import build_document_summary
+
+        payload["document_summary"] = build_document_summary(metadata)
+    return payload
 
 
 # ------------------------------------------------------------------

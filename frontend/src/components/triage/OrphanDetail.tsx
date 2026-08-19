@@ -10,7 +10,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button, Toast } from '../ui';
 import DocumentPreview from '../DocumentPreview';
 import ManualMatchModal from '../ManualMatchModal';
-import { endpoints } from '../../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../../lib/api';
+import DocumentSummary from '../DocumentSummary';
 import { getToastDuration } from '../../lib/toast';
 import '../../styles/orphan-detail.css';
 
@@ -32,6 +33,7 @@ interface TriageItem {
   resolved_at: string | null;
   resolved_action: string | null;
   created_at: string | null;
+  document_summary?: DocumentSummaryModel;
 }
 
 type ToastState = { message: string; tone: 'success' | 'error' } | null;
@@ -185,7 +187,9 @@ export default function OrphanDetail({ triageItem, onResolved, onSkip }: OrphanD
       <div className="orphan-doc-card">
         <div className="orphan-doc-header">
           <span className="orphan-doc-icon">{documentType === 'eob' ? '📋' : '💵'}</span>
-          <span className="orphan-doc-title">{providerName}</span>
+          {triageItem.document_summary && (
+            <DocumentSummary summary={triageItem.document_summary} density="review" />
+          )}
           <span className={`orphan-doc-badge ${documentType}`}>{docTypeLabel(documentType)}</span>
         </div>
         <div className="orphan-fields">

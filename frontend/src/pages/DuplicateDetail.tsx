@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Badge, Button, Card, ConfidenceBar, SkeletonLoader } from '../components/ui';
-import { endpoints } from '../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
+import DocumentSummary from '../components/DocumentSummary';
 import '../styles/duplicate-detail.css';
 
 // ------------------------------------------------------------------
@@ -32,6 +33,8 @@ interface DuplicatePairDetail {
   created_at: string | null;
   doc_a_metadata: DocMetadata | null;
   doc_b_metadata: DocMetadata | null;
+  doc_a_summary: DocumentSummaryModel;
+  doc_b_summary: DocumentSummaryModel;
 }
 
 interface DuplicateDetailProps {
@@ -190,6 +193,7 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
               {primaryDocId === pair.doc_a_id && <Badge tone="info">Primary</Badge>}
             </div>
             <div className="duplicate-doc-card-body">
+              <DocumentSummary summary={pair.doc_a_summary} density="review" />
               {comparisonFields.map(({ key, label, altKey }) => {
                 const val = (metaA as Record<string, unknown>)[key] ?? (altKey ? (metaA as Record<string, unknown>)[altKey] : undefined);
                 const otherVal = (metaB as Record<string, unknown>)[key] ?? (altKey ? (metaB as Record<string, unknown>)[altKey] : undefined);
@@ -215,6 +219,7 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
               {primaryDocId === pair.doc_b_id && <Badge tone="info">Primary</Badge>}
             </div>
             <div className="duplicate-doc-card-body">
+              <DocumentSummary summary={pair.doc_b_summary} density="review" />
               {comparisonFields.map(({ key, label, altKey }) => {
                 const val = (metaB as Record<string, unknown>)[key] ?? (altKey ? (metaB as Record<string, unknown>)[altKey] : undefined);
                 const otherVal = (metaA as Record<string, unknown>)[key] ?? (altKey ? (metaA as Record<string, unknown>)[altKey] : undefined);
@@ -267,8 +272,7 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
                   checked={primaryDocId === pair.doc_a_id}
                   onChange={() => setPrimaryDocId(pair.doc_a_id)}
                 />
-                Doc A #{pair.doc_a_id}
-                {metaA.title ? ` — ${metaA.title}` : ''}
+                <DocumentSummary summary={pair.doc_a_summary} />
               </label>
               <label
                 className={`duplicate-primary-option${primaryDocId === pair.doc_b_id ? ' selected' : ''}`}
@@ -279,8 +283,7 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
                   checked={primaryDocId === pair.doc_b_id}
                   onChange={() => setPrimaryDocId(pair.doc_b_id)}
                 />
-                Doc B #{pair.doc_b_id}
-                {metaB.title ? ` — ${metaB.title}` : ''}
+                <DocumentSummary summary={pair.doc_b_summary} />
               </label>
             </div>
           </div>
