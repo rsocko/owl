@@ -176,6 +176,196 @@ async def test_list_saved_views(client):
     assert views[0]["name"] == "Inbox"
 
 
+def _make_saved_view_client(monkeypatch, definition, *, detail_status=200):
+    requests_seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests_seen.append(request)
+        if request.url.path == "/api/saved_views/7/":
+            return httpx.Response(detail_status, json=definition)
+        if request.url.path == "/api/documents/":
+            if request.url.params.get("saved_view") == "7":
+                return httpx.Response(
+                    200,
+                    json={
+                        "count": 8868,
+                        "next": None,
+                        "results": [{"id": item} for item in range(8868)],
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={"count": 2, "next": None, "results": [{"id": 41}, {"id": 42}]},
+            )
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    return PaperlessClient(base_url="https://paperless.test", token="test-token"), requests_seen
+
+
+@pytest.mark.asyncio
+async def test_saved_view_rules_are_translated_before_querying_documents(monkeypatch):
+    definition = {
+        "id": 7,
+        "name": "Deployment-managed view",
+        "filter_rules": [
+            {"rule_type": 3, "value": None},
+            {"rule_type": 4, "value": None},
+            {"rule_type": 6, "value": "11,12"},
+            {"rule_type": 6, "value": "13"},
+            {"rule_type": 7, "value": "false"},
+            {"rule_type": 17, "value": "21"},
+            {"rule_type": 17, "value": "22"},
+            {"rule_type": 20, "value": "added:[-30 day to now]"},
+            {"rule_type": 25, "value": None},
+            {"rule_type": 26, "value": "31"},
+            {"rule_type": 26, "value": "32"},
+        ],
+    }
+    client, requests_seen = _make_saved_view_client(monkeypatch, definition)
+
+    documents = await client.list_documents(saved_view=7)
+
+    assert [document["id"] for document in documents] == [41, 42]
+    document_request = next(
+        request for request in requests_seen if request.url.path == "/api/documents/"
+    )
+    assert "saved_view" not in document_request.url.params
+    assert dict(document_request.url.params) == {
+        "page_size": "100",
+        "correspondent__isnull": "1",
+        "document_type__isnull": "1",
+        "is_tagged": "0",
+        "query": "added:[-30 day to now]",
+        "storage_path__isnull": "1",
+        "tags__id__all": "11,12,13",
+        "tags__id__none": "21,22",
+        "correspondent__id__in": "31,32",
+        "page": "1",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "filter_rules",
+    [
+        [],
+        [{"rule_type": 999, "value": "1"}],
+        [{"rule_type": 6, "value": ""}],
+        [{"rule_type": 7, "value": "maybe"}],
+        [{"rule_type": 20, "value": ""}],
+        [{"rule_type": 3, "value": None}, {"rule_type": 3, "value": "4"}],
+        ["not-a-rule"],
+    ],
+)
+async def test_saved_view_malformed_or_unsupported_rules_fail_closed(monkeypatch, filter_rules):
+    client, requests_seen = _make_saved_view_client(
+        monkeypatch,
+        {"id": 7, "name": "Unsafe view", "filter_rules": filter_rules},
+    )
+
+    with pytest.raises(PaperlessError):
+        await client.list_documents(saved_view=7)
+
+    assert not any(request.url.path == "/api/documents/" for request in requests_seen)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [403, 404])
+async def test_saved_view_permission_or_missing_errors_fail_closed(monkeypatch, status):
+    client, requests_seen = _make_saved_view_client(monkeypatch, {}, detail_status=status)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.list_documents(saved_view=7)
+
+    assert not any(request.url.path == "/api/documents/" for request in requests_seen)
+
+
+@pytest.mark.asyncio
+async def test_saved_view_mismatched_id_fails_closed(monkeypatch):
+    client, requests_seen = _make_saved_view_client(
+        monkeypatch,
+        {"id": 8, "name": "Wrong view", "filter_rules": [{"rule_type": 7, "value": "true"}]},
+    )
+
+    with pytest.raises(PaperlessError, match="mismatched"):
+        await client.list_documents(saved_view=7)
+
+    assert not any(request.url.path == "/api/documents/" for request in requests_seen)
+
+
+@pytest.mark.asyncio
+async def test_saved_view_nullable_not_null_value(monkeypatch):
+    client, requests_seen = _make_saved_view_client(
+        monkeypatch,
+        {"id": 7, "name": "Has correspondent", "filter_rules": [{"rule_type": 3, "value": "-1"}]},
+    )
+
+    await client.list_documents(saved_view=7)
+
+    document_request = next(
+        request for request in requests_seen if request.url.path == "/api/documents/"
+    )
+    assert document_request.url.params.get("correspondent__isnull") == "0"
+
+
+@pytest.mark.asyncio
+async def test_saved_view_cannot_be_combined_with_explicit_filters(monkeypatch):
+    client, requests_seen = _make_saved_view_client(
+        monkeypatch,
+        {"id": 7, "name": "View", "filter_rules": [{"rule_type": 7, "value": "true"}]},
+    )
+
+    with pytest.raises(PaperlessError, match="cannot be combined"):
+        await client.list_documents(saved_view=7, correspondent="Acme")
+
+    assert requests_seen == []
+
+
+@pytest.mark.asyncio
+async def test_list_saved_views_follows_pagination(monkeypatch):
+    requests_seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests_seen.append(request)
+        page = request.url.params.get("page")
+        if page == "1":
+            return httpx.Response(
+                200,
+                json={
+                    "count": 2,
+                    "next": "https://paperless.test/api/saved_views/?page=2",
+                    "results": [{"id": 1, "name": "First"}],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={"count": 2, "next": None, "results": [{"id": 2, "name": "Second"}]},
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    client = PaperlessClient(base_url="https://paperless.test", token="test-token")
+
+    views = await client.list_saved_views()
+
+    assert [view["id"] for view in views] == [1, 2]
+    assert len(requests_seen) == 2
+
+
 def test_load_fixture(tmp_path):
     fixture = tmp_path / "docs.json"
     fixture.write_text('[{"id": 1, "title": "Test"}]', encoding="utf-8")

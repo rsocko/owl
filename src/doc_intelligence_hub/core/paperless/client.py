@@ -38,6 +38,19 @@ _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "PUT", "DELETE", "OPTIONS"})
 # Status codes that indicate transient server issues
 _TRANSIENT_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
 
+_SAVED_VIEW_NULLABLE_ID_RULES = {
+    3: ("correspondent__id", "correspondent__isnull"),
+    4: ("document_type__id", "document_type__isnull"),
+    25: ("storage_path__id", "storage_path__isnull"),
+}
+_SAVED_VIEW_MULTI_ID_RULES = {
+    6: "tags__id__all",
+    17: "tags__id__none",
+    26: "correspondent__id__in",
+}
+_SAVED_VIEW_BOOLEAN_RULES = {7: "is_tagged"}
+_SAVED_VIEW_STRING_RULES = {20: "query"}
+
 
 @dataclass(frozen=True)
 class PaperlessPage:
@@ -61,6 +74,87 @@ def _equivalent_field_value(actual: Any, expected: Any, *, numeric: bool = False
         except InvalidOperation:
             return False
     return False
+
+
+def _saved_view_filter_params(filter_rules: Any) -> dict[str, Any]:
+    """Translate supported Paperless saved-view rules into document query params."""
+    if not isinstance(filter_rules, list) or not filter_rules:
+        raise PaperlessError("Saved view has no usable filter rules")
+
+    params: dict[str, Any] = {}
+    multi_values: dict[str, list[str]] = {}
+    single_rule_types: set[int] = set()
+    for index, rule in enumerate(filter_rules):
+        if not isinstance(rule, dict):
+            raise PaperlessError(f"Saved view rule {index} is malformed")
+        rule_type = rule.get("rule_type")
+        if isinstance(rule_type, bool) or not isinstance(rule_type, int):
+            raise PaperlessError(f"Saved view rule {index} has an invalid rule type")
+        value = rule.get("value")
+
+        if rule_type in _SAVED_VIEW_NULLABLE_ID_RULES:
+            if rule_type in single_rule_types:
+                raise PaperlessError(f"Saved view rule {index} duplicates rule type {rule_type}")
+            single_rule_types.add(rule_type)
+            filter_param, null_param = _SAVED_VIEW_NULLABLE_ID_RULES[rule_type]
+            if value is None:
+                target_param, rendered = null_param, 1
+            elif isinstance(value, str) and value.strip() == "-1":
+                target_param, rendered = null_param, 0
+            else:
+                target_param = filter_param
+                rendered = _saved_view_positive_ids(value, index, allow_multiple=False)[0]
+            if target_param in params:
+                raise PaperlessError(f"Saved view rule {index} duplicates {target_param}")
+            params[target_param] = rendered
+            continue
+
+        if rule_type in _SAVED_VIEW_MULTI_ID_RULES:
+            target_param = _SAVED_VIEW_MULTI_ID_RULES[rule_type]
+            multi_values.setdefault(target_param, []).extend(
+                _saved_view_positive_ids(value, index, allow_multiple=True)
+            )
+            continue
+
+        if rule_type in _SAVED_VIEW_BOOLEAN_RULES:
+            target_param = _SAVED_VIEW_BOOLEAN_RULES[rule_type]
+            if target_param in params:
+                raise PaperlessError(f"Saved view rule {index} duplicates {target_param}")
+            if isinstance(value, bool):
+                rendered_bool = value
+            elif isinstance(value, str) and value.strip().lower() in {"true", "1", "false", "0"}:
+                rendered_bool = value.strip().lower() in {"true", "1"}
+            else:
+                raise PaperlessError(f"Saved view rule {index} has an invalid boolean value")
+            params[target_param] = 1 if rendered_bool else 0
+            continue
+
+        if rule_type in _SAVED_VIEW_STRING_RULES:
+            target_param = _SAVED_VIEW_STRING_RULES[rule_type]
+            if target_param in params:
+                raise PaperlessError(f"Saved view rule {index} duplicates {target_param}")
+            if not isinstance(value, str) or not value.strip():
+                raise PaperlessError(f"Saved view rule {index} has an invalid string value")
+            params[target_param] = value.strip()
+            continue
+
+        raise PaperlessError(f"Saved view rule type {rule_type} is not supported")
+
+    params.update({key: ",".join(values) for key, values in multi_values.items()})
+    return params
+
+
+def _saved_view_positive_ids(value: Any, rule_index: int, *, allow_multiple: bool) -> list[str]:
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise PaperlessError(f"Saved view rule {rule_index} has an invalid ID value")
+    parts = str(value).split(",") if allow_multiple else [str(value)]
+    rendered: list[str] = []
+    for part in parts:
+        candidate = part.strip()
+        if not candidate.isdigit() or int(candidate) <= 0:
+            raise PaperlessError(f"Saved view rule {rule_index} has an invalid ID value")
+        rendered.append(str(int(candidate)))
+    return rendered
 
 
 class PaperlessClient:
@@ -318,7 +412,21 @@ class PaperlessClient:
         params: dict[str, Any] = {"page_size": effective_page_size}
 
         if saved_view is not None:
-            params["saved_view"] = saved_view
+            if any(
+                (
+                    tags,
+                    query,
+                    correspondent,
+                    document_type,
+                    created_after,
+                    created_before,
+                    added_after,
+                    added_before,
+                )
+            ):
+                raise PaperlessError("A saved view cannot be combined with explicit filters")
+            view = await self.get_saved_view(saved_view)
+            params.update(_saved_view_filter_params(view.get("filter_rules")))
 
         if query:
             params["query"] = query
@@ -618,11 +726,26 @@ class PaperlessClient:
     async def list_saved_views(self) -> list[dict]:
         """List all saved views."""
         client = self._get_client()
-        resp = await client.get("/api/saved_views/")
+        return await self._paginate(client, "/api/saved_views/", {"page_size": 100})
+
+    async def get_saved_view(self, view_id: int) -> dict:
+        """Fetch and validate one saved view by its unique Paperless ID."""
+        if isinstance(view_id, bool) or not isinstance(view_id, int) or view_id <= 0:
+            raise PaperlessError("Saved view ID must be a positive integer")
+        resp = await self._request("GET", f"/api/saved_views/{view_id}/")
         resp.raise_for_status()
         data = resp.json()
-        if isinstance(data, dict) and "results" in data:
-            return data["results"]
+        if not isinstance(data, dict):
+            raise PaperlessError(f"Saved view {view_id} returned a malformed definition")
+        actual_id = data.get("id")
+        if isinstance(actual_id, bool) or not isinstance(actual_id, (str, int)):
+            raise PaperlessError(f"Saved view {view_id} returned a malformed definition")
+        try:
+            normalized_id = int(actual_id)
+        except ValueError as exc:
+            raise PaperlessError(f"Saved view {view_id} returned a malformed definition") from exc
+        if normalized_id != view_id:
+            raise PaperlessError(f"Saved view {view_id} returned a mismatched definition")
         return data
 
     # ------------------------------------------------------------------
