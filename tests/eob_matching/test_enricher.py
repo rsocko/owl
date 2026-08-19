@@ -161,13 +161,9 @@ async def test_account_identifier_reuses_policy_and_audit_is_masked() -> None:
     assert account_record.value_display == "policy ending 5678"
     assert "POLICY-12345678" not in account_record.value_display
     audit_rows = [
-        row
-        for call in enricher.audit_session.add_all.call_args_list
-        for row in call.args[0]
+        row for call in enricher.audit_session.add_all.call_args_list for row in call.args[0]
     ]
-    stored_account_audit = next(
-        row for row in audit_rows if row.stable_key == "account_identifier"
-    )
+    stored_account_audit = next(row for row in audit_rows if row.stable_key == "account_identifier")
     assert stored_account_audit.value_display == "policy ending 5678"
     assert stored_account_audit.status == "applied"
     assert enricher.audit_session.commit.call_count == 2

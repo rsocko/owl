@@ -719,9 +719,7 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
             },
             "classifications": classified_documents,
             "matches": [match.model_dump(mode="json") for match in matches],
-            "extracted_eobs": [_safe_eob_dump(e) for e in extracted_eobs]
-            if body.verbose
-            else [],
+            "extracted_eobs": [_safe_eob_dump(e) for e in extracted_eobs] if body.verbose else [],
             "extracted_bills": [b.model_dump(mode="json") for b in extracted_bills]
             if body.verbose
             else [],
