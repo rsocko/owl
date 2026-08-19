@@ -85,3 +85,63 @@ async def test_get_document_metadata_retains_invalid_legacy_value(monkeypatch) -
     assert fields["patient_responsibility"]["value"] == "$125.00"
     assert fields["patient_responsibility"]["validation_error"]
     assert result["metadata_value_diagnostics"][0]["field_name"] == "patient_responsibility"
+
+
+@pytest.mark.asyncio
+async def test_account_identifier_is_only_masked_in_named_review_context(monkeypatch) -> None:
+    client = AsyncMock()
+    client.get_document.return_value = {
+        "id": 100,
+        "title": "Synthetic Document",
+        "custom_fields": [{"field": 6, "value": "SENSITIVE123456"}],
+    }
+    client.list_custom_fields.return_value = [
+        {"id": 6, "name": "Account Identifier", "data_type": "string"}
+    ]
+    monkeypatch.setattr(metadata, "make_paperless_client", lambda request: client)
+    monkeypatch.setattr(metadata, "get_corrections_for_document", lambda document_id: [])
+
+    general = await metadata.get_document_metadata(100, object())
+    review = await metadata.get_document_metadata(100, object(), context="account_review")
+
+    assert all(field["field_name"] != "account_identifier" for field in general["extracted_fields"])
+    account = next(
+        field for field in review["extracted_fields"] if field["field_name"] == "account_identifier"
+    )
+    assert account["account_identifier_display"] == "ending 3456"
+    assert "value" not in account
+    assert "SENSITIVE123456" not in str(review)
+
+
+@pytest.mark.asyncio
+async def test_account_correction_writes_exact_only_to_paperless(monkeypatch) -> None:
+    client = AsyncMock()
+    client.list_custom_fields.return_value = [
+        {"id": 10, "name": "Account Identifier", "data_type": "string"}
+    ]
+    persisted: dict = {}
+
+    def capture_correction(**kwargs):
+        persisted.update(kwargs)
+        return kwargs
+
+    monkeypatch.setattr(metadata, "make_paperless_client", lambda request: client)
+    monkeypatch.setattr(metadata, "create_extraction_correction", capture_correction)
+    body = metadata.CorrectFieldRequest(
+        field_name="account_identifier",
+        corrected_value="MEMBER123456",
+        original_value="OLDMEMBER9876",
+        identifier_class="member",
+        notes="Do not retain MEMBER123456",
+    )
+
+    result = await metadata.correct_field(100, body, object())
+
+    client.update_custom_fields.assert_awaited_once_with(
+        100,
+        [{"field": 10, "value": "MEMBER123456"}],
+    )
+    assert persisted["corrected_value"] == "member ending 3456"
+    assert persisted["original_value"] == "member ending 9876"
+    assert persisted["notes"] is None
+    assert "MEMBER123456" not in str(result)

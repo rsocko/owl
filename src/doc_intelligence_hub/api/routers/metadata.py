@@ -18,12 +18,16 @@ from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.api.routers import make_paperless_client
 from doc_intelligence_hub.core.paperless import (
+    AccountIdentifierClass,
     MetadataFieldKey,
     MetadataSchemaError,
     MetadataValueError,
     PaperlessMetadataResolver,
+    build_account_identifier_update,
     build_metadata_update,
     get_metadata_field_spec,
+    govern_account_identifier,
+    mask_account_identifier,
     resolve_metadata_schema,
     resolve_metadata_value,
 )
@@ -71,6 +75,10 @@ class CorrectFieldRequest(BaseModel):
         default=None, description="Bounding box / OCR region coordinates"
     )
     notes: str | None = Field(default=None, description="Optional correction notes")
+    identifier_class: AccountIdentifierClass | None = Field(
+        default=None,
+        description="Required classification for an Account Identifier correction",
+    )
 
 
 class ConfirmFieldRequest(BaseModel):
@@ -103,11 +111,16 @@ async def list_corrections(
         correction_type=correction_type,
         field_name=field_name,
     )
+    corrections = [_sanitize_correction(correction) for correction in corrections]
     return {"corrections": corrections, "count": len(corrections), "offset": offset, "limit": limit}
 
 
 @router.get("/{doc_id}")
-async def get_document_metadata(doc_id: int, request: Request) -> dict[str, Any]:
+async def get_document_metadata(
+    doc_id: int,
+    request: Request,
+    context: str | None = None,
+) -> dict[str, Any]:
     """Get extracted fields and corrections for a document.
 
     Fetches the document from Paperless and overlays any stored corrections.
@@ -131,6 +144,8 @@ async def get_document_metadata(doc_id: int, request: Request) -> dict[str, Any]
     conflicts: list[dict[str, Any]] = []
     value_diagnostics: list[dict[str, str]] = []
     for api_name, key in _API_FIELD_KEYS.items():
+        if key is MetadataFieldKey.ACCOUNT_IDENTIFIER and context != "account_review":
+            continue
         resolved_value = resolve_metadata_value(key, doc.get("custom_fields", []), schema)
         conflict = resolved_value.conflict
         if conflict is not None:
@@ -139,7 +154,14 @@ async def get_document_metadata(doc_id: int, request: Request) -> dict[str, Any]
                     "field_name": api_name,
                     "selected_source": conflict.selected_source_name,
                     "conflicting_sources": [
-                        {"source": source, "value": value}
+                        {
+                            "source": source,
+                            "value": (
+                                mask_account_identifier(value)
+                                if key is MetadataFieldKey.ACCOUNT_IDENTIFIER
+                                else value
+                            ),
+                        }
                         for source, value in conflict.conflicting_sources
                     ],
                 }
@@ -152,20 +174,26 @@ async def get_document_metadata(doc_id: int, request: Request) -> dict[str, Any]
                     "message": resolved_value.validation_error,
                 }
             )
-        extracted_fields.append(
-            {
-                "field_name": api_name,
-                "paperless_field": get_metadata_field_spec(key).canonical_name,
-                "value": resolved_value.value,
-                "has_value": resolved_value.value is not None,
-                "source_field": resolved_value.source_name,
-                "conflict": conflict is not None,
-                "validation_error": resolved_value.validation_error,
-            }
-        )
+        field_payload = {
+            "field_name": api_name,
+            "paperless_field": get_metadata_field_spec(key).canonical_name,
+            "has_value": resolved_value.value is not None,
+            "source_field": resolved_value.source_name,
+            "conflict": conflict is not None,
+            "validation_error": resolved_value.validation_error,
+        }
+        if key is MetadataFieldKey.ACCOUNT_IDENTIFIER:
+            field_payload["account_identifier_display"] = mask_account_identifier(
+                resolved_value.value
+            )
+        else:
+            field_payload["value"] = resolved_value.value
+        extracted_fields.append(field_payload)
 
     # Get corrections
-    corrections = get_corrections_for_document(doc_id)
+    corrections = [
+        _sanitize_correction(correction) for correction in get_corrections_for_document(doc_id)
+    ]
 
     # Build per-field correction map (latest correction per field)
     latest_corrections: dict[str, dict] = {}
@@ -204,10 +232,57 @@ def _validate_field_name(field_name: str) -> None:
         )
 
 
+def _sanitize_correction(correction: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(correction)
+    if sanitized.get("field_name") == MetadataFieldKey.ACCOUNT_IDENTIFIER.value:
+        sanitized["original_value"] = mask_account_identifier(sanitized.get("original_value"))
+        sanitized["corrected_value"] = mask_account_identifier(sanitized.get("corrected_value"))
+        sanitized["source_region"] = None
+    return sanitized
+
+
 @router.post("/{doc_id}/correct")
-async def correct_field(doc_id: int, body: CorrectFieldRequest) -> dict[str, Any]:
+async def correct_field(doc_id: int, body: CorrectFieldRequest, request: Request) -> dict[str, Any]:
     """Submit a field correction."""
     _validate_field_name(body.field_name)
+    if body.field_name == MetadataFieldKey.ACCOUNT_IDENTIFIER.value:
+        if body.identifier_class is None:
+            raise HTTPException(
+                status_code=422,
+                detail="identifier_class is required for Account Identifier corrections",
+            )
+        projection = govern_account_identifier(body.corrected_value, body.identifier_class, 1.0)
+        client = make_paperless_client(request)
+        try:
+            schema = await PaperlessMetadataResolver(client).resolve(
+                (MetadataFieldKey.ACCOUNT_IDENTIFIER,)
+            )
+            update, projection = build_account_identifier_update(
+                body.corrected_value,
+                body.identifier_class,
+                1.0,
+                schema,
+            )
+            await client.update_custom_fields(doc_id, [update])
+        except (MetadataSchemaError, MetadataValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.error("Account Identifier write-through failed for doc %d", doc_id)
+            raise HTTPException(
+                status_code=502,
+                detail="Failed to write Account Identifier to Paperless",
+            ) from exc
+        correction = create_extraction_correction(
+            document_id=doc_id,
+            field_name=body.field_name,
+            original_value=mask_account_identifier(body.original_value, body.identifier_class),
+            corrected_value=projection.display_value,
+            confidence=100,
+            correction_type="corrected",
+            notes=None,
+        )
+        return {"correction": correction, "written_to_paperless": True}
+
     correction = create_extraction_correction(
         document_id=doc_id,
         field_name=body.field_name,
@@ -225,6 +300,11 @@ async def correct_field(doc_id: int, body: CorrectFieldRequest) -> dict[str, Any
 async def confirm_field(doc_id: int, body: ConfirmFieldRequest) -> dict[str, Any]:
     """Confirm a field extraction is correct (positive training example)."""
     _validate_field_name(body.field_name)
+    if body.field_name == MetadataFieldKey.ACCOUNT_IDENTIFIER.value:
+        raise HTTPException(
+            status_code=422,
+            detail="Use the classified Account Identifier correction endpoint",
+        )
     correction = create_extraction_correction(
         document_id=doc_id,
         field_name=body.field_name,
@@ -276,6 +356,8 @@ async def writeback_to_paperless(doc_id: int, request: Request) -> dict[str, Any
         key = _API_FIELD_KEYS.get(di_field)
         if key is None:
             missing_fields.append(di_field)
+            continue
+        if key is MetadataFieldKey.ACCOUNT_IDENTIFIER:
             continue
         try:
             updates.append(build_metadata_update(key, value, schema))

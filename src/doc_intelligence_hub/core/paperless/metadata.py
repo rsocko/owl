@@ -83,6 +83,27 @@ class MetadataCreatePolicy(str, Enum):
     RENAME_FIRST_ALIAS = "rename_first_alias"
 
 
+class AccountIdentifierClass(str, Enum):
+    PROVIDER_ACCOUNT = "provider_account"
+    MEMBER = "member"
+    POLICY = "policy"
+    BANK_ACCOUNT = "bank_account"
+    PAYMENT_CARD = "payment_card"
+    CLAIM = "claim"
+    INVOICE = "invoice"
+    AMBIGUOUS = "ambiguous"
+
+
+@dataclass(frozen=True)
+class AccountIdentifierProjection:
+    identifier_class: AccountIdentifierClass
+    paperless_value: str | None
+    display_value: str | None
+    confidence: float
+    requires_review: bool
+    reason: str | None = None
+
+
 @dataclass(frozen=True)
 class MetadataFieldSpec:
     key: MetadataFieldKey
@@ -141,7 +162,7 @@ _REGISTRY_ENTRIES = (
         "Account Identifier",
         PaperlessFieldType.TEXT,
         MetadataNormalization.TEXT,
-        aliases=("di_account_id",),
+        aliases=("di_account_id", "account_identifier"),
         sensitivity=MetadataSensitivity.FINANCIAL,
         projection_policy=_DURABLE,
         create_policy=_CREATE,
@@ -866,6 +887,14 @@ def build_metadata_update(
     resolved = schema.field(key)
     normalized = _normalize_value(resolved.spec, value)
     _validate_write_value(resolved.spec, normalized)
+    return _build_normalized_update(resolved, normalized, schema)
+
+
+def _build_normalized_update(
+    resolved: ResolvedMetadataField,
+    normalized: Any,
+    schema: ResolvedMetadataSchema,
+) -> dict[str, Any]:
     field_id = schema.write_field_id(resolved.spec.key)
     if (
         resolved.spec.normalization is MetadataNormalization.SELECT
@@ -876,6 +905,95 @@ def build_metadata_update(
     elif isinstance(normalized, Decimal):
         normalized = float(normalized)
     return {"field": field_id, "value": normalized}
+
+
+def mask_account_identifier(
+    value: Any, identifier_class: AccountIdentifierClass | str | None = None
+) -> str | None:
+    """Return the only account-identifier representation allowed outside Paperless."""
+    if value is None:
+        return None
+    normalized = re.sub(r"\s+", "", str(value).strip())
+    if not normalized:
+        return None
+    suffix_match = re.search(r"([A-Za-z0-9]{2,4})$", normalized)
+    if suffix_match is None:
+        return None
+    suffix = suffix_match.group(1)
+    try:
+        classification = AccountIdentifierClass(identifier_class) if identifier_class else None
+    except ValueError:
+        classification = None
+    prefix = {
+        AccountIdentifierClass.MEMBER: "member ",
+        AccountIdentifierClass.POLICY: "policy ",
+        AccountIdentifierClass.BANK_ACCOUNT: "bank account ",
+        AccountIdentifierClass.PAYMENT_CARD: "card ",
+    }.get(classification, "")
+    return f"{prefix}ending {suffix}"
+
+
+def govern_account_identifier(
+    value: Any,
+    identifier_class: AccountIdentifierClass | str,
+    confidence: float,
+) -> AccountIdentifierProjection:
+    """Apply the registry's Paperless storage and external-display policy."""
+    classification = AccountIdentifierClass(identifier_class)
+    display_value = mask_account_identifier(value, classification)
+    if classification in {
+        AccountIdentifierClass.CLAIM,
+        AccountIdentifierClass.INVOICE,
+        AccountIdentifierClass.AMBIGUOUS,
+    }:
+        return AccountIdentifierProjection(
+            classification,
+            None,
+            None,
+            confidence,
+            classification is AccountIdentifierClass.AMBIGUOUS,
+            "Dedicated claim/invoice field"
+            if classification is not AccountIdentifierClass.AMBIGUOUS
+            else "Ambiguous identifier label",
+        )
+    if confidence < 0.95:
+        return AccountIdentifierProjection(
+            classification,
+            None,
+            display_value,
+            confidence,
+            True,
+            "Identifier confidence is below the automatic projection threshold",
+        )
+    if classification in {
+        AccountIdentifierClass.BANK_ACCOUNT,
+        AccountIdentifierClass.PAYMENT_CARD,
+    }:
+        paperless_value = display_value
+    else:
+        paperless_value = str(value).strip()
+    return AccountIdentifierProjection(
+        classification,
+        paperless_value,
+        display_value,
+        confidence,
+        False,
+    )
+
+
+def build_account_identifier_update(
+    value: Any,
+    identifier_class: AccountIdentifierClass | str,
+    confidence: float,
+    schema: ResolvedMetadataSchema,
+) -> tuple[dict[str, Any], AccountIdentifierProjection]:
+    """Build a governed canonical Account Identifier update."""
+    projection = govern_account_identifier(value, identifier_class, confidence)
+    if projection.paperless_value is None or projection.requires_review:
+        raise MetadataValueError(projection.reason or "Account Identifier requires review")
+    resolved = schema.field(MetadataFieldKey.ACCOUNT_IDENTIFIER)
+    normalized = _normalize_value(resolved.spec, projection.paperless_value)
+    return _build_normalized_update(resolved, normalized, schema), projection
 
 
 def _validate_write_value(spec: MetadataFieldSpec, value: Any) -> None:
@@ -890,6 +1008,8 @@ def _validate_write_value(spec: MetadataFieldSpec, value: Any) -> None:
 
 
 __all__ = [
+    "AccountIdentifierClass",
+    "AccountIdentifierProjection",
     "MetadataConflict",
     "MetadataCreatePolicy",
     "MetadataDiagnostic",
@@ -909,7 +1029,10 @@ __all__ = [
     "ResolvedMetadataSchema",
     "ResolvedMetadataValue",
     "build_metadata_update",
+    "build_account_identifier_update",
+    "govern_account_identifier",
     "get_metadata_field_spec",
+    "mask_account_identifier",
     "resolve_metadata_schema",
     "resolve_metadata_value",
 ]

@@ -146,6 +146,32 @@ async def test_inventory_is_read_only_and_stdout_summary_is_redacted(tmp_path: P
 
 
 @pytest.mark.asyncio
+async def test_account_identifier_audit_values_are_masked(tmp_path: Path):
+    definitions = _definitions()
+    account_spec = PAPERLESS_METADATA_REGISTRY[MetadataFieldKey.ACCOUNT_IDENTIFIER]
+    alias_id = next(item["id"] for item in definitions if item["name"] == account_spec.aliases[0])
+    secret = "SENSITIVE123456"
+    client = FakeClient(
+        definitions,
+        [{"id": 7002, "custom_fields": [{"field": alias_id, "value": secret}]}],
+    )
+    protected = tmp_path / "protected.json"
+
+    await MetadataMigrationService(client).inventory(batch_size=1, protected_output=protected)
+
+    serialized = protected.read_text(encoding="utf-8")
+    records = json.loads(serialized)["records"]
+    account_record = next(
+        record
+        for record in records
+        if record["stable_key"] == MetadataFieldKey.ACCOUNT_IDENTIFIER.value
+    )
+    assert account_record["before_value"] == "ending 3456"
+    assert account_record["after_value"] == "ending 3456"
+    assert secret not in serialized
+
+
+@pytest.mark.asyncio
 async def test_backfill_is_dry_run_by_default_and_apply_is_canonical_only(tmp_path: Path):
     definitions = _definitions()
     canonical_id, alias_id = _provider_ids(definitions)

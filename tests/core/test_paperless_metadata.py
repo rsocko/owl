@@ -9,12 +9,14 @@ import pytest
 
 from doc_intelligence_hub.core.paperless import (
     PAPERLESS_METADATA_REGISTRY,
+    AccountIdentifierClass,
     MetadataCreatePolicy,
     MetadataDiagnosticCode,
     MetadataFieldKey,
     MetadataSchemaError,
     MetadataValueError,
     PaperlessMetadataResolver,
+    build_account_identifier_update,
     build_metadata_update,
     get_metadata_field_spec,
     resolve_metadata_schema,
@@ -119,6 +121,36 @@ def test_blank_canonical_falls_back_to_ordered_alias() -> None:
 
     assert result.value == "ending 4321"
     assert result.source_id == 21
+
+
+def test_account_identifier_reads_both_legacy_aliases_in_order() -> None:
+    schema = resolve_metadata_schema(
+        [
+            {
+                "id": 22,
+                "name": "di_account_id",
+                "data_type": "string",
+            },
+            {
+                "id": 23,
+                "name": "account_identifier",
+                "data_type": "string",
+            },
+        ],
+        (MetadataFieldKey.ACCOUNT_IDENTIFIER,),
+    )
+    result = resolve_metadata_value(
+        MetadataFieldKey.ACCOUNT_IDENTIFIER,
+        [
+            {"field": 22, "value": "ending 4321"},
+            {"field": 23, "value": "ending 9876"},
+        ],
+        schema,
+    )
+
+    assert result.value == "ending 4321"
+    assert result.conflict is not None
+    assert result.conflict.conflicting_sources == (("account_identifier", "ending 9876"),)
 
 
 def test_equal_normalized_values_do_not_conflict() -> None:
@@ -307,6 +339,23 @@ def test_build_update_rejects_unmasked_account_identifier() -> None:
             "SAMPLE123456789",
             schema,
         )
+
+
+def test_governed_account_update_masks_financial_credentials() -> None:
+    schema = resolve_metadata_schema(
+        [_definition(94, MetadataFieldKey.ACCOUNT_IDENTIFIER)],
+        (MetadataFieldKey.ACCOUNT_IDENTIFIER,),
+    )
+
+    update, projection = build_account_identifier_update(
+        "123456789",
+        AccountIdentifierClass.BANK_ACCOUNT,
+        0.99,
+        schema,
+    )
+
+    assert update == {"field": 94, "value": "bank account ending 6789"}
+    assert projection.display_value == "bank account ending 6789"
 
 
 def test_normalized_document_type_remains_inventory_gated() -> None:

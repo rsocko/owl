@@ -17,13 +17,15 @@ from pydantic import BaseModel, Field
 from doc_intelligence_hub.api.routers import make_paperless_client
 from doc_intelligence_hub.core.extractors.account_numbers import (
     ACCOUNT_PATTERNS,
+    AccountExtractionDecision,
+    evaluate_account_identifiers,
     extract_account_numbers,
     extract_from_document,
-    pick_best_account_identifier,
     write_account_to_paperless,
 )
 from doc_intelligence_hub.modules.triage.database import (
     create_extraction_correction,
+    create_queue_item,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,7 +69,13 @@ async def list_patterns() -> dict[str, Any]:
     """List supported account number extraction patterns."""
     return {
         "patterns": [
-            {"name": name, "pattern": pattern.pattern} for name, pattern in ACCOUNT_PATTERNS
+            {
+                "name": name,
+                "identifier_class": identifier_class.value,
+                "confidence": confidence,
+                "pattern": pattern.pattern,
+            }
+            for name, identifier_class, confidence, pattern in ACCOUNT_PATTERNS
         ],
         "count": len(ACCOUNT_PATTERNS),
     }
@@ -75,14 +83,45 @@ async def list_patterns() -> dict[str, Any]:
 
 @router.post("/account-numbers/extract-text")
 async def extract_from_text(body: ExtractTextRequest) -> dict[str, Any]:
-    """Extract account numbers from raw text (no Paperless interaction)."""
+    """Classify raw text without returning exact candidates."""
     matches = extract_account_numbers(body.text)
-    best = pick_best_account_identifier(matches)
+    return _serialize_decision(evaluate_account_identifiers(matches))
+
+
+def _serialize_decision(decision: AccountExtractionDecision) -> dict[str, Any]:
+    projection = decision.projection
     return {
-        "matches": matches,
-        "best_identifier": best,
-        "count": len(matches),
+        "candidate_count": decision.candidate_count,
+        "identifier_class": projection.identifier_class.value if projection else None,
+        "confidence": projection.confidence if projection else None,
+        "account_identifier_display": projection.display_value if projection else None,
+        "account_identifier_displays": list(decision.display_values),
+        "requires_review": decision.requires_review,
+        "reason": decision.reason,
     }
+
+
+def _queue_account_review(document_id: int, decision: AccountExtractionDecision) -> None:
+    create_queue_item(
+        item_type="metadata_quality_review",
+        source="account_identifier_extraction",
+        target_type="document",
+        target_id=str(document_id),
+        reason=decision.reason or "Account Identifier requires review",
+        metadata={
+            "field_name": "account_identifier",
+            "candidate_count": decision.candidate_count,
+            "identifier_class": (
+                decision.projection.identifier_class.value if decision.projection else None
+            ),
+            "confidence": decision.projection.confidence if decision.projection else None,
+            "account_identifier_display": (
+                decision.projection.display_value if decision.projection else None
+            ),
+            "account_identifier_displays": list(decision.display_values),
+        },
+        priority=70,
+    )
 
 
 @router.post("/account-numbers/extract")
@@ -94,26 +133,32 @@ async def extract_single(body: ExtractRequest, request: Request) -> dict[str, An
     if not result.success:
         raise HTTPException(status_code=422, detail=result.error or "Extraction failed")
 
-    best = pick_best_account_identifier(result.pattern_matches)
+    decision = evaluate_account_identifiers(result.pattern_matches)
     written = False
 
-    if body.write_to_paperless and best:
-        written = await write_account_to_paperless(body.document_id, best, client)
+    if body.write_to_paperless and decision.requires_review:
+        _queue_account_review(body.document_id, decision)
+    elif body.write_to_paperless and decision.candidate and decision.projection:
+        written = await write_account_to_paperless(
+            body.document_id,
+            decision.candidate["value"],
+            client,
+            identifier_class=decision.projection.identifier_class,
+            confidence=decision.projection.confidence,
+        )
         if written:
-            # Record as extraction correction
             create_extraction_correction(
                 document_id=body.document_id,
                 field_name="account_identifier",
-                corrected_value=best,
+                corrected_value=decision.projection.display_value,
+                confidence=decision.projection.confidence * 100,
                 correction_type="added",
-                notes="Auto-extracted by account number pipeline",
+                notes=f"Auto-extracted class={decision.projection.identifier_class.value}",
             )
 
     return {
         "document_id": body.document_id,
-        "matches": result.pattern_matches,
-        "best_identifier": best,
-        "account_numbers": result.account_numbers,
+        **_serialize_decision(decision),
         "written_to_paperless": written,
         "text_length": result.raw_text_length,
     }
@@ -160,30 +205,42 @@ async def backfill(body: BackfillRequest, request: Request) -> dict[str, Any]:
     for doc_id in doc_ids[: body.limit]:
         try:
             result = await extract_from_document(doc_id, client)
-            best = pick_best_account_identifier(result.pattern_matches) if result.success else None
+            decision = (
+                evaluate_account_identifiers(result.pattern_matches)
+                if result.success
+                else AccountExtractionDecision(None, None, 0, False, result.error)
+            )
 
             written = False
-            if body.write_to_paperless and best:
-                written = await write_account_to_paperless(doc_id, best, client)
+            if body.write_to_paperless and decision.requires_review:
+                _queue_account_review(doc_id, decision)
+            elif body.write_to_paperless and decision.candidate and decision.projection:
+                written = await write_account_to_paperless(
+                    doc_id,
+                    decision.candidate["value"],
+                    client,
+                    identifier_class=decision.projection.identifier_class,
+                    confidence=decision.projection.confidence,
+                )
                 if written:
                     written_count += 1
                     create_extraction_correction(
                         document_id=doc_id,
                         field_name="account_identifier",
-                        corrected_value=best,
+                        corrected_value=decision.projection.display_value,
+                        confidence=decision.projection.confidence * 100,
                         correction_type="added",
-                        notes="Backfill by account number pipeline",
+                        notes=f"Backfill class={decision.projection.identifier_class.value}",
                     )
 
-            if result.success and result.account_numbers:
+            if result.success and decision.candidate_count:
                 extracted_count += 1
 
             results.append(
                 {
                     "document_id": doc_id,
                     "success": result.success,
-                    "account_numbers": result.account_numbers if result.success else [],
-                    "best_identifier": best,
+                    **_serialize_decision(decision),
                     "written": written,
                     "error": result.error,
                 }
@@ -194,8 +251,13 @@ async def backfill(body: BackfillRequest, request: Request) -> dict[str, Any]:
                 {
                     "document_id": doc_id,
                     "success": False,
-                    "account_numbers": [],
-                    "best_identifier": None,
+                    "candidate_count": 0,
+                    "identifier_class": None,
+                    "confidence": None,
+                    "account_identifier_display": None,
+                    "account_identifier_displays": [],
+                    "requires_review": False,
+                    "reason": "Extraction failed",
                     "written": False,
                     "error": "Extraction failed for this document",
                 }
