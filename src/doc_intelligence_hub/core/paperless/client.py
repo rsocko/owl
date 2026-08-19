@@ -617,13 +617,68 @@ class PaperlessClient:
 
     async def list_saved_views(self) -> list[dict]:
         """List all saved views."""
-        client = self._get_client()
-        resp = await client.get("/api/saved_views/")
+        results: list[dict] = []
+        page = 1
+        while True:
+            resp = await self._request(
+                "GET",
+                "/api/saved_views/",
+                params={"page": page, "page_size": 100},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, dict) or "results" not in data:
+                return data
+            results.extend(data["results"])
+            if not data.get("next"):
+                return results
+            page += 1
+
+    async def get_saved_view(self, view_id: int) -> dict:
+        """Fetch one saved view."""
+        resp = await self._request("GET", f"/api/saved_views/{view_id}/")
         resp.raise_for_status()
-        data = resp.json()
-        if isinstance(data, dict) and "results" in data:
-            return data["results"]
-        return data
+        return resp.json()
+
+    async def create_saved_view(self, definition: dict) -> dict:
+        """Create a saved view without retrying an ambiguous POST response."""
+        resp = await self._request(
+            "POST",
+            "/api/saved_views/",
+            json=definition,
+            max_attempts=1,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def update_saved_view(self, view_id: int, definition: dict) -> dict:
+        """Update a saved view and return the server representation."""
+        resp = await self._request(
+            "PATCH",
+            f"/api/saved_views/{view_id}/",
+            json=definition,
+            max_attempts=1,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def count_documents(self, params: dict[str, Any]) -> int:
+        """Count documents matching server-side filters without retaining documents."""
+        resp = await self._request(
+            "GET",
+            "/api/documents/",
+            params={**params, "page": 1, "page_size": 1},
+        )
+        resp.raise_for_status()
+        return int(resp.json().get("count", 0))
+
+    async def list_documents_filtered(self, params: dict[str, Any]) -> list[dict]:
+        """List documents using an already validated set of server-side filters."""
+        return await self._paginate(
+            self._get_client(),
+            "/api/documents/",
+            {**params, "page_size": 100},
+        )
 
     # ------------------------------------------------------------------
     # Metadata helpers (fetch all correspondents + tags for enrichment)

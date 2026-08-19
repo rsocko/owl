@@ -27,6 +27,12 @@ def cli():
     "--saved-view", type=int, default=None, help="Use a Paperless saved view ID as the source"
 )
 @click.option(
+    "--saved-view-key",
+    type=str,
+    default=None,
+    help="Use an OWL-managed quality view stable key as the source",
+)
+@click.option(
     "--created-after", type=str, default=None, help="Only docs created after date (YYYY-MM-DD)"
 )
 @click.option(
@@ -47,6 +53,7 @@ def run(
     document_id,
     tag,
     saved_view,
+    saved_view_key,
     created_after,
     created_before,
     added_after,
@@ -69,13 +76,45 @@ def run(
     """
     from .pipeline import run_pipeline
 
-    asyncio.run(
-        run_pipeline(
+    if saved_view is not None and saved_view_key is not None:
+        raise click.UsageError("Use only one of --saved-view or --saved-view-key")
+
+    async def _run():
+        resolved_view = saved_view
+        if saved_view_key is not None:
+            from doc_intelligence_hub.core.paperless import PaperlessClient
+            from doc_intelligence_hub.modules.paperless_quality.registry import (
+                QUALITY_VIEW_REGISTRY,
+                QualityViewKey,
+            )
+
+            from .config import settings
+
+            try:
+                definition = QUALITY_VIEW_REGISTRY[QualityViewKey(saved_view_key)]
+            except (KeyError, ValueError) as exc:
+                raise click.UsageError("Unknown OWL quality saved-view key") from exc
+            async with PaperlessClient(
+                base_url=settings.paperless_url,
+                token=settings.paperless_api_token,
+            ) as client:
+                matches = [
+                    view
+                    for view in await client.list_saved_views()
+                    if view.get("name") == definition.name
+                ]
+            if len(matches) != 1:
+                raise click.ClickException(
+                    "Managed saved view is missing or duplicated; run paperless-quality plan."
+                )
+            resolved_view = int(matches[0]["id"])
+
+        await run_pipeline(
             force=force,
             limit=limit,
             document_id=document_id,
             tag_override=tag,
-            saved_view_id=saved_view,
+            saved_view_id=resolved_view,
             created_after=created_after,
             created_before=created_before,
             added_after=added_after,
@@ -84,7 +123,8 @@ def run(
             document_type=document_type,
             dry_run=dry_run,
         )
-    )
+
+    asyncio.run(_run())
 
 
 @cli.command()
@@ -124,11 +164,17 @@ def views():
         table = Table(show_header=True, title="Paperless Saved Views")
         table.add_column("ID", style="bold")
         table.add_column("Name")
+        table.add_column("OWL key")
         table.add_column("# Rules")
+        from doc_intelligence_hub.modules.paperless_quality.registry import (
+            quality_view_key_from_name,
+        )
+
         for view in saved_views:
             table.add_row(
                 str(view["id"]),
                 view.get("name", ""),
+                quality_view_key_from_name(view.get("name", "")) or "",
                 str(len(view.get("filter_rules", []))),
             )
         console.print(table)
