@@ -31,9 +31,6 @@ class MigrationAction(str, Enum):
     NONE = "none"
     CREATE_FIELD = "create_field"
     BACKFILL_VALUE = "backfill_value"
-    CREATE_SAVED_VIEW = "create_saved_view"
-    UPDATE_SAVED_VIEW = "update_saved_view"
-    SET_STORAGE_PATH = "set_storage_path"
     REVIEW = "review"
 
 

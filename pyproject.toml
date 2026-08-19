@@ -56,7 +56,6 @@ doc-hub-serve = "doc_intelligence_hub.api.app:main"
 eob-match = "doc_intelligence_hub.modules.eob_matching.cli:cli"
 paq = "doc_intelligence_hub.modules.action_queue.cli:cli"
 paperless-metadata = "doc_intelligence_hub.modules.metadata_migration.cli:cli"
-paperless-quality = "doc_intelligence_hub.modules.paperless_quality.cli:cli"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
