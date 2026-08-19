@@ -4,7 +4,17 @@ import httpx
 import pytest
 
 from doc_intelligence_hub.core.paperless import PaperlessClient, load_fixture
-from doc_intelligence_hub.core.resilience import PaperlessError
+from doc_intelligence_hub.core.resilience import (
+    PaperlessError,
+    reset_circuit_breakers,
+)
+
+
+@pytest.fixture(autouse=True)
+def isolate_circuit_breakers():
+    reset_circuit_breakers()
+    yield
+    reset_circuit_breakers()
 
 
 def _mock_transport():
