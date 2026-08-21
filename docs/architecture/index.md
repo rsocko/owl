@@ -201,6 +201,31 @@ A dedicated `mc_connector` router exposes flat-array endpoints that Mission Cont
 
 This allows Mission Control to aggregate OWL data alongside other homelab services without duplicating business logic.
 
+### Durable Event Boundary
+
+OWL may publish workflow-change notifications through a provider-neutral durable event boundary. SQLite remains authoritative for OWL state, and the existing REST connector remains the compatibility and recovery path. Events are hints that committed state changed; they do not replace OWL queries or transfer ownership of OWL domain state to a broker.
+
+NATS JetStream is the preferred optional internal transport when the homelab deployment enables it. NATS subjects, stream names, and client types belong in a transport adapter rather than in OWL's domain contract. A deployment without NATS continues to operate through SQLite and REST polling.
+
+The boundary has the following invariants:
+
+- **Stable identity and bounded schemas:** Each committed domain transition receives one stable event ID that is reused across publish retries. Envelopes are explicitly versioned and size-bounded, with an allowlisted set of fields such as `event_id`, `event_type`, `schema_version`, `occurred_at`, `source`, aggregate identity, and a minimal payload. Consumers must reject unsupported versions and malformed or oversized envelopes.
+- **Commit before publication:** Domain state is committed to SQLite before an event is eligible for delivery. The implementation must use a local transactional outbox where the domain database permits it, or document and test explicit crash-recovery semantics that reconstruct unpublished events from authoritative state. A broker publish acknowledgement must never be the only record that a transition occurred.
+- **Retry and recovery:** Publishers retry transient failures with bounded exponential backoff and jitter, retain enough local state to resume after restart, and surface exhausted or permanently invalid deliveries for operator action. Broker unavailability cannot roll back or hide committed OWL state.
+- **Commit before acknowledgement:** Consumers validate the destination, envelope, and schema; apply idempotent processing keyed by event ID; commit their local result; and only then acknowledge the broker message. Failures remain unacknowledged or are negatively acknowledged for redelivery.
+- **Privacy and destination safety:** Event payloads are constructed from an explicit allowlist and exclude document bodies, OCR text, credentials, tokens, and protected configuration. Destinations and subject prefixes are configuration-owned and validated against approved schemes, hosts, and namespaces; event data cannot select an arbitrary destination.
+- **Operational gates:** Publishing remains feature-gated until connectivity, authorization, stream retention, publish acknowledgement, replay, duplicate handling, and consumer-lag health checks pass. Rollout proceeds through disabled, shadow/canary, and enabled stages with REST polling retained for reconciliation and rollback.
+
+Tests cover crash recovery around the SQLite commit and publish boundary, publisher retry/backoff, broker outage, replay after downtime, duplicate delivery, consumer failure before and after its local commit, unsupported envelope versions, oversized or privacy-sensitive payloads, and invalid destinations.
+
+Companion can change RyMessage's deployment topology and how RyMessage reaches shared infrastructure, but Companion does not own OWL events, define their schema, or become an OWL dependency. OWL integrates only through its provider-neutral event boundary and continues to function independently.
+
+Related tracking:
+
+- [homelab-config#378](https://github.com/rsocko/homelab-config/issues/378) — optional NATS JetStream infrastructure
+- [mission-control#524](https://github.com/rsocko/mission-control/issues/524) — downstream durable consumers
+- [ideation#977](https://github.com/rsocko/ideation/issues/977) — superseded NATS-specific OWL proposal
+
 ### Module Routers
 
 All routers share the Paperless client instance but maintain their own database connections and session factories.
