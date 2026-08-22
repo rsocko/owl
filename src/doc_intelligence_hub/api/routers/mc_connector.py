@@ -85,9 +85,7 @@ async def mc_list_actions(
                 "correspondent": a.correspondent,
                 "summary": a.summary or "",
                 "recommended_cta": _deserialize_recommended_cta(a.recommended_cta),
-                "extracted_data": a.extracted_data
-                if isinstance(a.extracted_data, dict)
-                else None,
+                "extracted_data": a.extracted_data if isinstance(a.extracted_data, dict) else None,
                 "status": a.status or "pending",
                 "created_at": a.created_at.isoformat() if a.created_at else None,
                 "document_url": f"{base_url}/documents/{a.document_id}/details"
