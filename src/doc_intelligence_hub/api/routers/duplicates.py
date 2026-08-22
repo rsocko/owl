@@ -12,6 +12,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -41,6 +42,8 @@ from doc_intelligence_hub.modules.triage.relationships import (
     get_document_relationship,
     set_projection_result,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/duplicates", tags=["duplicates"])
 
@@ -145,8 +148,12 @@ async def _project_automatic_relationships(result: dict[str, Any]) -> None:
         return
     try:
         projection = await project_relationships_to_paperless(document_ids)
-    except Exception as exc:
-        projection = {"synced": False, "error": str(exc)}
+    except Exception:
+        logger.exception("Failed to project automatic relationships to Paperless")
+        projection = {
+            "synced": False,
+            "error": "Failed to sync relationship projection to Paperless",
+        }
     for relationship in relationships:
         set_projection_result(
             relationship["id"],
@@ -234,11 +241,12 @@ async def resolve_duplicate(pair_id: str, body: ResolveRequest) -> dict[str, Any
                 projection = await project_relationships_to_paperless(
                     {body.primary_doc_id, target_document_id}
                 )
-            except Exception as exc:
+            except Exception:
+                logger.exception("Failed to project related-document relationship to Paperless")
                 projection = {
                     "synced": False,
                     "documents": [body.primary_doc_id, target_document_id],
-                    "error": str(exc),
+                    "error": "Failed to sync relationship projection to Paperless",
                 }
             relationship = (
                 set_projection_result(

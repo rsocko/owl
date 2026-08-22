@@ -106,7 +106,7 @@ def test_projection_failure_is_reported_without_losing_relationship(client):
     assert response.status_code == 200
     body = response.json()
     assert body["relationship"]["paperless_synced"] is False
-    assert body["projection"]["error"] == "Paperless unavailable"
+    assert body["projection"]["error"] == "Failed to sync relationship projection to Paperless"
     assert client.get("/api/relationships/documents/1").json()["count"] == 1
 
 

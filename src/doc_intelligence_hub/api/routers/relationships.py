@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -23,6 +24,7 @@ from doc_intelligence_hub.modules.triage.relationships import (
 )
 
 router = APIRouter(prefix="/api/relationships", tags=["document-relationships"])
+logger = logging.getLogger(__name__)
 
 
 class RelationshipCreateRequest(BaseModel):
@@ -53,14 +55,15 @@ async def _project_and_record(relationship: dict[str, Any]) -> dict[str, Any]:
                 relationship["target_document_id"],
             }
         )
-    except Exception as exc:
+    except Exception:
+        logger.exception("Failed to project document relationship to Paperless")
         projection = {
             "synced": False,
             "documents": [
                 relationship["source_document_id"],
                 relationship["target_document_id"],
             ],
-            "error": str(exc),
+            "error": "Failed to sync relationship projection to Paperless",
         }
     updated = set_projection_result(
         relationship["id"],
