@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # ------------------------------------------------------------------
 # Enums
@@ -141,6 +141,7 @@ class RuleExecutionResult(BaseModel):
     rule_id: str
     success: bool = True
     error: str | None = None
+    should_route: bool = True
 
     # Insight data (populated on success)
     insight_type: InsightType | None = None
@@ -228,8 +229,15 @@ class RuleListResponse(BaseModel):
 class ExecuteRequest(BaseModel):
     rule_ids: list[str] | None = None  # None = all matching rules
     trigger_type: TriggerType = TriggerType.MANUAL
-    document_id: int | None = None  # For document_added triggers
+    document_id: int | None = Field(default=None, gt=0)  # For document_added triggers
     dry_run: bool = False
+
+    @field_validator("document_id", mode="before")
+    @classmethod
+    def reject_boolean_document_id(cls, value: Any) -> Any:
+        if isinstance(value, bool):
+            raise ValueError("document_id must be a positive integer")
+        return value
 
 
 class ExecuteResponse(BaseModel):

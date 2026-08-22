@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from doc_intelligence_hub.core.paperless import PaperlessClient
+from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
 from doc_intelligence_hub.modules.analysis.models import ContextData, RuleConfig
 
 logger = logging.getLogger(__name__)
@@ -100,15 +102,24 @@ async def build_batch_context(rule: RuleConfig) -> list[ContextData]:
 
 async def _fetch_document(document_id: int) -> dict[str, Any] | None:
     """Fetch a document from Paperless via the hub's client."""
+    client = PaperlessClient(
+        base_url=action_queue_settings.paperless_url,
+        token=action_queue_settings.paperless_api_token,
+    )
     try:
-        from doc_intelligence_hub.core.paperless.client import get_client
-
-        client = get_client()
-        if client:
-            doc = await client.get_document(document_id)
-            return doc
+        doc = await client.get_document(document_id)
+        tag_ids = doc.get("tags", [])
+        if tag_ids and all(isinstance(tag_id, int) for tag_id in tag_ids):
+            try:
+                tag_names = await client.resolve_tag_names(tag_ids)
+                doc["tag_names"] = [tag_names[tag_id] for tag_id in tag_ids if tag_id in tag_names]
+            except Exception as exc:
+                logger.warning("Could not resolve tags for document %d: %s", document_id, exc)
+        return doc
     except Exception as exc:
         logger.warning("Could not fetch document %d: %s", document_id, exc)
+    finally:
+        await client.aclose()
     return None
 
 

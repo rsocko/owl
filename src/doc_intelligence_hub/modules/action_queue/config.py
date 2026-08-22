@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     write_to_paperless: bool = Field(default=True)
     remove_source_tag_on_resolve: bool = Field(default=True)
     rate_limit_delay: float = Field(default=0.25)
+    fast_path_max_pending: int = Field(default=100, ge=1)
+    fast_path_min_interval_seconds: float = Field(default=0.25, ge=0)
 
     # Timeouts
     llm_timeout_seconds: float = Field(default=60.0)

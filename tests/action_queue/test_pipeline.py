@@ -128,6 +128,65 @@ class TestPipelineErrorIsolation:
         assert stats["timed_out"] is False
 
     @pytest.mark.asyncio
+    async def test_repeated_non_force_run_skips_processed_document(self, db, monkeypatch):
+        docs = _make_docs(1)
+        analyze_calls = 0
+
+        async def fake_list_correspondents(self):
+            return []
+
+        async def fake_fetch_all_metadata(self, **kwargs):
+            return {}, {}, {}
+
+        async def fake_list_documents(self, **kwargs):
+            return docs
+
+        async def fake_get_document_content(self, document_id):
+            return "Invoice: your payment of $50.00 is due by the end of the month."
+
+        async def fake_health_check(self):
+            return False
+
+        def fake_analyze(self, document):
+            nonlocal analyze_calls
+            analyze_calls += 1
+            return VALID_EXTRACTION
+
+        monkeypatch.setattr(aq_settings, "write_to_paperless", False)
+        monkeypatch.setattr(
+            "doc_intelligence_hub.core.paperless.PaperlessClient.list_correspondents",
+            fake_list_correspondents,
+        )
+        monkeypatch.setattr(
+            "doc_intelligence_hub.core.paperless.PaperlessClient.fetch_all_metadata",
+            fake_fetch_all_metadata,
+        )
+        monkeypatch.setattr(
+            "doc_intelligence_hub.core.paperless.PaperlessClient.list_documents",
+            fake_list_documents,
+        )
+        monkeypatch.setattr(
+            "doc_intelligence_hub.core.paperless.PaperlessClient.get_document_content",
+            fake_get_document_content,
+        )
+        monkeypatch.setattr(
+            "doc_intelligence_hub.modules.action_queue.analyzer.OllamaAnalyzer.health_check",
+            fake_health_check,
+        )
+        monkeypatch.setattr(
+            "doc_intelligence_hub.modules.action_queue.fallback_analyzer.RuleBasedAnalyzer.analyze_document",
+            fake_analyze,
+        )
+
+        first = await Pipeline().run(force=False)
+        repeated = await Pipeline().run(force=False)
+
+        assert first["processed"] == 1
+        assert repeated["processed"] == 0
+        assert repeated["skipped"] == 1
+        assert analyze_calls == 1
+
+    @pytest.mark.asyncio
     async def test_no_action_classification_updates_paperless(self, db, monkeypatch):
         pipeline = Pipeline()
         no_action_extraction = {
