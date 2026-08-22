@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from doc_intelligence_hub.modules.analysis.context_builder import (
+    _fetch_document,
     build_batch_context,
     build_context,
 )
@@ -88,6 +89,31 @@ class TestBuildContext:
 
         ctx = await build_context(rule, document_id=1)
         assert ctx.extra.get("threshold") == 0.85
+
+    @pytest.mark.asyncio
+    @patch("doc_intelligence_hub.modules.analysis.context_builder.PaperlessClient")
+    async def test_fetch_document_resolves_tag_names(self, mock_client_class):
+        client = mock_client_class.return_value
+        client.get_document = AsyncMock(return_value={"id": 42, "tags": [1, 2]})
+        client.resolve_tag_names = AsyncMock(return_value={1: "Inbox", 2: "Bills"})
+        client.aclose = AsyncMock()
+
+        document = await _fetch_document(42)
+
+        assert document["tag_names"] == ["Inbox", "Bills"]
+        client.aclose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @patch("doc_intelligence_hub.modules.analysis.context_builder.PaperlessClient")
+    async def test_fetch_document_survives_tag_resolution_failure(self, mock_client_class):
+        client = mock_client_class.return_value
+        client.get_document = AsyncMock(return_value={"id": 42, "tags": [1]})
+        client.resolve_tag_names = AsyncMock(side_effect=RuntimeError("tag API unavailable"))
+        client.aclose = AsyncMock()
+
+        document = await _fetch_document(42)
+
+        assert document == {"id": 42, "tags": [1]}
 
 
 class TestBuildBatchContext:

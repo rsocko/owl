@@ -142,6 +142,16 @@ async def execute_scheduled_batch(trigger_type: TriggerType) -> dict[str, Any]:
                     result = await _execute_rule_with_context(rule, ctx)
                     if not result.success:
                         continue
+                    if not result.should_route:
+                        results.append(
+                            {
+                                "rule_id": rule.id,
+                                "success": True,
+                                "skipped": True,
+                                "reason": result.detail.get("fast_path_status", "not_routable"),
+                            }
+                        )
+                        continue
 
                     # Route the result
                     routing_outcome = route_result(rule, result)
@@ -192,6 +202,16 @@ async def _run_single_rule(
     """Execute a single rule and optionally route the result."""
     # Build context
     ctx = await build_context(rule, document_id=document_id)
+    ctx.extra["_execution_dry_run"] = dry_run
+
+    if not _matches_trigger_filter(rule, ctx.current_document):
+        return {
+            "rule_id": rule.id,
+            "success": True,
+            "skipped": True,
+            "reason": "trigger_filter_not_matched",
+            "dry_run": dry_run,
+        }
 
     # Execute
     result = await _execute_rule_with_context(rule, ctx)
@@ -207,6 +227,16 @@ async def _run_single_rule(
             "success": False,
             "error": result.error,
             "dry_run": dry_run,
+        }
+
+    if not result.should_route:
+        return {
+            "rule_id": rule.id,
+            "success": True,
+            "skipped": True,
+            "reason": result.detail.get("fast_path_status", "not_routable"),
+            "dry_run": dry_run,
+            "detail": result.detail,
         }
 
     if dry_run:
@@ -251,8 +281,43 @@ async def _execute_rule_with_context(rule: RuleConfig, ctx: Any) -> RuleExecutio
         instance = N8nWebhookRule(rule)
         return await instance.execute(ctx)
 
+    if analyzer == "builtin:action_queue_trigger":
+        from doc_intelligence_hub.modules.analysis.rules.action_queue_rule import (
+            ActionQueueTriggerRule,
+        )
+
+        instance = ActionQueueTriggerRule(rule)
+        return await instance.execute(ctx)
+
     return RuleExecutionResult(
         rule_id=rule.id,
         success=False,
         error=f"No rule implementation found for '{rule.id}' (analyzer: {analyzer})",
     )
+
+
+def _matches_trigger_filter(rule: RuleConfig, document: dict[str, Any] | None) -> bool:
+    trigger_filter = rule.trigger.filter
+    if trigger_filter is None:
+        return True
+    if document is None:
+        return False
+
+    if trigger_filter.tags:
+        raw_tags = document.get("tag_names", document.get("tags", [])) or []
+        tag_names = {
+            str(tag.get("name") if isinstance(tag, dict) else tag).casefold()
+            for tag in raw_tags
+            if not isinstance(tag, int)
+        }
+        if not {tag.casefold() for tag in trigger_filter.tags}.issubset(tag_names):
+            return False
+
+    if trigger_filter.correspondent:
+        raw_correspondent = document.get("correspondent_name", document.get("correspondent"))
+        if isinstance(raw_correspondent, dict):
+            raw_correspondent = raw_correspondent.get("name")
+        if str(raw_correspondent or "").casefold() != trigger_filter.correspondent.casefold():
+            return False
+
+    return True

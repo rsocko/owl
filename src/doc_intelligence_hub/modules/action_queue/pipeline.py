@@ -46,6 +46,8 @@ def _serialize_cta(cta: dict | str | None) -> str | None:
 # ---------------------------------------------------------------------------
 _progress: dict[str, Any] = {"current_step": "idle", "progress": None, "current_document": None}
 _progress_start: float | None = None
+_pipeline_run_lock = asyncio.Lock()
+_last_pipeline_start: float | None = None
 
 
 def get_pipeline_progress() -> dict[str, Any]:
@@ -919,20 +921,31 @@ async def run_pipeline(
     correspondent: str | None = None,
     document_type: str | None = None,
     dry_run: bool = False,
+    min_start_interval_seconds: float = 0,
 ) -> dict:
-    """Entry point for running the pipeline."""
-    pipeline = Pipeline()
-    return await pipeline.run(
-        force=force,
-        limit=limit,
-        document_id=document_id,
-        tag_override=tag_override,
-        saved_view_id=saved_view_id,
-        created_after=created_after,
-        created_before=created_before,
-        added_after=added_after,
-        added_before=added_before,
-        correspondent=correspondent,
-        document_type=document_type,
-        dry_run=dry_run,
-    )
+    """Entry point for serialized scheduled, manual, and fast-path runs."""
+    global _last_pipeline_start
+
+    async with _pipeline_run_lock:
+        if min_start_interval_seconds > 0 and _last_pipeline_start is not None:
+            elapsed = time.monotonic() - _last_pipeline_start
+            delay = min_start_interval_seconds - elapsed
+            if delay > 0:
+                await asyncio.sleep(delay)
+        _last_pipeline_start = time.monotonic()
+
+        pipeline = Pipeline()
+        return await pipeline.run(
+            force=force,
+            limit=limit,
+            document_id=document_id,
+            tag_override=tag_override,
+            saved_view_id=saved_view_id,
+            created_after=created_after,
+            created_before=created_before,
+            added_after=added_after,
+            added_before=added_before,
+            correspondent=correspondent,
+            document_type=document_type,
+            dry_run=dry_run,
+        )

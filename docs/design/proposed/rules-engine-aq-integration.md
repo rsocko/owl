@@ -2,7 +2,7 @@
 title: "Rules Engine → Action Queue Integration"
 sidebar_label: Rules Engine AQ Trigger
 sidebar_position: 10
-status: proposed
+status: implemented
 ---
 
 # Design: Rules Engine → Action Queue Integration
@@ -71,4 +71,6 @@ rules:
 
 ## Status
 
-**Proposed** — not yet scheduled for implementation. This document serves as the reference for future work.
+**Implemented** — the rule is available as `action-queue-trigger` and is disabled by default.
+Enable it after the `document_added` event producer is configured. Fast-path requests are bounded,
+deduplicated while pending, rate-limited, and serialized with scheduled Action Queue runs.

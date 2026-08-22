@@ -10,6 +10,26 @@
 #   n8n   — External webhook (multi-step workflows)
 
 rules:
+  - id: action-queue-trigger
+    name: "Immediate Action Queue Analysis"
+    description: "Analyze new Inbox documents without waiting for the next scheduled batch"
+    tier: basic
+    enabled: false
+    trigger:
+      type: document_added
+      filter:
+        tags: ["Inbox"]
+    context:
+      - current_document
+    analyzer: "builtin:action_queue_trigger"
+    params:
+      force: false
+      dry_run: false
+    routing:
+      default: informational
+    display:
+      card_type: summary
+
   # ── Tier 1: MVP Rules ──────────────────────────────────
 
   - id: monthly-spend-comparison
