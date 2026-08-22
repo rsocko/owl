@@ -37,6 +37,11 @@ class TestRuleRegistry:
         assert "missing-statement" in rule_ids
         assert "statement-received" in rule_ids
         assert "spend-spike" in rule_ids
+        assert "action-queue-trigger" in rule_ids
+
+        fast_path_rule = get_rule("action-queue-trigger")
+        assert fast_path_rule.enabled is False
+        assert fast_path_rule.analyzer == "builtin:action_queue_trigger"
 
     def test_get_rule_by_id(self):
         rule = get_rule("monthly-spend-comparison")

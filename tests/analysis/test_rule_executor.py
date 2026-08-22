@@ -15,10 +15,12 @@ from doc_intelligence_hub.modules.analysis.models import (
     RuleRouting,
     RuleTier,
     RuleTrigger,
+    TriggerFilter,
     TriggerType,
 )
 from doc_intelligence_hub.modules.analysis.rule_executor import (
     _execute_rule_with_context,
+    _matches_trigger_filter,
     execute_rule,
     execute_trigger,
 )
@@ -110,6 +112,33 @@ class TestExecuteRule:
         assert result["dry_run"] is True
         assert result["success"] is True
         assert "insight_id" not in result  # No routing in dry run
+
+    @pytest.mark.asyncio
+    @patch("doc_intelligence_hub.modules.analysis.rule_executor.route_result")
+    @patch("doc_intelligence_hub.modules.analysis.rule_executor.build_context")
+    @patch("doc_intelligence_hub.modules.analysis.rule_executor.get_rule_class")
+    @patch("doc_intelligence_hub.modules.analysis.rule_executor.get_rule")
+    @patch("doc_intelligence_hub.modules.analysis.rule_executor.db")
+    async def test_non_routable_result_does_not_create_insight(
+        self, mock_db, mock_get_rule, mock_cls, mock_build, mock_route
+    ):
+        rule = _make_rule()
+        mock_get_rule.return_value = rule
+        mock_build.return_value = ContextData()
+
+        mock_instance = AsyncMock()
+        mock_instance.execute.return_value = _make_result(
+            should_route=False,
+            detail={"fast_path_status": "already_pending"},
+        )
+        mock_cls.return_value = MagicMock(return_value=mock_instance)
+
+        result = await execute_rule("test-rule")
+
+        assert result["success"] is True
+        assert result["skipped"] is True
+        assert result["reason"] == "already_pending"
+        mock_route.assert_not_called()
 
 
 class TestExecuteTrigger:
@@ -206,3 +235,41 @@ class TestExecuteRuleWithContext:
         result = await _execute_rule_with_context(rule, ctx)
         assert result.success is False
         assert "No rule implementation found" in result.error
+
+    @pytest.mark.asyncio
+    @patch(
+        "doc_intelligence_hub.modules.analysis.rules.action_queue_rule.trigger_fast_path_analysis"
+    )
+    async def test_custom_rule_dispatches_action_queue_analyzer(self, mock_trigger):
+        from doc_intelligence_hub.modules.action_queue.fast_path import FastPathResult
+
+        mock_trigger.return_value = FastPathResult(
+            status="completed",
+            document_id=42,
+            pipeline_result={"processed": 1},
+        )
+        rule = _make_rule("custom-action-rule")
+        rule.analyzer = "builtin:action_queue_trigger"
+
+        result = await _execute_rule_with_context(
+            rule,
+            ContextData(current_document={"id": 42}),
+        )
+
+        assert result.success is True
+        mock_trigger.assert_awaited_once()
+
+
+class TestTriggerFilters:
+    def test_required_tags_match_case_insensitively(self):
+        rule = _make_rule()
+        rule.trigger.filter = TriggerFilter(tags=["Inbox"])
+
+        assert _matches_trigger_filter(rule, {"tag_names": ["inbox", "Bills"]}) is True
+        assert _matches_trigger_filter(rule, {"tag_names": ["Bills"]}) is False
+
+    def test_filtered_rule_rejects_missing_document(self):
+        rule = _make_rule()
+        rule.trigger.filter = TriggerFilter(tags=["Inbox"])
+
+        assert _matches_trigger_filter(rule, None) is False

@@ -349,6 +349,18 @@ def _load_builtin_defaults() -> None:
             "display": {"card_type": "table"},
             "enabled": False,
         },
+        "action-queue-trigger": {
+            "name": "Immediate Action Queue Analysis",
+            "description": "Analyze matching Inbox documents without waiting for the next batch",
+            "tier": "basic",
+            "trigger": {"type": "document_added", "filter": {"tags": ["Inbox"]}},
+            "context": ["current_document"],
+            "analyzer": "builtin:action_queue_trigger",
+            "params": {"force": False, "dry_run": False},
+            "routing": {"default": "informational"},
+            "display": {"card_type": "summary"},
+            "enabled": False,
+        },
     }
 
     for rule_id in rule_classes:
