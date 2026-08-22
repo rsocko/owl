@@ -58,6 +58,7 @@ def _apply_rename(
             p = p.model_copy(
                 update={
                     "provider_name": hint.rename_to,
+                    "statement_name": hint.rename_to,
                     "provider_key": slugify(f"{hint.rename_to}-{p.normalized_title}"),
                 }
             )
@@ -98,6 +99,7 @@ def _apply_split(
                 split_provider = ProviderCandidate(
                     provider_key=slugify(f"{hint.correspondent}-{group.name}"),
                     provider_name=group.name,
+                    statement_name=group.name,
                     correspondent_id=p.correspondent_id,
                     document_count=len(group_docs),
                     normalized_title=normalize_title(group_docs[0].title),
@@ -146,6 +148,7 @@ def _apply_merge(providers: list[ProviderCandidate], hint: ProviderHint) -> list
     merged = ProviderCandidate(
         provider_key=slugify(f"{merged_name}-merged"),
         provider_name=merged_name,
+        statement_name=hint.rename_to or base.statement_name or merged_name,
         correspondent_id=base.correspondent_id,
         document_count=total_count,
         normalized_title=base.normalized_title,
@@ -194,6 +197,7 @@ def _apply_define(
     defined = ProviderCandidate(
         provider_key=slugify(f"{provider_name}-defined"),
         provider_name=provider_name,
+        statement_name=provider_name,
         correspondent_id=ordered[0].correspondent_id,
         document_count=len(ordered),
         normalized_title=normalize_title(ordered[0].title),

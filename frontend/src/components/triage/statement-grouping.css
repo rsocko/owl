@@ -49,6 +49,40 @@
 /* ── Anomaly Indicators ── */
 .sg-anomalies { display: flex; flex-wrap: wrap; gap: 8px; }
 
+.sg-account-groups {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+  padding: 16px;
+}
+.sg-account-groups-heading { display: flex; flex-direction: column; gap: 3px; }
+.sg-account-groups-heading strong { color: #9a3412; font-size: 13px; }
+.sg-account-groups-heading span { color: #7c2d12; font-size: 12px; }
+.sg-account-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.sg-account-group {
+  align-items: flex-start;
+  background: #fff;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+}
+.sg-account-group-dot {
+  border-radius: 50%;
+  flex: 0 0 auto;
+  height: 10px;
+  margin-top: 4px;
+  width: 10px;
+}
+.sg-account-group-name { font-size: 12px; font-weight: 700; }
+.sg-account-group-meta { color: var(--muted, #6b7280); font-size: 11px; margin-top: 2px; }
+
 /* ── Rename Form ── */
 .sg-rename-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
 .sg-rename-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; }

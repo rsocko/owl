@@ -178,10 +178,12 @@ def analyze_group(
     provider_name = correspondent_name.strip() if correspondent_name else ""
     if not provider_name or provider_name.lower() == "unknown":
         provider_name = dominant_pattern.title()
+    statement_name = dominant_pattern.title()
 
     return ProviderCandidate(
         provider_key=slugify(f"{correspondent_name}-{dominant_pattern}"),
         provider_name=provider_name,
+        statement_name=statement_name,
         correspondent_id=correspondent_id,
         document_count=len(ordered),
         normalized_title=dominant_pattern,

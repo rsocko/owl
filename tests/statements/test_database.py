@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import date
 
 from doc_intelligence_hub.modules.statements.database import Database
@@ -21,6 +22,7 @@ def _sample_discovery() -> DiscoveryResult:
             ProviderCandidate(
                 provider_key="chase-visa-chase-statement",
                 provider_name="Chase Visa",
+                statement_name="Chase Statement",
                 correspondent_id=42,
                 document_count=12,
                 normalized_title="chase statement",
@@ -95,6 +97,50 @@ def test_database_creates_schema(tmp_path) -> None:
         db.close()
 
 
+def test_database_migrates_statement_name_column(tmp_path) -> None:
+    db_path = tmp_path / "legacy.db"
+    connection = sqlite3.connect(db_path)
+    connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+    connection.execute("INSERT INTO schema_version (version) VALUES (3)")
+    connection.execute(
+        """
+        CREATE TABLE providers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            discovery_run_id INTEGER NOT NULL,
+            provider_key TEXT NOT NULL,
+            provider_name TEXT NOT NULL,
+            correspondent_id INTEGER,
+            document_count INTEGER NOT NULL,
+            normalized_title TEXT NOT NULL,
+            title_consistency REAL NOT NULL,
+            frequency TEXT NOT NULL,
+            pattern_type TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            anchor_day INTEGER,
+            variance_days INTEGER NOT NULL DEFAULT 0,
+            grace_period_days INTEGER NOT NULL DEFAULT 5,
+            sample_document_ids TEXT NOT NULL DEFAULT '[]',
+            first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    db = Database(str(db_path))
+    try:
+        connection = db.connect()
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(providers)").fetchall()
+        }
+        version = connection.execute("SELECT version FROM schema_version").fetchone()["version"]
+        assert "statement_name" in columns
+        assert version == 4
+    finally:
+        db.close()
+
+
 def test_save_and_load_discovery(tmp_path) -> None:
     db = Database(str(tmp_path / "test.db"))
     try:
@@ -110,6 +156,7 @@ def test_save_and_load_discovery(tmp_path) -> None:
         # Verify provider details survived round-trip
         chase = next(p for p in loaded.providers if p.provider_key == "chase-visa-chase-statement")
         assert chase.provider_name == "Chase Visa"
+        assert chase.statement_name == "Chase Statement"
         assert chase.document_count == 12
         assert chase.pattern.frequency == "monthly"
         assert chase.pattern.confidence == 0.95

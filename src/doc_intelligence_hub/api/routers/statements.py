@@ -387,6 +387,7 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
         series = db.get_series(series_id)
 
         if series:
+            series["statement_name"] = series["name"]
             documents = db.get_series_documents(series_id)
             similar = db.get_similar_series(series_id)
         else:
@@ -405,7 +406,10 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
             )
             series = {
                 "id": provider["provider_key"],
-                "name": provider["provider_name"],
+                "name": provider.get("statement_name") or provider["provider_name"],
+                "statement_name": provider.get("statement_name")
+                or provider.get("normalized_title", "").title()
+                or provider["provider_name"],
                 "correspondent_id": provider.get("correspondent_id"),
                 "correspondent_name": provider.get("provider_name", "Unknown"),
                 "frequency": provider.get("frequency", "monthly"),
