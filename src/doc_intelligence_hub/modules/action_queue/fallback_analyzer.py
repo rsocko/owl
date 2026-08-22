@@ -157,7 +157,9 @@ class RuleBasedAnalyzer:
                 "links": [
                     {
                         "url": url,
-                        "label": "Pay online" if action_type == "PAY" and index == 0 else "Open document link",
+                        "label": "Pay online"
+                        if action_type == "PAY" and index == 0
+                        else "Open document link",
                         "purpose": "payment" if action_type == "PAY" and index == 0 else "other",
                     }
                     for index, url in enumerate(urls)
