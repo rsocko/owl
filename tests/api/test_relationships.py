@@ -128,9 +128,7 @@ def test_duplicate_review_related_resolution_applies_notice_priority(client):
         ),
         patch(
             "doc_intelligence_hub.api.routers.duplicates.project_relationships_to_paperless",
-            new=AsyncMock(
-                return_value={"synced": True, "documents": [10, 20], "error": None}
-            ),
+            new=AsyncMock(return_value={"synced": True, "documents": [10, 20], "error": None}),
         ),
     ):
         response = client.post(

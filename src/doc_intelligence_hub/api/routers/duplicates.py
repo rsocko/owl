@@ -190,7 +190,10 @@ async def resolve_duplicate(pair_id: str, body: ResolveRequest) -> dict[str, Any
             detail=f"Invalid resolution '{body.resolution}'. Must be one of: {', '.join(valid_resolutions)}",
         )
 
-    if body.resolution in ("true_duplicate", "superseded", "related") and body.primary_doc_id is None:
+    if (
+        body.resolution in ("true_duplicate", "superseded", "related")
+        and body.primary_doc_id is None
+    ):
         raise HTTPException(
             status_code=400,
             detail="primary_doc_id is required for true_duplicate, superseded, and related resolutions",
@@ -205,9 +208,7 @@ async def resolve_duplicate(pair_id: str, body: ResolveRequest) -> dict[str, Any
                 raise ValueError("primary_doc_id must identify a document in the duplicate pair")
             relationship_type = body.relationship_type or "follows"
             target_document_id = (
-                pair["doc_b_id"]
-                if body.primary_doc_id == pair["doc_a_id"]
-                else pair["doc_a_id"]
+                pair["doc_b_id"] if body.primary_doc_id == pair["doc_a_id"] else pair["doc_a_id"]
             )
             source_metadata = get_document_metadata(body.primary_doc_id) or {}
             source_text = " ".join(

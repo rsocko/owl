@@ -23,9 +23,7 @@ _NOTICE_PATTERNS: tuple[tuple[str, int, re.Pattern[str]], ...] = (
     (
         "collections_or_disconnect",
         35,
-        re.compile(
-            r"\b(collections?|collection agency|disconnect(?:ion)?|shut[\s-]?off)\b", re.I
-        ),
+        re.compile(r"\b(collections?|collection agency|disconnect(?:ion)?|shut[\s-]?off)\b", re.I),
     ),
     (
         "final_notice",
@@ -130,9 +128,7 @@ def _parse_date(metadata: dict[str, Any]) -> date | None:
 
 
 def _document_text(metadata: dict[str, Any]) -> str:
-    return " ".join(
-        str(metadata.get(key) or "") for key in ("title", "summary", "content", "text")
-    )
+    return " ".join(str(metadata.get(key) or "") for key in ("title", "summary", "content", "text"))
 
 
 def calculate_priority_adjustment(
@@ -260,7 +256,9 @@ def list_document_relationships(
                 (DocumentRelationship.source_document_id == document_id)
                 | (DocumentRelationship.target_document_id == document_id)
             )
-        return [_relationship_to_dict(item) for item in query.order_by(DocumentRelationship.created_at)]
+        return [
+            _relationship_to_dict(item) for item in query.order_by(DocumentRelationship.created_at)
+        ]
     finally:
         session.close()
 
@@ -311,15 +309,11 @@ def create_document_relationship(
             .filter(
                 DocumentRelationship.removed_at.is_(None),
                 (
-                    (
-                        DocumentRelationship.source_document_id == source_document_id
-                    )
+                    (DocumentRelationship.source_document_id == source_document_id)
                     & (DocumentRelationship.target_document_id == target_document_id)
                 )
                 | (
-                    (
-                        DocumentRelationship.source_document_id == target_document_id
-                    )
+                    (DocumentRelationship.source_document_id == target_document_id)
                     & (DocumentRelationship.target_document_id == source_document_id)
                 ),
             )
@@ -334,10 +328,10 @@ def create_document_relationship(
                 same_direction or relationship_type in SYMMETRIC_TYPES
             ):
                 return _relationship_to_dict(existing), False
-            if (
-                relationship_type in {"follows", "supersedes"}
-                and existing.relationship_type in {"follows", "supersedes"}
-            ):
+            if relationship_type in {"follows", "supersedes"} and existing.relationship_type in {
+                "follows",
+                "supersedes",
+            }:
                 raise RelationshipConflictError(
                     "The document pair already has an incompatible active sequence relationship"
                 )
