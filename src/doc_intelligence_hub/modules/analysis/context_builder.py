@@ -112,9 +112,7 @@ async def _fetch_document(document_id: int) -> dict[str, Any] | None:
         if tag_ids and all(isinstance(tag_id, int) for tag_id in tag_ids):
             try:
                 tag_names = await client.resolve_tag_names(tag_ids)
-                doc["tag_names"] = [
-                    tag_names[tag_id] for tag_id in tag_ids if tag_id in tag_names
-                ]
+                doc["tag_names"] = [tag_names[tag_id] for tag_id in tag_ids if tag_id in tag_names]
             except Exception as exc:
                 logger.warning("Could not resolve tags for document %d: %s", document_id, exc)
         return doc

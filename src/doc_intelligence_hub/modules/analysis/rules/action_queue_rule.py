@@ -19,11 +19,7 @@ class ActionQueueTriggerRule(AnalysisRule):
     async def execute(self, context: ContextData) -> RuleExecutionResult:
         document = context.current_document
         document_id = document.get("id") if document else None
-        if (
-            isinstance(document_id, bool)
-            or not isinstance(document_id, int)
-            or document_id <= 0
-        ):
+        if isinstance(document_id, bool) or not isinstance(document_id, int) or document_id <= 0:
             return RuleExecutionResult(
                 rule_id=self.config.id,
                 success=False,
