@@ -40,6 +40,12 @@ DEFAULT_SCHEDULES: dict[str, dict[str, Any]] = {
         "limit": 50,
         "enabled": True,
     },
+    "action_queue_reminders": {
+        "cron": "* * * * *",
+        "endpoint": "/api/queue/actions/resurface-expired",
+        "method": "POST",
+        "enabled": True,
+    },
     "eob_matching": {
         "cron": "0 10 * * *",
         "endpoint": "/api/eob/run",

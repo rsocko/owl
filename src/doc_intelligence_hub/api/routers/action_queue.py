@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 from sqlalchemy import String as SAString
+from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
@@ -267,10 +268,41 @@ def _urgency_to_severity(urgency: str | None) -> str:
     return mapping.get((urgency or "LOW").upper(), "safe")
 
 
+def _resurface_expired_snoozes(db: Session, *, now: datetime | None = None) -> list[Action]:
+    """Move expired snoozes back to pending and return the affected actions."""
+    expired = (
+        db.query(Action)
+        .filter(
+            Action.status == "snoozed",
+            Action.snoozed_until.isnot(None),
+            Action.snoozed_until <= (now or datetime.utcnow()),
+        )
+        .all()
+    )
+    for action in expired:
+        action.status = "pending"
+        action.completed_at = None
+        action.acknowledged_at = None
+        action.snoozed_until = None
+        action.risk_score = compute_risk_score(
+            urgency=action.urgency or "LOW",
+            due_date=action.due_date,
+            amount=action.amount,
+            confidence=action.confidence or 0,
+            action_type=action.action_type or "REVIEW",
+        )
+        action.version = (action.version or 1) + 1
+
+    if expired:
+        db.commit()
+    return expired
+
+
 def _database_counts() -> dict[str, int]:
     init_db()
     db = get_session()
     try:
+        _resurface_expired_snoozes(db)
         pending = db.query(Action).filter_by(status="pending").count()
         acknowledged = db.query(Action).filter_by(status="acknowledged").count()
         completed = db.query(Action).filter_by(status="completed").count()
@@ -581,6 +613,7 @@ async def list_actions(
     init_db()
     db = get_session()
     try:
+        _resurface_expired_snoozes(db)
         query = db.query(Action)
         if status:
             query = query.filter_by(status=status)
@@ -603,6 +636,22 @@ async def list_actions(
             "total": total,
             "limit": limit,
             "offset": offset,
+        }
+    finally:
+        db.close()
+
+
+@router.post("/actions/resurface-expired")
+async def resurface_expired_snoozes(request: Request) -> dict[str, Any]:
+    """Move snoozed actions whose reminder time has passed back to pending."""
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        resurfaced = _resurface_expired_snoozes(db)
+        return {
+            "resurfaced": len(resurfaced),
+            "action_ids": [action.id for action in resurfaced],
         }
     finally:
         db.close()

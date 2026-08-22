@@ -108,6 +108,21 @@ class TestListActions:
         assert data["total"] == 0
         assert data["actions"] == []
 
+    def test_list_actions_resurfaces_expired_snoozes(self, seeded_client):
+        seeded_client.post(
+            "/api/queue/actions/1/snooze",
+            json={"until": "2020-01-01T00:00:00"},
+        )
+
+        pending = seeded_client.get("/api/queue/actions?status=pending").json()
+        snoozed = seeded_client.get("/api/queue/actions?status=snoozed").json()
+
+        assert pending["total"] == 1
+        assert pending["actions"][0]["id"] == 1
+        assert pending["actions"][0]["status"] == "pending"
+        assert pending["actions"][0]["snoozed_until"] is None
+        assert snoozed["total"] == 0
+
     def test_action_serialization_fields(self, seeded_client):
         resp = seeded_client.get("/api/queue/actions?status=pending")
         action = resp.json()["actions"][0]
@@ -324,6 +339,20 @@ class TestExpiredSnoozes:
         resp = seeded_client.get("/api/queue/actions/expired-snoozes")
         assert resp.status_code == 200
         assert resp.json()["count"] == 0
+
+    def test_resurface_expired_snoozes_promotes_only_expired(self, seeded_client):
+        seeded_client.post(
+            "/api/queue/actions/1/snooze",
+            json={"until": "2020-01-01T00:00:00"},
+        )
+
+        resp = seeded_client.post("/api/queue/actions/resurface-expired")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"resurfaced": 1, "action_ids": [1]}
+        action = seeded_client.get("/api/queue/actions?status=pending").json()["actions"][0]
+        assert action["status"] == "pending"
+        assert action["snoozed_until"] is None
 
 
 class TestFeedback:

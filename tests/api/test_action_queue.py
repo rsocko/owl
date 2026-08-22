@@ -296,7 +296,7 @@ class TestBulkAction:
         )
         assert missing_time.status_code == 422
 
-        snoozed_until = "2026-08-18T09:00:00"
+        snoozed_until = "2099-08-18T09:00:00"
         resp = client.post(
             "/api/queue/actions/bulk",
             json={

@@ -137,6 +137,15 @@ describe('ActionQueue', () => {
     expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
   });
 
+  it('labels the action list for the selected status', async () => {
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    await screen.findByText('Pending actions (1)');
+    fireEvent.click(screen.getByRole('radio', { name: 'Remind later (0)' }));
+
+    expect(await screen.findByText('Remind later actions (1)')).toBeTruthy();
+  });
+
   it('saves corrected action details from the drawer', async () => {
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
 
