@@ -354,6 +354,29 @@ class TestExpiredSnoozes:
         assert action["status"] == "pending"
         assert action["snoozed_until"] is None
 
+    def test_resurface_expired_snooze_syncs_pending_to_paperless(self, seeded_client):
+        from unittest.mock import AsyncMock, patch
+
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=1).one()
+            action.status = "snoozed"
+            action.snoozed_until = datetime(2020, 1, 1)
+            action.last_synced_status = "snoozed"
+            db.commit()
+        finally:
+            db.close()
+
+        enricher = AsyncMock()
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
+            return_value=enricher,
+        ):
+            resp = seeded_client.post("/api/queue/actions/resurface-expired")
+
+        assert resp.status_code == 200
+        enricher.sync_status.assert_awaited_once_with(42, "pending")
+
 
 class TestFeedback:
     def test_submit_not_an_action_feedback(self, seeded_client):
@@ -419,6 +442,25 @@ class TestNewStatusesViaUpdate:
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "snoozed"
+
+    def test_update_snooze_deadline_without_resending_status(self, seeded_client):
+        seeded_client.post(
+            "/api/queue/actions/1/snooze",
+            json={"until": "2026-09-01T00:00:00"},
+        )
+        resp = seeded_client.patch(
+            "/api/queue/actions/1",
+            json={"snoozed_until": "2026-10-01T00:00:00"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["snoozed_until"] == "2026-10-01T00:00:00"
+
+    def test_explicit_null_status_is_rejected(self, seeded_client):
+        resp = seeded_client.patch(
+            "/api/queue/actions/1",
+            json={"status": None},
+        )
+        assert resp.status_code == 422
 
     def test_reopen_clears_timestamps(self, seeded_client):
         # Acknowledge first
