@@ -180,7 +180,9 @@ curl -X PATCH http://service-005.example.invalid/api/queue/actions/42 \
   -d '{"status": "snoozed", "snoozed_until": "2026-08-20T09:00:00", "dry_run": false}'
 ```
 
-Removes the action from the active queue until the specified date and time.
+Removes the action from the active queue until the specified date and time. Once
+the reminder expires, OWL automatically returns it to Pending within one minute.
+Queue reads also perform this promotion so reminders catch up after service downtime.
 
 ### Snooze an Action
 
@@ -260,7 +262,6 @@ workflow state and does not add a separate `Todo` tag.
 
 :::warning Current Limitations
 - **Bulk operations** are defined in the API schema but not yet implemented in the UI
-- **Snooze re-surfacing** — snoozed actions have an expiry timestamp and the `expired-snoozes` endpoint, but automatic notification/re-promotion on expiry requires a scheduler (not yet wired)
 - **Learning from feedback** — user corrections (via `/feedback` endpoint) are stored but not yet used for model fine-tuning; feedback data can be exported for offline analysis
 - **CTA deep links** — AI extracts URLs/phone numbers when available, but not all documents have parseable payment links
 :::

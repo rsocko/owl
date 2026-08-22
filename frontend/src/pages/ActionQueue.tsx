@@ -1389,7 +1389,11 @@ export default function ActionQueue() {
         <ErrorState message={error} onRetry={() => void loadData()} />
       ) : (
         <div className="action-queue-layout">
-          <Card title={`Pending actions (${filteredActions.length})`} className="aq-table-card">            {/* [ARCH-01] Bulk action bar */}
+          <Card
+            title={`${filter === 'all' ? 'All' : statusDisplayLabel(filter)} actions (${filteredActions.length})`}
+            className="aq-table-card"
+          >
+            {/* [ARCH-01] Bulk action bar */}
             {checkedIds.size > 0 && (
               <div className="aq-bulk-bar">
                 <span className="aq-bulk-count">
