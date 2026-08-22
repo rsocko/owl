@@ -30,6 +30,7 @@ class AnalysisPattern(BaseModel):
 class ProviderCandidate(BaseModel):
     provider_key: str
     provider_name: str
+    statement_name: str | None = None
     correspondent_id: int | None = None
     document_count: int
     normalized_title: str
