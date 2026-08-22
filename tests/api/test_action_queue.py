@@ -352,6 +352,24 @@ class TestBulkAction:
         assert resp.status_code == 200
         assert resp.json()["affected"] == 0
 
+    def test_bulk_retries_unsynced_target_status(self, client, seed_actions):
+        from unittest.mock import AsyncMock, patch
+
+        action = client.get("/api/queue/actions?status=completed").json()["actions"][0]
+        enricher = AsyncMock()
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
+            return_value=enricher,
+        ):
+            resp = client.post(
+                "/api/queue/actions/bulk",
+                json={"action": "complete", "action_ids": [action["id"]]},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["affected"] == 0
+        enricher.sync_status.assert_awaited_once_with(action["document_id"], "completed")
+
     def test_bulk_invalid_action(self, client, seed_actions):
         resp = client.post(
             "/api/queue/actions/bulk",
