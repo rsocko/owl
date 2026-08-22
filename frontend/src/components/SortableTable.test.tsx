@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll } from 'vitest';
+import { describe, expect, it, beforeAll, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { SortableTable, type SortableColumnDef } from './SortableTable';
 
@@ -131,5 +131,23 @@ describe('SortableTable', () => {
     render(<SortableTable data={testData} columns={noSortCols} rowKey={(r) => String(r.id)} />);
     const btn = screen.getByLabelText('Sort by Name');
     expect(btn).toHaveAttribute('disabled');
+  });
+
+  it('activates interactive rows with the keyboard', () => {
+    const onRowActivate = vi.fn();
+    render(
+      <SortableTable
+        data={testData}
+        columns={columns}
+        rowKey={(r) => String(r.id)}
+        onRowActivate={onRowActivate}
+        rowClassName="interactive-row"
+      />,
+    );
+
+    const row = screen.getByText('Alpha').closest('tr');
+    expect(row).toHaveClass('interactive-row');
+    fireEvent.keyDown(row!, { key: 'Enter' });
+    expect(onRowActivate).toHaveBeenCalledWith(testData[0]);
   });
 });
