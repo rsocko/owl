@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import type { ColumnFiltersState, SortingState } from '@tanstack/react-table';
+import { SortableTable, type SortableColumnDef } from '../components/SortableTable';
 import { Badge, Button, Card, ConfidenceBadge, ConfidenceLegend, EmptyState, ErrorState, PageHeader, ProgressBanner, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
 import { useStreamingAction } from '../hooks/useStreamingAction';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
+import '../styles/sortable-table.css';
 import '../styles/statements.css';
 
 interface MissingStatement {
@@ -90,6 +93,12 @@ function formatPatternType(patternType: string, anchorDay?: number | null): stri
   }
 }
 
+function buildFilterOptions(values: string[]): { value: string; label: string }[] {
+  return Array.from(new Set(values))
+    .sort((left, right) => left.localeCompare(right))
+    .map((value) => ({ value, label: value }));
+}
+
 export default function Statements() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<MissingStatement[]>([]);
@@ -103,6 +112,10 @@ export default function Statements() {
   const [recsState, runRecsStream, cancelRecs] = useStreamingAction();
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
   const [activeTab, setActiveTab] = useState<'discovered' | 'missing'>('discovered');
+  const [providerSorting, setProviderSorting] = useState<SortingState>([]);
+  const [providerFilters, setProviderFilters] = useState<ColumnFiltersState>([]);
+  const [missingSorting, setMissingSorting] = useState<SortingState>([]);
+  const [missingFilters, setMissingFilters] = useState<ColumnFiltersState>([]);
 
   const loadStatements = useCallback(async () => {
     try {
@@ -164,6 +177,130 @@ export default function Statements() {
   }, [rows]);
 
   const anyRunning = discoveryState.running || recsState.running;
+
+  const providerColumns: SortableColumnDef<DiscoveredProvider>[] = useMemo(() => [
+    {
+      id: 'provider',
+      header: 'Provider',
+      accessorFn: (provider) => provider.provider_name.toLowerCase(),
+      cell: (provider) => (
+        <>
+          <div className="statements-provider">{provider.provider_name}</div>
+          <div className="statements-subtle">{provider.normalized_title}</div>
+        </>
+      ),
+      filterOptions: buildFilterOptions(providers.map((provider) => provider.provider_name)),
+      filterFn: (rowValue, filterValue) => rowValue === filterValue.toLowerCase(),
+    },
+    {
+      id: 'frequency',
+      header: 'Frequency',
+      accessorFn: (provider) => provider.frequency,
+      cell: (provider) => <Badge tone="ok">{provider.frequency}</Badge>,
+      filterOptions: buildFilterOptions(providers.map((provider) => provider.frequency)),
+    },
+    {
+      id: 'pattern',
+      header: 'Pattern',
+      accessorFn: (provider) => formatPatternType(provider.pattern_type, provider.anchor_day),
+      cell: (provider) => (
+        <>
+          <div className="statements-provider">{formatPatternType(provider.pattern_type, provider.anchor_day)}</div>
+          <div className="statements-subtle">±{provider.variance_days}d variance</div>
+        </>
+      ),
+      filterOptions: buildFilterOptions(providers.map((provider) => formatPatternType(provider.pattern_type, provider.anchor_day))),
+    },
+    {
+      id: 'confidence',
+      header: 'Confidence',
+      accessorFn: (provider) => provider.confidence,
+      cell: (provider) => <ConfidenceBadge pct={Math.round(provider.confidence * 100)} />,
+      filterOptions: [
+        { value: 'high', label: '≥85% High' },
+        { value: 'medium', label: '60–84% Medium' },
+        { value: 'low', label: '<60% Low' },
+      ],
+      filterFn: (rowValue, filterValue) => {
+        const confidence = Number(rowValue);
+        if (filterValue === 'high') return confidence >= 0.85;
+        if (filterValue === 'medium') return confidence >= 0.6 && confidence < 0.85;
+        return confidence < 0.6;
+      },
+    },
+    {
+      id: 'documents',
+      header: 'Documents',
+      accessorFn: (provider) => provider.document_count,
+      cell: (provider) => provider.document_count,
+    },
+    {
+      id: 'first_seen',
+      header: 'First seen',
+      accessorFn: (provider) => provider.first_seen,
+      cell: (provider) => formatDate(provider.first_seen),
+    },
+    {
+      id: 'last_seen',
+      header: 'Last seen',
+      accessorFn: (provider) => provider.last_seen,
+      cell: (provider) => formatDate(provider.last_seen),
+    },
+  ], [providers]);
+
+  const missingColumns: SortableColumnDef<MissingStatement>[] = useMemo(() => [
+    {
+      id: 'provider',
+      header: 'Provider',
+      accessorFn: (row) => (row.correspondent ?? 'Unknown provider').toLowerCase(),
+      cell: (row) => (
+        <>
+          <div className="statements-provider">{row.correspondent ?? 'Unknown provider'}</div>
+          <div className="statements-subtle">{row.frequency ?? 'Unknown cadence'}</div>
+        </>
+      ),
+      filterOptions: buildFilterOptions(rows.map((row) => row.correspondent ?? 'Unknown provider')),
+      filterFn: (rowValue, filterValue) => rowValue === filterValue.toLowerCase(),
+    },
+    {
+      id: 'expected_period',
+      header: 'Expected period',
+      accessorFn: (row) => row.expected_period ?? '',
+      cell: (row) => <div className="statements-provider">{formatExpectedPeriod(row.expected_period)}</div>,
+    },
+    {
+      id: 'days_overdue',
+      header: 'Days overdue',
+      accessorFn: (row) => row.days_overdue ?? 0,
+      cell: (row) => <div className="statements-provider">{row.days_overdue ?? 0} days</div>,
+    },
+    {
+      id: 'priority',
+      header: 'Priority',
+      accessorFn: (row) => getPriority(row.days_overdue).label,
+      cell: (row) => {
+        const priority = getPriority(row.days_overdue);
+        return <Badge tone={priority.tone}>{priority.label}</Badge>;
+      },
+      filterOptions: [
+        { value: 'Critical', label: 'Critical' },
+        { value: 'High', label: 'High' },
+        { value: 'Watch', label: 'Watch' },
+      ],
+    },
+    {
+      id: 'last_received',
+      header: 'Last received',
+      accessorFn: (row) => row.last_received_date ?? '',
+      cell: (row) => formatDate(row.last_received_date),
+    },
+    {
+      id: 'series_key',
+      header: 'Series key',
+      accessorFn: (row) => buildSeriesId(row).toLowerCase(),
+      cell: (row) => <code className="statements-series-key">{buildSeriesId(row)}</code>,
+    },
+  ], [rows]);
 
   const runDiscovery = useCallback(() => {
     runDiscoveryStream(endpoints.statements.discoveryStreamUrl, () => {
@@ -277,53 +414,17 @@ export default function Statements() {
             {!loading && !error && providers.length > 0 ? (
               <div className="statements-table-wrapper">
                 <ConfidenceLegend />
-                <table className="data-table statements-table">
-                  <thead>
-                    <tr>
-                      <th>Provider</th>
-                      <th>Frequency</th>
-                      <th>Pattern</th>
-                      <th>Confidence</th>
-                      <th>Documents</th>
-                      <th>First seen</th>
-                      <th>Last seen</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {providers.map((provider) => (
-                      <tr
-                        key={provider.provider_key}
-                        className="statements-row"
-                        onClick={() => navigate(`/statements/${encodeURIComponent(provider.provider_key)}`)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault();
-                            navigate(`/statements/${encodeURIComponent(provider.provider_key)}`);
-                          }
-                        }}
-                        tabIndex={0}
-                      >
-                        <td>
-                          <div className="statements-provider">{provider.provider_name}</div>
-                          <div className="statements-subtle">{provider.normalized_title}</div>
-                        </td>
-                        <td>
-                          <Badge tone="ok">{provider.frequency}</Badge>
-                        </td>
-                        <td>
-                          <div className="statements-provider">{formatPatternType(provider.pattern_type, provider.anchor_day)}</div>
-                          <div className="statements-subtle">±{provider.variance_days}d variance</div>
-                        </td>
-                        <td>
-                          <ConfidenceBadge pct={Math.round(provider.confidence * 100)} />
-                        </td>
-                        <td>{provider.document_count}</td>
-                        <td>{formatDate(provider.first_seen)}</td>
-                        <td>{formatDate(provider.last_seen)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <SortableTable
+                  data={providers}
+                  columns={providerColumns}
+                  rowKey={(provider) => provider.provider_key}
+                  sorting={providerSorting}
+                  onSortingChange={setProviderSorting}
+                  columnFilters={providerFilters}
+                  onColumnFiltersChange={setProviderFilters}
+                  rowClassName="statements-row"
+                  onRowActivate={(provider) => navigate(`/statements/${encodeURIComponent(provider.provider_key)}`)}
+                />
               </div>
             ) : null}
           </Card>
@@ -338,56 +439,17 @@ export default function Statements() {
             ) : null}
             {!loading && !error && rows.length > 0 ? (
               <div className="statements-table-wrapper">
-                <table className="data-table statements-table">
-                  <thead>
-                    <tr>
-                      <th>Provider</th>
-                      <th>Expected period</th>
-                      <th>Days overdue</th>
-                      <th>Priority</th>
-                      <th>Last received</th>
-                      <th>Series key</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row) => {
-                      const rowId = buildSeriesId(row);
-                      const priority = getPriority(row.days_overdue);
-                      return (
-                        <tr
-                          key={`${rowId}-${row.expected_period ?? 'period'}`}
-                          className="statements-row"
-                          onClick={() => navigate(`/statements/${encodeURIComponent(rowId)}`)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault();
-                              navigate(`/statements/${encodeURIComponent(rowId)}`);
-                            }
-                          }}
-                          tabIndex={0}
-                        >
-                          <td>
-                            <div className="statements-provider">{row.correspondent ?? 'Unknown provider'}</div>
-                            <div className="statements-subtle">{row.frequency ?? 'Unknown cadence'}</div>
-                          </td>
-                          <td>
-                              <div className="statements-provider">{formatExpectedPeriod(row.expected_period)}</div>
-                            </td>
-                            <td>
-                              <div className="statements-provider">{row.days_overdue ?? 0} days</div>
-                            </td>
-                          <td>
-                            <Badge tone={priority.tone}>{priority.label}</Badge>
-                          </td>
-                          <td>{formatDate(row.last_received_date)}</td>
-                          <td>
-                            <code className="statements-series-key">{rowId}</code>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <SortableTable
+                  data={rows}
+                  columns={missingColumns}
+                  rowKey={(row) => `${buildSeriesId(row)}-${row.expected_period ?? 'period'}`}
+                  sorting={missingSorting}
+                  onSortingChange={setMissingSorting}
+                  columnFilters={missingFilters}
+                  onColumnFiltersChange={setMissingFilters}
+                  rowClassName="statements-row"
+                  onRowActivate={(row) => navigate(`/statements/${encodeURIComponent(buildSeriesId(row))}`)}
+                />
               </div>
             ) : null}
           </Card>

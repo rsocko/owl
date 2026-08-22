@@ -110,6 +110,8 @@ interface SortableTableProps<T> {
   onSortingChange?: OnChangeFn<SortingState>;
   columnFilters?: ColumnFiltersState;
   onColumnFiltersChange?: OnChangeFn<ColumnFiltersState>;
+  rowClassName?: string | ((row: T) => string);
+  onRowActivate?: (row: T) => void;
   /** Optional extra content above each row (e.g. checkbox column) handled via columns */
 }
 
@@ -122,6 +124,8 @@ export function SortableTable<T>({
   onSortingChange,
   columnFilters: controlledColumnFilters,
   onColumnFiltersChange,
+  rowClassName,
+  onRowActivate,
 }: SortableTableProps<T>) {
   const [internalSorting, setInternalSorting] = useState<SortingState>([]);
   const [internalColumnFilters, setInternalColumnFilters] = useState<ColumnFiltersState>([]);
@@ -199,7 +203,18 @@ export function SortableTable<T>({
           </tr>
         ) : (
           rows.map((row) => (
-            <tr key={row.id}>
+            <tr
+              key={row.id}
+              className={typeof rowClassName === 'function' ? rowClassName(row.original) : rowClassName}
+              onClick={onRowActivate ? () => onRowActivate(row.original) : undefined}
+              onKeyDown={onRowActivate ? (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onRowActivate(row.original);
+                }
+              } : undefined}
+              tabIndex={onRowActivate ? 0 : undefined}
+            >
               {row.getVisibleCells().map((cell) => (
                 <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
               ))}
