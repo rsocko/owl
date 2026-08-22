@@ -23,6 +23,10 @@ from doc_intelligence_hub.modules.statements.paperless import (
 from doc_intelligence_hub.modules.statements.recommendations import build_recommendations
 
 
+def _resolve_config(config: AppConfig | str) -> AppConfig:
+    return load_config(config) if isinstance(config, str) else config
+
+
 async def load_documents(config: AppConfig, on_progress=None):
     validate_source_config(config)
 
@@ -42,8 +46,8 @@ async def load_documents(config: AppConfig, on_progress=None):
     raise ValueError(f"Unsupported source mode: {config.source.mode}")
 
 
-async def run_discovery(config_path: str) -> DiscoveryResult:
-    config = load_config(config_path)
+async def run_discovery(config_path: AppConfig | str) -> DiscoveryResult:
+    config = _resolve_config(config_path)
     _inject_document_type_mapping(config)
     documents = await load_documents(config)
     result = discover_providers(documents, config.analysis)
@@ -64,8 +68,8 @@ async def run_discovery_debug(config_path: str, limit: int) -> DiscoveryDiagnost
     return debug_discovery(documents, config.analysis, limit=limit)
 
 
-async def run_recommendations(config_path: str, as_of: date) -> RecommendationResult:
-    config = load_config(config_path)
+async def run_recommendations(config_path: AppConfig | str, as_of: date) -> RecommendationResult:
+    config = _resolve_config(config_path)
     _inject_document_type_mapping(config)
     documents = await load_documents(config)
     discovery = discover_providers(documents, config.analysis)

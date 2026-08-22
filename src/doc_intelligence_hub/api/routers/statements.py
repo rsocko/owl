@@ -89,20 +89,20 @@ async def statement_health(request: Request) -> dict[str, Any]:
 
 @router.post("/discovery/run")
 async def discovery_run(request: Request) -> dict[str, Any]:
-    result = await run_discovery(get_statement_config_path(request))
+    result = await run_discovery(load_statement_config_from_request(request))
     return result.model_dump(mode="json")
 
 
 @router.post("/recommendations/run")
 async def recommendations_run(request: Request, as_of: date = Query(...)) -> dict[str, Any]:  # noqa: B008
-    result = await run_recommendations(get_statement_config_path(request), as_of)
+    result = await run_recommendations(load_statement_config_from_request(request), as_of)
     return result.model_dump(mode="json")
 
 
 @router.get("/discovery/stream")
 async def discovery_stream(request: Request) -> StreamingResponse:
     return StreamingResponse(
-        _discovery_event_generator(get_statement_config_path(request)),
+        _discovery_event_generator(load_statement_config_from_request(request)),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -111,7 +111,7 @@ async def discovery_stream(request: Request) -> StreamingResponse:
 @router.get("/recommendations/stream")
 async def recommendations_stream(request: Request, as_of: date = Query(...)) -> StreamingResponse:  # noqa: B008
     return StreamingResponse(
-        _recommendations_event_generator(get_statement_config_path(request), as_of),
+        _recommendations_event_generator(load_statement_config_from_request(request), as_of),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

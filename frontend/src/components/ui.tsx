@@ -430,7 +430,11 @@ export function Toast({
   }, [duration, onDismiss]);
 
   return (
-    <div className={`toast ${tone}`}>
+    <div
+      className={`toast ${tone}`}
+      role={tone === 'error' ? 'alert' : 'status'}
+      aria-live={tone === 'error' ? 'assertive' : 'polite'}
+    >
       <span className="toast-message">{message}</span>
       {tone === 'error' && onDismiss ? (
         <button className="toast-dismiss" onClick={onDismiss} type="button" aria-label="Dismiss notification">

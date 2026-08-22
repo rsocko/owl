@@ -4,6 +4,31 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from doc_intelligence_hub.api.routers import load_statement_config_from_request
+from doc_intelligence_hub.modules.statements.config import resolve_api_token
+
+
+def test_statement_config_uses_runtime_paperless_settings(app, tmp_path):
+    config_path = tmp_path / "statements.yaml"
+    config_path.write_text(
+        """
+source:
+  mode: paperless
+  paperless_url: http://paperless:8000
+  api_token_env: UNUSED_TOKEN
+runtime:
+  database_path: statements.db
+"""
+    )
+    app.state.statement_tracker_config = str(config_path)
+    request = MagicMock()
+    request.app = app
+
+    config = load_statement_config_from_request(request)
+
+    assert config.source.paperless_url == "http://paperless.test"
+    assert resolve_api_token(config) == "test-token"
+
 
 class TestStatementHealth:
     """Tests for GET /api/statements/health."""
@@ -38,11 +63,13 @@ class TestDiscoveryRun:
             "doc_intelligence_hub.api.routers.statements.run_discovery",
             new_callable=AsyncMock,
             return_value=mock_result,
-        ):
+        ) as mock_run:
             resp = client.post("/api/statements/discovery/run")
             assert resp.status_code == 200
             data = resp.json()
             assert "providers" in data
+            config = mock_run.await_args.args[0]
+            assert not isinstance(config, str)
 
 
 class TestRecommendationsRun:
