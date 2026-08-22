@@ -625,19 +625,50 @@ a.aq-pdf-preview .aq-pdf-hint {
   margin-top: 12px;
 }
 
-.aq-cta-section {
+.aq-resources {
   padding: 12px;
   background: var(--muted-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 
-.aq-cta-section .section-title {
+.aq-resources .section-title {
   margin-bottom: 8px;
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
+}
+
+.aq-resource-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.aq-resource-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.84rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.aq-resource-link:hover {
+  border-color: var(--accent);
+}
+
+.aq-resource-link.primary {
+  color: white;
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .aq-feedback-section {

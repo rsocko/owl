@@ -1,5 +1,6 @@
 """Tests for the action queue API router — preview_url and serialization."""
 
+import json
 from datetime import date, datetime
 
 import pytest
@@ -52,6 +53,24 @@ def seeded_client(client):
                 confidence=85,
                 status="pending",
                 correspondent="Power Co",
+                recommended_cta=json.dumps(
+                    {
+                        "id": "pay-online",
+                        "label": "Pay online",
+                        "url": "https://billing.example/pay",
+                    }
+                ),
+                extracted_data={
+                    "payment_url": "https://billing.example/pay",
+                    "reference_number": "INV-42",
+                    "links": [
+                        {
+                            "url": "https://billing.example/pay",
+                            "label": "Pay online",
+                            "purpose": "payment",
+                        }
+                    ],
+                },
             )
         )
         db.add(
@@ -145,6 +164,7 @@ class TestListActions:
             "document_date",
             "document_type",
             "tags",
+            "extracted_data",
             "ai_reasoning",
             "version",
             "preview_url",
@@ -154,6 +174,8 @@ class TestListActions:
             "snoozed_until",
         }
         assert set(action.keys()) == expected_fields
+        assert action["recommended_cta"]["url"] == "https://billing.example/pay"
+        assert action["extracted_data"]["reference_number"] == "INV-42"
 
 
 class TestUpdateAction:

@@ -79,6 +79,14 @@ interface ActionItem {
   document_date?: string | null;
   document_type?: string | null;
   tags?: string[] | null;
+  extracted_data?: {
+    account_number?: string | null;
+    payment_url?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    reference_number?: string | null;
+    links?: Array<{ url: string; label?: string | null; purpose?: string | null }> | null;
+  } | null;
   ai_reasoning?: string | null;
   preview_url?: string | null;
   version?: number | null;
@@ -220,6 +228,39 @@ function normalizeType(value?: string | null) {
 
 function dateInputValue(value?: string | null) {
   return value ? value.slice(0, 10) : '';
+}
+
+function safeWebUrl(value?: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function actionResources(action: ActionItem) {
+  const resources: Array<{ url: string; label: string; purpose: string; primary: boolean }> = [];
+  const seen = new Set<string>();
+  const add = (urlValue: string | null | undefined, label: string | null | undefined, purpose: string, primary = false) => {
+    const url = safeWebUrl(urlValue);
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    resources.push({ url, label: label?.trim() || 'Open link', purpose, primary });
+  };
+
+  add(
+    action.recommended_cta?.url,
+    action.recommended_cta?.label,
+    action.recommended_cta?.id || 'recommended',
+    true,
+  );
+  add(action.extracted_data?.payment_url, 'Pay online', 'payment');
+  for (const link of action.extracted_data?.links ?? []) {
+    add(link.url, link.label, link.purpose || 'other');
+  }
+  return resources;
 }
 
 function buildEditDraft(action: ActionItem): ActionEditDraft {
@@ -1603,6 +1644,34 @@ export default function ActionQueue() {
                 <Badge tone={dueMeta(selectedAction).tone}>{dueMeta(selectedAction).label}</Badge>
               </div>
 
+              {(actionResources(selectedAction).length > 0 || selectedAction.recommended_cta?.phone) && (
+                <div className="aq-resources" aria-label="Action links">
+                  <div className="section-title">Quick links</div>
+                  <div className="aq-resource-list">
+                    {actionResources(selectedAction).map((resource) => (
+                      <a
+                        className={`aq-resource-link${resource.primary ? ' primary' : ''}`}
+                        href={resource.url}
+                        key={resource.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <span>{resource.label}</span>
+                        <span aria-hidden="true">↗</span>
+                      </a>
+                    ))}
+                    {selectedAction.recommended_cta?.phone && (
+                      <a
+                        className="aq-resource-link primary"
+                        href={`tel:${selectedAction.recommended_cta.phone}`}
+                      >
+                        Call {selectedAction.recommended_cta.phone}
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="aq-edit-section">
                 <div className="aq-edit-header">
                   <div className="section-title">Correct extracted details</div>
@@ -1774,6 +1843,10 @@ export default function ActionQueue() {
                 <div className="aq-meta-row"><span>Tags</span><span>{selectedAction.tags?.join(', ') || '—'}</span></div>
                 <div className="aq-meta-row"><span>Amount</span><span>{formatCurrency(selectedAction.amount)}</span></div>
                 <div className="aq-meta-row"><span>Due date</span><span>{formatDate(selectedAction.due_date)}</span></div>
+                {selectedAction.extracted_data?.account_number && <div className="aq-meta-row"><span>Account</span><span>{selectedAction.extracted_data.account_number}</span></div>}
+                {selectedAction.extracted_data?.reference_number && <div className="aq-meta-row"><span>Reference</span><span>{selectedAction.extracted_data.reference_number}</span></div>}
+                {selectedAction.extracted_data?.phone && <div className="aq-meta-row"><span>Phone</span><span><a href={`tel:${selectedAction.extracted_data.phone}`}>{selectedAction.extracted_data.phone}</a></span></div>}
+                {selectedAction.extracted_data?.email && <div className="aq-meta-row"><span>Email</span><span><a href={`mailto:${selectedAction.extracted_data.email}`}>{selectedAction.extracted_data.email}</a></span></div>}
                 <div className="aq-meta-row"><span>Severity</span><span><Badge tone={selectedAction.severity === 'critical' ? 'danger' : selectedAction.severity === 'focus' ? 'warning' : 'success'}>{selectedAction.severity ?? 'safe'}</Badge></span></div>
                 <div className="aq-meta-row"><span>Created</span><span>{formatDateTime(selectedAction.created_at)}</span></div>
                 {selectedAction.completed_at && <div className="aq-meta-row"><span>Done</span><span>{formatDateTime(selectedAction.completed_at)}</span></div>}
@@ -1800,28 +1873,6 @@ export default function ActionQueue() {
                 const currentStatus = normalizeStatus(selectedAction.status);
                 return (
                   <div className="aq-detail-actions">
-                    {/* Recommended CTA — primary action derived from document intelligence */}
-                    {selectedAction.recommended_cta && (
-                      <div className="aq-cta-section">
-                        <div className="section-title">Recommended action</div>
-                        <Button
-                          variant="primary"
-                          onClick={() => {
-                            if (selectedAction.recommended_cta?.url) {
-                              window.open(selectedAction.recommended_cta.url, '_blank', 'noopener');
-                            } else if (selectedAction.recommended_cta?.phone) {
-                              window.open(`tel:${selectedAction.recommended_cta.phone}`);
-                            }
-                          }}
-                          disabled={!selectedAction.recommended_cta.url && !selectedAction.recommended_cta.phone}
-                        >
-                          {selectedAction.recommended_cta.label}
-                          {selectedAction.recommended_cta.url && ' ↗'}
-                          {selectedAction.recommended_cta.phone && ` (${selectedAction.recommended_cta.phone})`}
-                        </Button>
-                      </div>
-                    )}
-
                     {/* Lifecycle transition buttons */}
                     <div className="btn-group">
                       {['pending', 'acknowledged', 'snoozed'].includes(currentStatus) && (

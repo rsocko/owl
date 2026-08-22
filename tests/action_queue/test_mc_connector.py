@@ -6,6 +6,7 @@ UPPERCASE, silently breaking Mission Control's `isTaskAction()` filter
 (which expects lowercase values per INTEGRATION-API-CONTRACT.md).
 """
 
+import json
 from datetime import date
 
 import pytest
@@ -56,6 +57,25 @@ def seeded_client(client):
                 confidence=85,
                 status="pending",
                 correspondent="Power Co",
+                recommended_cta=json.dumps(
+                    {
+                        "id": "pay-online",
+                        "label": "Pay online",
+                        "url": "https://billing.example/pay",
+                    }
+                ),
+                extracted_data={
+                    "account_number": "1234",
+                    "reference_number": "INV-42",
+                    "email": "billing@example.com",
+                    "links": [
+                        {
+                            "url": "https://billing.example/pay",
+                            "label": "Pay online",
+                            "purpose": "payment",
+                        }
+                    ],
+                },
             )
         )
         db.commit()
@@ -93,3 +113,37 @@ class TestMcListActions:
         assert action["category"] != ""
         assert action["title"] != ""
         assert action["confidence"] not in (None, "")
+
+    def test_response_preserves_action_helpers(self, seeded_client):
+        action = seeded_client.get("/api/action-queue/actions").json()[0]
+
+        assert action["recommended_cta"] == {
+            "id": "pay-online",
+            "label": "Pay online",
+            "url": "https://billing.example/pay",
+        }
+        assert action["extracted_data"]["account_number"] == "1234"
+        assert action["extracted_data"]["reference_number"] == "INV-42"
+        assert action["extracted_data"]["links"][0]["purpose"] == "payment"
+
+    def test_response_uses_null_for_missing_action_helpers(self, client):
+        db = get_session()
+        try:
+            db.add(
+                Action(
+                    id=2,
+                    document_id=99,
+                    document_title="Legacy notice",
+                    action_type="REVIEW",
+                    title="Review notice",
+                    urgency="LOW",
+                    status="pending",
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        action = client.get("/api/action-queue/actions").json()[0]
+        assert action["recommended_cta"] is None
+        assert action["extracted_data"] is None

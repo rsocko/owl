@@ -255,6 +255,7 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         "document_date": a.document_date.isoformat() if a.document_date else None,
         "document_type": a.document_type,
         "tags": a.tags if isinstance(a.tags, list) else None,
+        "extracted_data": a.extracted_data if isinstance(a.extracted_data, dict) else None,
         "ai_reasoning": a.ai_reasoning,
         "version": a.version or 1,
         "preview_url": _build_preview_url(a.document_id),

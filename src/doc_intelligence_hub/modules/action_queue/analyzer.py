@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from urllib.parse import urlsplit
 
 from doc_intelligence_hub.core.llm import (
     chat_json,
@@ -55,7 +56,15 @@ Return a JSON object with these fields:
       "account_number": "if found, else null",
       "payment_url": "if found, else null",
       "phone": "if found, else null",
-      "reference_number": "if found, else null"
+      "email": "actionable contact email if found, else null",
+      "reference_number": "if found, else null",
+      "links": [
+        {{
+          "url": "https://...",
+          "label": "Short human-readable label",
+          "purpose": "payment|portal|form|schedule|support|sign|upload|other"
+        }}
+      ]
     }}
   }}
 }}
@@ -91,6 +100,10 @@ Rules for recommended_cta:
 - If the document contains a payment URL, use "pay-online" with the URL.
 - If the document has a phone number for billing/support, use "call-provider" with the phone.
 - For documents with no specific deep-link, use the most natural action (e.g., "review-document" for REVIEW type).
+- Extract every useful HTTP(S) link in extracted_data.links, not just payment links. Prefer links
+  that let the user complete the action: account portals, forms, scheduling, signing, uploads,
+  support pages, and status pages. Give each a concise label and purpose.
+- Do not invent, repair, or guess URLs. Only return links visibly present in the document.
 
 Document metadata:
 - Title: {title}
@@ -135,6 +148,61 @@ _DEFAULT_CTA_BY_ACTION_TYPE: dict[str, dict] = {
 }
 
 
+def _normalize_web_url(value: object) -> str | None:
+    """Return a safe HTTP(S) URL suitable for rendering, or None."""
+    if not isinstance(value, str):
+        return None
+    url = value.strip().rstrip(".,;:!?)\"]}'")
+    if url.lower().startswith("www."):
+        url = f"https://{url}"
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return None
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return None
+    return url
+
+
+def normalize_extracted_data(raw: object) -> dict:
+    """Normalize useful extracted metadata and deduplicate safe document links."""
+    extracted = dict(raw) if isinstance(raw, dict) else {}
+    normalized_links: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    candidates: list[object] = []
+    payment_url = _normalize_web_url(extracted.get("payment_url"))
+    if payment_url:
+        extracted["payment_url"] = payment_url
+        candidates.append({"url": payment_url, "label": "Pay online", "purpose": "payment"})
+    else:
+        extracted["payment_url"] = None
+
+    links = extracted.get("links")
+    if isinstance(links, list):
+        candidates.extend(links)
+
+    for candidate in candidates:
+        if isinstance(candidate, str):
+            candidate = {"url": candidate}
+        if not isinstance(candidate, dict):
+            continue
+        url = _normalize_web_url(candidate.get("url"))
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        purpose = str(candidate.get("purpose") or "other").strip().lower()
+        label = str(candidate.get("label") or purpose.replace("-", " ").title()).strip()
+        normalized_links.append(
+            {"url": url, "label": label[:80] or "Open link", "purpose": purpose[:30]}
+        )
+        if len(normalized_links) == 8:
+            break
+
+    extracted["links"] = normalized_links
+    return extracted
+
+
 def _normalize_cta(raw_cta: dict | str | None, action: dict, assessment: dict) -> dict:
     """Normalize a CTA from LLM response into a consistent structure.
 
@@ -158,7 +226,7 @@ def _normalize_cta(raw_cta: dict | str | None, action: dict, assessment: dict) -
         if raw_cta.get("label"):
             result["label"] = raw_cta["label"]
         if raw_cta.get("url"):
-            result["url"] = raw_cta["url"]
+            result["url"] = _normalize_web_url(raw_cta["url"])
         if raw_cta.get("phone"):
             result["phone"] = raw_cta["phone"]
         if isinstance(raw_cta.get("metadata"), dict):
@@ -169,6 +237,8 @@ def _normalize_cta(raw_cta: dict | str | None, action: dict, assessment: dict) -
     # Enrich from extracted_data if CTA doesn't already have a URL/phone
     if not result["url"] and extracted.get("payment_url"):
         result["url"] = extracted["payment_url"]
+    if not result["url"] and extracted.get("links"):
+        result["url"] = extracted["links"][0]["url"]
     if not result["phone"] and extracted.get("phone"):
         result["phone"] = extracted["phone"]
 
@@ -297,6 +367,7 @@ class OllamaAnalyzer:
     def _validate_multi_action(self, data: dict) -> dict | None:
         """Validate the multi-action response format."""
         assessment = data.get("document_assessment", {})
+        assessment["extracted_data"] = normalize_extracted_data(assessment.get("extracted_data"))
 
         valid_types = {
             "PAY",

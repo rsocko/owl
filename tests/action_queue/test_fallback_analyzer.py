@@ -47,6 +47,43 @@ class TestPayDetection:
         assert action["action_type"] == "PAY"
         assert action["amount"] == 1850.00
 
+    def test_payment_url_becomes_quick_action(self, analyzer):
+        result = analyzer.analyze_document(
+            {
+                "title": "Electric bill",
+                "content": "Amount due: $42.00. Pay online at https://billing.example.com/pay?id=7",
+                "tag_names": ["bill"],
+            }
+        )
+
+        action = result["actions"][0]
+        extracted = result["document_assessment"]["extracted_data"]
+        assert action["recommended_cta"]["url"] == "https://billing.example.com/pay?id=7"
+        assert extracted["links"] == [
+            {
+                "url": "https://billing.example.com/pay?id=7",
+                "label": "Pay online",
+                "purpose": "payment",
+            }
+        ]
+
+    def test_extracts_non_payment_links_and_contact_email(self, analyzer):
+        result = analyzer.analyze_document(
+            {
+                "title": "Appointment reminder",
+                "content": (
+                    "Confirm at www.example.com/schedule or contact care@example.com. "
+                    "Your appointment is scheduled soon."
+                ),
+                "tag_names": [],
+            }
+        )
+
+        extracted = result["document_assessment"]["extracted_data"]
+        assert extracted["email"] == "care@example.com"
+        assert extracted["links"][0]["url"] == "https://www.example.com/schedule"
+        assert extracted["links"][0]["purpose"] == "other"
+
 
 class TestRespondDetection:
     def test_action_required_letter(self, analyzer):

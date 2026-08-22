@@ -6,6 +6,7 @@ expects: /api/action-queue/actions, /api/statements/missing, /api/eob/unmatched.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -75,6 +76,19 @@ class MCFeedbackRequest(BaseModel):
     reason: str | None = None
 
 
+def _deserialize_recommended_cta(value: object) -> dict[str, Any] | None:
+    """Return the structured CTA stored on an action, if available."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
 @router.get("/api/action-queue/actions")
 async def mc_list_actions(
     request: Request,
@@ -136,6 +150,10 @@ async def mc_list_actions(
                     "amount": action.amount,
                     "correspondent": action.correspondent,
                     "summary": action.summary or "",
+                    "recommended_cta": _deserialize_recommended_cta(action.recommended_cta),
+                    "extracted_data": action.extracted_data
+                    if isinstance(action.extracted_data, dict)
+                    else None,
                     "status": normalized_status,
                     "created_at": serialize_utc_datetime(action.created_at),
                     "updated_at": serialize_utc_datetime(action.updated_at),

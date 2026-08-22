@@ -8,6 +8,8 @@ ensures the pipeline still produces useful results without AI.
 import re
 from datetime import date, timedelta
 
+from .analyzer import _normalize_cta, normalize_extracted_data
+
 # Keyword patterns for action type detection
 _PAY_KEYWORDS = re.compile(
     r"\b(invoice|bill|statement|payment\s*due|balance\s*due|amount\s*due|"
@@ -95,6 +97,8 @@ _AMOUNT_PATTERN = re.compile(r"\$\s*([\d,]+\.?\d{0,2})")
 
 # Date extraction (simple patterns)
 _DATE_PATTERN = re.compile(r"\b(\d{1,2})[/\-](\d{1,2})[/\-](20\d{2})\b")
+_URL_PATTERN = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>{}\[\]\"']+")
+_EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 
 
 class RuleBasedAnalyzer:
@@ -142,19 +146,41 @@ class RuleBasedAnalyzer:
 
         # Build action title
         action_title = self._build_title(action_type, title, correspondent, amount)
+        urls = self._extract_urls(text)
+        extracted_data = normalize_extracted_data(
+            {
+                "account_number": None,
+                "payment_url": urls[0] if action_type == "PAY" and urls else None,
+                "phone": None,
+                "email": self._extract_email(text),
+                "reference_number": None,
+                "links": [
+                    {
+                        "url": url,
+                        "label": "Pay online"
+                        if action_type == "PAY" and index == 0
+                        else "Open document link",
+                        "purpose": "payment" if action_type == "PAY" and index == 0 else "other",
+                    }
+                    for index, url in enumerate(urls)
+                ],
+            }
+        )
+        action_payload = {
+            "action_type": action_type,
+            "title": action_title,
+            "summary": f"Auto-detected from document metadata (rule-based, no AI). Correspondent: {correspondent or 'unknown'}",
+            "due_date": due_date.isoformat() if due_date else None,
+            "amount": amount,
+            "urgency": urgency,
+            "confidence": confidence,
+        }
+        action_payload["recommended_cta"] = _normalize_cta(
+            None, action_payload, {"extracted_data": extracted_data}
+        )
 
         return {
-            "actions": [
-                {
-                    "action_type": action_type,
-                    "title": action_title,
-                    "summary": f"Auto-detected from document metadata (rule-based, no AI). Correspondent: {correspondent or 'unknown'}",
-                    "due_date": due_date.isoformat() if due_date else None,
-                    "amount": amount,
-                    "urgency": urgency,
-                    "confidence": confidence,
-                }
-            ],
+            "actions": [action_payload],
             "document_assessment": {
                 "primary_action_index": 0,
                 "correspondent": correspondent or None,
@@ -162,14 +188,25 @@ class RuleBasedAnalyzer:
                 "requires_action": True,
                 "reasoning": f"Rule-based fallback (Ollama unavailable). Detected {action_type} from keywords.",
                 "text_quality": "fair",
-                "extracted_data": {
-                    "account_number": None,
-                    "payment_url": None,
-                    "phone": None,
-                    "reference_number": None,
-                },
+                "extracted_data": extracted_data,
             },
         }
+
+    def _extract_urls(self, text: str) -> list[str]:
+        """Extract up to eight distinct web URLs from OCR text."""
+        urls: list[str] = []
+        for match in _URL_PATTERN.findall(text):
+            url = match.rstrip(".,;:!?)\"]}'")
+            if url not in urls:
+                urls.append(url)
+            if len(urls) == 8:
+                break
+        return urls
+
+    def _extract_email(self, text: str) -> str | None:
+        """Extract the first contact email address."""
+        match = _EMAIL_PATTERN.search(text)
+        return match.group(0) if match else None
 
     def _detect_action_type(self, text: str, tags: list) -> tuple[str, int]:
         """Return (action_type, confidence) based on keyword matching."""
