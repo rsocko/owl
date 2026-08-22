@@ -6,6 +6,7 @@ expects: /api/action-queue/actions, /api/statements/missing, /api/eob/unmatched.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -33,6 +34,19 @@ from doc_intelligence_hub.modules.eob_matching.database import (
 from doc_intelligence_hub.modules.statements.database import Database as StatementsDB
 
 router = APIRouter(tags=["mc-connector"])
+
+
+def _deserialize_recommended_cta(value: object) -> dict[str, Any] | None:
+    """Return the structured CTA stored on an action, if available."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
 
 
 @router.get("/api/action-queue/actions")
@@ -70,6 +84,10 @@ async def mc_list_actions(
                 "amount": a.amount,
                 "correspondent": a.correspondent,
                 "summary": a.summary or "",
+                "recommended_cta": _deserialize_recommended_cta(a.recommended_cta),
+                "extracted_data": a.extracted_data
+                if isinstance(a.extracted_data, dict)
+                else None,
                 "status": a.status or "pending",
                 "created_at": a.created_at.isoformat() if a.created_at else None,
                 "document_url": f"{base_url}/documents/{a.document_id}/details"
