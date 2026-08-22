@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer
+from doc_intelligence_hub.modules.action_queue.analyzer import (
+    OllamaAnalyzer,
+    normalize_extracted_data,
+)
 
 
 class TestPromptBuildingWithIntegerTags:
@@ -98,3 +101,21 @@ class TestPromptBuildingWithIntegerTags:
             assert result is not None
             prompt_sent = mock_chat.call_args[0][0]
             assert "1, manual-tag, 99" in prompt_sent
+
+
+def test_normalize_extracted_data_keeps_safe_links_and_rejects_unsafe_urls():
+    extracted = normalize_extracted_data(
+        {
+            "payment_url": "https://billing.example/pay",
+            "links": [
+                {"url": "https://billing.example/pay", "label": "Duplicate", "purpose": "payment"},
+                {"url": "www.example.com/form", "label": "Complete form", "purpose": "form"},
+                {"url": "javascript:alert(1)", "label": "Unsafe", "purpose": "other"},
+            ],
+        }
+    )
+
+    assert extracted["links"] == [
+        {"url": "https://billing.example/pay", "label": "Pay online", "purpose": "payment"},
+        {"url": "https://www.example.com/form", "label": "Complete form", "purpose": "form"},
+    ]

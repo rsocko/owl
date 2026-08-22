@@ -62,6 +62,20 @@ const initialAction = {
   risk_score: 94,
   status: 'pending',
   correspondent: 'Utility Co',
+  recommended_cta: {
+    id: 'pay-online',
+    label: 'Pay online',
+    url: 'https://billing.example/pay',
+  },
+  extracted_data: {
+    reference_number: 'INV-42',
+    email: 'billing@example.com',
+    links: [
+      { url: 'https://billing.example/pay', label: 'Pay online', purpose: 'payment' },
+      { url: 'https://billing.example/help', label: 'Billing help', purpose: 'support' },
+      { url: 'javascript:alert(1)', label: 'Unsafe', purpose: 'other' },
+    ],
+  },
   preview_url: '/documents/1/details',
   version: 3,
   created_at: '2026-07-20T10:00:00Z',
@@ -144,6 +158,27 @@ describe('ActionQueue', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Remind later (0)' }));
 
     expect(await screen.findByText('Remind later actions (1)')).toBeTruthy();
+  });
+
+  it('shows safe extracted links and useful action details', async () => {
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /pay electric bill/i }));
+
+    expect(screen.getByRole('link', { name: 'Pay online' })).toHaveAttribute(
+      'href',
+      'https://billing.example/pay',
+    );
+    expect(screen.getByRole('link', { name: 'Billing help' })).toHaveAttribute(
+      'href',
+      'https://billing.example/help',
+    );
+    expect(screen.queryByRole('link', { name: 'Unsafe' })).toBeNull();
+    expect(screen.getByText('INV-42')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'billing@example.com' })).toHaveAttribute(
+      'href',
+      'mailto:billing@example.com',
+    );
   });
 
   it('saves corrected action details from the drawer', async () => {
