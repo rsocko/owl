@@ -32,6 +32,26 @@ interface DuplicatePairDetail {
   created_at: string | null;
   doc_a_metadata: DocMetadata | null;
   doc_b_metadata: DocMetadata | null;
+  relationship_proposal?: {
+    source_document_id: number;
+    target_document_id: number;
+    relationship_type: string;
+    confidence: number;
+    reason_codes: string[];
+    priority_adjustment: number;
+    priority_explanation: string;
+    auto_create: boolean;
+  } | null;
+}
+
+interface RelatedResolutionResponse {
+  duplicate: DuplicatePairDetail;
+  relationship: {
+    relationship_type: string;
+    priority_adjustment: number;
+    priority_explanation: string;
+  };
+  projection: { synced: boolean; error: string | null };
 }
 
 interface DuplicateDetailProps {
@@ -94,6 +114,8 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
   const [primaryDocId, setPrimaryDocId] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [resolved, setResolved] = useState(false);
+  const [relationshipType, setRelationshipType] = useState('follows');
+  const [relationshipResult, setRelationshipResult] = useState<RelatedResolutionResponse | null>(null);
 
   const loadPair = useCallback(async () => {
     setLoading(true);
@@ -104,6 +126,9 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
       // Default primary to doc_a
       if (data.primary_doc_id) {
         setPrimaryDocId(data.primary_doc_id);
+      } else if (data.relationship_proposal) {
+        setPrimaryDocId(data.relationship_proposal.source_document_id);
+        setRelationshipType(data.relationship_proposal.relationship_type);
       } else {
         setPrimaryDocId(data.doc_a_id);
       }
@@ -124,10 +149,18 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
     setBusy(resolution);
     setResolveError(null);
     try {
-      await endpoints.duplicates.resolve(pair.id, {
+      const result = await endpoints.duplicates.resolve(pair.id, {
         resolution,
         primary_doc_id: resolution !== 'not_duplicate' ? (primaryDocId ?? undefined) : undefined,
+        relationship_type: resolution === 'related' ? relationshipType : undefined,
       });
+      if (resolution === 'related') {
+        const related = result as RelatedResolutionResponse;
+        setRelationshipResult(related);
+        setPair(related.duplicate);
+      } else {
+        setPair(result as DuplicatePairDetail);
+      }
       setResolved(true);
       onResolved?.();
     } catch (err) {
@@ -250,13 +283,38 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
         </Card>
       )}
 
+      {pair.relationship_proposal && !isResolved && (
+        <Card title="Related-document proposal">
+          <div className="duplicate-resolution-hint">
+            OWL proposes <strong>{pair.relationship_proposal.relationship_type}</strong> at{' '}
+            <strong>{Math.round(pair.relationship_proposal.confidence * 100)}% confidence</strong>.
+            <br />
+            {pair.relationship_proposal.priority_explanation}.
+            <br />
+            Evidence: {pair.relationship_proposal.reason_codes.map((code) => code.replace(/_/g, ' ')).join(', ')}.
+          </div>
+        </Card>
+      )}
+
       {/* Primary document selector + actions (only when pending) */}
       {!isResolved && (
         <Card title="Resolution">
           <div>
             <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.85rem' }}>
-              Select primary document (to keep):
+              Select primary or current document:
             </div>
+            <label style={{ display: 'grid', gap: '0.35rem', marginTop: '0.75rem', maxWidth: 280 }}>
+              <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>If keeping both, link as</span>
+              <select
+                value={relationshipType}
+                onChange={(event) => setRelationshipType(event.target.value)}
+              >
+                <option value="follows">Follows (later notice)</option>
+                <option value="supersedes">Supersedes (replacement)</option>
+                <option value="supports">Supports (additional evidence)</option>
+                <option value="same_sequence">Same sequence</option>
+              </select>
+            </label>
             <div className="duplicate-primary-selector">
               <label
                 className={`duplicate-primary-option${primaryDocId === pair.doc_a_id ? ' selected' : ''}`}
@@ -290,7 +348,9 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
             <br />
             <strong>Superseded</strong> — Updated balance or payment applied. Marks old as superseded.
             <br />
-            <strong>Not duplicate</strong> — Related but different documents. Keeps both, no merge.
+            <strong>Keep both and link</strong> — Preserves both documents and records their typed relationship.
+            <br />
+            <strong>Not duplicate</strong> — Unrelated documents. Keeps both without a link.
           </div>
 
           {resolveError && (
@@ -315,6 +375,12 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
               {busy === 'superseded' ? 'Resolving…' : '📋 Superseded'}
             </Button>
             <Button
+              onClick={() => void handleResolve('related')}
+              disabled={busy !== null || !primaryDocId}
+            >
+              {busy === 'related' ? 'Linking…' : '🔗 Keep Both and Link'}
+            </Button>
+            <Button
               onClick={() => void handleResolve('not_duplicate')}
               disabled={busy !== null}
             >
@@ -330,6 +396,18 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
           <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)' }}>
             ✓ Resolved as <strong>{pair.status.replace(/_/g, ' ')}</strong>
             {pair.primary_doc_id && <> — Primary: Doc #{pair.primary_doc_id}</>}
+            {relationshipResult && (
+              <>
+                <br />
+                Linked as <strong>{relationshipResult.relationship.relationship_type}</strong>.
+                {relationshipResult.relationship.priority_adjustment > 0 && (
+                  <> {relationshipResult.relationship.priority_explanation}.</>
+                )}
+                {!relationshipResult.projection.synced && (
+                  <> OWL saved the link, but Paperless projection needs retry: {relationshipResult.projection.error}.</>
+                )}
+              </>
+            )}
           </div>
         </Card>
       )}

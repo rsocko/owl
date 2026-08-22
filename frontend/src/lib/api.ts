@@ -227,7 +227,7 @@ export const endpoints = {
   duplicates: {
     list: (params?: string) => api.get(`/api/duplicates${params ? `?${params}` : ''}`),
     get: (id: string) => api.get(`/api/duplicates/${id}`),
-    resolve: (id: string, body: { resolution: string; primary_doc_id?: number }) =>
+    resolve: (id: string, body: { resolution: string; primary_doc_id?: number; relationship_type?: string }) =>
       api.post(`/api/duplicates/${id}/resolve`, body),
     scan: () => api.post('/api/duplicates/scan'),
     settings: () => api.get<{ auto_detect_enabled: boolean }>('/api/duplicates/settings'),
@@ -235,6 +235,13 @@ export const endpoints = {
       api.put<{ auto_detect_enabled: boolean }>('/api/duplicates/settings', body),
     checkSingle: (body: { document_id: number }) =>
       api.post('/api/duplicates/check-single', body),
+  },
+  relationships: {
+    list: (documentId: number, direction = 'all') =>
+      api.get(`/api/relationships/documents/${documentId}?direction=${direction}`),
+    propose: (body: unknown) => api.post('/api/relationships/propose', body),
+    create: (body: unknown) => api.post('/api/relationships', body),
+    remove: (id: string) => api.delete(`/api/relationships/${id}`),
   },
   metadata: {
     get: (docId: string | number) => api.get(`/api/metadata/${docId}`),

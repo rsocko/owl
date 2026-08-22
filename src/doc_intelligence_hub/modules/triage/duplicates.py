@@ -36,6 +36,11 @@ from doc_intelligence_hub.modules.triage.database import (
 from doc_intelligence_hub.modules.triage.database import (
     get_session as get_triage_session,
 )
+from doc_intelligence_hub.modules.triage.relationships import (
+    RelationshipConflictError,
+    classify_related_notice,
+    create_document_relationship,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +250,11 @@ def get_document_metadata(doc_id: int) -> dict | None:
                     "invoice_number": getattr(eob, "claim_number", None),
                     "claim_number": getattr(eob, "claim_number", None),
                     "content_hash": getattr(eob, "checksum", None),
+                    "document_date": (
+                        eob.created_at.date().isoformat()
+                        if getattr(eob, "created_at", None)
+                        else None
+                    ),
                     "doc_type": "eob",
                 }
 
@@ -260,7 +270,13 @@ def get_document_metadata(doc_id: int) -> dict | None:
                     "amount": getattr(bill, "amount", None) or getattr(bill, "total_amount", None),
                     "date_of_service": getattr(bill, "date_of_service", None),
                     "invoice_number": getattr(bill, "invoice_number", None),
+                    "due_date": getattr(bill, "due_date", None),
                     "content_hash": getattr(bill, "checksum", None),
+                    "document_date": (
+                        bill.created_at.date().isoformat()
+                        if getattr(bill, "created_at", None)
+                        else None
+                    ),
                     "doc_type": "bill",
                 }
         finally:
@@ -418,6 +434,8 @@ def scan_all_duplicates() -> dict[str, Any]:
     pairs_found = 0
     pairs_created = 0
     triage_created = 0
+    relationships_created = 0
+    relationship_ids: list[str] = []
     seen_pairs: set[tuple[int, int]] = set()
 
     for i, doc_a_id in enumerate(all_doc_ids):
@@ -448,6 +466,32 @@ def scan_all_duplicates() -> dict[str, Any]:
             if existing:
                 continue
 
+            proposal = classify_related_notice(doc_a_id, meta_a, doc_b_id, meta_b)
+            relationship_conflict = False
+            if proposal and proposal.auto_create and proposal.relationship_type != "same_sequence":
+                try:
+                    relationship, created = create_document_relationship(
+                        source_document_id=proposal.source_document_id,
+                        target_document_id=proposal.target_document_id,
+                        relationship_type=proposal.relationship_type,
+                        provenance="automatic",
+                        confidence=proposal.confidence,
+                        reason_codes=proposal.reason_codes,
+                        priority_adjustment=proposal.priority_adjustment,
+                        priority_explanation=proposal.priority_explanation,
+                    )
+                    if created:
+                        relationships_created += 1
+                        relationship_ids.append(relationship["id"])
+                    continue
+                except RelationshipConflictError:
+                    relationship_conflict = True
+                    logger.warning(
+                        "Relationship proposal conflicts with an active link for docs %d and %d",
+                        doc_a_id,
+                        doc_b_id,
+                    )
+
             # Create duplicate pair record
             pair = create_duplicate_pair(
                 doc_a_id=doc_a_id,
@@ -461,6 +505,17 @@ def scan_all_duplicates() -> dict[str, Any]:
             provider_a = meta_a.get("provider") or meta_a.get("provider_name") or "Unknown"
             provider_b = meta_b.get("provider") or meta_b.get("provider_name") or "Unknown"
             score_pct = round(overall * 100, 1)
+            proposal_data = proposal.to_dict() if proposal else None
+            priority = _priority_from_similarity(overall)
+            if proposal:
+                priority = min(100, priority + proposal.priority_adjustment)
+            if relationship_conflict:
+                priority = min(100, priority + 15)
+                proposal_data = {
+                    **(proposal_data or {}),
+                    "conflict": True,
+                    "conflict_priority_adjustment": 15,
+                }
 
             create_queue_item(
                 item_type="duplicate_document",
@@ -468,7 +523,7 @@ def scan_all_duplicates() -> dict[str, Any]:
                 target_type="document_duplicate",
                 target_id=pair["id"],
                 reason=f"Potential duplicate: {score_pct}% similar (docs #{doc_a_id} & #{doc_b_id})",
-                priority=_priority_from_similarity(overall),
+                priority=priority,
                 metadata={
                     "duplicate_pair_id": pair["id"],
                     "doc_a_id": doc_a_id,
@@ -478,13 +533,15 @@ def scan_all_duplicates() -> dict[str, Any]:
                     "provider_a": provider_a,
                     "provider_b": provider_b,
                     "breakdown": breakdown,
+                    "relationship_proposal": proposal_data,
                 },
             )
             triage_created += 1
 
     logger.info(
-        "Duplicate scan complete: %d pairs found, %d created, %d triage items",
+        "Duplicate scan complete: %d pairs found, %d relationships, %d pairs, %d triage items",
         pairs_found,
+        relationships_created,
         pairs_created,
         triage_created,
     )
@@ -492,6 +549,8 @@ def scan_all_duplicates() -> dict[str, Any]:
         "pairs_found": pairs_found,
         "pairs_created": pairs_created,
         "triage_items_created": triage_created,
+        "relationships_created": relationships_created,
+        "relationship_ids": relationship_ids,
         "cleaned_invalid": cleaned,
     }
 
@@ -519,11 +578,14 @@ def on_document_ingested(document_id: int) -> dict[str, Any]:
             "skipped": False,
             "pairs_created": 0,
             "triage_items_created": 0,
+            "relationships_created": 0,
         }
 
     meta_a = get_document_metadata(document_id)
     pairs_created = 0
     triage_created = 0
+    relationships_created = 0
+    relationship_ids: list[str] = []
 
     for match in matches:
         other_id = match["doc_id"]
@@ -535,6 +597,35 @@ def on_document_ingested(document_id: int) -> dict[str, Any]:
 
         overall = match["similarity_score"]
         breakdown = match["breakdown"]
+        meta_b = match.get("metadata", {})
+        proposal = (
+            classify_related_notice(document_id, meta_a, other_id, meta_b) if meta_a else None
+        )
+
+        relationship_conflict = False
+        if proposal and proposal.auto_create and proposal.relationship_type != "same_sequence":
+            try:
+                relationship, created = create_document_relationship(
+                    source_document_id=proposal.source_document_id,
+                    target_document_id=proposal.target_document_id,
+                    relationship_type=proposal.relationship_type,
+                    provenance="automatic",
+                    confidence=proposal.confidence,
+                    reason_codes=proposal.reason_codes,
+                    priority_adjustment=proposal.priority_adjustment,
+                    priority_explanation=proposal.priority_explanation,
+                )
+                relationships_created += int(created)
+                if created:
+                    relationship_ids.append(relationship["id"])
+                continue
+            except RelationshipConflictError:
+                relationship_conflict = True
+                logger.warning(
+                    "Relationship proposal conflicts with an active link for docs %d and %d",
+                    document_id,
+                    other_id,
+                )
 
         pair = create_duplicate_pair(
             doc_a_id=document_id,
@@ -547,9 +638,19 @@ def on_document_ingested(document_id: int) -> dict[str, Any]:
         provider_a = (
             (meta_a or {}).get("provider") or (meta_a or {}).get("provider_name") or "Unknown"
         )
-        meta_b = match.get("metadata", {})
         provider_b = meta_b.get("provider") or meta_b.get("provider_name") or "Unknown"
         score_pct = round(overall * 100, 1)
+        proposal_data = proposal.to_dict() if proposal else None
+        priority = _priority_from_similarity(overall)
+        if proposal:
+            priority = min(100, priority + proposal.priority_adjustment)
+        if relationship_conflict:
+            priority = min(100, priority + 15)
+            proposal_data = {
+                **(proposal_data or {}),
+                "conflict": True,
+                "conflict_priority_adjustment": 15,
+            }
 
         create_queue_item(
             item_type="duplicate_document",
@@ -557,7 +658,7 @@ def on_document_ingested(document_id: int) -> dict[str, Any]:
             target_type="document_duplicate",
             target_id=pair["id"],
             reason=f"Potential duplicate: {score_pct}% similar (docs #{document_id} & #{other_id})",
-            priority=_priority_from_similarity(overall),
+            priority=priority,
             metadata={
                 "duplicate_pair_id": pair["id"],
                 "doc_a_id": document_id,
@@ -567,13 +668,15 @@ def on_document_ingested(document_id: int) -> dict[str, Any]:
                 "provider_a": provider_a,
                 "provider_b": provider_b,
                 "breakdown": breakdown,
+                "relationship_proposal": proposal_data,
             },
         )
         triage_created += 1
 
     logger.info(
-        "Auto-detect for doc %d: %d pairs created, %d triage items",
+        "Auto-detect for doc %d: %d relationships, %d pairs, %d triage items",
         document_id,
+        relationships_created,
         pairs_created,
         triage_created,
     )
@@ -582,6 +685,8 @@ def on_document_ingested(document_id: int) -> dict[str, Any]:
         "skipped": False,
         "pairs_created": pairs_created,
         "triage_items_created": triage_created,
+        "relationships_created": relationships_created,
+        "relationship_ids": relationship_ids,
     }
 
 

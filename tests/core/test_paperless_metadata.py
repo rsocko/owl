@@ -62,6 +62,16 @@ def test_registry_contains_all_design_fields_without_di_prefix() -> None:
     assert all(get_metadata_field_spec(key).compatibility_read for key in CANONICAL_KEYS)
 
 
+def test_relationship_projection_fields_are_creatable() -> None:
+    related = get_metadata_field_spec(MetadataFieldKey.RELATED_DOCUMENTS)
+    summary = get_metadata_field_spec(MetadataFieldKey.RELATIONSHIP_SUMMARY)
+
+    assert related.canonical_name == "Related Document IDs"
+    assert related.create_policy is MetadataCreatePolicy.IF_MISSING
+    assert related.create_definition()["data_type"] == "string"
+    assert summary.create_policy is MetadataCreatePolicy.IF_MISSING
+
+
 def test_document_classification_is_an_internal_key_alias() -> None:
     spec = get_metadata_field_spec("document_classification")
     assert spec.key is MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE
