@@ -91,6 +91,22 @@ class TestMCListActions:
         completed = client.get("/api/action-queue/actions?status=completed").json()
         assert any(action["document_id"] == 3 for action in completed)
 
+    def test_expired_snooze_resurfaces_before_filtering(self, client, seed_actions):
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(status="pending").first()
+            action.status = "snoozed"
+            action.snoozed_until = datetime(2020, 1, 1)
+            action_id = str(action.id)
+            db.commit()
+        finally:
+            db.close()
+
+        pending = client.get("/api/action-queue/actions?status=pending").json()
+        resurfaced = next(action for action in pending if action["id"] == action_id)
+        assert resurfaced["status"] == "pending"
+        assert resurfaced["snoozed_until"] is None
+
 
 class TestMCUpdateAction:
     """Tests for PATCH /api/action-queue/actions/{id}."""
@@ -145,6 +161,18 @@ class TestMCUpdateAction:
         assert resp.status_code == 200
         data = resp.json()
         assert data["new_status"] == "dismissed"
+
+    def test_dismiss_clears_completed_timestamp(self, client, seed_actions):
+        completed = client.get("/api/action-queue/actions?status=completed").json()[0]
+
+        resp = client.patch(
+            f"/api/action-queue/actions/{completed['id']}",
+            json={"status": "dismissed"},
+        )
+
+        assert resp.status_code == 200
+        dismissed = client.get("/api/action-queue/actions?status=dismissed").json()[0]
+        assert dismissed["completed_at"] is None
 
     def test_reopen_clears_lifecycle_timestamps(self, client, seed_actions):
         completed = client.get("/api/action-queue/actions?status=completed").json()[0]

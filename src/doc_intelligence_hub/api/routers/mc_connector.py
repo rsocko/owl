@@ -14,7 +14,10 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.api.routers import get_loaded_statement_config
-from doc_intelligence_hub.api.routers.action_queue import _sync_action_queue_settings
+from doc_intelligence_hub.api.routers.action_queue import (
+    _resurface_expired_snoozes,
+    _sync_action_queue_settings,
+)
 from doc_intelligence_hub.modules.action_queue.database import (
     Action,
 )
@@ -85,6 +88,7 @@ async def mc_list_actions(
     aq_init_db()
     db = get_aq_session()
     try:
+        await _resurface_expired_snoozes(db)
         query = db.query(Action)
         if status and status != "all":
             try:

@@ -107,6 +107,7 @@ def transition_action_status(
         action.completed_at = None
         action.snoozed_until = snoozed_until
     elif status in {"dismissed", "not_an_action"}:
+        action.completed_at = None
         action.snoozed_until = None
 
     current = (
