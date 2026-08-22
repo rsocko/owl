@@ -98,6 +98,10 @@ class ActionFeedback(Base):
     corrected_action_type = Column(
         String, nullable=True
     )  # What user says it should be (if misclassified)
+    original_urgency = Column(String, nullable=True)
+    corrected_urgency = Column(String, nullable=True)
+    original_amount = Column(Float, nullable=True)
+    corrected_amount = Column(Float, nullable=True)
     reason = Column(Text, nullable=True)  # Optional user explanation
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -180,6 +184,12 @@ def _migrate_missing_columns(engine):
             ("document_date", "DATE"),
             ("document_type", "TEXT"),
             ("tags", "TEXT"),  # JSON array stored as TEXT in SQLite
+        ],
+        "action_feedback": [
+            ("original_urgency", "TEXT"),
+            ("corrected_urgency", "TEXT"),
+            ("original_amount", "REAL"),
+            ("corrected_amount", "REAL"),
         ],
     }
 

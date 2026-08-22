@@ -23,11 +23,14 @@ from doc_intelligence_hub.modules.action_queue.database import (
     get_session,
     init_db,
 )
-from doc_intelligence_hub.modules.action_queue.pipeline import get_pipeline_progress, run_pipeline
-from doc_intelligence_hub.modules.action_queue.risk_scoring import (
-    compute_risk_score,
-    recalculate_risk_scores,
+from doc_intelligence_hub.modules.action_queue.lifecycle import (
+    recalculate_action_risk,
+    record_action_feedback,
+    sync_action_status,
+    transition_action_status,
 )
+from doc_intelligence_hub.modules.action_queue.pipeline import get_pipeline_progress, run_pipeline
+from doc_intelligence_hub.modules.action_queue.risk_scoring import recalculate_risk_scores
 from doc_intelligence_hub.modules.statements.config import resolve_api_token
 
 router = APIRouter(prefix="/api/queue", tags=["action-queue"])
@@ -147,7 +150,7 @@ class ActionUpdateRequest(BaseModel):
                 "At least one editable field must be provided",
             )
 
-        for field_name in ("action_type", "title", "urgency"):
+        for field_name in ("status", "action_type", "title", "urgency"):
             if field_name in self.model_fields_set and getattr(self, field_name) is None:
                 raise PydanticCustomError(
                     "null_editable_field",
@@ -268,7 +271,7 @@ def _urgency_to_severity(urgency: str | None) -> str:
     return mapping.get((urgency or "LOW").upper(), "safe")
 
 
-def _resurface_expired_snoozes(db: Session, *, now: datetime | None = None) -> list[Action]:
+async def _resurface_expired_snoozes(db: Session, *, now: datetime | None = None) -> list[Action]:
     """Move expired snoozes back to pending and return the affected actions."""
     expired = (
         db.query(Action)
@@ -280,29 +283,28 @@ def _resurface_expired_snoozes(db: Session, *, now: datetime | None = None) -> l
         .all()
     )
     for action in expired:
-        action.status = "pending"
-        action.completed_at = None
-        action.acknowledged_at = None
-        action.snoozed_until = None
-        action.risk_score = compute_risk_score(
-            urgency=action.urgency or "LOW",
-            due_date=action.due_date,
-            amount=action.amount,
-            confidence=action.confidence or 0,
-            action_type=action.action_type or "REVIEW",
-        )
+        transition_action_status(action, "pending")
         action.version = (action.version or 1) + 1
 
     if expired:
         db.commit()
+        import logging
+
+        for action in expired:
+            await sync_action_status(
+                db,
+                action,
+                "pending",
+                logger=logging.getLogger(__name__),
+            )
     return expired
 
 
-def _database_counts() -> dict[str, int]:
+async def _database_counts() -> dict[str, int]:
     init_db()
     db = get_session()
     try:
-        _resurface_expired_snoozes(db)
+        await _resurface_expired_snoozes(db)
         pending = db.query(Action).filter_by(status="pending").count()
         acknowledged = db.query(Action).filter_by(status="acknowledged").count()
         completed = db.query(Action).filter_by(status="completed").count()
@@ -427,7 +429,7 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
         "limit": effective_limit,
         "read_only": not action_queue_settings.write_to_paperless,
         "result": result,
-        "database": _database_counts(),
+        "database": await _database_counts(),
     }
     request.app.state.last_queue_status = status
     return status
@@ -571,7 +573,7 @@ async def queue_run_stream(
                 "limit": body.limit,
                 "read_only": not action_queue_settings.write_to_paperless,
                 "result": result,
-                "database": _database_counts(),
+                "database": await _database_counts(),
             }
             request.app.state.last_queue_status = final_status
 
@@ -594,7 +596,7 @@ async def queue_status(request: Request) -> dict[str, Any]:
     return {
         **base_status,
         "read_only": not action_queue_settings.write_to_paperless,
-        "database": _database_counts(),
+        "database": await _database_counts(),
         "progress": get_pipeline_progress(),
     }
 
@@ -613,7 +615,7 @@ async def list_actions(
     init_db()
     db = get_session()
     try:
-        _resurface_expired_snoozes(db)
+        await _resurface_expired_snoozes(db)
         query = db.query(Action)
         if status:
             query = query.filter_by(status=status)
@@ -648,7 +650,7 @@ async def resurface_expired_snoozes(request: Request) -> dict[str, Any]:
     init_db()
     db = get_session()
     try:
-        resurfaced = _resurface_expired_snoozes(db)
+        resurfaced = await _resurface_expired_snoozes(db)
         return {
             "resurfaced": len(resurfaced),
             "action_ids": [action.id for action in resurfaced],
@@ -716,8 +718,8 @@ async def update_action(
             )
 
         supplied_fields = body.model_fields_set
-        effective_status = body.status or action.status
         risk_inputs_changed = False
+        status_changed = False
 
         if "action_type" in supplied_fields:
             action.action_type = body.action_type
@@ -738,14 +740,10 @@ async def update_action(
         if "correspondent" in supplied_fields:
             action.correspondent = body.correspondent
 
-        if "status" in supplied_fields:
-            action.status = body.status
-        if effective_status == "completed" and "status" in supplied_fields:
-            action.completed_at = datetime.utcnow()
-        elif effective_status == "acknowledged" and "status" in supplied_fields:
-            action.acknowledged_at = datetime.utcnow()
-        elif effective_status == "snoozed":
-            if "status" in supplied_fields or "snoozed_until" in supplied_fields:
+        if "status" in supplied_fields or "snoozed_until" in supplied_fields:
+            effective_status = body.status or action.status
+            snoozed_until = None
+            if effective_status == "snoozed":
                 if not body.snoozed_until:
                     from fastapi import HTTPException
 
@@ -753,47 +751,46 @@ async def update_action(
                         status_code=422,
                         detail="snoozed_until is required when status is 'snoozed'",
                     )
-                action.snoozed_until = datetime.fromisoformat(body.snoozed_until)
-        elif effective_status == "pending" and "status" in supplied_fields:
-            action.completed_at = None
-            action.acknowledged_at = None
-            action.snoozed_until = None
-            risk_inputs_changed = True
+                try:
+                    snoozed_until = datetime.fromisoformat(body.snoozed_until)
+                except ValueError as exc:
+                    from fastapi import HTTPException
+
+                    raise HTTPException(
+                        status_code=422,
+                        detail="snoozed_until must be a valid ISO timestamp",
+                    ) from exc
+            elif "snoozed_until" in supplied_fields:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=422,
+                    detail="snoozed_until can only be changed for a snoozed action",
+                )
+            status_changed = transition_action_status(
+                action,
+                effective_status,
+                snoozed_until=snoozed_until,
+            )
 
         if risk_inputs_changed:
-            action.risk_score = compute_risk_score(
-                urgency=action.urgency or "LOW",
-                due_date=action.due_date,
-                amount=action.amount,
-                confidence=action.confidence or 0,
-                action_type=action.action_type or "REVIEW",
-            )
+            recalculate_action_risk(action)
 
         action.version = (action.version or 1) + 1
         db.commit()
 
         # Sync status to Paperless (best-effort — don't fail the user action)
-        if (
-            action_queue_settings.write_to_paperless
-            and action.document_id
-            and "status" in supplied_fields
+        if "status" in supplied_fields and (
+            status_changed or action.last_synced_status != body.status
         ):
-            try:
-                from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
+            import logging
 
-                enricher = PaperlessEnricher()
-                await enricher.sync_status(action.document_id, body.status)
-                action.last_synced_status = body.status
-                db.commit()
-            except Exception as exc:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "Failed to sync status to Paperless for action %d (doc %d): %s",
-                    action_id,
-                    action.document_id,
-                    exc,
-                )
+            await sync_action_status(
+                db,
+                action,
+                body.status,
+                logger=logging.getLogger(__name__),
+            )
 
         return _serialize_action(action)
     finally:
@@ -837,66 +834,33 @@ async def bulk_action(request: Request, body: BulkActionRequest) -> dict[str, An
             raise HTTPException(status_code=404, detail="No matching actions found")
 
         affected = 0
-        affected_actions: list[Action] = []
+        sync_actions: list[Action] = []
         for action in actions:
             if action.status == target_status:
+                if action.last_synced_status != target_status:
+                    sync_actions.append(action)
                 continue
-            action.status = target_status
-            action.version = (action.version or 1) + 1
-            if target_status == "completed":
-                action.completed_at = datetime.utcnow()
-            elif target_status == "snoozed":
-                action.snoozed_until = snoozed_until
-            elif target_status == "pending":
-                action.completed_at = None
-                action.acknowledged_at = None
-                action.snoozed_until = None
-                # Recalculate risk score on reopen
-                action.risk_score = compute_risk_score(
-                    urgency=action.urgency or "LOW",
-                    due_date=action.due_date,
-                    amount=action.amount,
-                    confidence=action.confidence or 0,
-                    action_type=action.action_type or "REVIEW",
+            if target_status == "not_an_action":
+                record_action_feedback(db, action, feedback_type="not_an_action")
+            else:
+                transition_action_status(
+                    action,
+                    target_status,
+                    snoozed_until=snoozed_until,
                 )
-            elif target_status == "not_an_action":
-                db.add(
-                    ActionFeedback(
-                        action_id=action.id,
-                        feedback_type="not_an_action",
-                        original_action_type=action.action_type,
-                    )
-                )
+                action.version = (action.version or 1) + 1
             affected += 1
-            affected_actions.append(action)
+            sync_actions.append(action)
 
         db.commit()
 
         # Sync status to Paperless for affected actions (best-effort)
-        if action_queue_settings.write_to_paperless and affected_actions:
+        if sync_actions:
             import logging
 
             log = logging.getLogger(__name__)
-            try:
-                from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
-
-                enricher = PaperlessEnricher()
-                for action in affected_actions:
-                    if not action.document_id:
-                        continue
-                    try:
-                        await enricher.sync_status(action.document_id, target_status)
-                        action.last_synced_status = target_status
-                    except Exception as exc:
-                        log.warning(
-                            "Bulk sync: failed for action %d (doc %d): %s",
-                            action.id,
-                            action.document_id,
-                            exc,
-                        )
-                db.commit()
-            except Exception as exc:
-                log.warning("Bulk sync to Paperless failed: %s", exc)
+            for action in sync_actions:
+                await sync_action_status(db, action, target_status, logger=log)
 
         return {"affected": affected, "action": body.action}
     finally:
@@ -1336,6 +1300,14 @@ class FeedbackRequest(BaseModel):
         default=None,
         description="What the action type should be (for misclassified feedback)",
     )
+    corrected_urgency: str | None = Field(
+        default=None,
+        description="What the urgency should be (for wrong_urgency feedback)",
+    )
+    corrected_amount: float | None = Field(
+        default=None,
+        description="What the amount should be (for wrong_amount feedback)",
+    )
     reason: str | None = Field(default=None, description="Optional user explanation")
 
 
@@ -1363,52 +1335,32 @@ async def submit_feedback(
 
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
 
-        # Record the feedback
-        feedback = ActionFeedback(
-            action_id=action_id,
-            feedback_type=body.feedback_type,
-            original_action_type=action.action_type,
-            corrected_action_type=body.corrected_action_type,
-            reason=body.reason,
-        )
-        db.add(feedback)
+        try:
+            feedback, _ = record_action_feedback(
+                db,
+                action,
+                feedback_type=body.feedback_type,
+                corrected_action_type=body.corrected_action_type,
+                corrected_urgency=body.corrected_urgency,
+                corrected_amount=body.corrected_amount,
+                reason=body.reason,
+            )
+        except ValueError as exc:
+            from fastapi import HTTPException
 
-        # If "not_an_action", also update the action status
-        if body.feedback_type == "not_an_action":
-            action.status = "not_an_action"
-            action.version = (action.version or 1) + 1
-
-        # If misclassified and a correction is provided, update the action type
-        if body.feedback_type == "misclassified" and body.corrected_action_type:
-            from doc_intelligence_hub.modules.action_queue.database import VALID_ACTION_TYPES
-
-            if body.corrected_action_type.upper() in VALID_ACTION_TYPES:
-                action.action_type = body.corrected_action_type.upper()
-                action.version = (action.version or 1) + 1
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         db.commit()
 
-        if (
-            body.feedback_type == "not_an_action"
-            and action_queue_settings.write_to_paperless
-            and action.document_id
-        ):
-            try:
-                from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
+        if body.feedback_type == "not_an_action":
+            import logging
 
-                enricher = PaperlessEnricher()
-                await enricher.sync_status(action.document_id, "not_an_action")
-                action.last_synced_status = "not_an_action"
-                db.commit()
-            except Exception as exc:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "Failed to sync no-action feedback to Paperless for action %d (doc %d): %s",
-                    action_id,
-                    action.document_id,
-                    exc,
-                )
+            await sync_action_status(
+                db,
+                action,
+                "not_an_action",
+                logger=logging.getLogger(__name__),
+            )
 
         return {
             "feedback_id": feedback.id,
@@ -1416,6 +1368,8 @@ async def submit_feedback(
             "feedback_type": body.feedback_type,
             "action_status": action.status,
             "action_type": action.action_type,
+            "urgency": action.urgency,
+            "amount": action.amount,
         }
     finally:
         db.close()
@@ -1442,6 +1396,10 @@ async def get_feedback(request: Request, action_id: int) -> dict[str, Any]:
                     "feedback_type": f.feedback_type,
                     "original_action_type": f.original_action_type,
                     "corrected_action_type": f.corrected_action_type,
+                    "original_urgency": f.original_urgency,
+                    "corrected_urgency": f.corrected_urgency,
+                    "original_amount": f.original_amount,
+                    "corrected_amount": f.corrected_amount,
                     "reason": f.reason,
                     "created_at": f.created_at.isoformat() if f.created_at else None,
                 }
@@ -1488,10 +1446,20 @@ async def snooze_action(request: Request, action_id: int, body: SnoozeRequest) -
                 detail=f"Invalid ISO timestamp: {body.until}",
             ) from err
 
-        action.status = "snoozed"
-        action.snoozed_until = snooze_dt
-        action.version = (action.version or 1) + 1
+        changed = transition_action_status(action, "snoozed", snoozed_until=snooze_dt)
+        if changed:
+            action.version = (action.version or 1) + 1
         db.commit()
+
+        import logging
+
+        if changed or action.last_synced_status != "snoozed":
+            await sync_action_status(
+                db,
+                action,
+                "snoozed",
+                logger=logging.getLogger(__name__),
+            )
 
         return _serialize_action(action)
     finally:
@@ -1515,10 +1483,20 @@ async def acknowledge_action(request: Request, action_id: int) -> dict[str, Any]
 
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
 
-        action.status = "acknowledged"
-        action.acknowledged_at = datetime.utcnow()
-        action.version = (action.version or 1) + 1
+        changed = transition_action_status(action, "acknowledged")
+        if changed:
+            action.version = (action.version or 1) + 1
         db.commit()
+
+        import logging
+
+        if changed or action.last_synced_status != "acknowledged":
+            await sync_action_status(
+                db,
+                action,
+                "acknowledged",
+                logger=logging.getLogger(__name__),
+            )
 
         return _serialize_action(action)
     finally:

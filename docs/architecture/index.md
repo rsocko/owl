@@ -193,13 +193,19 @@ OWL ships a React/Vite single-page application as its primary UI. The compiled a
 
 ### Mission Control Connector
 
-A dedicated `mc_connector` router exposes flat-array endpoints that Mission Control's Document Intelligence connector expects:
+A dedicated `mc_connector` router exposes the endpoints that Mission Control's Document Intelligence connector expects:
 
-- `/api/action-queue/actions` — pending actions for MC badges
+- `/api/action-queue/actions` — paginated, optionally incremental action reconciliation
+- `/api/action-queue/actions/{id}` — Paperless-aware completion, dismissal, and reopen
+- `/api/action-queue/actions/{id}/snooze` — source-side snooze
+- `/api/action-queue/actions/{id}/feedback` — classifier feedback and corrections
 - `/api/statements/missing` — missing statement alerts
 - `/api/eob/unmatched` — unmatched EOB records
 
-This allows Mission Control to aggregate OWL data alongside other homelab services without duplicating business logic.
+The Action Queue and connector routers share lifecycle and feedback helpers so
+timestamps, Paperless status write-back, sync tracking, and configured intake-tag
+removal stay consistent. See the
+[Mission Control integration contract](../guide/mission-control-integration.md).
 
 ### Module Routers
 

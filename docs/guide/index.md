@@ -16,6 +16,7 @@ OWL is a document intelligence application that turns your [Paperless-ngx](https
 | [Statement Tracking](./statement-tracking-guide.md) | Detects missing recurring statements (bank, utilities, insurance) |
 | [EOB Matching](./eob-matching-guide.md) | Matches insurance Explanations of Benefit to medical bills |
 | [Alerts](./alerts-guide.md) | Unified alert inbox across all modules |
+| [Mission Control Integration](./mission-control-integration.md) | Bidirectional Action Queue reconciliation and source corrections |
 | OCR Quality | Scores and remediates poor OCR (planned) |
 
 ## Architecture
