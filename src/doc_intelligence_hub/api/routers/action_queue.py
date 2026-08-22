@@ -268,9 +268,7 @@ def _urgency_to_severity(urgency: str | None) -> str:
     return mapping.get((urgency or "LOW").upper(), "safe")
 
 
-def _resurface_expired_snoozes(
-    db: Session, *, now: datetime | None = None
-) -> list[Action]:
+def _resurface_expired_snoozes(db: Session, *, now: datetime | None = None) -> list[Action]:
     """Move expired snoozes back to pending and return the affected actions."""
     expired = (
         db.query(Action)
