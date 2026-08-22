@@ -10,7 +10,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, Response
 from starlette.responses import StreamingResponse
 
-from doc_intelligence_hub.modules.statements.config import load_config, resolve_api_token
+from doc_intelligence_hub.modules.statements.config import AppConfig, load_config, resolve_api_token
 from doc_intelligence_hub.modules.statements.database import Database
 from doc_intelligence_hub.modules.statements.detector import discover_providers
 from doc_intelligence_hub.modules.statements.recommendations import build_recommendations
@@ -143,9 +143,23 @@ def create_app(config_path: str) -> FastAPI:
     return app
 
 
-async def _discovery_event_generator(config_path: str):
+def _resolve_config(config: AppConfig | str) -> AppConfig:
+    return load_config(config) if isinstance(config, str) else config
+
+
+def _stream_error_message(error: Exception, config: AppConfig) -> str:
+    if isinstance(error, httpx.ConnectError):
+        return (
+            f"Unable to connect to Paperless at {config.source.paperless_url}. "
+            "Check the Paperless URL and network access."
+        )
+    if isinstance(error, httpx.TimeoutException):
+        return f"Paperless at {config.source.paperless_url} did not respond in time."
+    return str(error)
+
+
+async def _discovery_event_generator(config_path: AppConfig | str):
     """Generate SSE events for discovery with progress updates."""
-    from doc_intelligence_hub.modules.statements.config import load_config
     from doc_intelligence_hub.modules.statements.hints import apply_hints
     from doc_intelligence_hub.modules.statements.models import DiscoveryResult
     from doc_intelligence_hub.modules.statements.service import (
@@ -154,7 +168,7 @@ async def _discovery_event_generator(config_path: str):
         _write_snapshot,
     )
 
-    config = load_config(config_path)
+    config = _resolve_config(config_path)
     _inject_document_type_mapping(config)
 
     # We need to yield from inside the generator, so use a queue
@@ -178,7 +192,7 @@ async def _discovery_event_generator(config_path: str):
             _save_to_database(config.runtime.database_path, result)
             await queue.put({"stage": "complete", "result": result.model_dump(mode="json")})
         except Exception as e:
-            await queue.put({"stage": "error", "message": str(e)})
+            await queue.put({"stage": "error", "message": _stream_error_message(e, config)})
 
     task = asyncio.create_task(run_task())
 
@@ -192,16 +206,15 @@ async def _discovery_event_generator(config_path: str):
     await task
 
 
-async def _recommendations_event_generator(config_path: str, as_of: date):
+async def _recommendations_event_generator(config_path: AppConfig | str, as_of: date):
     """Generate SSE events for recommendations with progress updates."""
-    from doc_intelligence_hub.modules.statements.config import load_config
     from doc_intelligence_hub.modules.statements.hints import apply_hints
     from doc_intelligence_hub.modules.statements.service import (
         _inject_document_type_mapping,
         _save_recommendations_to_database,
     )
 
-    config = load_config(config_path)
+    config = _resolve_config(config_path)
     _inject_document_type_mapping(config)
 
     queue: asyncio.Queue = asyncio.Queue()
@@ -228,7 +241,7 @@ async def _recommendations_event_generator(config_path: str, as_of: date):
             _save_recommendations_to_database(config.runtime.database_path, result)
             await queue.put({"stage": "complete", "result": result.model_dump(mode="json")})
         except Exception as e:
-            await queue.put({"stage": "error", "message": str(e)})
+            await queue.put({"stage": "error", "message": _stream_error_message(e, config)})
 
     task = asyncio.create_task(run_task())
 

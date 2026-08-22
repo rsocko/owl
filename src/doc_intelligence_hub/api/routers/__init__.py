@@ -26,7 +26,17 @@ def get_statement_config_path(request: Request) -> str:
 
 
 def load_statement_config_from_request(request: Request) -> AppConfig:
-    return load_config(get_statement_config_path(request))
+    config = load_config(get_statement_config_path(request))
+    settings = request.app.state.hub_settings
+
+    if config.source.mode == "paperless":
+        config = config.model_copy(deep=True)
+        if settings.paperless_url:
+            config.source.paperless_url = settings.paperless_url
+        if settings.resolved_paperless_token:
+            config.source.api_token = settings.resolved_paperless_token
+
+    return config
 
 
 def get_loaded_statement_config(request: Request) -> AppConfig | None:

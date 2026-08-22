@@ -247,9 +247,9 @@
 /* Toast */
 .toast {
   position: fixed; bottom: 24px; right: 24px; background: var(--card); border: 1px solid var(--border);
-  padding: 12px 20px; border-radius: var(--radius-sm); font-size: 0.82rem; z-index: 1100;
+  padding: 16px 20px; border-radius: var(--radius-sm); font-size: 0.95rem; line-height: 1.45; z-index: 1100;
   box-shadow: 0 8px 24px rgba(0,0,0,0.15); display: inline-flex; align-items: center; gap: 12px;
-  max-width: min(480px, calc(100vw - 48px));
+  min-width: min(360px, calc(100vw - 48px)); max-width: min(560px, calc(100vw - 48px));
 }
 .toast-message { flex: 1; }
 .toast.success { border-color: var(--success); color: var(--success); }
