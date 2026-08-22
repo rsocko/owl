@@ -30,6 +30,7 @@ from doc_intelligence_hub.api.routers import (
     insights,
     mc_connector,
     metadata,
+    relationships,
     statements,
     stats,
     system,
@@ -341,6 +342,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(triage.router)
     app.include_router(dashboard.router)
     app.include_router(duplicates.router)
+    app.include_router(relationships.router)
     app.include_router(metadata.router)
     app.include_router(analysis.router)
     app.include_router(insights.router)

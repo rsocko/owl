@@ -73,6 +73,32 @@ class DocumentDuplicate(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
 
+class DocumentRelationship(Base):
+    """A typed, auditable relationship between two preserved documents."""
+
+    __tablename__ = "document_relationships"
+    __table_args__ = (
+        Index("idx_relationship_source_active", "source_document_id", "removed_at"),
+        Index("idx_relationship_target_active", "target_document_id", "removed_at"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex[:12])
+    source_document_id = Column(Integer, nullable=False)
+    target_document_id = Column(Integer, nullable=False)
+    relationship_type = Column(String, nullable=False)
+    provenance = Column(String, nullable=False)
+    confidence = Column(Float, nullable=True)
+    reason_codes_json = Column("reason_codes", Text, nullable=False, default="[]")
+    priority_adjustment = Column(Integer, nullable=False, default=0)
+    priority_explanation = Column(Text, nullable=False, default="")
+    source_duplicate_pair_id = Column(String, nullable=True)
+    paperless_synced = Column(Integer, nullable=False, default=0)
+    projection_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    removed_at = Column(DateTime, nullable=True)
+    removed_by = Column(String, nullable=True)
+
+
 class CorrectionEvent(Base):
     """Audit trail entry for all user corrections."""
 

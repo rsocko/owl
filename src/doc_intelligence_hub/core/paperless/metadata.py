@@ -36,6 +36,8 @@ class MetadataFieldKey(str, Enum):
     EOB_DOCUMENT_TYPE = "eob_document_type"
     EOB_PATIENT_RESPONSIBILITY = "eob_patient_responsibility"
     EOB_ANALYZED = "eob_analyzed"
+    RELATED_DOCUMENTS = "related_documents"
+    RELATIONSHIP_SUMMARY = "relationship_summary"
 
 
 class PaperlessFieldType(str, Enum):
@@ -235,6 +237,24 @@ _REGISTRY_ENTRIES = (
         PaperlessFieldType.TEXT,
         MetadataNormalization.TEXT,
         projection_policy=_DURABLE,
+    ),
+    _spec(
+        MetadataFieldKey.RELATED_DOCUMENTS,
+        "Related Document IDs",
+        PaperlessFieldType.TEXT,
+        MetadataNormalization.TEXT,
+        projection_policy=_OPERATIONAL,
+        create_policy=_CREATE,
+        create_type=PaperlessFieldType.TEXT,
+    ),
+    _spec(
+        MetadataFieldKey.RELATIONSHIP_SUMMARY,
+        "Relationship Summary",
+        PaperlessFieldType.TEXT,
+        MetadataNormalization.TEXT,
+        projection_policy=_OPERATIONAL,
+        create_policy=_CREATE,
+        create_type=PaperlessFieldType.TEXT,
     ),
     _spec(
         MetadataFieldKey.DOCUMENT_AMOUNT,
