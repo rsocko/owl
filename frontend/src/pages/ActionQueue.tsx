@@ -104,6 +104,12 @@ interface ActionListResponse {
   total?: number;
 }
 
+interface PaperlessTag {
+  id: number;
+  name: string;
+  colour?: string | null;
+}
+
 type ActionFilter = 'pending' | 'acknowledged' | 'completed' | 'dismissed' | 'snoozed' | 'not_an_action' | 'all';
 type ActionStatus = 'completed' | 'dismissed' | 'pending' | 'acknowledged' | 'snoozed' | 'not_an_action';
 type ActionEditDraft = {
@@ -205,6 +211,32 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
 
 function formatCurrency(value?: number | null) {
   return typeof value === 'number' ? currencyFormatter.format(value) : '—';
+}
+
+function normalizeTagColour(value?: string | null): string | null {
+  if (!value) return null;
+  const match = value.trim().match(/^#?([0-9a-f]{6})$/i);
+  return match ? `#${match[1]}` : null;
+}
+
+function tagTextColour(background: string): string {
+  const red = Number.parseInt(background.slice(1, 3), 16);
+  const green = Number.parseInt(background.slice(3, 5), 16);
+  const blue = Number.parseInt(background.slice(5, 7), 16);
+  return (red * 299 + green * 587 + blue * 114) / 1000 > 150 ? '#111827' : '#ffffff';
+}
+
+function PaperlessTagBadge({ label, tag }: { label: string; tag?: PaperlessTag }) {
+  const colour = normalizeTagColour(tag?.colour);
+  if (!colour) return <Badge tone="muted">{label}</Badge>;
+  return (
+    <span
+      className="badge"
+      style={{ backgroundColor: colour, borderColor: colour, color: tagTextColour(colour) }}
+    >
+      {label}
+    </span>
+  );
 }
 
 function formatDate(value?: string | null) {
@@ -340,6 +372,7 @@ export default function ActionQueue() {
   const [status, setStatus] = useState<QueueStatus | null>(null);
   const [health, setHealth] = useState<ActionQueueCheck | null>(null);
   const [actions, setActions] = useState<ActionItem[]>([]);
+  const [tagMetadata, setTagMetadata] = useState<PaperlessTag[]>([]);
   const [filter, setFilter] = useState<ActionFilter>('pending');
   const [search, setSearch] = useState('');
   const [tableSorting, setTableSorting] = useState<SortingState>([]);
@@ -410,19 +443,33 @@ export default function ActionQueue() {
       .sort((left, right) => left.localeCompare(right))
       .map((name) => ({ value: name, label: name }));
   }, [customRunMetadata.correspondents, editDraft?.correspondent]);
+  const tagsByValue = useMemo(() => {
+    const lookup = new Map<string, PaperlessTag>();
+    for (const tag of tagMetadata) {
+      lookup.set(String(tag.id), tag);
+      lookup.set(tag.name, tag);
+    }
+    return lookup;
+  }, [tagMetadata]);
+  const displayActions = useMemo(() => actions.map((action) => ({
+    ...action,
+    tags: action.tags?.map((value) => tagsByValue.get(String(value))?.name ?? String(value)),
+  })), [actions, tagsByValue]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const params = filter === 'all' ? 'limit=200' : `status=${filter}&limit=200`;
-      const [statusResponse, actionsResponse] = await Promise.all([
+      const [statusResponse, actionsResponse, tagsResponse] = await Promise.all([
         endpoints.actionQueue.status() as Promise<QueueStatus>,
         endpoints.actionQueue.actions(params) as Promise<ActionListResponse>,
+        endpoints.actionQueue.metadataTags() as Promise<{ tags?: PaperlessTag[] }>,
       ]);
 
       setStatus(statusResponse ?? null);
       setActions(actionsResponse?.actions ?? []);
+      setTagMetadata(tagsResponse?.tags ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load action queue.');
     } finally {
@@ -452,8 +499,8 @@ export default function ActionQueue() {
 
   const filteredActions = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    if (!needle) return actions;
-    return actions.filter((action) => {
+    if (!needle) return displayActions;
+    return displayActions.filter((action) => {
       const haystack = [
         action.title,
         action.document_title,
@@ -469,7 +516,7 @@ export default function ActionQueue() {
         .toLowerCase();
       return haystack.includes(needle);
     });
-  }, [actions, search]);
+  }, [displayActions, search]);
 
   // [UX-07] Preserve selection across filter changes — cache the selected action
   // When the selected item leaves the filtered set, show it from cache with a banner
@@ -945,9 +992,9 @@ export default function ActionQueue() {
   }, [actions]);
 
   const tagOptions = useMemo(() => {
-    const allTags = new Set(actions.flatMap((a) => a.tags || []));
+    const allTags = new Set(displayActions.flatMap((a) => a.tags || []));
     return Array.from(allTags).sort().map((t) => ({ value: t, label: t }));
-  }, [actions]);
+  }, [displayActions]);
 
   // Column definitions for sortable table
   const actionTableColumns: SortableColumnDef<ActionItem>[] = useMemo(
@@ -1060,7 +1107,7 @@ export default function ActionQueue() {
           return (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
               {tags.slice(0, 3).map((tag) => (
-                <Badge key={tag} tone="muted">{tag}</Badge>
+                <PaperlessTagBadge key={tag} label={tag} tag={tagsByValue.get(tag)} />
               ))}
               {tags.length > 3 && <span className="text-muted">+{tags.length - 3}</span>}
             </div>
@@ -1152,7 +1199,7 @@ export default function ActionQueue() {
         width: '460px',
       },
     ],
-    [checkedIds, selectedActionId, processingIds, busyKey, actionTypeOptions, statusOptions, urgencyOptions],
+    [checkedIds, selectedActionId, processingIds, busyKey, actionTypeOptions, statusOptions, urgencyOptions, tagOptions, tagsByValue, documentTypeOptions],
   );
 
   return (
@@ -1865,7 +1912,16 @@ export default function ActionQueue() {
                 <div className="aq-meta-row"><span>Correspondent</span><span>{selectedAction.correspondent || '—'}</span></div>
                 <div className="aq-meta-row"><span>Document date</span><span>{formatDate(selectedAction.document_date)}</span></div>
                 <div className="aq-meta-row"><span>Document type</span><span>{selectedAction.document_type || '—'}</span></div>
-                <div className="aq-meta-row"><span>Tags</span><span>{selectedAction.tags?.join(', ') || '—'}</span></div>
+                <div className="aq-meta-row">
+                  <span>Tags</span>
+                  <span style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {selectedAction.tags?.length
+                      ? selectedAction.tags.map((tag) => (
+                          <PaperlessTagBadge key={tag} label={tag} tag={tagsByValue.get(tag)} />
+                        ))
+                      : '—'}
+                  </span>
+                </div>
                 <div className="aq-meta-row"><span>Amount</span><span>{formatCurrency(selectedAction.amount)}</span></div>
                 <div className="aq-meta-row"><span>Due date</span><span>{formatDate(selectedAction.due_date)}</span></div>
                 {selectedAction.extracted_data?.account_number && <div className="aq-meta-row"><span>Account</span><span>{selectedAction.extracted_data.account_number}</span></div>}

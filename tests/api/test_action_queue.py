@@ -622,6 +622,7 @@ class TestQueueMetadata:
         assert "tags" in data
         assert len(data["tags"]) == 2
         assert data["tags"][0]["name"] == "Inbox"
+        assert data["tags"][0]["colour"] == "#1f6feb"
 
     def test_list_saved_views(self, client, mock_paperless):
         resp = client.get("/api/queue/metadata/saved-views")
