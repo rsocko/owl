@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from doc_intelligence_hub.modules.statements.correspondent_models import (
     Cadence,
     DocumentExpectation,
@@ -160,6 +162,25 @@ def test_single_any_of_option_is_an_exact_repair() -> None:
     assert finding.violations == ["missing_any_of"]
     assert finding.unresolved_violations == []
     assert finding.operation.patch.model_dump() == {"tags": [10, 11]}
+
+
+def test_not_expected_policy_cannot_be_evaluated() -> None:
+    expectation = _expectation(
+        kind="invoice",
+        statement_series_id=None,
+        document_ids=[101],
+        cadence=None,
+        expectation_mode="not_expected",
+    )
+
+    with pytest.raises(ValueError, match="Not-expected expectations cannot be evaluated"):
+        evaluate_expectation_policy(
+            expectation,
+            "Example Bank",
+            [_document()],
+            tag_names={},
+            document_type_names={},
+        )
 
 
 def test_series_period_uses_statement_date_with_canonical_quarter_format() -> None:

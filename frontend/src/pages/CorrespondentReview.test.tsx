@@ -222,6 +222,27 @@ describe('Correspondent Review', () => {
     expect(screen.getByText('Checking - 2026-04')).toBeInTheDocument();
   });
 
+  it('keeps the workspace visible while analysis refreshes profile data', async () => {
+    const { container } = renderPage();
+    await screen.findAllByText('Example Bank');
+    const profilePayload = await mocks.profiles.mock.results[0].value;
+    let finishRefresh!: (value: unknown) => void;
+    mocks.profiles.mockReturnValueOnce(new Promise((resolve) => {
+      finishRefresh = resolve;
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: /analyze history/i }));
+
+    expect(await screen.findByText('Checking')).toBeInTheDocument();
+    expect(container.querySelector('.skeleton-cards')).toBeInTheDocument();
+    expect(container.querySelector('.skeleton-detail-panel')).not.toBeInTheDocument();
+
+    finishRefresh(profilePayload);
+    await waitFor(() => {
+      expect(container.querySelector('.skeleton-cards')).not.toBeInTheDocument();
+    });
+  });
+
   it('submits selected metadata names as Paperless IDs', async () => {
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: /analyze history/i }));

@@ -561,8 +561,8 @@ export default function CorrespondentReview() {
     [expectationsByProfile, selectedId],
   );
 
-  const loadWorkspace = useCallback(async () => {
-    setLoading(true);
+  const loadWorkspace = useCallback(async (showSkeleton = true) => {
+    if (showSkeleton) setLoading(true);
     setError(null);
     try {
       const [profilePayload, sourcePayload, paperlessPayload, tagsPayload, documentTypesPayload] = await Promise.all([
@@ -628,7 +628,7 @@ export default function CorrespondentReview() {
     try {
       await action();
       setToast({ message: successMessage, tone: 'success' });
-      await loadWorkspace();
+      await loadWorkspace(false);
     } catch (requestError) {
       setToast({ message: getErrorMessage(requestError), tone: 'error' });
     } finally {
@@ -644,7 +644,7 @@ export default function CorrespondentReview() {
       if (selectedIdRef.current !== result.correspondent_id) return;
       setAnalysis(result);
       setToast({ message: `Analyzed ${result.suggestions.length} candidate series.`, tone: 'success' });
-      await loadWorkspace();
+      await loadWorkspace(false);
     } catch (requestError) {
       setToast({ message: getErrorMessage(requestError), tone: 'error' });
     } finally {
@@ -693,7 +693,7 @@ export default function CorrespondentReview() {
           tone: 'error',
         });
       }
-      await loadWorkspace();
+      await loadWorkspace(false);
     } catch (requestError) {
       setToast({ message: getErrorMessage(requestError), tone: 'error' });
     } finally {

@@ -32,6 +32,8 @@ def evaluate_expectation_policy(
     """Evaluate a confirmed expectation without mutating Paperless or OWL state."""
     if expectation.status != "confirmed":
         raise ValueError("Only confirmed expectations can be evaluated")
+    if expectation.expectation_mode == "not_expected":
+        raise ValueError("Not-expected expectations cannot be evaluated")
 
     findings: list[PolicyViolationPreview] = []
     compliant = 0
