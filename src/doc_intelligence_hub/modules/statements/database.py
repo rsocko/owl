@@ -47,7 +47,7 @@ from doc_intelligence_hub.modules.statements.models import (
     RecommendationResult,
 )
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -271,7 +271,6 @@ CREATE INDEX IF NOT EXISTS idx_correspondent_profile_events_profile
 CREATE TABLE IF NOT EXISTS external_signal_connections (
     deployment_id TEXT PRIMARY KEY,
     base_url TEXT NOT NULL,
-    connector_ref TEXT NOT NULL,
     api_token TEXT,
     verify_ssl INTEGER NOT NULL DEFAULT 1,
     timeout_seconds INTEGER NOT NULL DEFAULT 30,
@@ -372,6 +371,31 @@ class Database:
             conn.execute(
                 "ALTER TABLE document_expectations "
                 "ADD COLUMN document_ids_json TEXT NOT NULL DEFAULT '[]'"
+            )
+        connection_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(external_signal_connections)").fetchall()
+        }
+        if "connector_ref" in connection_columns:
+            conn.executescript(
+                """ALTER TABLE external_signal_connections
+                       RENAME TO external_signal_connections_legacy;
+                   CREATE TABLE external_signal_connections (
+                       deployment_id TEXT PRIMARY KEY,
+                       base_url TEXT NOT NULL,
+                       api_token TEXT,
+                       verify_ssl INTEGER NOT NULL DEFAULT 1,
+                       timeout_seconds INTEGER NOT NULL DEFAULT 30,
+                       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                   );
+                   INSERT INTO external_signal_connections (
+                       deployment_id, base_url, api_token, verify_ssl,
+                       timeout_seconds, updated_at
+                   )
+                   SELECT deployment_id, base_url, api_token, verify_ssl,
+                          timeout_seconds, updated_at
+                   FROM external_signal_connections_legacy;
+                   DROP TABLE external_signal_connections_legacy;"""
             )
         conn.execute(
             """UPDATE document_expectations
@@ -1434,8 +1458,13 @@ class Database:
                       s.updated_at AS last_synced_at
                FROM external_signal_connections c
                LEFT JOIN external_signal_sources s
-                 ON s.deployment_id = c.deployment_id
-                AND s.connector_ref = c.connector_ref
+                 ON s.rowid = (
+                    SELECT latest.rowid
+                    FROM external_signal_sources latest
+                    WHERE latest.deployment_id = c.deployment_id
+                    ORDER BY latest.updated_at DESC
+                    LIMIT 1
+                 )
                WHERE c.deployment_id = ?""",
             (deployment_id,),
         ).fetchone()
@@ -1445,7 +1474,6 @@ class Database:
             configured=True,
             source="saved",
             base_url=row["base_url"],
-            connector_ref=row["connector_ref"],
             token_configured=row["api_token"] is not None,
             verify_ssl=bool(row["verify_ssl"]),
             timeout_seconds=row["timeout_seconds"],
@@ -1495,12 +1523,11 @@ class Database:
         with conn:
             conn.execute(
                 """INSERT INTO external_signal_connections (
-                       deployment_id, base_url, connector_ref, api_token,
+                       deployment_id, base_url, api_token,
                        verify_ssl, timeout_seconds
-                   ) VALUES (?, ?, ?, ?, ?, ?)
+                   ) VALUES (?, ?, ?, ?, ?)
                    ON CONFLICT(deployment_id) DO UPDATE SET
                        base_url = excluded.base_url,
-                       connector_ref = excluded.connector_ref,
                        api_token = excluded.api_token,
                        verify_ssl = excluded.verify_ssl,
                        timeout_seconds = excluded.timeout_seconds,
@@ -1508,7 +1535,6 @@ class Database:
                 (
                     deployment_id,
                     update.base_url,
-                    update.connector_ref,
                     api_token,
                     int(update.verify_ssl),
                     update.timeout_seconds,

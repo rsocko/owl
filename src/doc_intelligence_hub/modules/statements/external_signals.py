@@ -30,18 +30,14 @@ class DocumentExpectationSignalsClient:
 
     async def fetch(
         self,
-        connector_ref: str,
         source_generation: str,
     ) -> DocumentExpectationSignalsV1:
         generation = quote(source_generation, safe="")
         response = await self._client.get(
             f"/api/connector/v1/document-expectation-signals/{generation}",
-            params={"connectorRef": connector_ref},
         )
         response.raise_for_status()
         snapshot = DocumentExpectationSignalsV1.model_validate(response.json())
-        if snapshot.connector_ref != connector_ref:
-            raise ValueError("External signal response connectorRef did not match the request")
         if snapshot.source_generation != source_generation:
             raise ValueError("External signal response sourceGeneration did not match the request")
         return snapshot

@@ -48,7 +48,6 @@ vi.mock('../lib/api', () => ({
       externalCandidates: mocks.externalCandidates,
       externalCandidateConnection: vi.fn().mockResolvedValue({
         configured: true,
-        connector_ref: 'opaque-connector',
       }),
       syncExternalCandidates: mocks.syncCandidates,
       reviewExternalCandidate: mocks.reviewCandidate,

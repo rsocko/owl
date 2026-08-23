@@ -14,6 +14,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     DocumentExpectationUpdate,
     ExpectationEvidence,
     ExternalCandidateReview,
+    ExternalSignalConnectionUpdate,
 )
 from doc_intelligence_hub.modules.statements.correspondent_service import (
     CorrespondentPolicyService,
@@ -85,8 +86,19 @@ def test_correspondent_schema_migration_preserves_series_history(tmp_path) -> No
     db = Database(path)
     db.create_series("series-1", "Checking", "Example Bank", correspondent_id=42)
     db.save_series_override("event-1", "series-1", "rename", {"old_name": "Old"})
+    db.update_external_signal_connection(
+        DEPLOYMENT_ID,
+        ExternalSignalConnectionUpdate(
+            base_url="https://tyrion.test",
+            api_token="saved-token",
+        ),
+    )
     conn = db.connect()
-    conn.execute("UPDATE schema_version SET version = 3")
+    conn.execute(
+        "ALTER TABLE external_signal_connections "
+        "ADD COLUMN connector_ref TEXT NOT NULL DEFAULT 'legacy-connector'"
+    )
+    conn.execute("UPDATE schema_version SET version = 6")
     conn.commit()
     db.close()
 
@@ -95,6 +107,15 @@ def test_correspondent_schema_migration_preserves_series_history(tmp_path) -> No
         conn = migrated.connect()
         assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == SCHEMA_VERSION
         assert migrated.get_series_overrides("series-1")[0]["id"] == "event-1"
+        connection_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(external_signal_connections)").fetchall()
+        }
+        assert "connector_ref" not in connection_columns
+        connection = migrated.get_external_signal_credentials(DEPLOYMENT_ID)
+        assert connection is not None
+        assert connection["base_url"] == "https://tyrion.test"
+        assert connection["api_token"] == "saved-token"
         tables = {
             row["name"]
             for row in conn.execute(

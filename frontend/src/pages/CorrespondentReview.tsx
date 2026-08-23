@@ -189,7 +189,6 @@ interface ExternalCandidate {
 
 interface ExternalSignalConnection {
   configured: boolean;
-  connector_ref?: string | null;
   last_source_generation?: string | null;
   last_source_as_of?: string | null;
   last_synced_at?: string | null;
