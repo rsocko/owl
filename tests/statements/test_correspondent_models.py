@@ -81,6 +81,7 @@ def test_metadata_any_of_requires_a_child_tag() -> None:
 def test_non_alerting_expectation_states_are_ineligible(status: str, mode: str) -> None:
     expectation = DocumentExpectationCreate(
         kind="invoice",
+        document_ids=[1] if status == "confirmed" and mode != "not_expected" else [],
         expectation_mode=mode,
         status=status,
         cadence=Cadence(frequency="monthly") if mode == "recurring" else None,
@@ -94,7 +95,18 @@ def test_confirmed_recurring_expectation_requires_cadence() -> None:
     with pytest.raises(ValidationError, match="require cadence"):
         DocumentExpectationCreate(
             kind="invoice",
+            document_ids=[1],
             expectation_mode="recurring",
+            status="confirmed",
+            evidence=ExpectationEvidence(source="user"),
+        )
+
+
+def test_confirmed_non_statement_expectation_requires_document_membership() -> None:
+    with pytest.raises(ValidationError, match="durable document membership"):
+        DocumentExpectationCreate(
+            kind="invoice",
+            expectation_mode="irregular",
             status="confirmed",
             evidence=ExpectationEvidence(source="user"),
         )

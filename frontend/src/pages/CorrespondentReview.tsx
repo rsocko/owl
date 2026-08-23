@@ -86,6 +86,7 @@ interface Suggestion {
     confidence?: number | null;
     reason_codes: string[];
   };
+  document_ids: number[];
   sample_document_ids: number[];
 }
 
@@ -110,6 +111,40 @@ interface DocumentExpectation {
   title_convention?: TitleConvention | null;
   metadata_policy: MetadataPolicy;
   acquisition_source_id?: string | null;
+}
+
+interface DocumentMetadataSnapshot {
+  title: string;
+  tag_ids: number[];
+  tag_names: string[];
+  document_type_id?: number | null;
+  document_type_name?: string | null;
+}
+
+interface PolicyViolationFinding {
+  preview_id: string;
+  operation: {
+    expectation_id: string;
+    document_id: number;
+    expected: DocumentMetadataSnapshot;
+    patch: {
+      title?: string;
+      tags?: number[];
+      document_type?: number;
+    };
+  };
+  proposed: DocumentMetadataSnapshot;
+  violations: string[];
+  unresolved_violations: string[];
+  missing_title_fields: string[];
+}
+
+interface ExpectationPolicyPreview {
+  expectation_id: string;
+  correspondent_id: number;
+  matched_document_count: number;
+  compliant_document_count: number;
+  findings: PolicyViolationFinding[];
 }
 
 interface AcquisitionSource {
@@ -158,6 +193,10 @@ function redactSensitiveNumbers(value: string): string {
     const numeric = Number(match);
     return match.length === 4 && numeric >= 1900 && numeric <= 2099 ? match : '[redacted]';
   });
+}
+
+function formatMetadataList(values: string[]): string {
+  return values.length > 0 ? values.join(', ') : 'None';
 }
 
 function profilePriority(
@@ -237,6 +276,7 @@ function buildExpectationBody(
     kind: suggestion.kind,
     document_type_id: suggestion.metadata.policy.required_document_type_id ?? null,
     statement_series_id: suggestion.statement_series_id ?? null,
+    document_ids: suggestion.document_ids,
     series_discriminator: draft.seriesDiscriminator || null,
     expectation_mode: draft.mode,
     status,
@@ -476,6 +516,7 @@ export default function CorrespondentReview() {
   const [profiles, setProfiles] = useState<CorrespondentProfile[]>([]);
   const [expectationsByProfile, setExpectationsByProfile] = useState<Record<number, DocumentExpectation[]>>({});
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [policyPreviews, setPolicyPreviews] = useState<Record<string, ExpectationPolicyPreview>>({});
   const [acquisitionSources, setAcquisitionSources] = useState<AcquisitionSource[]>([]);
   const [paperlessUrl, setPaperlessUrl] = useState('');
   const [loading, setLoading] = useState(true);
@@ -530,6 +571,7 @@ export default function CorrespondentReview() {
 
   useEffect(() => {
     setAnalysis(null);
+    setPolicyPreviews({});
     setRelinkTarget('');
   }, [selectedId]);
 
@@ -640,6 +682,26 @@ export default function CorrespondentReview() {
       'Acquisition source added.',
     );
   }, [runAction, sourceDraft]);
+
+  const previewExpectation = useCallback(async (expectationId: string) => {
+    setBusy(true);
+    try {
+      const preview = await endpoints.statements.previewDocumentExpectationPolicy(
+        expectationId,
+      ) as ExpectationPolicyPreview;
+      setPolicyPreviews((current) => ({ ...current, [expectationId]: preview }));
+      setToast({
+        message: preview.findings.length === 0
+          ? 'All matched documents satisfy this policy.'
+          : `Found ${preview.findings.length} policy violation previews.`,
+        tone: 'success',
+      });
+    } catch (requestError) {
+      setToast({ message: getErrorMessage(requestError), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   return (
     <>
@@ -824,31 +886,96 @@ export default function CorrespondentReview() {
                     <div className="correspondent-muted">No reviewed expectations yet.</div>
                   ) : (
                     <div className="correspondent-expectation-list">
-                      {selectedExpectations.map((expectation) => (
-                        <div className="correspondent-expectation" key={expectation.id}>
-                          <div>
-                            <strong>{redactSensitiveNumbers(expectation.series_discriminator ?? humanize(expectation.kind))}</strong>
-                            <span>{humanize(expectation.expectation_mode)} · {expectation.cadence?.frequency ?? 'no cadence'}</span>
-                          </div>
-                          <div className="correspondent-actions">
-                            <Badge tone={expectation.status === 'confirmed' ? 'ok' : expectation.status === 'dismissed' ? 'muted' : 'warning'}>
-                              {humanize(expectation.status)}
-                            </Badge>
-                            {expectation.status !== 'retired' ? (
-                              <Button
-                                size="sm"
-                                disabled={busy || selectedProfileTerminal}
-                                onClick={() => void runAction(
-                                  () => endpoints.statements.updateDocumentExpectation(expectation.id, { status: 'retired' }),
-                                  'Expectation retired.',
-                                )}
-                              >
-                                Retire
-                              </Button>
+                      {selectedExpectations.map((expectation) => {
+                        const preview = policyPreviews[expectation.id];
+                        return (
+                          <div className="correspondent-expectation-item" key={expectation.id}>
+                            <div className="correspondent-expectation">
+                              <div>
+                                <strong>{redactSensitiveNumbers(expectation.series_discriminator ?? humanize(expectation.kind))}</strong>
+                                <span>{humanize(expectation.expectation_mode)} · {expectation.cadence?.frequency ?? 'no cadence'}</span>
+                              </div>
+                              <div className="correspondent-actions">
+                                <Badge tone={expectation.status === 'confirmed' ? 'ok' : expectation.status === 'dismissed' ? 'muted' : 'warning'}>
+                                  {humanize(expectation.status)}
+                                </Badge>
+                                {expectation.status === 'confirmed' && expectation.expectation_mode !== 'not_expected' ? (
+                                  <Button
+                                    size="sm"
+                                    disabled={busy || selectedProfileTerminal}
+                                    onClick={() => void previewExpectation(expectation.id)}
+                                  >
+                                    Preview violations
+                                  </Button>
+                                ) : null}
+                                {expectation.status !== 'retired' ? (
+                                  <Button
+                                    size="sm"
+                                    disabled={busy || selectedProfileTerminal}
+                                    onClick={() => void runAction(
+                                      () => endpoints.statements.updateDocumentExpectation(expectation.id, { status: 'retired' }),
+                                      'Expectation retired.',
+                                    )}
+                                  >
+                                    Retire
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+                            {preview ? (
+                              <div className="correspondent-policy-preview">
+                                <div className="correspondent-preview-header">
+                                  <strong>{preview.findings.length} violations</strong>
+                                  <span>{preview.compliant_document_count} of {preview.matched_document_count} compliant</span>
+                                </div>
+                                {preview.findings.map((finding) => (
+                                  <div className="correspondent-policy-finding" key={finding.preview_id}>
+                                    <div className="correspondent-badges">
+                                      {finding.violations.map((violation) => (
+                                        <Badge
+                                          key={violation}
+                                          tone={finding.unresolved_violations.includes(violation) ? 'warning' : 'info'}
+                                        >
+                                          {humanize(violation)}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                    <div className="correspondent-policy-change">
+                                      <span>Title</span>
+                                      <del>{finding.operation.expected.title}</del>
+                                      <strong>{finding.proposed.title}</strong>
+                                    </div>
+                                    <div className="correspondent-policy-change">
+                                      <span>Tags</span>
+                                      <del>{formatMetadataList(finding.operation.expected.tag_names)}</del>
+                                      <strong>{formatMetadataList(finding.proposed.tag_names)}</strong>
+                                    </div>
+                                    <div className="correspondent-policy-change">
+                                      <span>Document type</span>
+                                      <del>{finding.operation.expected.document_type_name ?? 'None'}</del>
+                                      <strong>{finding.proposed.document_type_name ?? 'None'}</strong>
+                                    </div>
+                                    {finding.missing_title_fields.length > 0 ? (
+                                      <div className="correspondent-callout warning">
+                                        Missing title fields: {finding.missing_title_fields.join(', ')}
+                                      </div>
+                                    ) : null}
+                                    {paperlessUrl ? (
+                                      <a
+                                        href={`${paperlessUrl}/documents/${finding.operation.document_id}/details`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                      >
+                                        Open document in Paperless
+                                      </a>
+                                    ) : null}
+                                  </div>
+                                ))}
+                              </div>
                             ) : null}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </Card>

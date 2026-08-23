@@ -136,7 +136,7 @@ def test_database_migrates_statement_name_column(tmp_path) -> None:
         }
         version = connection.execute("SELECT version FROM schema_version").fetchone()["version"]
         assert "statement_name" in columns
-        assert version == 4
+        assert version == 5
     finally:
         db.close()
 

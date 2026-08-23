@@ -68,7 +68,7 @@ def analyze_correspondent_policy(
     group_series: dict[tuple[DocumentKind, str], dict] = {}
     for document in profile_documents:
         series = series_by_document.get(str(document.id))
-        kind: DocumentKind = "statement" if series else _classify_kind(document)
+        kind: DocumentKind = "statement" if series else classify_document_kind(document)
         normalized = normalize_title(document.title) or kind
         account_key = _account_group_key(document.title, identifier_counts)
         group_key = (
@@ -197,6 +197,7 @@ def _build_suggestion(
             channel="unknown",
             reason_codes=["ingestion_source_unavailable"],
         ),
+        document_ids=[document.id for document in ordered],
         sample_document_ids=[document.id for document in ordered[-3:]],
     )
 
@@ -232,7 +233,7 @@ def _redact_account_identifiers(title: str) -> str:
     return redacted
 
 
-def _classify_kind(document: DocumentRecord) -> DocumentKind:
+def classify_document_kind(document: DocumentRecord) -> DocumentKind:
     evidence = " ".join(
         [
             document.document_type or "",
@@ -339,7 +340,7 @@ def _suggest_title_convention(
                 "correspondent": correspondent_name,
                 "series": discriminator,
                 "kind": kind.replace("_", " ").title(),
-                date_field: _period_label(document.created, cadence),
+                date_field: period_label(document.created, cadence),
             },
         )
         for document in documents
@@ -393,7 +394,7 @@ def _suggest_title_convention(
     )
 
 
-def _period_label(value: date, cadence: Cadence | None) -> str:
+def period_label(value: date, cadence: Cadence | None) -> str:
     if cadence is None or cadence.frequency == "monthly":
         return value.strftime("%Y-%m") if cadence else value.isoformat()
     if cadence.frequency == "quarterly":
