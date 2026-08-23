@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from datetime import date
 from string import Formatter
@@ -26,6 +27,7 @@ def evaluate_expectation_policy(
     tag_names: dict[int, str],
     document_type_names: dict[int, str],
     series_documents: dict[int, dict] | None = None,
+    preview_signing_key: str | None = None,
 ) -> ExpectationPolicyPreview:
     """Evaluate a confirmed expectation without mutating Paperless or OWL state."""
     if expectation.status != "confirmed":
@@ -42,6 +44,7 @@ def evaluate_expectation_policy(
             tag_names=tag_names,
             document_type_names=document_type_names,
             series_document=series_documents.get(document.id),
+            preview_signing_key=preview_signing_key,
         )
         if finding is None:
             compliant += 1
@@ -64,6 +67,7 @@ def _evaluate_document(
     tag_names: dict[int, str],
     document_type_names: dict[int, str],
     series_document: dict | None,
+    preview_signing_key: str | None,
 ) -> PolicyViolationPreview | None:
     policy = expectation.metadata_policy
     current_tags = set(document.tag_ids)
@@ -156,7 +160,7 @@ def _evaluate_document(
         expected=current,
         patch=patch,
     )
-    preview_id = _preview_id(operation)
+    preview_id = policy_operation_id(operation, signing_key=preview_signing_key)
     return PolicyViolationPreview(
         preview_id=preview_id,
         operation=operation,
@@ -243,6 +247,17 @@ def _snapshot(
     )
 
 
-def _preview_id(operation: PolicyPatchOperation) -> str:
+def policy_operation_id(
+    operation: PolicyPatchOperation,
+    *,
+    signing_key: str | None = None,
+) -> str:
+    """Return the stable integrity identifier for an exact preview operation."""
     canonical = json.dumps(operation.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    if signing_key is not None:
+        return hmac.new(
+            signing_key.encode("utf-8"),
+            canonical.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
