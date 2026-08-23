@@ -67,7 +67,6 @@ class RuntimeConfig(BaseModel):
 
 class ExternalSignalsConfig(BaseModel):
     base_url: str | None = None
-    connector_ref: str | None = Field(default=None, min_length=1, max_length=200)
     api_token: str | None = Field(default=None, exclude=True, repr=False)
     api_token_env: str | None = None
     verify_ssl: bool = True

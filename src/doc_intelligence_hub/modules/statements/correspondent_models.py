@@ -147,7 +147,6 @@ class ExternalSignalSyncRequest(PolicyModel):
 
 class ExternalSignalConnectionUpdate(PolicyModel):
     base_url: str = Field(min_length=1, max_length=2000)
-    connector_ref: str = Field(min_length=1, max_length=200)
     api_token: SecretStr | None = None
     clear_api_token: bool = False
     verify_ssl: bool = True
@@ -183,7 +182,6 @@ class ExternalSignalConnection(PolicyModel):
     configured: bool
     source: Literal["saved", "configuration"] | None = None
     base_url: str | None = None
-    connector_ref: str | None = None
     token_configured: bool = False
     verify_ssl: bool = True
     timeout_seconds: int = 30
