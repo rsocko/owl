@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { MetadataTypeahead, type MetadataOption } from '../components/MetadataTypeahead';
 import { Button, PageHeader, Toast } from '../components/ui';
+import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 
 // ── Types ──
@@ -46,6 +48,7 @@ interface Rule {
 
 type ToastState = { message: string; tone: 'success' | 'error' };
 type TabFilter = 'all' | RuleType;
+type MetadataOptions = Record<'tag' | 'document_type' | 'correspondent', MetadataOption[]>;
 
 // ── Seed data ──
 
@@ -330,7 +333,15 @@ function RuleRow({ rule, selected, onSelect, onToggle }: { rule: Rule; selected:
 
 // ── Threshold Builder ──
 
-function ThresholdBuilder({ conditions, onChange }: { conditions: ThresholdCondition[]; onChange: (c: ThresholdCondition[]) => void }) {
+function ThresholdBuilder({
+  conditions,
+  metadataOptions,
+  onChange,
+}: {
+  conditions: ThresholdCondition[];
+  metadataOptions: MetadataOptions;
+  onChange: (c: ThresholdCondition[]) => void;
+}) {
   const updateCondition = (idx: number, patch: Partial<ThresholdCondition>) => {
     const next = conditions.map((c, i) => i === idx ? { ...c, ...patch } : c);
     onChange(next);
@@ -352,13 +363,29 @@ function ThresholdBuilder({ conditions, onChange }: { conditions: ThresholdCondi
           <select className="threshold-field" style={{ width: 50 }} value={c.operator} onChange={(e) => updateCondition(idx, { operator: e.target.value })}>
             {OPERATORS.map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
-          <input
-            type="text"
-            className="threshold-field"
-            style={{ width: 60 }}
-            value={c.value}
-            onChange={(e) => updateCondition(idx, { value: e.target.value })}
-          />
+          {c.field in metadataOptions ? (
+            <MetadataTypeahead
+              ariaLabel={`${c.field.replaceAll('_', ' ')} value`}
+              className="threshold-metadata-value"
+              options={[
+                ...metadataOptions[c.field as keyof MetadataOptions],
+                ...(c.value && !metadataOptions[c.field as keyof MetadataOptions]
+                  .some((option) => option.value === c.value)
+                  ? [{ value: c.value, label: c.value }]
+                  : []),
+              ]}
+              value={c.value}
+              onChange={(value) => updateCondition(idx, { value })}
+            />
+          ) : (
+            <input
+              type="text"
+              className="threshold-field"
+              style={{ width: 60 }}
+              value={c.value}
+              onChange={(e) => updateCondition(idx, { value: e.target.value })}
+            />
+          )}
           <select className="threshold-field" style={{ width: 60 }} value={c.unit} onChange={(e) => updateCondition(idx, { unit: e.target.value })}>
             {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
           </select>
@@ -489,6 +516,7 @@ function RuleEditor({
   confirmingDelete,
   onCancel,
   onTest,
+  metadataOptions,
 }: {
   rule: Rule;
   isNew: boolean;
@@ -498,6 +526,7 @@ function RuleEditor({
   confirmingDelete: boolean;
   onCancel: () => void;
   onTest: () => void;
+  metadataOptions: MetadataOptions;
 }) {
   const handleTypeChange = (newType: RuleType) => {
     const patch: Partial<Rule> = { type: newType };
@@ -577,6 +606,7 @@ function RuleEditor({
           <div className="editor-label">Conditions</div>
           <ThresholdBuilder
             conditions={rule.conditions ?? []}
+            metadataOptions={metadataOptions}
             onChange={(conditions) => onChange({ conditions })}
           />
         </div>
@@ -726,6 +756,11 @@ export default function RulesConfig() {
   const [testingRule, setTestingRule] = useState<Rule | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [metadataOptions, setMetadataOptions] = useState<MetadataOptions>({
+    tag: [],
+    document_type: [],
+    correspondent: [],
+  });
   const editorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -741,6 +776,22 @@ export default function RulesConfig() {
       editorRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [editingRule?.id, isNewRule]);
+
+  useEffect(() => {
+    void Promise.all([
+      endpoints.actionQueue.metadataTags() as Promise<{ tags?: Array<{ id: number; name: string }> }>,
+      endpoints.actionQueue.metadataDocumentTypes() as Promise<{ document_types?: Array<{ id: number; name: string }> }>,
+      endpoints.actionQueue.metadataCorrespondents() as Promise<{ correspondents?: Array<{ id: number; name: string }> }>,
+    ]).then(([tags, documentTypes, correspondents]) => {
+      setMetadataOptions({
+        tag: (tags.tags ?? []).map((item) => ({ value: item.name, label: item.name })),
+        document_type: (documentTypes.document_types ?? []).map((item) => ({ value: item.name, label: item.name })),
+        correspondent: (correspondents.correspondents ?? []).map((item) => ({ value: item.name, label: item.name })),
+      });
+    }).catch(() => {
+      setToast({ message: 'Paperless metadata could not be loaded for rule suggestions.', tone: 'error' });
+    });
+  }, []);
 
   const counts = useMemo<Record<TabFilter, number>>(() => ({
     all: rules.length,
@@ -871,6 +922,7 @@ export default function RulesConfig() {
             confirmingDelete={confirmDelete}
             onCancel={handleCancel}
             onTest={handleTest}
+            metadataOptions={metadataOptions}
           />
         </div>
       )}

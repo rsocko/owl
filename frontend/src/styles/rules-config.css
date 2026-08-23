@@ -254,6 +254,18 @@ textarea.editor-input {
   background: var(--card);
   color: var(--text);
 }
+.threshold-metadata-value {
+  width: 180px;
+}
+.threshold-metadata-value input {
+  min-height: 28px;
+  padding: 4px 28px 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+}
 .threshold-op {
   padding: 4px 8px;
   border-radius: 4px;

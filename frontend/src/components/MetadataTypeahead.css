@@ -1,0 +1,107 @@
+.metadata-typeahead {
+  position: relative;
+  width: 100%;
+}
+
+.metadata-typeahead-input-wrap {
+  position: relative;
+}
+
+.metadata-typeahead input {
+  width: 100%;
+}
+
+.metadata-typeahead-input-wrap input {
+  padding-right: 30px;
+}
+
+.metadata-typeahead-clear {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.metadata-typeahead-list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+}
+
+.metadata-typeahead-list button,
+.metadata-typeahead-empty {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.metadata-typeahead-list button {
+  cursor: pointer;
+}
+
+.metadata-typeahead-list button:hover,
+.metadata-typeahead-list button[aria-selected="true"] {
+  background: var(--surface-hover);
+}
+
+.metadata-typeahead-empty {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.metadata-multi-typeahead {
+  display: grid;
+  gap: 8px;
+}
+
+.metadata-typeahead-values {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.metadata-typeahead-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-hover);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.metadata-typeahead-value button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.metadata-typeahead-value button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}

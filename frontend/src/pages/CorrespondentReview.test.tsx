@@ -16,6 +16,20 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../lib/api', () => ({
   endpoints: {
+    actionQueue: {
+      metadataTags: vi.fn().mockResolvedValue({
+        tags: [
+          { id: 7, name: 'Finance' },
+          { id: 280, name: 'Work Expenses' },
+        ],
+      }),
+      metadataDocumentTypes: vi.fn().mockResolvedValue({
+        document_types: [
+          { id: 2, name: 'Receipt' },
+          { id: 3, name: 'Statement' },
+        ],
+      }),
+    },
     statements: {
       correspondentProfiles: mocks.profiles,
       acquisitionSources: vi.fn().mockResolvedValue([]),
@@ -193,6 +207,10 @@ describe('Correspondent Review', () => {
 
     expect(await screen.findByText('Checking')).toBeInTheDocument();
     expect(screen.getByText('100% coverage · 0 exceptions')).toBeInTheDocument();
+    expect(screen.getAllByText('Finance').length).toBeGreaterThan(0);
+    expect(screen.getByRole('combobox', { name: 'Required document type' })).toHaveValue('Statement');
+    expect(screen.queryByText('All required tag IDs')).not.toBeInTheDocument();
+    expect(screen.queryByText('Required document type ID')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /open in paperless/i })).toHaveAttribute(
       'href',
       'https://paperless.test/documents/4/details',
@@ -204,9 +222,17 @@ describe('Correspondent Review', () => {
     expect(screen.getByText('Checking - 2026-04')).toBeInTheDocument();
   });
 
-  it('confirms policy locally without invoking document metadata endpoints', async () => {
+  it('submits selected metadata names as Paperless IDs', async () => {
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: /analyze history/i }));
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Any required tags' }), {
+      target: { value: 'work' },
+    });
+    fireEvent.click(screen.getByRole('option', { name: 'Work Expenses' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Required document type' }), {
+      target: { value: 'receipt' },
+    });
+    fireEvent.click(screen.getByRole('option', { name: 'Receipt' }));
     fireEvent.click(await screen.findByRole('button', { name: /confirm expectation/i }));
 
     await waitFor(() => {
@@ -216,6 +242,13 @@ describe('Correspondent Review', () => {
           statement_series_id: 'checking',
           status: 'confirmed',
           expectation_mode: 'recurring',
+          document_type_id: 2,
+          metadata_policy: {
+            all_of: [7],
+            any_of: [280],
+            none_of: [],
+            required_document_type_id: 2,
+          },
         }),
       );
       expect(mocks.updateProfile).toHaveBeenCalledWith(
