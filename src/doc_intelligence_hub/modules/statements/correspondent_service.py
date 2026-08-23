@@ -16,8 +16,12 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     CorrespondentSyncResult,
     DocumentExpectation,
     DocumentExpectationCreate,
+    DocumentExpectationSignalsV1,
     DocumentExpectationUpdate,
     ExpectationPolicyPreview,
+    ExternalCandidateReview,
+    ExternalCandidateSnapshotResult,
+    ExternalDocumentCandidate,
     IdentityResolution,
     LegacyOverrideReviewItem,
 )
@@ -119,6 +123,28 @@ class CorrespondentPolicyService:
         self, expectation_id: str, update: DocumentExpectationUpdate
     ) -> DocumentExpectation:
         return self.database.update_document_expectation(self.deployment_id, expectation_id, update)
+
+    def replace_external_candidates(
+        self, snapshot: DocumentExpectationSignalsV1
+    ) -> ExternalCandidateSnapshotResult:
+        return self.database.replace_external_candidate_snapshot(self.deployment_id, snapshot)
+
+    def list_external_candidates(
+        self, correspondent_id: int | None = None
+    ) -> list[ExternalDocumentCandidate]:
+        return self.database.list_external_candidates(
+            self.deployment_id,
+            correspondent_id=correspondent_id,
+        )
+
+    def review_external_candidate(
+        self, candidate_id: str, review: ExternalCandidateReview
+    ) -> ExternalDocumentCandidate:
+        return self.database.review_external_candidate(
+            self.deployment_id,
+            candidate_id,
+            review,
+        )
 
     def preview_expectation_policy(
         self,

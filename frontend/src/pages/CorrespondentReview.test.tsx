@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   analyze: vi.fn(),
   createExpectation: vi.fn(),
   updateProfile: vi.fn(),
+  externalCandidates: vi.fn(),
+  reviewCandidate: vi.fn(),
   expectations: vi.fn(),
   previewPolicy: vi.fn(),
   applyPolicy: vi.fn(),
@@ -42,6 +44,8 @@ vi.mock('../lib/api', () => ({
       analyzeCorrespondentProfiles: vi.fn(),
       relinkCorrespondentProfile: vi.fn(),
       updateDocumentExpectation: vi.fn(),
+      externalCandidates: mocks.externalCandidates,
+      reviewExternalCandidate: mocks.reviewCandidate,
       previewDocumentExpectationPolicy: mocks.previewPolicy,
       applyDocumentExpectationPolicy: mocks.applyPolicy,
       undoDocumentExpectationPolicy: mocks.undoPolicy,
@@ -133,6 +137,8 @@ beforeEach(() => {
   });
   mocks.createExpectation.mockResolvedValue({ id: 'expectation-1' });
   mocks.updateProfile.mockResolvedValue({});
+  mocks.externalCandidates.mockResolvedValue([]);
+  mocks.reviewCandidate.mockResolvedValue({});
   mocks.expectations.mockResolvedValue([]);
   mocks.previewPolicy.mockResolvedValue({
     expectation_id: 'expectation-1',
@@ -303,6 +309,58 @@ describe('Correspondent Review', () => {
     expect(screen.getByRole('button', { name: /analyze history/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /mark reviewed/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /return to review/i })).toBeEnabled();
+  });
+
+  it('supports explicit external candidate review without inferring cadence', async () => {
+    mocks.externalCandidates.mockResolvedValue([{
+      id: 'candidate-1',
+      kind: 'accountStatementCandidate',
+      active: true,
+      display_hint: 'Credit account',
+      confidence: 0.6,
+      basis: ['active_non_cash_account'],
+      outcome: 'unreviewed',
+      correspondent_id: null,
+      likely_multiple_statement_series: false,
+      recurrence_evidence: 'high',
+    }]);
+
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /create suggestion/i }));
+
+    await waitFor(() => {
+      expect(mocks.reviewCandidate).toHaveBeenCalledWith('candidate-1', {
+        outcome: 'suggested',
+        correspondent_id: 42,
+      });
+    });
+    expect(screen.getByText(/do not establish cadence/i)).toBeInTheDocument();
+  });
+
+  it('records documentless external evidence as durable not-expected policy', async () => {
+    mocks.externalCandidates.mockResolvedValue([{
+      id: 'candidate-1',
+      kind: 'recurringDocumentCandidate',
+      active: true,
+      display_hint: 'Recurring expense',
+      confidence: 0.6,
+      basis: ['active_recurring_obligation'],
+      outcome: 'unreviewed',
+      correspondent_id: null,
+      likely_multiple_statement_series: false,
+      recurrence_evidence: 'none',
+    }]);
+
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /record not expected/i }));
+
+    await waitFor(() => {
+      expect(mocks.reviewCandidate).toHaveBeenCalledWith('candidate-1', {
+        outcome: 'not_applicable',
+        correspondent_id: 42,
+      });
+    });
+    expect(screen.getByText(/recurring obligations do not create invoice/i)).toBeInTheDocument();
   });
 
   it('shows exact old and proposed metadata from a read-only policy preview', async () => {

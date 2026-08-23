@@ -5,6 +5,7 @@ import uuid
 from datetime import date
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response
 from starlette.responses import StreamingResponse
@@ -24,6 +25,7 @@ from doc_intelligence_hub.modules.statements.api import (
     _discovery_event_generator,
     _recommendations_event_generator,
 )
+from doc_intelligence_hub.modules.statements.config import resolve_external_signal_token
 from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSource,
     AcquisitionSourceCreate,
@@ -36,6 +38,10 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     DocumentExpectationCreate,
     DocumentExpectationUpdate,
     ExpectationPolicyPreview,
+    ExternalCandidatePollRequest,
+    ExternalCandidateReview,
+    ExternalCandidateSnapshotResult,
+    ExternalDocumentCandidate,
     LegacyOverrideReviewItem,
     PolicyApplyRequest,
     PolicyApplyResponse,
@@ -48,6 +54,9 @@ from doc_intelligence_hub.modules.statements.correspondent_service import (
     CorrespondentPolicyService,
 )
 from doc_intelligence_hub.modules.statements.database import Database
+from doc_intelligence_hub.modules.statements.external_signals import (
+    DocumentExpectationSignalsClient,
+)
 from doc_intelligence_hub.modules.statements.models import (
     MergeSeriesRequest,
     ReassignDocumentRequest,
@@ -262,6 +271,7 @@ def _raise_policy_error(exc: KeyError | ValueError) -> None:
         "statement_series_not_found",
         "acquisition_source_not_found",
         "document_expectation_not_found",
+        "external_candidate_not_found",
     }:
         raise_api_error(404, str(code), str(code).replace("_", " "))
     raise_api_error(409, "policy_conflict", str(exc))
@@ -645,6 +655,82 @@ async def get_missing_alert_eligibility(
         except (KeyError, ValueError) as exc:
             _raise_policy_error(exc)
         return {"expectation_id": expectation_id, "eligible": eligible}
+    finally:
+        service.close()
+
+
+@router.post(
+    "/external-candidates/poll",
+    response_model=ExternalCandidateSnapshotResult,
+    summary="Pull one external candidate generation",
+)
+async def poll_external_candidates(
+    request: Request,
+    body: ExternalCandidatePollRequest,
+) -> ExternalCandidateSnapshotResult:
+    config = load_statement_config_from_request(request)
+    if not config.external_signals.base_url:
+        raise_api_error(
+            409,
+            "external_signal_source_not_configured",
+            "Configure external_signals.base_url before polling candidate signals.",
+        )
+    client = DocumentExpectationSignalsClient(
+        config.external_signals.base_url,
+        api_token=resolve_external_signal_token(config),
+        verify_ssl=config.external_signals.verify_ssl,
+        timeout_seconds=config.external_signals.timeout_seconds,
+    )
+    try:
+        snapshot = await client.fetch(body.connector_ref, body.source_generation)
+    except (httpx.HTTPError, ValueError):
+        raise_api_error(
+            502,
+            "external_signal_source_failed",
+            "The external candidate projection could not be retrieved or validated.",
+        )
+    finally:
+        await client.close()
+
+    service = _get_policy_service(request)
+    try:
+        return service.replace_external_candidates(snapshot)
+    finally:
+        service.close()
+
+
+@router.get(
+    "/external-candidates",
+    response_model=list[ExternalDocumentCandidate],
+    summary="List bounded external document candidates",
+)
+async def list_external_candidates(
+    request: Request,
+    correspondent_id: int | None = Query(default=None, gt=0),
+) -> list[ExternalDocumentCandidate]:
+    service = _get_policy_service(request)
+    try:
+        return service.list_external_candidates(correspondent_id)
+    finally:
+        service.close()
+
+
+@router.put(
+    "/external-candidates/{candidate_id}/review",
+    response_model=ExternalDocumentCandidate,
+    summary="Record an explicit external candidate review outcome",
+)
+async def review_external_candidate(
+    request: Request,
+    candidate_id: str,
+    body: ExternalCandidateReview,
+) -> ExternalDocumentCandidate:
+    service = _get_policy_service(request)
+    try:
+        try:
+            return service.review_external_candidate(candidate_id, body)
+        except (KeyError, ValueError) as exc:
+            _raise_policy_error(exc)
     finally:
         service.close()
 

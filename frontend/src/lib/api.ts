@@ -95,6 +95,9 @@ export const endpoints = {
       api.post(`/api/statements/correspondent-profiles/${id}/expectations`, body),
     updateDocumentExpectation: (id: string, body: unknown) =>
       api.patch(`/api/statements/document-expectations/${id}`, body),
+    externalCandidates: () => api.get('/api/statements/external-candidates'),
+    reviewExternalCandidate: (id: string, body: unknown) =>
+      api.put(`/api/statements/external-candidates/${id}/review`, body),
     previewDocumentExpectationPolicy: (id: string) =>
       api.post(`/api/statements/document-expectations/${id}/policy-preview`),
     applyDocumentExpectationPolicy: (id: string, body: unknown) =>
