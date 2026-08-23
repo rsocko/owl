@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import uuid
 from datetime import date
 from typing import Any
@@ -74,6 +75,33 @@ from doc_intelligence_hub.modules.statements.policy_corrections import (
 from doc_intelligence_hub.modules.statements.service import run_discovery, run_recommendations
 
 router = APIRouter(tags=["statement-tracker"])
+logger = logging.getLogger(__name__)
+
+
+def _raise_external_signal_error(exc: httpx.HTTPError | ValueError) -> None:
+    details: dict[str, Any] = {}
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        details["upstream_status"] = status
+        if status in {401, 403}:
+            message = (
+                "Tyrion rejected the saved credentials. Update the Tyrion API token in Settings."
+            )
+        elif status == 404:
+            message = (
+                "Tyrion's candidate endpoint was not found. Check the Tyrion base URL and version."
+            )
+        else:
+            message = f"Tyrion returned HTTP {status} while retrieving candidate signals."
+    elif isinstance(exc, httpx.RequestError):
+        message = (
+            "OWL could not connect to Tyrion. Check the base URL, network access, and TLS settings."
+        )
+    else:
+        message = "Tyrion returned a candidate projection that OWL could not validate."
+
+    logger.warning("Tyrion candidate synchronization failed: %s", exc)
+    raise_api_error(502, "external_signal_source_failed", message, details)
 
 
 @router.get("/providers")
@@ -686,12 +714,8 @@ async def poll_external_candidates(
     )
     try:
         snapshot = await client.fetch(body.source_generation)
-    except (httpx.HTTPError, ValueError):
-        raise_api_error(
-            502,
-            "external_signal_source_failed",
-            "The external candidate projection could not be retrieved or validated.",
-        )
+    except (httpx.HTTPError, ValueError) as exc:
+        _raise_external_signal_error(exc)
     finally:
         await client.close()
 
@@ -799,12 +823,8 @@ async def sync_external_candidates(
                 if body is not None
                 else await client.fetch_latest()
             )
-        except (httpx.HTTPError, ValueError):
-            raise_api_error(
-                502,
-                "external_signal_source_failed",
-                "The Tyrion candidate projection could not be retrieved or validated.",
-            )
+        except (httpx.HTTPError, ValueError) as exc:
+            _raise_external_signal_error(exc)
         finally:
             await client.close()
         return service.replace_external_candidates(snapshot)
