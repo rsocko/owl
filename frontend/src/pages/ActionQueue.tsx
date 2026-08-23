@@ -26,7 +26,7 @@ import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import '../styles/action-queue.css';
 import '../styles/sortable-table.css';
-import { buildQueueRunBody } from './actionQueueRunBody';
+import { buildBackfillBody, buildQueueRunBody } from './actionQueueRunBody';
 import { customReminderUntil, minimumReminderDate, reminderUntil } from './actionReminder';
 
 interface ActionQueueCheck {
@@ -668,7 +668,7 @@ export default function ActionQueue() {
   const runBackfill = async (dryRun: boolean) => {
     setBusyKey(dryRun ? 'backfill-dry' : 'backfill');
     try {
-      const result = await endpoints.actionQueue.backfill({ dry_run: dryRun }) as Record<string, unknown>;
+      const result = await endpoints.actionQueue.backfill(buildBackfillBody(dryRun)) as Record<string, unknown>;
       await loadData();
       if (dryRun) {
         const count = (result as { would_sync?: number }).would_sync ?? 0;
@@ -1221,10 +1221,10 @@ export default function ActionQueue() {
             <Button variant="primary" onClick={() => runPipeline(false)} disabled={busyKey !== null || pipelineState.running}>
               {busyKey === 'run' ? 'Running…' : 'Run pipeline'}
             </Button>
-            <Button variant="ghost" onClick={() => void runBackfill(true)} disabled={busyKey !== null} title="Preview which actions would be re-synced to Paperless">
+            <Button variant="ghost" onClick={() => void runBackfill(true)} disabled={busyKey !== null} title="Preview all actions that would be re-synced to Paperless">
               Backfill preview
             </Button>
-            <Button onClick={() => void runBackfill(false)} disabled={busyKey !== null} title="Re-write action metadata to Paperless for actions that were never synced">
+            <Button onClick={() => void runBackfill(false)} disabled={busyKey !== null} title="Force re-write action metadata and resolved tag cleanup to Paperless">
               Backfill Paperless
             </Button>
             <Button variant="ghost" onClick={() => void refreshMetadata()} disabled={busyKey !== null} title="Fetch latest document date, type, tags, and correspondent from Paperless for existing actions">

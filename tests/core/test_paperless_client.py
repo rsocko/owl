@@ -134,6 +134,11 @@ async def test_list_documents(client):
 
 
 @pytest.mark.asyncio
+async def test_resolve_tag_ids_is_case_insensitive(client):
+    assert await client.resolve_tag_ids(["BILLS", "Monthly"]) == [1, 2]
+
+
+@pytest.mark.asyncio
 async def test_list_documents_filters_by_correspondent_id_without_name_lookup(monkeypatch):
     requests_seen: list[httpx.Request] = []
 
