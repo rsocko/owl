@@ -373,17 +373,15 @@ describe('Correspondent Review', () => {
     expect(screen.getByText(/do not establish cadence/i)).toBeInTheDocument();
   });
 
-  it('synchronizes a Tyrion generation from the review workspace', async () => {
+  it('synchronizes the latest Tyrion candidates from the review workspace', async () => {
     renderPage();
 
-    fireEvent.change(await screen.findByLabelText('Tyrion source generation'), {
-      target: { value: 'generation-2' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /sync tyrion candidates/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /sync tyrion candidates/i }));
 
     await waitFor(() => {
-      expect(mocks.syncCandidates).toHaveBeenCalledWith('generation-2');
+      expect(mocks.syncCandidates).toHaveBeenCalledWith();
     });
+    expect(screen.queryByLabelText('Tyrion source generation')).not.toBeInTheDocument();
   });
 
   it('records documentless external evidence as durable not-expected policy', async () => {

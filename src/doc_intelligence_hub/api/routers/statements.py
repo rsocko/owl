@@ -716,9 +716,10 @@ async def get_external_candidate_connection(request: Request) -> ExternalSignalC
         config = load_statement_config_from_request(request)
         if config.external_signals.base_url:
             return ExternalSignalConnection(
-                configured=True,
+                configured=config.external_signals.connector_ref is not None,
                 source="configuration",
                 base_url=config.external_signals.base_url,
+                connector_ref=config.external_signals.connector_ref,
                 token_configured=resolve_external_signal_token(config) is not None,
                 verify_ssl=config.external_signals.verify_ssl,
                 timeout_seconds=config.external_signals.timeout_seconds,
@@ -764,29 +765,41 @@ async def delete_external_candidate_connection(request: Request) -> Response:
 @router.post(
     "/external-candidates/sync",
     response_model=ExternalCandidateSnapshotResult,
-    summary="Synchronize a Tyrion candidate generation using the saved connection",
+    summary="Synchronize the latest Tyrion candidates using the saved connection",
 )
 async def sync_external_candidates(
     request: Request,
-    body: ExternalSignalSyncRequest,
+    body: ExternalSignalSyncRequest | None = None,
 ) -> ExternalCandidateSnapshotResult:
     service = _get_policy_service(request)
     try:
         connection = service.get_external_signal_credentials()
         if connection is None:
             config = load_statement_config_from_request(request)
-            if not config.external_signals.base_url:
+            if (
+                not config.external_signals.base_url
+                or (body is None and not config.external_signals.connector_ref)
+            ):
                 raise_api_error(
                     409,
                     "external_signal_source_not_configured",
-                    "Configure the Tyrion connection in Settings before synchronizing candidates.",
+                    "Configure the Tyrion URL and connector reference in Settings before "
+                    "synchronizing candidates.",
                 )
             connection = {
                 "base_url": config.external_signals.base_url,
+                "connector_ref": config.external_signals.connector_ref,
                 "api_token": resolve_external_signal_token(config),
                 "verify_ssl": config.external_signals.verify_ssl,
                 "timeout_seconds": config.external_signals.timeout_seconds,
             }
+        if body is None and not connection["connector_ref"]:
+            raise_api_error(
+                409,
+                "external_signal_source_not_configured",
+                "Configure the Tyrion connector reference in Settings before synchronizing "
+                "candidates.",
+            )
         client = DocumentExpectationSignalsClient(
             connection["base_url"],
             api_token=connection["api_token"],
@@ -794,7 +807,11 @@ async def sync_external_candidates(
             timeout_seconds=connection["timeout_seconds"],
         )
         try:
-            snapshot = await client.fetch(body.source_generation)
+            snapshot = (
+                await client.fetch(body.source_generation)
+                if body is not None
+                else await client.fetch_latest(connection["connector_ref"])
+            )
         except (httpx.HTTPError, ValueError):
             raise_api_error(
                 502,

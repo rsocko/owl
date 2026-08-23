@@ -90,14 +90,11 @@ def test_correspondent_schema_migration_preserves_series_history(tmp_path) -> No
         DEPLOYMENT_ID,
         ExternalSignalConnectionUpdate(
             base_url="https://tyrion.test",
+            connector_ref="legacy-connector",
             api_token="saved-token",
         ),
     )
     conn = db.connect()
-    conn.execute(
-        "ALTER TABLE external_signal_connections "
-        "ADD COLUMN connector_ref TEXT NOT NULL DEFAULT 'legacy-connector'"
-    )
     conn.execute("UPDATE schema_version SET version = 6")
     conn.commit()
     db.close()
@@ -111,10 +108,11 @@ def test_correspondent_schema_migration_preserves_series_history(tmp_path) -> No
             row["name"]
             for row in conn.execute("PRAGMA table_info(external_signal_connections)").fetchall()
         }
-        assert "connector_ref" not in connection_columns
+        assert "connector_ref" in connection_columns
         connection = migrated.get_external_signal_credentials(DEPLOYMENT_ID)
         assert connection is not None
         assert connection["base_url"] == "https://tyrion.test"
+        assert connection["connector_ref"] == "legacy-connector"
         assert connection["api_token"] == "saved-token"
         tables = {
             row["name"]

@@ -10,7 +10,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
 
 
 class DocumentExpectationSignalsClient:
-    """Pull the bounded, policy-safe Tyrion projection by opaque generation."""
+    """Pull the bounded, policy-safe Tyrion projection."""
 
     def __init__(
         self,
@@ -40,6 +40,17 @@ class DocumentExpectationSignalsClient:
         snapshot = DocumentExpectationSignalsV1.model_validate(response.json())
         if snapshot.source_generation != source_generation:
             raise ValueError("External signal response sourceGeneration did not match the request")
+        return snapshot
+
+    async def fetch_latest(self, connector_ref: str) -> DocumentExpectationSignalsV1:
+        response = await self._client.get(
+            "/api/connector/v1/document-expectation-signals",
+            params={"connectorRef": connector_ref},
+        )
+        response.raise_for_status()
+        snapshot = DocumentExpectationSignalsV1.model_validate(response.json())
+        if snapshot.connector_ref != connector_ref:
+            raise ValueError("External signal response connectorRef did not match the request")
         return snapshot
 
     async def close(self) -> None:
