@@ -30,6 +30,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     DocumentExpectation,
     DocumentExpectationCreate,
     DocumentExpectationUpdate,
+    ExpectationPolicyPreview,
     LegacyOverrideReviewItem,
     RelinkProfileRequest,
     paperless_deployment_identity,
@@ -477,6 +478,34 @@ async def update_document_expectation(
             _raise_policy_error(exc)
     finally:
         service.close()
+
+
+@router.post(
+    "/document-expectations/{expectation_id}/policy-preview",
+    response_model=ExpectationPolicyPreview,
+    summary="Preview confirmed expectation policy violations",
+)
+async def preview_document_expectation_policy(
+    request: Request, expectation_id: str
+) -> ExpectationPolicyPreview:
+    client = make_paperless_client(request, timeout=60.0)
+    service = _get_policy_service(request)
+    try:
+        correspondents, tags, document_types = await client.fetch_all_metadata()
+        raw_documents = await client.list_documents()
+        documents = build_document_records(raw_documents, correspondents, tags, document_types)
+        try:
+            return service.preview_expectation_policy(
+                expectation_id,
+                documents,
+                tag_names=tags,
+                document_type_names=document_types,
+            )
+        except (KeyError, ValueError) as exc:
+            _raise_policy_error(exc)
+    finally:
+        service.close()
+        await client.aclose()
 
 
 @router.get(

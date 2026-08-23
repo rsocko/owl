@@ -300,6 +300,38 @@ expectation, and reject ambiguous resolution. Existing statement-series history 
 The general document list opens in Paperless. OWL owns the profile and policy review because
 the workflow depends on cross-document and cross-system evidence.
 
+### Policy preview contract
+
+`POST /api/statements/document-expectations/{expectation_id}/policy-preview` evaluates only a
+confirmed expectation. It reads current Paperless metadata and returns deterministic findings;
+it does not update Paperless or persist evaluation state.
+
+Each finding contains a stable `preview_id` and an apply-ready `operation`:
+
+- `operation.document_id` identifies the exact Paperless document;
+- `operation.expected` is the full title, ordered tag IDs/names, and document type observed
+  during evaluation for optimistic concurrency checks;
+- `operation.patch` contains only changed Paperless fields (`title`, `tags`, `document_type`);
+- `proposed` is the complete post-patch display snapshot; and
+- `unresolved_violations` identifies findings that require a user decision and therefore are
+  deliberately absent from the patch.
+
+Required `all_of` tags are added and `none_of` tags are removed while unrelated tags are
+preserved. An unsatisfied multi-value `any_of` rule is reported but never resolved by guessing
+a child tag. Title templates likewise produce no title patch when a required field is missing
+or the deterministic render exceeds 128 characters. Issue #71 can submit the returned
+`operation` without re-evaluating policy; it must reject the operation if current metadata no
+longer matches `expected`.
+
+Confirmed non-statement expectations persist the exact Paperless document IDs from the reviewed
+analysis group. Preview evaluation uses that durable membership rather than reclassifying by
+current title or document type, so one expectation cannot propose patches for a sibling group.
+Statement expectations continue to use `StatementSeries` membership as their authoritative
+scope. Confirming any other applicable expectation requires non-empty durable membership.
+During schema migration, legacy confirmed non-statement expectations without that membership
+return to `suggested` for explicit re-analysis and review rather than remaining falsely
+confirmed but unevaluable.
+
 ## Acquisition strategy
 
 Use the least brittle channel available:
