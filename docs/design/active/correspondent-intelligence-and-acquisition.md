@@ -377,3 +377,23 @@ shared connector contract and at least two real providers require browser automa
 - Legacy provider overrides and webhook keys resolve to at most one expectation.
 - Acquisition retries cannot create duplicate Paperless documents or false success callbacks.
 - APIs, logs, and profiles contain no connector credentials or sensitive URLs.
+
+## Initial persistence contract
+
+The first implementation stores this policy in statement-tracker schema version 4:
+
+- profile rows use a composite key of a non-reversible Paperless deployment fingerprint and
+  numeric correspondent ID; the fingerprint is deployment scope and is not returned by APIs;
+- correspondent synchronization updates names for stable IDs, marks absent IDs orphaned, and
+  creates a separate unreviewed profile for a new ID even when its display name matches;
+- orphan relinking is explicit and carries expectations to the selected current correspondent;
+- statement expectations reference the existing `statement_series.id`; series merge operations
+  rebind a sole expectation or retire a duplicate policy while retaining its review event;
+- legacy provider overrides remain intact and receive a recorded `migrated`, `review_required`,
+  or `unmigrated` outcome; only an exactly-one-series result receives a compatibility key; and
+- `statement-found` accepts an expectation ID or an unambiguous legacy key, while unmapped keys
+  remain backward-compatible and ambiguous keys fail closed for explicit review.
+
+Acquisition sources accept only credential-free portal landing pages without query strings or
+fragments. Evidence APIs expose bounded reason codes and aggregate counts, never raw documents,
+OCR text, account identifiers, or external-system payloads.
