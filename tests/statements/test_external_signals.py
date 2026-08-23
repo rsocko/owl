@@ -104,7 +104,7 @@ async def test_client_pulls_generation_addressed_projection() -> None:
         transport=httpx.MockTransport(handler),
     )
     try:
-        snapshot = await client.fetch("opaque connector", "generation/one")
+        snapshot = await client.fetch("generation/one")
     finally:
         await client.close()
 
@@ -113,4 +113,4 @@ async def test_client_pulls_generation_addressed_projection() -> None:
     assert seen_request.url.raw_path.startswith(
         b"/api/connector/v1/document-expectation-signals/generation%2Fone"
     )
-    assert seen_request.url.params["connectorRef"] == "opaque connector"
+    assert "connectorRef" not in seen_request.url.params

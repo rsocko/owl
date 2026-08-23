@@ -368,13 +368,13 @@ The finalized Tyrion V1 pull endpoint uses Tyrion's authenticated connector gate
 
 ```text
 GET /api/connector/v1/document-expectation-signals/{sourceGeneration}
-    ?connectorRef={connectorRef}
 ```
 
 OWL normally configures the source from **Settings → Tyrion insights connection**. The saved
 token remains server-side in OWL's local application database and is never returned to the
 browser. Tyrion authenticates the request with the same bearer-token pattern as its other
-server-to-server connector routes. YAML and environment configuration under `external_signals` remains an advanced
+server-to-server connector routes and resolves the connector from that authentication. YAML and
+environment configuration under `external_signals` remains an advanced
 deployment alternative. In **Documents → Correspondent Review**, the user supplies the opaque
 source generation and selects **Sync Tyrion candidates**. OWL calls the generation-addressed
 projection and accepts at most 6,000 signals per response. A repeated generation is a no-op.

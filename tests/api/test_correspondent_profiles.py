@@ -12,21 +12,20 @@ from doc_intelligence_hub.modules.statements.policy_evaluation import policy_ope
 from doc_intelligence_hub.modules.triage.database import list_correction_events
 
 
-def _configure_statement_database(app, tmp_path) -> str:
+def _configure_statement_database(app, tmp_path, *, tyrion_base_url: str | None = None) -> str:
     database_path = str(tmp_path / "correspondent-policy.db")
     config_path = tmp_path / "statements.yaml"
+    lines = [
+        "source:",
+        "  mode: paperless",
+        "  paperless_url: http://paperless.test",
+        "runtime:",
+        f"  database_path: '{database_path}'",
+    ]
+    if tyrion_base_url is not None:
+        lines.extend(["external_signals:", f"  base_url: {tyrion_base_url}"])
     config_path.write_text(
-        "\n".join(
-            [
-                "source:",
-                "  mode: paperless",
-                "  paperless_url: http://paperless.test",
-                "runtime:",
-                f"  database_path: '{database_path}'",
-                "external_signals:",
-                "  base_url: https://tyrion.test",
-            ]
-        ),
+        "\n".join(lines),
         encoding="utf-8",
     )
     app.state.statement_tracker_config = str(config_path)
@@ -334,7 +333,9 @@ def test_acquisition_source_rejects_credential_bearing_url(client, app, tmp_path
 
 
 def test_external_candidate_poll_and_review_contract(client, app, tmp_path) -> None:
-    database_path = _configure_statement_database(app, tmp_path)
+    database_path = _configure_statement_database(
+        app, tmp_path, tyrion_base_url="https://tyrion.test"
+    )
     database = Database(database_path)
     try:
         database.reconcile_correspondents(
@@ -373,7 +374,6 @@ def test_external_candidate_poll_and_review_contract(client, app, tmp_path) -> N
         response = client.post(
             "/api/statements/external-candidates/poll",
             json={
-                "connector_ref": "opaque-connector",
                 "source_generation": "opaque-generation",
             },
         )
@@ -385,7 +385,7 @@ def test_external_candidate_poll_and_review_contract(client, app, tmp_path) -> N
         "active_candidates": 1,
         "deactivated_candidates": 0,
     }
-    source_client.fetch.assert_awaited_once_with("opaque-connector", "opaque-generation")
+    source_client.fetch.assert_awaited_once_with("opaque-generation")
 
     candidates = client.get("/api/statements/external-candidates")
     assert candidates.status_code == 200
@@ -422,7 +422,6 @@ def test_saved_external_connection_drives_candidate_sync(client, app, tmp_path) 
         "/api/statements/external-candidates/connection",
         json={
             "base_url": "https://tyrion-ui.test",
-            "connector_ref": "saved-connector",
             "api_token": "saved-secret",
             "verify_ssl": True,
             "timeout_seconds": 45,
@@ -433,7 +432,6 @@ def test_saved_external_connection_drives_candidate_sync(client, app, tmp_path) 
         "configured": True,
         "source": "saved",
         "base_url": "https://tyrion-ui.test",
-        "connector_ref": "saved-connector",
         "token_configured": True,
         "verify_ssl": True,
         "timeout_seconds": 45,
@@ -471,7 +469,7 @@ def test_saved_external_connection_drives_candidate_sync(client, app, tmp_path) 
         verify_ssl=True,
         timeout_seconds=45,
     )
-    source_client.fetch.assert_awaited_once_with("saved-connector", "generation-2")
+    source_client.fetch.assert_awaited_once_with("generation-2")
 
     connection = client.get("/api/statements/external-candidates/connection")
     assert connection.status_code == 200
@@ -498,7 +496,6 @@ def test_external_connection_does_not_send_saved_token_to_new_origin(client, app
             "/api/statements/external-candidates/connection",
             json={
                 "base_url": "https://tyrion-one.test",
-                "connector_ref": "connector",
                 "api_token": "origin-one-secret",
             },
         ).status_code
@@ -509,7 +506,6 @@ def test_external_connection_does_not_send_saved_token_to_new_origin(client, app
         "/api/statements/external-candidates/connection",
         json={
             "base_url": "https://tyrion-two.test",
-            "connector_ref": "connector",
         },
     )
 
@@ -524,7 +520,6 @@ def test_external_connection_rejects_token_over_plain_http(client, app, tmp_path
         "/api/statements/external-candidates/connection",
         json={
             "base_url": "http://tyrion.test",
-            "connector_ref": "connector",
             "api_token": "insecure-secret",
         },
     )
