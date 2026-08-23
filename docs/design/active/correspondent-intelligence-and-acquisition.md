@@ -414,6 +414,23 @@ or the deterministic render exceeds 128 characters. Issue #71 can submit the ret
 `operation` without re-evaluating policy; it must reject the operation if current metadata no
 longer matches `expected`.
 
+### Policy apply and undo contract
+
+`POST /api/statements/document-expectations/{expectation_id}/policy-apply` accepts a reason and
+one or more user-selected `{preview_id, operation}` pairs from the preview response. OWL verifies
+the deployment-authenticated stable operation identifier, expectation, and complete current Paperless metadata before
+passing the sparse patch unchanged to the shared Paperless client. Results are returned per
+document, so one stale, invalid, or failed operation does not hide sibling outcomes.
+
+Each successful patch creates a bounded `paperless_policy_correction` event with actor,
+expectation, reason, Paperless document ID, redacted old/new display values, integrity digests,
+and only the tag/type identifiers required for conflict-aware undo. Exact title values are not
+persisted in the audit record. `POST /api/statements/policy-corrections/{event_id}/undo` therefore
+requires the original preview operation, verifies it against the audit digests, and restores only
+the fields and tag deltas changed by that operation. It rejects later edits to policy-managed
+values while preserving unrelated tags added after apply. Neither endpoint schedules or silently
+enforces future corrections.
+
 Confirmed non-statement expectations persist the exact Paperless document IDs from the reviewed
 analysis group. Preview evaluation uses that durable membership rather than reclassifying by
 current title or document type, so one expectation cannot propose patches for a sibling group.
