@@ -240,6 +240,31 @@ describe('Correspondent Review', () => {
     expect(screen.getByText('Checking - 2026-04')).toBeInTheDocument();
   });
 
+  it('groups the review queue and provides candidate section navigation', async () => {
+    mocks.externalCandidates.mockResolvedValue([{
+      id: 'candidate-1',
+      kind: 'accountStatementCandidate',
+      active: true,
+      display_hint: 'Credit account',
+      confidence: 0.6,
+      basis: ['active_non_cash_account'],
+      outcome: 'unreviewed',
+      correspondent_id: null,
+      likely_multiple_statement_series: false,
+      recurrence_evidence: 'high',
+    }]);
+
+    const { container } = renderPage();
+
+    expect((await screen.findAllByText('Unreviewed')).length).toBeGreaterThan(0);
+    expect(container.querySelector('.correspondent-inventory-list')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /external candidates 1/i })).toHaveAttribute(
+      'href',
+      '#correspondent-external-candidates',
+    );
+    expect(screen.getByText('Account statement candidates')).toBeInTheDocument();
+  });
+
   it('keeps the workspace visible while analysis refreshes profile data', async () => {
     const { container } = renderPage();
     await screen.findAllByText('Example Bank');
