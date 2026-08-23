@@ -1076,7 +1076,9 @@ class PaperlessClient:
     async def _resolve_tag_ids(self, client: httpx.AsyncClient, tag_names: list[str]) -> list[int]:
         """Resolve tag names to IDs, using a per-client cache (tags rarely change)."""
         name_to_id = await self._get_tag_name_to_id_map(client)
-        normalized_name_to_id = {name.strip().casefold(): tag_id for name, tag_id in name_to_id.items()}
+        normalized_name_to_id = {
+            name.strip().casefold(): tag_id for name, tag_id in name_to_id.items()
+        }
         return [
             normalized_name_to_id[normalized]
             for name in tag_names
