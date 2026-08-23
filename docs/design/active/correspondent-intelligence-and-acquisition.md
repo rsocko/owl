@@ -252,7 +252,8 @@ OWL may suggest:
 
 - recurring, periodic, or irregular behavior from document dates;
 - separate series from existing curated membership, document type, stable tag families,
-  account hints, normalized title similarity, and user corrections;
+  stored masked account identifiers, account hints, subject tags, normalized title similarity,
+  and user corrections;
 - dominant title conventions;
 - common and missing tag families;
 - document-type consistency; and
@@ -291,6 +292,12 @@ profiles and persist a versioned analysis snapshot. Selecting a profile displays
 snapshot immediately. The user-facing action is **Reanalyze**, with its reason and snapshot
 age visible, rather than a required first-run **Analyze** gate. Manual reanalysis remains
 available after Paperless history or grouping corrections change.
+
+Normal analysis reads existing masked `Account Identifier` document metadata. A user may
+request OCR extraction for documents where that value is absent; this extraction is scoped to
+the selected correspondent and remains non-persistent unless the user separately confirms a
+Paperless writeback. Candidate groups aggregate document-level identifiers, while the parent
+correspondent never receives a single account identifier.
 
 ### From Tyrion
 

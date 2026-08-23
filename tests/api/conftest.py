@@ -86,6 +86,7 @@ def _make_mock_paperless() -> AsyncMock:
         {1: "Statement", 2: "Bill", 3: "Letter"},
     )
     mock.list_documents.return_value = []
+    mock.list_custom_fields.return_value = []
     mock.get_document.return_value = {
         "id": 1,
         "title": "Test Document",

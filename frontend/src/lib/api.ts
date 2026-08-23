@@ -80,7 +80,11 @@ export const endpoints = {
     correspondentProfile: (id: number) => api.get(`/api/statements/correspondent-profiles/${id}`),
     syncCorrespondentProfiles: () => api.post('/api/statements/correspondent-profiles/sync'),
     analyzeCorrespondentProfiles: () => api.post('/api/statements/correspondent-profiles/analyze'),
-    analyzeCorrespondentProfile: (id: number) => api.post(`/api/statements/correspondent-profiles/${id}/analyze`),
+    analyzeCorrespondentProfile: (id: number, extractMissingAccountIdentifiers = false) =>
+      api.post(
+        `/api/statements/correspondent-profiles/${id}/analyze`
+        + (extractMissingAccountIdentifiers ? '?extract_missing_account_identifiers=true' : ''),
+      ),
     updateCorrespondentProfile: (id: number, body: unknown) =>
       api.patch(`/api/statements/correspondent-profiles/${id}`, body),
     relinkCorrespondentProfile: (id: number, body: { correspondent_id: number }) =>

@@ -16,6 +16,11 @@ from doc_intelligence_hub.api.routers import (
     make_paperless_client,
     raise_api_error,
 )
+from doc_intelligence_hub.core.extractors.account_numbers import (
+    extract_from_document,
+    pick_masked_account_identifier,
+)
+from doc_intelligence_hub.core.paperless import MetadataFieldKey, PaperlessMetadataResolver
 from doc_intelligence_hub.modules.statements.api import (
     _discovery_event_generator,
     _recommendations_event_generator,
@@ -272,14 +277,47 @@ def _raise_policy_error(exc: KeyError | ValueError) -> None:
     raise_api_error(409, "policy_conflict", str(exc))
 
 
-async def _load_policy_analysis_documents(request: Request, *, correspondent_id: int | None = None):
+async def _load_policy_analysis_documents(
+    request: Request,
+    *,
+    correspondent_id: int | None = None,
+    extract_missing_account_identifiers: bool = False,
+):
     client = make_paperless_client(request, timeout=60.0)
     try:
         correspondents, tags, document_types = await client.fetch_all_metadata()
         raw_documents = await client.list_documents(correspondent_id=correspondent_id)
+        metadata_schema = await PaperlessMetadataResolver(client).resolve(
+            (MetadataFieldKey.ACCOUNT_IDENTIFIER,)
+        )
+        documents = build_document_records(
+            raw_documents,
+            correspondents,
+            tags,
+            document_types,
+            metadata_schema=metadata_schema,
+        )
+        if extract_missing_account_identifiers:
+            for index, document in enumerate(documents):
+                if document.account_identifier is not None:
+                    continue
+                extraction = await extract_from_document(document.id, client)
+                if not extraction.success:
+                    documents[index] = document.model_copy(
+                        update={"account_identifier_source": "extraction_failed"}
+                    )
+                    continue
+                identifier = pick_masked_account_identifier(extraction.pattern_matches)
+                if identifier is not None:
+                    documents[index] = document.model_copy(
+                        update={
+                            "account_identifier": identifier,
+                            "account_identifier_source": "extracted",
+                        }
+                    )
         return (
             correspondents,
-            build_document_records(raw_documents, correspondents, tags, document_types),
+            documents,
         )
     finally:
         await client.aclose()
@@ -324,7 +362,12 @@ async def analyze_correspondent_profiles(request: Request) -> list[Correspondent
     summary="Analyze one Paperless correspondent for policy suggestions",
 )
 async def analyze_correspondent_profile(
-    request: Request, correspondent_id: int
+    request: Request,
+    correspondent_id: int,
+    extract_missing_account_identifiers: bool = Query(
+        default=False,
+        description="Extract masked identifiers from OCR for documents without stored values",
+    ),
 ) -> CorrespondentAnalysisResult:
     service = _get_policy_service(request)
     try:
@@ -336,9 +379,15 @@ async def analyze_correspondent_profile(
                 "Correspondent profile not found.",
             )
         _, documents = await _load_policy_analysis_documents(
-            request, correspondent_id=correspondent_id
+            request,
+            correspondent_id=correspondent_id,
+            extract_missing_account_identifiers=extract_missing_account_identifiers,
         )
-        return service.analyze_profile(correspondent_id, documents)
+        return service.analyze_profile(
+            correspondent_id,
+            documents,
+            account_identifier_extraction_requested=extract_missing_account_identifiers,
+        )
     finally:
         service.close()
 

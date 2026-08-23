@@ -661,11 +661,22 @@ class ExpectationPolicySuggestion(PolicyModel):
     sample_document_ids: list[int] = Field(default_factory=list, max_length=3)
 
 
+class AccountIdentifierAnalysis(PolicyModel):
+    extraction_requested: bool = False
+    stored_document_count: int = Field(default=0, ge=0)
+    extracted_document_count: int = Field(default=0, ge=0)
+    unresolved_document_count: int = Field(default=0, ge=0)
+    extraction_failed_document_count: int = Field(default=0, ge=0)
+
+
 class CorrespondentAnalysisResult(PolicyModel):
     correspondent_id: int = Field(gt=0)
     correspondent_name: str
     analyzed_at: str
     observed_summary: ObservedSummary
+    account_identifiers: AccountIdentifierAnalysis = Field(
+        default_factory=AccountIdentifierAnalysis
+    )
     suggestions: list[ExpectationPolicySuggestion] = Field(default_factory=list)
 
 

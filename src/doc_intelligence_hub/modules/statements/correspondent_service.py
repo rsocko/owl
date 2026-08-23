@@ -61,6 +61,7 @@ class CorrespondentPolicyService:
         documents: list[DocumentRecord],
         *,
         analyzed_at: datetime | None = None,
+        account_identifier_extraction_requested: bool = False,
     ) -> CorrespondentAnalysisResult:
         profile = self.get_profile(correspondent_id)
         if profile is None:
@@ -77,6 +78,7 @@ class CorrespondentPolicyService:
             documents,
             statement_series,
             analyzed_at=analyzed_at,
+            account_identifier_extraction_requested=account_identifier_extraction_requested,
         )
         self.update_profile(
             correspondent_id,

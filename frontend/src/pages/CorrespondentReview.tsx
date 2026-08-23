@@ -96,6 +96,13 @@ interface AnalysisResult {
   correspondent_name: string;
   analyzed_at: string;
   observed_summary: ObservedSummary;
+  account_identifiers: {
+    extraction_requested: boolean;
+    stored_document_count: number;
+    extracted_document_count: number;
+    unresolved_document_count: number;
+    extraction_failed_document_count: number;
+  };
   suggestions: Suggestion[];
 }
 
@@ -668,14 +675,23 @@ export default function CorrespondentReview() {
     }
   }, [loadWorkspace]);
 
-  const analyzeSelected = useCallback(async () => {
+  const analyzeSelected = useCallback(async (extractMissingAccountIdentifiers = false) => {
     if (!selectedId) return;
     setDetailLoading(true);
     try {
-      const result = await endpoints.statements.analyzeCorrespondentProfile(selectedId) as AnalysisResult;
+      const result = await endpoints.statements.analyzeCorrespondentProfile(
+        selectedId,
+        extractMissingAccountIdentifiers,
+      ) as AnalysisResult;
       if (selectedIdRef.current !== result.correspondent_id) return;
       setAnalysis(result);
-      setToast({ message: `Analyzed ${result.suggestions.length} candidate series.`, tone: 'success' });
+      const extractionDetail = extractMissingAccountIdentifiers
+        ? ` ${result.account_identifiers.extracted_document_count} identifiers extracted; ${result.account_identifiers.unresolved_document_count} documents remain unresolved.`
+        : '';
+      setToast({
+        message: `${extractMissingAccountIdentifiers ? 'OCR-enhanced analysis found' : 'Analyzed'} ${result.suggestions.length} candidate series.${extractionDetail}`,
+        tone: 'success',
+      });
       await loadWorkspace(false);
     } catch (requestError) {
       setToast({ message: getErrorMessage(requestError), tone: 'error' });
@@ -948,9 +964,16 @@ export default function CorrespondentReview() {
                         {humanize(selectedProfile.lifecycle_status)}
                       </Badge>
                       <Button
+                        disabled={detailLoading || busy || selectedProfileTerminal}
+                        title="Extract masked account identifiers from OCR for this analysis only"
+                        onClick={() => void analyzeSelected(true)}
+                      >
+                        Analyze with account OCR
+                      </Button>
+                      <Button
                         variant="primary"
                         disabled={detailLoading || busy || selectedProfileTerminal}
-                        onClick={() => void analyzeSelected()}
+                        onClick={() => void analyzeSelected(false)}
                       >
                         {detailLoading ? 'Analyzing…' : 'Analyze history'}
                       </Button>
