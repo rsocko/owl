@@ -1662,7 +1662,14 @@ async def list_paperless_tags(request: Request) -> dict[str, Any]:
         client = make_paperless_client(request, timeout=15.0)
         tags = await client.list_tags()
         return {
-            "tags": [{"id": item["id"], "name": item["name"]} for item in tags],
+            "tags": [
+                {
+                    "id": item["id"],
+                    "name": item["name"],
+                    "colour": item.get("colour"),
+                }
+                for item in tags
+            ],
         }
     except Exception as exc:
         return {"tags": [], "error": str(exc)}
