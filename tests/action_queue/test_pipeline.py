@@ -129,7 +129,7 @@ class TestPipelineErrorIsolation:
 
     def test_resolves_paperless_metadata_for_analysis(self):
         pipeline = Pipeline()
-        pipeline._correspondent_cache = {7: "Town of Natick"}
+        pipeline._correspondent_cache = {7: "City Utilities"}
         pipeline._doc_type_cache = {5: "Receipt"}
         pipeline._tag_cache = {9: "Inbox", 12: "Utilities"}
         document = {
@@ -140,7 +140,7 @@ class TestPipelineErrorIsolation:
 
         pipeline._resolve_document_metadata(document)
 
-        assert document["correspondent_name"] == "Town of Natick"
+        assert document["correspondent_name"] == "City Utilities"
         assert document["document_type_name"] == "Receipt"
         assert document["tag_names"] == ["Inbox", "Utilities"]
 

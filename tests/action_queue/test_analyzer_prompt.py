@@ -105,8 +105,8 @@ class TestPromptBuildingWithIntegerTags:
     @pytest.mark.asyncio
     async def test_receipt_document_type_skips_llm_and_pay_action(self, analyzer):
         document = {
-            "title": "Town water payment",
-            "content": "Water bill payment $1,382.28. Thank you for your payment.",
+            "title": "Utility payment",
+            "content": "Utility bill payment $142.50. Thank you for your payment.",
             "document_type_name": "Receipt",
             "tag_names": ["Inbox"],
         }
