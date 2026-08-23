@@ -23,6 +23,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSource,
     AcquisitionSourceCreate,
     AcquisitionSourceUpdate,
+    CorrespondentInventoryItem,
     CorrespondentPolicyAnalysis,
     CorrespondentProfile,
     CorrespondentProfileUpdate,
@@ -32,6 +33,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     DocumentExpectationUpdate,
     LegacyOverrideReviewItem,
     RelinkProfileRequest,
+    SuggestionDispositionRequest,
     paperless_deployment_identity,
 )
 from doc_intelligence_hub.modules.statements.correspondent_service import (
@@ -281,6 +283,19 @@ async def list_correspondent_profiles(request: Request) -> list[CorrespondentPro
 
 
 @router.get(
+    "/correspondent-profiles/inventory",
+    response_model=list[CorrespondentInventoryItem],
+    summary="List prioritized correspondent review inventory",
+)
+async def list_correspondent_inventory(request: Request) -> list[CorrespondentInventoryItem]:
+    service = _get_policy_service(request)
+    try:
+        return service.list_inventory()
+    finally:
+        service.close()
+
+
+@router.get(
     "/correspondent-profiles/{correspondent_id}",
     response_model=CorrespondentProfile,
     summary="Get a correspondent profile",
@@ -356,6 +371,27 @@ async def relink_correspondent_profile(
             )
         except (KeyError, ValueError) as exc:
             _raise_policy_error(exc)
+    finally:
+        service.close()
+
+
+@router.post(
+    "/correspondent-profiles/{correspondent_id}/suggestions/dismiss",
+    status_code=204,
+    summary="Dismiss a read-only correspondent policy suggestion",
+)
+async def dismiss_correspondent_suggestion(
+    request: Request,
+    correspondent_id: int,
+    body: SuggestionDispositionRequest,
+) -> Response:
+    service = _get_policy_service(request)
+    try:
+        try:
+            service.dismiss_suggestion(correspondent_id, body)
+        except (KeyError, ValueError) as exc:
+            _raise_policy_error(exc)
+        return Response(status_code=204)
     finally:
         service.close()
 

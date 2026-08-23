@@ -410,3 +410,23 @@ def test_uncurated_series_with_repeated_account_hints_suggests_distinct_series()
     assert all(
         "account_hint_candidate" in item.evidence.reason_codes for item in result.suggestions
     )
+
+
+def test_title_examples_redact_currency_and_short_account_identifiers() -> None:
+    dates = ["2026-01-03", "2026-02-03", "2026-03-03"]
+    series, memberships = _series("checking", "Checking AB123", [1, 2, 3], dates)
+    documents = [
+        _document(
+            document_id,
+            f"Checking AB123 balance $1,234.56 - {created[:7]}",
+            created,
+        )
+        for document_id, created in zip([1, 2, 3], dates, strict=True)
+    ]
+
+    result = _analyze(documents, [series], {"checking": memberships})
+
+    examples = result.suggestions[0].title.examples
+    assert examples
+    assert all("AB123" not in example.before for example in examples)
+    assert all("$1,234.56" not in example.before for example in examples)

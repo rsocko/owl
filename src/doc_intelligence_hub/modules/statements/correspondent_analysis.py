@@ -35,6 +35,11 @@ _ALPHANUMERIC_IDENTIFIER = re.compile(
     r"\b(?=[A-Za-z0-9-]{6,}\b)(?=(?:[A-Za-z0-9-]*\d){4})"
     r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\b"
 )
+_SHORT_ALPHANUMERIC_IDENTIFIER = re.compile(
+    r"\b(?=[A-Za-z0-9-]{5,}\b)(?=[A-Za-z0-9-]*[A-Za-z])"
+    r"(?=(?:[A-Za-z0-9-]*\d){3})[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\b"
+)
+_CURRENCY_AMOUNT = re.compile(r"(?<!\w)[$€£]\s?\d[\d,]*(?:\.\d{2})?")
 _SUBJECT_FAMILIES = frozenset(
     {"animal", "child", "dog", "entity", "patient", "person", "pet", "subject"}
 )
@@ -792,8 +797,10 @@ def _redact_sensitive_numbers(value: Any) -> str | None:
         return f"__TEMPORAL_{chr(65 + len(temporal_tokens) - 1)}__"
 
     redacted = _TEMPORAL_TOKEN.sub(preserve_temporal, str(value))
+    redacted = _CURRENCY_AMOUNT.sub("****", redacted)
     redacted = _GROUPED_SENSITIVE_NUMBER.sub("****", redacted)
     redacted = _ALPHANUMERIC_IDENTIFIER.sub("****", redacted)
+    redacted = _SHORT_ALPHANUMERIC_IDENTIFIER.sub("****", redacted)
     redacted = _SENSITIVE_NUMBER.sub("****", redacted)
     for index, token in enumerate(temporal_tokens):
         redacted = redacted.replace(f"__TEMPORAL_{chr(65 + index)}__", token)

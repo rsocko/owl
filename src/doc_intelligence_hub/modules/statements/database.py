@@ -1117,6 +1117,33 @@ class Database:
         assert created is not None
         return created
 
+    def record_correspondent_suggestion_dismissal(
+        self, deployment_id: str, correspondent_id: int, suggestion_key: str
+    ) -> None:
+        conn = self.connect()
+        with conn:
+            self._insert_profile_event(
+                conn,
+                deployment_id,
+                correspondent_id,
+                "suggestion_dismissed",
+                {"suggestion_key": suggestion_key},
+            )
+
+    def list_dismissed_correspondent_suggestion_keys(
+        self, deployment_id: str, correspondent_id: int
+    ) -> set[str]:
+        conn = self.connect()
+        rows = conn.execute(
+            """SELECT payload_json FROM correspondent_profile_events
+               WHERE deployment_id = ? AND correspondent_id = ?
+                 AND event_type = 'suggestion_dismissed'""",
+            (deployment_id, correspondent_id),
+        ).fetchall()
+        return {
+            key for row in rows if (key := json.loads(row["payload_json"]).get("suggestion_key"))
+        }
+
     def get_acquisition_source(
         self, deployment_id: str, source_id: str
     ) -> AcquisitionSource | None:
@@ -1281,30 +1308,34 @@ class Database:
         self._validate_expectation_references(deployment_id, current.correspondent_id, validated)
 
         conn = self.connect()
-        with conn:
-            conn.execute(
-                """UPDATE document_expectations SET
-                    document_type_id = ?, series_discriminator = ?, expectation_mode = ?,
-                    status = ?, cadence_json = ?, evidence_json = ?,
-                    title_convention_json = ?, metadata_policy_json = ?,
-                    acquisition_source_id = ?, updated_at = datetime('now')
-                   WHERE deployment_id = ? AND id = ?""",
-                (
-                    validated.document_type_id,
-                    validated.series_discriminator,
-                    validated.expectation_mode,
-                    validated.status,
-                    validated.cadence.model_dump_json() if validated.cadence else None,
-                    validated.evidence.model_dump_json(),
-                    validated.title_convention.model_dump_json()
-                    if validated.title_convention
-                    else None,
-                    validated.metadata_policy.model_dump_json(),
-                    validated.acquisition_source_id,
-                    deployment_id,
-                    expectation_id,
-                ),
-            )
+        try:
+            with conn:
+                conn.execute(
+                    """UPDATE document_expectations SET
+                        document_type_id = ?, statement_series_id = ?, series_discriminator = ?,
+                        expectation_mode = ?, status = ?, cadence_json = ?, evidence_json = ?,
+                        title_convention_json = ?, metadata_policy_json = ?,
+                        acquisition_source_id = ?, updated_at = datetime('now')
+                       WHERE deployment_id = ? AND id = ?""",
+                    (
+                        validated.document_type_id,
+                        validated.statement_series_id,
+                        validated.series_discriminator,
+                        validated.expectation_mode,
+                        validated.status,
+                        validated.cadence.model_dump_json() if validated.cadence else None,
+                        validated.evidence.model_dump_json(),
+                        validated.title_convention.model_dump_json()
+                        if validated.title_convention
+                        else None,
+                        validated.metadata_policy.model_dump_json(),
+                        validated.acquisition_source_id,
+                        deployment_id,
+                        expectation_id,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("StatementSeries already has an active document expectation") from exc
         result = self.get_document_expectation(deployment_id, expectation_id)
         assert result is not None
         return result
