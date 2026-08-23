@@ -23,9 +23,10 @@ analysis:
 runtime:
   snapshot_path: ../data/catalog.snapshot.json
 
-# Optional pull-only Tyrion or Mission Control projection.
+# Optional advanced deployment configuration. The same connection can be managed in Settings.
 external_signals:
   base_url: https://tyrion.example.com
+  connector_ref: replace-with-opaque-connector-reference
   api_token_env: TYRION_API_TOKEN
   verify_ssl: true
   timeout_seconds: 30

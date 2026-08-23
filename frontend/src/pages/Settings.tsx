@@ -72,6 +72,27 @@ type LlmDraft = {
   model: string;
 };
 
+type TyrionConnection = {
+  configured: boolean;
+  source?: 'saved' | 'configuration' | null;
+  base_url?: string | null;
+  connector_ref?: string | null;
+  token_configured: boolean;
+  verify_ssl: boolean;
+  timeout_seconds: number;
+  last_source_generation?: string | null;
+  last_source_as_of?: string | null;
+  last_synced_at?: string | null;
+};
+
+type TyrionDraft = {
+  baseUrl: string;
+  connectorRef: string;
+  apiToken: string;
+  verifySsl: boolean;
+  timeoutSeconds: number;
+};
+
 type ScheduleDrafts = {
   statement_discovery: Required<ScheduleConfig>;
   statement_gap_check: Required<ScheduleConfig>;
@@ -157,6 +178,7 @@ export default function Settings() {
   const [connectionSaving, setConnectionSaving] = useState(false);
   const [llmSaving, setLlmSaving] = useState(false);
   const [llmTesting, setLlmTesting] = useState(false);
+  const [tyrionSaving, setTyrionSaving] = useState(false);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [retentionSaving, setRetentionSaving] = useState(false);
   const [cleanupRunning, setCleanupRunning] = useState(false);
@@ -190,6 +212,19 @@ export default function Settings() {
     writeToPaperless: false,
   });
   const [llm, setLlm] = useState<LlmDraft>({ baseUrl: '', model: '' });
+  const [tyrionConnection, setTyrionConnection] = useState<TyrionConnection>({
+    configured: false,
+    token_configured: false,
+    verify_ssl: true,
+    timeout_seconds: 30,
+  });
+  const [tyrion, setTyrion] = useState<TyrionDraft>({
+    baseUrl: '',
+    connectorRef: '',
+    apiToken: '',
+    verifySsl: true,
+    timeoutSeconds: 30,
+  });
   const [schedules, setSchedules] = useState<ScheduleDrafts>(normalizeSchedules());
   const [modelsInfo, setModelsInfo] = useState<ModelsResponse | null>(null);
   const [llmTestResult, setLlmTestResult] = useState<LlmTestResponse | null>(null);
@@ -215,7 +250,7 @@ export default function Settings() {
     setLoading(true);
     setError(null);
     try {
-      const [settingsResponse, schedulesResponse, modelsResponse, healthResponse, statsResponse, retentionResponse, storageResponse] = await Promise.all([
+      const [settingsResponse, schedulesResponse, modelsResponse, healthResponse, statsResponse, retentionResponse, storageResponse, tyrionResponse] = await Promise.all([
         endpoints.settings.get() as Promise<SettingsResponse>,
         endpoints.admin.schedules.get() as Promise<SchedulesResponse>,
         endpoints.llm.models() as Promise<ModelsResponse>,
@@ -223,6 +258,7 @@ export default function Settings() {
         api.get<PaperlessStats>('/api/paperless/stats'),
         endpoints.admin.retention.get() as Promise<RetentionPolicy>,
         endpoints.admin.storage() as Promise<StorageStats>,
+        endpoints.statements.externalCandidateConnection() as Promise<TyrionConnection>,
       ]);
 
       setConnection({
@@ -233,6 +269,14 @@ export default function Settings() {
       setLlm({
         baseUrl: settingsResponse.llm_base_url ?? settingsResponse.ollama_url ?? '',
         model: settingsResponse.llm_model ?? settingsResponse.ollama_model ?? '',
+      });
+      setTyrionConnection(tyrionResponse);
+      setTyrion({
+        baseUrl: tyrionResponse.base_url ?? '',
+        connectorRef: tyrionResponse.connector_ref ?? '',
+        apiToken: '',
+        verifySsl: tyrionResponse.verify_ssl,
+        timeoutSeconds: tyrionResponse.timeout_seconds,
       });
       setSchedules(normalizeSchedules(schedulesResponse));
       setModelsInfo(modelsResponse);
@@ -334,6 +378,51 @@ export default function Settings() {
       setToast({ message: getErrorMessage(err), tone: 'error' });
     } finally {
       setLlmSaving(false);
+    }
+  };
+
+  const handleSaveTyrion = async () => {
+    setTyrionSaving(true);
+    try {
+      const response = await endpoints.statements.updateExternalCandidateConnection({
+        base_url: tyrion.baseUrl,
+        connector_ref: tyrion.connectorRef,
+        ...(tyrion.apiToken ? { api_token: tyrion.apiToken } : {}),
+        verify_ssl: tyrion.verifySsl,
+        timeout_seconds: tyrion.timeoutSeconds,
+      }) as TyrionConnection;
+      setTyrionConnection(response);
+      setTyrion((current) => ({ ...current, apiToken: '' }));
+      setToast({ message: 'Tyrion connection saved.', tone: 'success' });
+    } catch (err) {
+      setToast({ message: getErrorMessage(err), tone: 'error' });
+    } finally {
+      setTyrionSaving(false);
+    }
+  };
+
+  const handleDisconnectTyrion = async () => {
+    setTyrionSaving(true);
+    try {
+      await endpoints.statements.deleteExternalCandidateConnection();
+      setTyrionConnection({
+        configured: false,
+        token_configured: false,
+        verify_ssl: true,
+        timeout_seconds: 30,
+      });
+      setTyrion({
+        baseUrl: '',
+        connectorRef: '',
+        apiToken: '',
+        verifySsl: true,
+        timeoutSeconds: 30,
+      });
+      setToast({ message: 'Tyrion connection removed.', tone: 'success' });
+    } catch (err) {
+      setToast({ message: getErrorMessage(err), tone: 'error' });
+    } finally {
+      setTyrionSaving(false);
     }
   };
 
@@ -449,9 +538,9 @@ export default function Settings() {
     <>
       <PageHeader
         title="Settings"
-        desc="Manage Paperless connectivity, the LLM gateway, and the scheduled admin jobs exposed by the current backend."
+        desc="Manage Paperless, Tyrion, the LLM gateway, and scheduled admin jobs."
         actions={
-          <Button onClick={() => void loadSettings()} disabled={loading || connectionSaving || llmSaving || scheduleSaving || llmTesting}>
+          <Button onClick={() => void loadSettings()} disabled={loading || connectionSaving || tyrionSaving || llmSaving || scheduleSaving || llmTesting}>
             Refresh
           </Button>
         }
@@ -469,6 +558,7 @@ export default function Settings() {
             <StatCard title="Paperless" metric={paperlessHealth?.status ?? 'unknown'} desc={`${paperlessStats?.document_count ?? 0} docs · ${paperlessStats?.tag_count ?? 0} tags · ${paperlessStats?.correspondent_count ?? 0} correspondents`} status={{ label: paperlessHealth?.status === 'ok' ? 'Connected' : 'Degraded', tone: paperlessHealth?.status === 'ok' ? 'success' : 'warning' }} />
             <StatCard title="Writeback mode" metric={connection.writeToPaperless ? 'Enabled' : 'Read-only'} desc="Controls whether downstream automations can write metadata back to Paperless." status={{ label: connection.writeToPaperless ? 'Writable' : 'Safe mode', tone: connection.writeToPaperless ? 'success' : 'warning' }} />
             <StatCard title="Configured model" metric={llm.model || '—'} desc={llm.baseUrl || 'No LLM gateway URL configured.'} status={{ label: modelsInfo?.available === true ? 'Available' : modelsInfo?.available === false ? 'Missing' : 'Unchecked', tone: modelsInfo?.available === true ? 'success' : modelsInfo?.available === false ? 'danger' : 'warning' }} />
+            <StatCard title="Tyrion" metric={tyrionConnection.configured ? 'Configured' : 'Not configured'} desc={tyrionConnection.last_synced_at ? `Last synchronized ${new Date(tyrionConnection.last_synced_at).toLocaleString()}` : 'No candidate generation synchronized yet.'} status={{ label: tyrionConnection.configured ? 'Ready' : 'Setup required', tone: tyrionConnection.configured ? 'success' : 'warning' }} />
             <StatCard title="Enabled schedules" metric={enabledSchedules} desc="Statement discovery, gap checks, EOB matching, and the action queue are all scheduled by the built-in scheduler." />
           </StatGrid>
 
@@ -527,6 +617,111 @@ export default function Settings() {
                 <Button variant="primary" onClick={() => void handleSaveConnection()} disabled={connectionSaving}>
                   {connectionSaving ? 'Saving…' : 'Save connection settings'}
                 </Button>
+              </div>
+            </Card>
+          </div>
+
+          <div className="section">
+            <Card
+              title="Tyrion insights connection"
+              actions={
+                <Badge tone={tyrionConnection.configured ? 'success' : 'warning'}>
+                  {tyrionConnection.configured ? 'Configured' : 'Setup required'}
+                </Badge>
+              }
+            >
+              <div className="text-muted" style={{ fontSize: '0.82rem', marginBottom: 16 }}>
+                OWL stores UI-managed connections in its local application database. The API token is never returned to the browser. Leave it blank to keep a UI-saved token; deployment-managed tokens must be re-entered when switching to UI management.
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="tyrion-url">Tyrion base URL</label>
+                  <input
+                    id="tyrion-url"
+                    value={tyrion.baseUrl}
+                    onChange={(event) => setTyrion((current) => ({ ...current, baseUrl: event.target.value }))}
+                    placeholder="https://tyrion.example.com"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="tyrion-connector-ref">Connector reference</label>
+                  <input
+                    id="tyrion-connector-ref"
+                    value={tyrion.connectorRef}
+                    onChange={(event) => setTyrion((current) => ({ ...current, connectorRef: event.target.value }))}
+                    placeholder="Paste the opaque Tyrion connector reference"
+                  />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="tyrion-token">API token</label>
+                  <input
+                    id="tyrion-token"
+                    type="password"
+                    value={tyrion.apiToken}
+                    onChange={(event) => setTyrion((current) => ({ ...current, apiToken: event.target.value }))}
+                    placeholder={tyrionConnection.token_configured ? 'Saved token (leave blank to keep)' : 'Optional bearer token'}
+                    autoComplete="new-password"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="tyrion-timeout">Timeout (seconds)</label>
+                  <input
+                    id="tyrion-timeout"
+                    type="number"
+                    min={1}
+                    max={300}
+                    value={tyrion.timeoutSeconds}
+                    onChange={(event) => setTyrion((current) => ({
+                      ...current,
+                      timeoutSeconds: Number(event.target.value) || 30,
+                    }))}
+                  />
+                </div>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  checked={tyrion.verifySsl}
+                  onChange={(event) => setTyrion((current) => ({ ...current, verifySsl: event.target.checked }))}
+                  style={{ width: 'auto' }}
+                />
+                Verify TLS certificates
+              </label>
+              {tyrionConnection.last_source_generation ? (
+                <div className="text-muted" style={{ fontSize: '0.82rem', marginBottom: 16 }}>
+                  Last generation: {tyrionConnection.last_source_generation}
+                  {tyrionConnection.last_source_as_of ? ` · Source as of ${new Date(tyrionConnection.last_source_as_of).toLocaleString()}` : ''}
+                </div>
+              ) : null}
+              {tyrionConnection.source === 'configuration' && tyrionConnection.token_configured && !tyrion.apiToken ? (
+                <div className="text-muted" style={{ fontSize: '0.82rem', marginBottom: 16 }}>
+                  Enter the deployment-managed token to create a UI-managed connection.
+                </div>
+              ) : null}
+              <div className="btn-group">
+                <Button
+                  variant="primary"
+                  onClick={() => void handleSaveTyrion()}
+                  disabled={
+                    tyrionSaving
+                    || !tyrion.baseUrl.trim()
+                    || !tyrion.connectorRef.trim()
+                    || (
+                      tyrionConnection.source === 'configuration'
+                      && tyrionConnection.token_configured
+                      && !tyrion.apiToken
+                    )
+                  }
+                >
+                  {tyrionSaving ? 'Saving…' : 'Save Tyrion connection'}
+                </Button>
+                {tyrionConnection.source === 'saved' ? (
+                  <Button variant="danger" onClick={() => void handleDisconnectTyrion()} disabled={tyrionSaving}>
+                    Disconnect
+                  </Button>
+                ) : null}
               </div>
             </Card>
           </div>

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   updateProfile: vi.fn(),
   externalCandidates: vi.fn(),
   reviewCandidate: vi.fn(),
+  syncCandidates: vi.fn(),
   expectations: vi.fn(),
   previewPolicy: vi.fn(),
   applyPolicy: vi.fn(),
@@ -45,6 +46,11 @@ vi.mock('../lib/api', () => ({
       relinkCorrespondentProfile: vi.fn(),
       updateDocumentExpectation: vi.fn(),
       externalCandidates: mocks.externalCandidates,
+      externalCandidateConnection: vi.fn().mockResolvedValue({
+        configured: true,
+        connector_ref: 'opaque-connector',
+      }),
+      syncExternalCandidates: mocks.syncCandidates,
       reviewExternalCandidate: mocks.reviewCandidate,
       previewDocumentExpectationPolicy: mocks.previewPolicy,
       applyDocumentExpectationPolicy: mocks.applyPolicy,
@@ -139,6 +145,12 @@ beforeEach(() => {
   mocks.updateProfile.mockResolvedValue({});
   mocks.externalCandidates.mockResolvedValue([]);
   mocks.reviewCandidate.mockResolvedValue({});
+  mocks.syncCandidates.mockResolvedValue({
+    source_generation: 'generation-2',
+    active_candidates: 1,
+    deactivated_candidates: 0,
+    idempotent: false,
+  });
   mocks.expectations.mockResolvedValue([]);
   mocks.previewPolicy.mockResolvedValue({
     expectation_id: 'expectation-1',
@@ -335,6 +347,19 @@ describe('Correspondent Review', () => {
       });
     });
     expect(screen.getByText(/do not establish cadence/i)).toBeInTheDocument();
+  });
+
+  it('synchronizes a Tyrion generation from the review workspace', async () => {
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Tyrion source generation'), {
+      target: { value: 'generation-2' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /sync tyrion candidates/i }));
+
+    await waitFor(() => {
+      expect(mocks.syncCandidates).toHaveBeenCalledWith('generation-2');
+    });
   });
 
   it('records documentless external evidence as durable not-expected policy', async () => {

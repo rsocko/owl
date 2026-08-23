@@ -12,6 +12,7 @@ import uuid
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSource,
@@ -29,6 +30,8 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     ExternalCandidateReview,
     ExternalCandidateSnapshotResult,
     ExternalDocumentCandidate,
+    ExternalSignalConnection,
+    ExternalSignalConnectionUpdate,
     IdentityResolution,
     LegacyOverrideReviewItem,
     MetadataPolicy,
@@ -44,7 +47,7 @@ from doc_intelligence_hub.modules.statements.models import (
     RecommendationResult,
 )
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -264,6 +267,16 @@ CREATE TABLE IF NOT EXISTS correspondent_profile_events (
 
 CREATE INDEX IF NOT EXISTS idx_correspondent_profile_events_profile
     ON correspondent_profile_events(deployment_id, correspondent_id, created_at);
+
+CREATE TABLE IF NOT EXISTS external_signal_connections (
+    deployment_id TEXT PRIMARY KEY,
+    base_url TEXT NOT NULL,
+    connector_ref TEXT NOT NULL,
+    api_token TEXT,
+    verify_ssl INTEGER NOT NULL DEFAULT 1,
+    timeout_seconds INTEGER NOT NULL DEFAULT 30,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS external_signal_sources (
     deployment_id TEXT NOT NULL,
@@ -1411,6 +1424,110 @@ class Database:
         result = self.get_document_expectation(deployment_id, expectation_id)
         assert result is not None
         return result
+
+    def get_external_signal_connection(
+        self, deployment_id: str
+    ) -> ExternalSignalConnection | None:
+        conn = self.connect()
+        row = conn.execute(
+            """SELECT c.*,
+                      s.source_generation AS last_source_generation,
+                      s.source_as_of AS last_source_as_of,
+                      s.updated_at AS last_synced_at
+               FROM external_signal_connections c
+               LEFT JOIN external_signal_sources s
+                 ON s.deployment_id = c.deployment_id
+                AND s.connector_ref = c.connector_ref
+               WHERE c.deployment_id = ?""",
+            (deployment_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return ExternalSignalConnection(
+            configured=True,
+            source="saved",
+            base_url=row["base_url"],
+            connector_ref=row["connector_ref"],
+            token_configured=row["api_token"] is not None,
+            verify_ssl=bool(row["verify_ssl"]),
+            timeout_seconds=row["timeout_seconds"],
+            last_source_generation=row["last_source_generation"],
+            last_source_as_of=row["last_source_as_of"],
+            last_synced_at=row["last_synced_at"],
+        )
+
+    def get_external_signal_credentials(self, deployment_id: str) -> dict[str, Any] | None:
+        conn = self.connect()
+        row = conn.execute(
+            "SELECT * FROM external_signal_connections WHERE deployment_id = ?",
+            (deployment_id,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def update_external_signal_connection(
+        self, deployment_id: str, update: ExternalSignalConnectionUpdate
+    ) -> ExternalSignalConnection:
+        conn = self.connect()
+        current = self.get_external_signal_credentials(deployment_id)
+        current_origin = (
+            (urlsplit(current["base_url"]).scheme, urlsplit(current["base_url"]).netloc)
+            if current is not None
+            else None
+        )
+        next_url = urlsplit(update.base_url)
+        next_origin = (next_url.scheme, next_url.netloc)
+        api_token = (
+            None
+            if update.clear_api_token or update.api_token is None
+            else update.api_token.get_secret_value()
+        )
+        if (
+            update.api_token is None
+            and not update.clear_api_token
+            and current is not None
+            and current_origin == next_origin
+        ):
+            api_token = current["api_token"]
+        if (
+            api_token is not None
+            and next_url.scheme != "https"
+            and next_url.hostname not in {"localhost", "127.0.0.1", "::1"}
+        ):
+            raise ValueError("API tokens require HTTPS except for loopback development URLs")
+        with conn:
+            conn.execute(
+                """INSERT INTO external_signal_connections (
+                       deployment_id, base_url, connector_ref, api_token,
+                       verify_ssl, timeout_seconds
+                   ) VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(deployment_id) DO UPDATE SET
+                       base_url = excluded.base_url,
+                       connector_ref = excluded.connector_ref,
+                       api_token = excluded.api_token,
+                       verify_ssl = excluded.verify_ssl,
+                       timeout_seconds = excluded.timeout_seconds,
+                       updated_at = datetime('now')""",
+                (
+                    deployment_id,
+                    update.base_url,
+                    update.connector_ref,
+                    api_token,
+                    int(update.verify_ssl),
+                    update.timeout_seconds,
+                ),
+            )
+        result = self.get_external_signal_connection(deployment_id)
+        assert result is not None
+        return result
+
+    def delete_external_signal_connection(self, deployment_id: str) -> bool:
+        conn = self.connect()
+        with conn:
+            cursor = conn.execute(
+                "DELETE FROM external_signal_connections WHERE deployment_id = ?",
+                (deployment_id,),
+            )
+        return cursor.rowcount > 0
 
     def list_alertable_expectations(self, deployment_id: str) -> list[DocumentExpectation]:
         conn = self.connect()

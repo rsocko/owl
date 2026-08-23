@@ -371,10 +371,14 @@ GET /api/internal/v1/finance/insights/document-expectation-signals/{sourceGenera
     ?connectorRef={connectorRef}
 ```
 
-OWL configures the source under `external_signals`, calls
-`POST /api/statements/external-candidates/poll` with the two opaque references, and accepts at
-most 6,000 signals per projection. A repeated generation is a no-op. Omitted candidates are
-deactivated only for a `complete` projection; `partial` omissions leave the previous snapshot
+OWL normally configures the source from **Settings → Tyrion insights connection**. The saved
+token remains server-side in OWL's local application database and is never returned to the
+browser. YAML and environment configuration under `external_signals` remains an advanced
+deployment alternative. In **Documents → Correspondent Review**, the user supplies the opaque
+source generation and selects **Sync Tyrion candidates**. OWL calls the generation-addressed
+projection and accepts at most 6,000 signals per response. A repeated generation is a no-op.
+Omitted candidates are deactivated only for a `complete` projection; `partial` omissions leave
+the previous snapshot
 active. Explicit `active: false` is retained as a review finding. OWL exposes only a derived
 candidate ID to the browser and never uses `displayHint` as an identity or match key.
 

@@ -10,6 +10,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SecretStr,
     field_validator,
     model_serializer,
     model_validator,
@@ -139,6 +140,57 @@ class ExternalCandidateSnapshotResult(PolicyModel):
 class ExternalCandidatePollRequest(PolicyModel):
     connector_ref: str = Field(min_length=1, max_length=200)
     source_generation: str = Field(min_length=1, max_length=200)
+
+
+class ExternalSignalSyncRequest(PolicyModel):
+    source_generation: str = Field(min_length=1, max_length=200)
+
+
+class ExternalSignalConnectionUpdate(PolicyModel):
+    base_url: str = Field(min_length=1, max_length=2000)
+    connector_ref: str = Field(min_length=1, max_length=200)
+    api_token: SecretStr | None = None
+    clear_api_token: bool = False
+    verify_ssl: bool = True
+    timeout_seconds: int = Field(default=30, ge=1, le=300)
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("base_url must be an absolute HTTP(S) URL without credentials")
+        return value.rstrip("/")
+
+    @model_validator(mode="after")
+    def validate_token_change(self) -> ExternalSignalConnectionUpdate:
+        if self.api_token is not None and self.clear_api_token:
+            raise ValueError("api_token and clear_api_token cannot both be set")
+        parsed = urlsplit(self.base_url)
+        loopback = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+        if self.api_token is not None and parsed.scheme != "https" and not loopback:
+            raise ValueError("API tokens require HTTPS except for loopback development URLs")
+        return self
+
+
+class ExternalSignalConnection(PolicyModel):
+    configured: bool
+    source: Literal["saved", "configuration"] | None = None
+    base_url: str | None = None
+    connector_ref: str | None = None
+    token_configured: bool = False
+    verify_ssl: bool = True
+    timeout_seconds: int = 30
+    last_source_generation: str | None = None
+    last_source_as_of: datetime | None = None
+    last_synced_at: datetime | None = None
 
 
 class ExternalDocumentCandidate(PolicyModel):
