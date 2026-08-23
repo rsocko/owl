@@ -52,7 +52,7 @@ Discovery scans your Paperless archive and identifies providers that send recurr
 curl -X POST http://service-005.example.invalid/api/statements/discovery/run
 ```
 
-This returns a Server-Sent Events (SSE) stream with progress updates. Discovery groups documents by correspondent and date, then infers the sending frequency.
+This returns a Server-Sent Events (SSE) stream with progress updates. Discovery groups documents by correspondent and normalized statement title, assigns a human-readable `statement_name`, and then infers the sending frequency. The statement name is distinct from the shared correspondent (for example, "Chase Sapphire Statement" versus "Chase") and can be corrected with the series rename action for Paperless write-back.
 
 :::info
 Discovery requires **sufficient document history** to detect patterns. A provider needs at least 3 documents with recognizable date spacing to be identified. For monthly statements, that means ~3 months of history minimum.
@@ -71,7 +71,8 @@ Response:
   "providers": [
     {
       "provider_key": "chase-visa",
-      "display_name": "Chase Visa",
+      "provider_name": "Chase",
+      "statement_name": "Chase Visa Statement",
       "frequency": "monthly",
       "last_document_date": "2026-06-15",
       "document_count": 14,

@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS providers (
     discovery_run_id INTEGER NOT NULL REFERENCES discovery_runs(id) ON DELETE CASCADE,
     provider_key TEXT NOT NULL,
     provider_name TEXT NOT NULL,
+    statement_name TEXT,
     correspondent_id INTEGER,
     document_count INTEGER NOT NULL,
     normalized_title TEXT NOT NULL,
@@ -291,6 +292,11 @@ class Database:
     def _initialize_schema(self) -> None:
         conn = self._conn
         conn.executescript(_SCHEMA_SQL)
+        provider_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(providers)").fetchall()
+        }
+        if "statement_name" not in provider_columns:
+            conn.execute("ALTER TABLE providers ADD COLUMN statement_name TEXT")
         row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
         if row is None:
             conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
@@ -317,16 +323,17 @@ class Database:
         for provider in result.providers:
             conn.execute(
                 """INSERT INTO providers (
-                    discovery_run_id, provider_key, provider_name, correspondent_id,
+                    discovery_run_id, provider_key, provider_name, statement_name, correspondent_id,
                     document_count, normalized_title, title_consistency,
                     frequency, pattern_type, confidence, anchor_day,
                     variance_days, grace_period_days, sample_document_ids,
                     first_seen, last_seen
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     run_id,
                     provider.provider_key,
                     provider.provider_name,
+                    provider.statement_name,
                     provider.correspondent_id,
                     provider.document_count,
                     provider.normalized_title,
@@ -365,6 +372,7 @@ class Database:
             ProviderCandidate(
                 provider_key=row["provider_key"],
                 provider_name=row["provider_name"],
+                statement_name=row["statement_name"],
                 correspondent_id=row["correspondent_id"],
                 document_count=row["document_count"],
                 normalized_title=row["normalized_title"],

@@ -10,6 +10,8 @@ import { endpoints } from '../../lib/api';
 import { SplitSeriesFlow } from './SplitSeriesFlow';
 import { MergeSeriesFlow } from './MergeSeriesFlow';
 import { SeriesTimeline } from './SeriesTimeline';
+import { StatementAccountGroups } from './StatementAccountGroups';
+import DocumentPreview from '../DocumentPreview';
 import './statement-grouping.css';
 
 // ------------------------------------------------------------------
@@ -19,6 +21,7 @@ import './statement-grouping.css';
 export interface SeriesInfo {
   id: string;
   name: string;
+  statement_name?: string | null;
   correspondent_id: number | null;
   correspondent_name: string;
   frequency: string;
@@ -265,6 +268,13 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
         </div>
       )}
 
+      <StatementAccountGroups
+        correspondentName={series.correspondent_name}
+        documents={documents}
+        accounts={accounts}
+        accountColorMap={accountColorMap}
+      />
+
       {/* Rename flow (inline) */}
       {activeFlow === 'rename' && (
         <Card title="✏️ Rename Series">
@@ -365,9 +375,16 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
                 )}
                 <div className="sg-doc-color" style={{ background: acctColor }} />
                 <div className="sg-doc-info">
-                  <div className="sg-doc-title">{doc.title || `Document ${doc.document_id}`}</div>
+                  {/^\d+$/.test(doc.document_id) ? (
+                    <DocumentPreview
+                      documentId={Number(doc.document_id)}
+                      variant="compact"
+                    />
+                  ) : (
+                    <div className="sg-doc-title">{doc.title || `Document ${doc.document_id}`}</div>
+                  )}
                   <div className="sg-doc-meta">
-                    ID: {doc.document_id}
+                    Paperless #{doc.document_id}
                     {doc.statement_date && ` · ${doc.statement_date}`}
                     {doc.period_label && ` · ${doc.period_label}`}
                   </div>

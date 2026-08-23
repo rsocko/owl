@@ -6,6 +6,8 @@ import { getToastDuration } from '../lib/toast';
 import { SeriesTimeline } from '../components/triage/SeriesTimeline';
 import { SplitSeriesFlow } from '../components/triage/SplitSeriesFlow';
 import { MergeSeriesFlow } from '../components/triage/MergeSeriesFlow';
+import { StatementAccountGroups } from '../components/triage/StatementAccountGroups';
+import DocumentPreview from '../components/DocumentPreview';
 import type { SeriesInfo, SeriesDoc, TimelineEntry } from '../components/triage/StatementGroupingDetail';
 import '../styles/statement-series-detail.css';
 
@@ -298,6 +300,17 @@ export default function StatementSeriesDetail() {
             </div>
           )}
 
+          {accounts.length > 1 && (
+            <div className="section">
+              <StatementAccountGroups
+                correspondentName={series?.correspondent_name ?? seriesName}
+                documents={documents}
+                accounts={accounts}
+                accountColorMap={accountColorMap}
+              />
+            </div>
+          )}
+
           {/* Action bar with Split / Merge / Rename */}
           <div className="statement-series-action-bar section">
             <span className="statement-series-action-label">Actions</span>
@@ -435,12 +448,19 @@ export default function StatementSeriesDetail() {
                             />
                           )}
                           <span className="statement-series-doc-color" style={{ background: acctColor }} />
-                          <div>
-                            <div className="statement-series-list-title">
-                              {doc.title || `Document ${doc.document_id}`}
-                            </div>
+                          <div className="statement-series-document">
+                            {/^\d+$/.test(doc.document_id) ? (
+                              <DocumentPreview
+                                documentId={Number(doc.document_id)}
+                                variant="compact"
+                              />
+                            ) : (
+                              <div className="statement-series-list-title">
+                                {doc.title || `Document ${doc.document_id}`}
+                              </div>
+                            )}
                             <div className="statement-series-list-meta">
-                              ID: {doc.document_id}
+                              Paperless #{doc.document_id}
                               {doc.statement_date && ` · ${doc.statement_date}`}
                               {doc.period_label && ` · ${doc.period_label}`}
                             </div>

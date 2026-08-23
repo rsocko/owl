@@ -81,6 +81,11 @@
   flex-shrink: 0;
 }
 
+.statement-series-document {
+  flex: 1;
+  min-width: 0;
+}
+
 .statement-series-link {
   color: var(--accent);
   font-size: 0.84rem;

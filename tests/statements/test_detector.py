@@ -87,6 +87,7 @@ def test_discover_providers_with_mixed_correspondent_documents() -> None:
 
     assert len(result.providers) == 1
     assert result.providers[0].provider_name == "Chase Visa"
+    assert result.providers[0].statement_name == "Chase Statement"
     assert result.providers[0].normalized_title == "chase statement"
     assert result.providers[0].document_count == 3
 
