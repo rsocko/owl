@@ -93,6 +93,10 @@ export const endpoints = {
       api.patch(`/api/statements/document-expectations/${id}`, body),
     previewDocumentExpectationPolicy: (id: string) =>
       api.post(`/api/statements/document-expectations/${id}/policy-preview`),
+    applyDocumentExpectationPolicy: (id: string, body: unknown) =>
+      api.post(`/api/statements/document-expectations/${id}/policy-apply`, body),
+    undoDocumentExpectationPolicy: (eventId: string, body: unknown) =>
+      api.post(`/api/statements/policy-corrections/${eventId}/undo`, body),
     acquisitionSources: () => api.get('/api/statements/acquisition-sources'),
     createAcquisitionSource: (body: unknown) => api.post('/api/statements/acquisition-sources', body),
     paperlessUrl: () => api.get('/api/statements/config/paperless-url'),

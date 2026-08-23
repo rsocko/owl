@@ -148,6 +148,15 @@ interface ExpectationPolicyPreview {
   findings: PolicyViolationFinding[];
 }
 
+interface PolicyOperationResult {
+  preview_id: string;
+  document_id: number;
+  status: 'succeeded' | 'failed';
+  audit_event_id?: string | null;
+  error_code?: string | null;
+  message: string;
+}
+
 interface AcquisitionSource {
   id: string;
   channel: string;
@@ -524,6 +533,10 @@ export default function CorrespondentReview() {
   const [expectationsByProfile, setExpectationsByProfile] = useState<Record<number, DocumentExpectation[]>>({});
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [policyPreviews, setPolicyPreviews] = useState<Record<string, ExpectationPolicyPreview>>({});
+  const [selectedPolicyOperations, setSelectedPolicyOperations] = useState<Record<string, string[]>>({});
+  const [policyReasons, setPolicyReasons] = useState<Record<string, string>>({});
+  const [policyResults, setPolicyResults] = useState<Record<string, PolicyOperationResult>>({});
+  const [undonePolicyOperations, setUndonePolicyOperations] = useState<string[]>([]);
   const [acquisitionSources, setAcquisitionSources] = useState<AcquisitionSource[]>([]);
   const [tags, setTags] = useState<MetadataOption[]>([]);
   const [documentTypes, setDocumentTypes] = useState<MetadataOption[]>([]);
@@ -588,6 +601,10 @@ export default function CorrespondentReview() {
   useEffect(() => {
     setAnalysis(null);
     setPolicyPreviews({});
+    setSelectedPolicyOperations({});
+    setPolicyReasons({});
+    setPolicyResults({});
+    setUndonePolicyOperations([]);
     setRelinkTarget('');
   }, [selectedId]);
 
@@ -706,12 +723,82 @@ export default function CorrespondentReview() {
         expectationId,
       ) as ExpectationPolicyPreview;
       setPolicyPreviews((current) => ({ ...current, [expectationId]: preview }));
+      setSelectedPolicyOperations((current) => ({ ...current, [expectationId]: [] }));
+      setPolicyResults((current) => {
+        const next = { ...current };
+        preview.findings.forEach((finding) => delete next[finding.preview_id]);
+        return next;
+      });
       setToast({
         message: preview.findings.length === 0
           ? 'All matched documents satisfy this policy.'
           : `Found ${preview.findings.length} policy violation previews.`,
         tone: 'success',
       });
+    } catch (requestError) {
+      setToast({ message: getErrorMessage(requestError), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const applySelectedPolicy = useCallback(async (expectationId: string) => {
+    const preview = policyPreviews[expectationId];
+    const selected = new Set(selectedPolicyOperations[expectationId] ?? []);
+    const reason = policyReasons[expectationId]?.trim() ?? '';
+    if (!preview || selected.size === 0 || !reason) return;
+    setBusy(true);
+    try {
+      const response = await endpoints.statements.applyDocumentExpectationPolicy(
+        expectationId,
+        {
+          actor: 'user',
+          reason,
+          operations: preview.findings
+            .filter((finding) => selected.has(finding.preview_id))
+            .map((finding) => ({
+              preview_id: finding.preview_id,
+              operation: finding.operation,
+            })),
+        },
+      ) as { results: PolicyOperationResult[] };
+      setPolicyResults((current) => ({
+        ...current,
+        ...Object.fromEntries(response.results.map((result) => [result.preview_id, result])),
+      }));
+      const succeeded = response.results.filter((result) => result.status === 'succeeded').length;
+      const failed = response.results.length - succeeded;
+      setToast({
+        message: `${succeeded} correction${succeeded === 1 ? '' : 's'} applied${failed ? `; ${failed} failed` : ''}.`,
+        tone: failed ? 'error' : 'success',
+      });
+    } catch (requestError) {
+      setToast({ message: getErrorMessage(requestError), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }, [policyPreviews, policyReasons, selectedPolicyOperations]);
+
+  const undoPolicyCorrection = useCallback(async (
+    finding: PolicyViolationFinding,
+    result: PolicyOperationResult,
+  ) => {
+    if (!result.audit_event_id) return;
+    setBusy(true);
+    try {
+      const undoResult = await endpoints.statements.undoDocumentExpectationPolicy(
+        result.audit_event_id,
+        {
+          actor: 'user',
+          reason: `Undo: ${result.message}`,
+          preview_id: finding.preview_id,
+          operation: finding.operation,
+        },
+      ) as PolicyOperationResult;
+      if (undoResult.status === 'succeeded') {
+        setUndonePolicyOperations((current) => [...current, finding.preview_id]);
+      }
+      setToast({ message: undoResult.message, tone: undoResult.status === 'succeeded' ? 'success' : 'error' });
     } catch (requestError) {
       setToast({ message: getErrorMessage(requestError), tone: 'error' });
     } finally {
@@ -944,8 +1031,26 @@ export default function CorrespondentReview() {
                                   <strong>{preview.findings.length} violations</strong>
                                   <span>{preview.compliant_document_count} of {preview.matched_document_count} compliant</span>
                                 </div>
-                                {preview.findings.map((finding) => (
+                                {preview.findings.map((finding) => {
+                                  const actionable = Object.keys(finding.operation.patch).length > 0;
+                                  const selected = (selectedPolicyOperations[expectation.id] ?? []).includes(finding.preview_id);
+                                  const result = policyResults[finding.preview_id];
+                                  return (
                                   <div className="correspondent-policy-finding" key={finding.preview_id}>
+                                    <label className="correspondent-policy-select">
+                                      <input
+                                        type="checkbox"
+                                        checked={selected}
+                                        disabled={busy || !actionable || result?.status === 'succeeded'}
+                                        onChange={(event) => setSelectedPolicyOperations((current) => ({
+                                          ...current,
+                                          [expectation.id]: event.target.checked
+                                            ? [...(current[expectation.id] ?? []), finding.preview_id]
+                                            : (current[expectation.id] ?? []).filter((id) => id !== finding.preview_id),
+                                        }))}
+                                      />
+                                      Select document {finding.operation.document_id}
+                                    </label>
                                     <div className="correspondent-badges">
                                       {finding.violations.map((violation) => (
                                         <Badge
@@ -985,8 +1090,50 @@ export default function CorrespondentReview() {
                                         Open document in Paperless
                                       </a>
                                     ) : null}
+                                    {result ? (
+                                      <div className={`correspondent-policy-result ${result.status}`}>
+                                        <span>{result.message}</span>
+                                        {result.audit_event_id
+                                          && (result.status === 'succeeded' || result.error_code === 'audit_finalize_failed')
+                                          && !undonePolicyOperations.includes(finding.preview_id) ? (
+                                          <Button
+                                            size="sm"
+                                            disabled={busy}
+                                            onClick={() => void undoPolicyCorrection(finding, result)}
+                                          >
+                                            Undo correction
+                                          </Button>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
                                   </div>
-                                ))}
+                                  );
+                                })}
+                                <div className="correspondent-policy-apply">
+                                  <label>
+                                    <span>Reason for applying selected corrections</span>
+                                    <input
+                                      aria-label={`Reason for ${expectation.series_discriminator ?? expectation.kind}`}
+                                      value={policyReasons[expectation.id] ?? ''}
+                                      maxLength={200}
+                                      onChange={(event) => setPolicyReasons((current) => ({
+                                        ...current,
+                                        [expectation.id]: event.target.value,
+                                      }))}
+                                    />
+                                  </label>
+                                  <Button
+                                    variant="primary"
+                                    disabled={
+                                      busy
+                                      || !(policyReasons[expectation.id]?.trim())
+                                      || (selectedPolicyOperations[expectation.id]?.length ?? 0) === 0
+                                    }
+                                    onClick={() => void applySelectedPolicy(expectation.id)}
+                                  >
+                                    Apply selected
+                                  </Button>
+                                </div>
                               </div>
                             ) : null}
                           </div>

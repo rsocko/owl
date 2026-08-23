@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   updateProfile: vi.fn(),
   expectations: vi.fn(),
   previewPolicy: vi.fn(),
+  applyPolicy: vi.fn(),
+  undoPolicy: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
@@ -41,6 +43,8 @@ vi.mock('../lib/api', () => ({
       relinkCorrespondentProfile: vi.fn(),
       updateDocumentExpectation: vi.fn(),
       previewDocumentExpectationPolicy: mocks.previewPolicy,
+      applyDocumentExpectationPolicy: mocks.applyPolicy,
+      undoDocumentExpectationPolicy: mocks.undoPolicy,
       createAcquisitionSource: vi.fn(),
     },
   },
@@ -165,6 +169,23 @@ beforeEach(() => {
       missing_title_fields: [],
     }],
   });
+  mocks.applyPolicy.mockResolvedValue({
+    expectation_id: 'expectation-1',
+    results: [{
+      preview_id: 'stable-preview',
+      document_id: 4,
+      status: 'succeeded',
+      audit_event_id: 'audit-1',
+      message: 'Approved metadata correction applied.',
+    }],
+  });
+  mocks.undoPolicy.mockResolvedValue({
+    preview_id: 'stable-preview',
+    document_id: 4,
+    status: 'succeeded',
+    audit_event_id: 'undo-1',
+    message: 'Correction undone without changing unrelated metadata.',
+  });
 });
 
 function renderPage() {
@@ -288,5 +309,49 @@ describe('Correspondent Review', () => {
     expect(screen.getByText('Invoice')).toBeInTheDocument();
     expect(screen.getByText('Statement')).toBeInTheDocument();
     expect(mocks.previewPolicy).toHaveBeenCalledWith('expectation-1');
+  });
+
+  it('applies only selected preview operations and offers bounded undo', async () => {
+    mocks.expectations.mockResolvedValue([{
+      id: 'expectation-1',
+      correspondent_id: 42,
+      kind: 'statement',
+      statement_series_id: 'checking',
+      series_discriminator: 'Checking',
+      expectation_mode: 'recurring',
+      status: 'confirmed',
+      cadence: suggestion.cadence,
+      evidence: suggestion.evidence,
+      title_convention: suggestion.title.convention,
+      metadata_policy: suggestion.metadata.policy,
+    }]);
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /preview violations/i }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /select document 4/i }));
+    fireEvent.change(screen.getByLabelText(/reason for checking/i), {
+      target: { value: 'Reviewed exact metadata changes' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /apply selected/i }));
+
+    await waitFor(() => expect(mocks.applyPolicy).toHaveBeenCalledWith(
+      'expectation-1',
+      {
+        actor: 'user',
+        reason: 'Reviewed exact metadata changes',
+        operations: [{
+          preview_id: 'stable-preview',
+          operation: expect.objectContaining({ document_id: 4 }),
+        }],
+      },
+    ));
+    fireEvent.click(await screen.findByRole('button', { name: /undo correction/i }));
+    await waitFor(() => expect(mocks.undoPolicy).toHaveBeenCalledWith(
+      'audit-1',
+      expect.objectContaining({
+        actor: 'user',
+        preview_id: 'stable-preview',
+        operation: expect.objectContaining({ document_id: 4 }),
+      }),
+    ));
   });
 });
