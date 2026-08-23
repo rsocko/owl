@@ -12,6 +12,9 @@ ProfileReviewStatus = Literal["unreviewed", "reviewed", "ignored"]
 ProfileLifecycleStatus = Literal["active", "orphaned", "retired"]
 DocumentKind = Literal["statement", "invoice", "bill", "receipt", "record", "other"]
 ExpectationMode = Literal["recurring", "periodic", "one_off", "irregular", "not_expected"]
+AnalysisExpectationMode = Literal[
+    "recurring", "periodic", "one_off", "irregular", "not_expected", "unknown"
+]
 ExpectationStatus = Literal["suggested", "confirmed", "dismissed", "retired"]
 CadenceFrequency = Literal["monthly", "quarterly", "annual"]
 EvidenceSource = Literal["paperless", "user", "legacy_override"]
@@ -346,6 +349,85 @@ class IdentityResolution(PolicyModel):
     status: Literal["resolved", "ambiguous", "unmapped"]
     canonical_key: str | None = None
     expectation: DocumentExpectation | None = None
+
+
+class TitleRenderExample(PolicyModel):
+    document_id: int = Field(gt=0)
+    before: str = Field(max_length=128)
+    after: str = Field(max_length=128)
+
+
+class MissingTitleFieldFinding(PolicyModel):
+    document_id: int = Field(gt=0)
+    missing_fields: list[str]
+
+    @field_validator("missing_fields")
+    @classmethod
+    def validate_missing_fields(cls, value: list[str]) -> list[str]:
+        unsupported = set(value) - TITLE_FIELDS
+        if unsupported:
+            raise ValueError(f"Unsupported title fields: {sorted(unsupported)}")
+        return sorted(set(value))
+
+
+class TitleConventionSuggestion(PolicyModel):
+    convention: TitleConvention | None = None
+    coverage: float = Field(ge=0, le=1)
+    confidence: float = Field(ge=0, le=1)
+    exception_document_ids: list[int] = Field(default_factory=list)
+    examples: list[TitleRenderExample] = Field(default_factory=list, max_length=3)
+    missing_required_fields: list[MissingTitleFieldFinding] = Field(default_factory=list)
+    reason_codes: list[str] = Field(default_factory=list)
+
+
+class TagFamilySuggestion(PolicyModel):
+    family: str = Field(min_length=1, max_length=100)
+    child_tag_ids: list[int] = Field(min_length=2)
+    child_tag_names: list[str] = Field(min_length=2)
+    coverage: float = Field(ge=0, le=1)
+    reason_codes: list[str] = Field(default_factory=list)
+
+
+class MetadataPolicySuggestion(PolicyModel):
+    policy: MetadataPolicy
+    confidence: float = Field(ge=0, le=1)
+    required_tag_families: list[TagFamilySuggestion] = Field(default_factory=list)
+    reason_codes: list[str] = Field(default_factory=list)
+
+
+class AcquisitionChannelSuggestion(PolicyModel):
+    channel: AcquisitionChannel = "unknown"
+    delivery_mode: DeliveryMode | None = None
+    confidence: float = Field(ge=0, le=1)
+    reason_codes: list[str] = Field(default_factory=list)
+    sample_size: int = Field(ge=0)
+
+
+class SeriesPolicySuggestion(PolicyModel):
+    statement_series_id: str | None = None
+    source_statement_series_id: str | None = None
+    series_discriminator: str | None = Field(default=None, max_length=200)
+    candidate_series: bool = False
+    existing_expectation_id: str | None = None
+    kind: DocumentKind
+    expectation_mode: AnalysisExpectationMode
+    cadence: Cadence | None = None
+    evidence: ExpectationEvidence
+    document_ids: list[int] = Field(default_factory=list)
+    title: TitleConventionSuggestion
+    metadata: MetadataPolicySuggestion
+    acquisition: AcquisitionChannelSuggestion
+
+
+class CorrespondentPolicyAnalysis(PolicyModel):
+    correspondent_id: int = Field(gt=0)
+    correspondent_name: str = Field(min_length=1, max_length=500)
+    document_count: int = Field(ge=0)
+    observed_from: date | None = None
+    observed_to: date | None = None
+    suggestions: list[SeriesPolicySuggestion] = Field(default_factory=list)
+    unassigned_document_ids: list[int] = Field(default_factory=list)
+    reason_codes: list[str] = Field(default_factory=list)
 
 
 def json_model(model_type: type[PolicyModel], value: str | None, default: Any) -> Any:

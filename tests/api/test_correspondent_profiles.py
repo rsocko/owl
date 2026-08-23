@@ -172,6 +172,70 @@ def test_statement_expectation_must_bind_existing_series(
     assert response.status_code == 422
 
 
+def test_correspondent_analysis_is_typed_and_read_only(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    database_path = _configure_statement_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    assert client.post("/api/statements/correspondent-profiles/sync").status_code == 200
+    database = Database(database_path)
+    try:
+        database.create_series(
+            "checking",
+            "Checking 1234",
+            "Example Bank",
+            correspondent_id=42,
+            frequency="monthly",
+        )
+        database.add_documents_to_series(
+            "checking",
+            [
+                {
+                    "document_id": str(index),
+                    "title": f"Checking 1234 - Statement - 2026-0{index}",
+                    "statement_date": f"2026-0{index}-03",
+                    "period_label": f"2026-0{index}",
+                }
+                for index in range(1, 4)
+            ],
+        )
+    finally:
+        database.close()
+    mock_paperless.list_documents.return_value = [
+        {
+            "id": index,
+            "title": f"Checking 1234 - Statement - 2026-0{index}",
+            "created": f"2026-0{index}-03",
+            "added": f"2026-0{index}-04T08:00:00Z",
+            "tags": [1],
+            "document_type": 1,
+        }
+        for index in range(1, 4)
+    ]
+    mock_paperless.list_mail_rules.return_value = [
+        {"id": 7, "name": "Private rule name", "enabled": True, "assign_correspondent": 42}
+    ]
+    mock_paperless.fetch_all_metadata.return_value = (
+        {42: "Example Bank"},
+        {1: "Financial"},
+        {1: "Statement"},
+    )
+
+    response = client.get("/api/statements/correspondent-profiles/42/analysis")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["suggestions"][0]["expectation_mode"] == "recurring"
+    assert body["suggestions"][0]["title"]["coverage"] == 1.0
+    assert body["suggestions"][0]["acquisition"]["channel"] == "paperless_mail"
+    assert body["suggestions"][0]["acquisition"]["reason_codes"] == [
+        "configured_mail_rule_evidence"
+    ]
+    assert "Private rule name" not in response.text
+    assert client.get("/api/statements/correspondent-profiles/42/expectations").json() == []
+    mock_paperless.list_documents.assert_awaited_once_with(correspondent_id=42)
+
+
 def test_acquisition_source_rejects_credential_bearing_url(client, app, tmp_path) -> None:
     _configure_statement_database(app, tmp_path)
 

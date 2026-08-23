@@ -23,6 +23,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSource,
     AcquisitionSourceCreate,
     AcquisitionSourceUpdate,
+    CorrespondentPolicyAnalysis,
     CorrespondentProfile,
     CorrespondentProfileUpdate,
     CorrespondentSyncResult,
@@ -376,6 +377,38 @@ async def list_profile_expectations(
                 "Correspondent profile not found.",
             )
         return service.list_expectations(correspondent_id)
+    finally:
+        service.close()
+
+
+@router.get(
+    "/correspondent-profiles/{correspondent_id}/analysis",
+    response_model=CorrespondentPolicyAnalysis,
+    summary="Analyze correspondent history and suggest read-only policy",
+)
+async def analyze_correspondent_profile(
+    request: Request, correspondent_id: int
+) -> CorrespondentPolicyAnalysis:
+    service = _get_policy_service(request)
+    try:
+        profile = service.get_profile(correspondent_id)
+        if profile is None:
+            raise_api_error(
+                404,
+                "correspondent_profile_not_found",
+                "Correspondent profile not found.",
+            )
+        client = make_paperless_client(request, timeout=60.0)
+        documents = await client.list_documents(correspondent_id=correspondent_id)
+        _, tag_names, document_type_names = await client.fetch_all_metadata()
+        mail_rules = await client.list_mail_rules()
+        return service.analyze(
+            correspondent_id,
+            documents,
+            tag_names,
+            document_type_names,
+            mail_rules,
+        )
     finally:
         service.close()
 

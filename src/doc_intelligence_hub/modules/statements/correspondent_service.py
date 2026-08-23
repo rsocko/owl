@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from doc_intelligence_hub.modules.statements.correspondent_analysis import (
+    analyze_correspondent_policy,
+)
 from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSource,
     AcquisitionSourceCreate,
     AcquisitionSourceUpdate,
+    CorrespondentPolicyAnalysis,
     CorrespondentProfile,
     CorrespondentProfileUpdate,
     CorrespondentSyncResult,
@@ -94,6 +98,47 @@ class CorrespondentPolicyService:
 
     def list_legacy_override_review(self) -> list[LegacyOverrideReviewItem]:
         return self.database.list_legacy_override_review(self.deployment_id)
+
+    def analyze(
+        self,
+        correspondent_id: int,
+        documents: list[dict[str, Any]],
+        tag_names: dict[int, str],
+        document_type_names: dict[int, str],
+        mail_rules: list[dict[str, Any]],
+    ) -> CorrespondentPolicyAnalysis:
+        profile = self.get_profile(correspondent_id)
+        if profile is None:
+            raise KeyError("correspondent_profile_not_found")
+        scoped_documents = [
+            item
+            for item in documents
+            if item.get("correspondent") is None
+            or str(item["correspondent"]) == str(correspondent_id)
+        ]
+        series = [
+            item
+            for item in self.database.list_series()
+            if item.get("correspondent_id") == correspondent_id
+        ]
+        return analyze_correspondent_policy(
+            profile=profile,
+            raw_documents=scoped_documents,
+            tag_names=tag_names,
+            document_type_names=document_type_names,
+            series=series,
+            series_documents={
+                str(item["id"]): self.database.get_series_documents(str(item["id"]))
+                for item in series
+            },
+            series_overrides={
+                str(item["id"]): self.database.get_series_overrides(str(item["id"]))
+                for item in series
+            },
+            expectations=self.list_expectations(correspondent_id),
+            acquisition_sources=self.list_acquisition_sources(),
+            mail_rules=mail_rules,
+        )
 
     def close(self) -> None:
         self.database.close()
