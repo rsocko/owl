@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
+from doc_intelligence_hub.modules.statements.correspondent_analysis import (
+    analyze_correspondent_policy,
+)
 from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSource,
     AcquisitionSourceCreate,
     AcquisitionSourceUpdate,
+    CorrespondentAnalysisResult,
     CorrespondentProfile,
     CorrespondentProfileUpdate,
     CorrespondentSyncResult,
@@ -16,6 +21,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     LegacyOverrideReviewItem,
 )
 from doc_intelligence_hub.modules.statements.database import Database
+from doc_intelligence_hub.modules.statements.models import DocumentRecord
 
 
 class CorrespondentPolicyService:
@@ -42,6 +48,38 @@ class CorrespondentPolicyService:
 
     def get_profile(self, correspondent_id: int) -> CorrespondentProfile | None:
         return self.database.get_correspondent_profile(self.deployment_id, correspondent_id)
+
+    def analyze_profile(
+        self,
+        correspondent_id: int,
+        documents: list[DocumentRecord],
+        *,
+        analyzed_at: datetime | None = None,
+    ) -> CorrespondentAnalysisResult:
+        profile = self.get_profile(correspondent_id)
+        if profile is None:
+            raise KeyError("correspondent_profile_not_found")
+        statement_series = self.database.list_series()
+        for series in statement_series:
+            series["document_ids"] = [
+                document["document_id"]
+                for document in self.database.get_series_documents(series["id"])
+            ]
+        result = analyze_correspondent_policy(
+            correspondent_id,
+            profile.current_name,
+            documents,
+            statement_series,
+            analyzed_at=analyzed_at,
+        )
+        self.update_profile(
+            correspondent_id,
+            CorrespondentProfileUpdate(
+                observed_summary=result.observed_summary,
+                last_analyzed_at=result.analyzed_at,
+            ),
+        )
+        return result
 
     def update_profile(
         self, correspondent_id: int, update: CorrespondentProfileUpdate

@@ -15,6 +15,9 @@ ExpectationMode = Literal["recurring", "periodic", "one_off", "irregular", "not_
 ExpectationStatus = Literal["suggested", "confirmed", "dismissed", "retired"]
 CadenceFrequency = Literal["monthly", "quarterly", "annual"]
 EvidenceSource = Literal["paperless", "user", "legacy_override"]
+SuggestedExpectationMode = Literal[
+    "recurring", "periodic", "one_off", "irregular", "not_expected", "unknown"
+]
 AcquisitionChannel = Literal[
     "paperless_mail",
     "email_manual",
@@ -346,6 +349,57 @@ class IdentityResolution(PolicyModel):
     status: Literal["resolved", "ambiguous", "unmapped"]
     canonical_key: str | None = None
     expectation: DocumentExpectation | None = None
+
+
+class TitleRenderExample(PolicyModel):
+    document_id: int = Field(gt=0)
+    before: str = Field(max_length=128)
+    after: str | None = Field(default=None, max_length=128)
+    missing_fields: list[str] = Field(default_factory=list)
+
+
+class TitleConventionSuggestion(PolicyModel):
+    convention: TitleConvention | None = None
+    coverage: float = Field(ge=0, le=1)
+    exception_document_ids: list[int] = Field(default_factory=list)
+    examples: list[TitleRenderExample] = Field(default_factory=list, max_length=3)
+    reason_codes: list[str] = Field(default_factory=list)
+
+
+class MetadataPolicySuggestion(PolicyModel):
+    policy: MetadataPolicy = Field(default_factory=MetadataPolicy)
+    tag_names: dict[int, str] = Field(default_factory=dict)
+    required_document_type_name: str | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    reason_codes: list[str] = Field(default_factory=list)
+
+
+class AcquisitionSuggestion(PolicyModel):
+    channel: AcquisitionChannel = "unknown"
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    reason_codes: list[str] = Field(default_factory=list)
+
+
+class ExpectationPolicySuggestion(PolicyModel):
+    suggestion_key: str
+    kind: DocumentKind
+    series_discriminator: str
+    statement_series_id: str | None = None
+    expectation_mode: SuggestedExpectationMode
+    cadence: Cadence | None = None
+    evidence: ExpectationEvidence
+    title: TitleConventionSuggestion
+    metadata: MetadataPolicySuggestion
+    acquisition: AcquisitionSuggestion
+    sample_document_ids: list[int] = Field(default_factory=list, max_length=3)
+
+
+class CorrespondentAnalysisResult(PolicyModel):
+    correspondent_id: int = Field(gt=0)
+    correspondent_name: str
+    analyzed_at: str
+    observed_summary: ObservedSummary
+    suggestions: list[ExpectationPolicySuggestion] = Field(default_factory=list)
 
 
 def json_model(model_type: type[PolicyModel], value: str | None, default: Any) -> Any:
