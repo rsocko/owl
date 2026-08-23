@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from urllib.parse import urlsplit
 
@@ -72,6 +73,7 @@ Return a JSON object with these fields:
 IMPORTANT:
 - Most documents will have exactly ONE action. Only include multiple if the document genuinely requires separate actions.
 - If the document requires NO action (informational receipt, old statement, etc.), set "requires_action": false and return an empty actions array.
+- A document whose type or tag is "Receipt" records a completed transaction. Do not create a PAY action for it, even if it contains bill, utility, amount, payment, or provider language.
 - If the text is unreadable or too garbled, set text_quality to "unreadable" and requires_action to false.
 
 Rules for urgency:
@@ -110,11 +112,57 @@ Document metadata:
 - Correspondent: {correspondent}
 - Tags: {tags}
 - Created: {created}
+- Document type: {document_type}
 
 Document content:
 ---
 {content}
 ---"""
+
+_RECEIPT_NAME = re.compile(r"\breceipts?\b", re.IGNORECASE)
+_PAYMENT_CONFIRMATION = re.compile(
+    r"\b(thank you for (?:your )?payment|payment (?:has been )?(?:received|processed|"
+    r"successful|completed|confirmed)|paid(?:\s+in\s+full)?|transaction (?:approved|"
+    r"successful|completed)|payment receipt|receipt number)\b",
+    re.IGNORECASE,
+)
+
+
+def is_non_actionable_receipt(document: dict) -> bool:
+    """Return whether metadata/content identifies a completed-payment receipt."""
+    document_type = document.get("document_type_name")
+    if not document_type:
+        raw_document_type = document.get("document_type")
+        if isinstance(raw_document_type, str) and not raw_document_type.isdigit():
+            document_type = raw_document_type
+
+    tags = document.get("tag_names", document.get("tags", []))
+    receipt_metadata = bool(_RECEIPT_NAME.search(str(document_type or ""))) or any(
+        bool(_RECEIPT_NAME.fullmatch(str(tag).strip())) for tag in tags
+    )
+    text = f"{document.get('title', '')}\n{document.get('content', '')[:2000]}"
+    return receipt_metadata or (
+        bool(_RECEIPT_NAME.search(str(document.get("title", ""))))
+        and bool(_PAYMENT_CONFIRMATION.search(text))
+    )
+
+
+def receipt_no_action_result(document: dict) -> dict | None:
+    """Build a deterministic no-action result for completed-payment receipts."""
+    if not is_non_actionable_receipt(document):
+        return None
+    return {
+        "actions": [],
+        "document_assessment": {
+            "primary_action_index": 0,
+            "correspondent": document.get("correspondent_name", document.get("correspondent")),
+            "overall_confidence": 98,
+            "requires_action": False,
+            "reasoning": "Receipt metadata indicates this records a completed payment.",
+            "text_quality": "good",
+            "extracted_data": {},
+        },
+    }
 
 
 # ------------------------------------------------------------------
@@ -279,6 +327,10 @@ class OllamaAnalyzer:
             Parsed extraction dict, or None if analysis failed.
         """
         doc_id = document.get("id")
+        receipt_result = receipt_no_action_result(document)
+        if receipt_result:
+            return receipt_result
+
         prompt = ANALYSIS_PROMPT.format(
             title=document.get("title", "Unknown"),
             correspondent=document.get(
@@ -286,6 +338,9 @@ class OllamaAnalyzer:
             ),
             tags=", ".join(str(t) for t in document.get("tag_names", document.get("tags", []))),
             created=document.get("created", "Unknown"),
+            document_type=document.get(
+                "document_type_name", document.get("document_type", "Unknown")
+            ),
             content=self._truncate_content(document.get("content", "")),
         )
 
