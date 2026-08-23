@@ -111,6 +111,6 @@ async def test_client_pulls_generation_addressed_projection() -> None:
     assert snapshot.source_generation == "generation/one"
     assert seen_request is not None
     assert seen_request.url.raw_path.startswith(
-        b"/api/internal/v1/finance/insights/document-expectation-signals/generation%2Fone"
+        b"/api/connector/v1/document-expectation-signals/generation%2Fone"
     )
     assert seen_request.url.params["connectorRef"] == "opaque connector"
