@@ -197,6 +197,19 @@ A Paperless correspondent may own several scoped expectations, each with its own
 kind, series discriminator, cadence, metadata policy, and acquisition source. OWL stores
 reviewed policy locally and treats inferred Paperless or Tyrion facts as suggestions.
 
+Tyrion/Mission Control integration is pull-only and generation-addressed. OWL persists only
+the bounded V1 candidate fields (`kind`, active state, display hint, optional document timing,
+confidence, and basis) behind an opaque local candidate ID. It never stores balances, raw
+transactions, or raw account identifiers. Review can map the candidate to an existing
+expectation, associate it as a suggestion, leave it ambiguous, or mark it not applicable.
+The last action creates durable confirmed `not_expected` policy keyed through the candidate's
+opaque connector and series references; unchanged generations do not prompt again. Inactive or
+removed candidates create findings without deleting confirmed or negative policy. Multiple
+active account candidates explicitly associated with one correspondent remain distinct and are
+flagged as likely separate statement series; ambiguous mappings stay in review. These signals
+do not establish document existence, cadence, importance, deadlines, or monitoring policy, and
+recurring income is not a bill.
+
 ### Recurrence Pattern
 - Frequency (monthly, quarterly, annual, custom)
 - Pattern type (fixed day, last day, last business day, variable)

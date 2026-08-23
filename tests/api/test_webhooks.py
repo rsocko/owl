@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -183,6 +183,7 @@ class TestStatementFoundEndpoint:
 
     def test_statement_found_resolves_legacy_key_to_expectation(self, client: TestClient):
         policy_db = MagicMock()
+        webhook_db = MagicMock()
         policy_db.resolve_expectation_identity.return_value = IdentityResolution(
             status="resolved",
             canonical_key="expectation-123",
@@ -197,6 +198,10 @@ class TestStatementFoundEndpoint:
                 new_callable=AsyncMock,
                 return_value={},
             ),
+            patch(
+                "doc_intelligence_hub.api.routers.webhooks._get_db",
+                return_value=webhook_db,
+            ),
         ):
             resp = client.post(
                 "/api/webhooks/statement-found",
@@ -209,6 +214,46 @@ class TestStatementFoundEndpoint:
         assert resp.status_code == 200
         assert resp.json()["provider_key"] == "expectation-123"
         assert resp.json()["expectation_id"] == "expectation-123"
+        assert resp.json()["expected_period"] == "2026-07"
+        assert webhook_db.mark_alerted.call_args_list == [
+            call("expectation-123", "2026-07", "statement.found"),
+            call("legacy-display-name-key", "2026-07-15", "statement.found"),
+        ]
+
+    def test_statement_found_deduplicates_expectation_by_expected_period(self, client: TestClient):
+        policy_db = MagicMock()
+        policy_db.get_document_expectation.return_value = MagicMock(
+            id="expectation-123",
+            legacy_provider_key=None,
+        )
+        webhook_db = MagicMock()
+        with (
+            patch(
+                "doc_intelligence_hub.api.routers.webhooks.Database",
+                return_value=policy_db,
+            ),
+            patch(
+                "doc_intelligence_hub.api.routers.webhooks._get_db",
+                return_value=webhook_db,
+            ),
+            patch(
+                "doc_intelligence_hub.api.routers.webhooks.dispatch_to_subscribers",
+                new_callable=AsyncMock,
+                return_value={},
+            ),
+        ):
+            resp = client.post(
+                "/api/webhooks/statement-found",
+                json={
+                    "expectation_id": "expectation-123",
+                    "expected_period": "2026-07",
+                },
+            )
+
+        assert resp.status_code == 200
+        webhook_db.mark_alerted.assert_called_once_with(
+            "expectation-123", "2026-07", "statement.found"
+        )
 
     def test_statement_found_rejects_ambiguous_legacy_key(self, client: TestClient):
         policy_db = MagicMock()

@@ -23,6 +23,13 @@ analysis:
 runtime:
   snapshot_path: ../data/catalog.snapshot.json
 
+# Optional pull-only Tyrion or Mission Control projection.
+external_signals:
+  base_url: https://tyrion.example.com
+  api_token_env: TYRION_API_TOKEN
+  verify_ssl: true
+  timeout_seconds: 30
+
 server:
   host: 0.0.0.0
   port: 8001

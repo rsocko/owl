@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from doc_intelligence_hub.modules.statements.correspondent_models import PolicyPatchOperation
+from unittest.mock import AsyncMock, patch
+
+from doc_intelligence_hub.modules.statements.correspondent_models import (
+    DocumentExpectationSignalsV1,
+    PolicyPatchOperation,
+    paperless_deployment_identity,
+)
 from doc_intelligence_hub.modules.statements.database import Database
 from doc_intelligence_hub.modules.statements.policy_evaluation import policy_operation_id
 from doc_intelligence_hub.modules.triage.database import list_correction_events
@@ -17,6 +23,8 @@ def _configure_statement_database(app, tmp_path) -> str:
                 "  paperless_url: http://paperless.test",
                 "runtime:",
                 f"  database_path: '{database_path}'",
+                "external_signals:",
+                "  base_url: https://tyrion.test",
             ]
         ),
         encoding="utf-8",
@@ -233,6 +241,89 @@ def test_acquisition_source_rejects_credential_bearing_url(client, app, tmp_path
     )
 
     assert response.status_code == 422
+
+
+def test_external_candidate_poll_and_review_contract(client, app, tmp_path) -> None:
+    database_path = _configure_statement_database(app, tmp_path)
+    database = Database(database_path)
+    try:
+        database.reconcile_correspondents(
+            paperless_deployment_identity("http://paperless.test"),
+            [{"id": 42, "name": "Example Bank"}],
+        )
+    finally:
+        database.close()
+    snapshot = DocumentExpectationSignalsV1.model_validate(
+        {
+            "contractVersion": "1",
+            "connectorRef": "opaque-connector",
+            "sourceGeneration": "opaque-generation",
+            "sourceAsOf": "2026-08-23T00:00:00Z",
+            "completeness": "complete",
+            "signals": [
+                {
+                    "seriesRef": "opaque-series",
+                    "kind": "accountStatementCandidate",
+                    "active": True,
+                    "displayHint": "Credit account",
+                    "cadence": None,
+                    "nextExpectedDate": None,
+                    "confidence": 0.6,
+                    "basis": ["active_non_cash_account"],
+                }
+            ],
+        }
+    )
+    with patch(
+        "doc_intelligence_hub.api.routers.statements.DocumentExpectationSignalsClient"
+    ) as client_type:
+        source_client = client_type.return_value
+        source_client.fetch = AsyncMock(return_value=snapshot)
+        source_client.close = AsyncMock()
+        response = client.post(
+            "/api/statements/external-candidates/poll",
+            json={
+                "connector_ref": "opaque-connector",
+                "source_generation": "opaque-generation",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "source_generation": "opaque-generation",
+        "idempotent": False,
+        "active_candidates": 1,
+        "deactivated_candidates": 0,
+    }
+    source_client.fetch.assert_awaited_once_with("opaque-connector", "opaque-generation")
+
+    candidates = client.get("/api/statements/external-candidates")
+    assert candidates.status_code == 200
+    candidate = candidates.json()[0]
+    assert candidate["display_hint"] == "Credit account"
+    assert candidate["recurrence_evidence"] == "high"
+    assert "series_ref" not in candidate
+    assert "connector_ref" not in candidate
+
+    reviewed = client.put(
+        f"/api/statements/external-candidates/{candidate['id']}/review",
+        json={"outcome": "ambiguous"},
+    )
+    assert reviewed.status_code == 200
+    assert reviewed.json()["outcome"] == "ambiguous"
+
+    documentless = client.put(
+        f"/api/statements/external-candidates/{candidate['id']}/review",
+        json={"outcome": "not_applicable", "correspondent_id": 42},
+    )
+    assert documentless.status_code == 200
+    assert documentless.json()["outcome"] == "not_applicable"
+    assert documentless.json()["expectation_id"]
+
+    expectations = client.get("/api/statements/correspondent-profiles/42/expectations")
+    assert expectations.status_code == 200
+    assert expectations.json()[0]["expectation_mode"] == "not_expected"
+    assert expectations.json()[0]["status"] == "confirmed"
 
 
 def test_cross_correspondent_series_merge_fails_before_mutation(client, app, tmp_path) -> None:

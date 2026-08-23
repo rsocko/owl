@@ -121,6 +121,17 @@ does not repeatedly ask whether a document should exist. `irregular` remains use
 classification, metadata validation, title policy, and acquisition guidance when documents
 appear.
 
+For the V1 Tyrion reconciliation, **documentless / not applicable** creates a confirmed
+`not_expected` expectation bound to the candidate's opaque connector and series references.
+Replaying unchanged generations keeps that association and does not prompt again. The user
+must explicitly retire the negative policy before remapping the signal. Candidate deactivation
+does not retire or delete it.
+
+Deterministic evidence fingerprints for locally generated Paperless suggestions belong to the
+separately tracked candidate-curation lifecycle, where merge/split/membership decisions can
+define material evidence changes. Until that lifecycle lands, dismissed suggestion records
+remain non-policy review history and must not be interpreted as durable `not_expected` policy.
+
 A one-off expectation requires an occurrence identity and due window. Until those fields are
 implemented, the UI must not imply that choosing `one_off` will generate a useful missing-item
 alert.
@@ -334,6 +345,31 @@ The projection excludes balances, transaction lists, notes, credentials, ownersh
 document content, and raw account identifiers. OWL polls by generation and replaces each
 bounded snapshot idempotently. Deactivating a source candidate does not delete a confirmed
 OWL expectation; it creates a review finding.
+
+The V1 payload is advisory evidence only. Account and recurring signals never establish
+document existence, cadence, importance, monitoring mode, or deadline. Recurring income is not
+a bill. Future importance and calendar policy can be added to confirmed expectations without
+changing this finalized signal contract. Tyrion's fixed `0.60` confidence is source
+classification confidence only, and `cadence` / `nextExpectedDate` remain required `null`.
+
+An unseen generation older than the connector's current `sourceAsOf` is recorded as processed
+but cannot overwrite newer candidate state. Two active account signals remain distinct even
+when they share an institution; OWL rejects mapping both to one expectation and leaves the
+second mapping in review.
+
+The finalized Tyrion V1 pull endpoint is:
+
+```text
+GET /api/internal/v1/finance/insights/document-expectation-signals/{sourceGeneration}
+    ?connectorRef={connectorRef}
+```
+
+OWL configures the source under `external_signals`, calls
+`POST /api/statements/external-candidates/poll` with the two opaque references, and accepts at
+most 6,000 signals per projection. A repeated generation is a no-op. Omitted candidates are
+deactivated only for a `complete` projection; `partial` omissions leave the previous snapshot
+active. Explicit `active: false` is retained as a review finding. OWL exposes only a derived
+candidate ID to the browser and never uses `displayHint` as an identity or match key.
 
 ## Relationship to existing statement models
 

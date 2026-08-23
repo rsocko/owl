@@ -81,7 +81,16 @@ class StatementFoundRequest(BaseModel):
         default=None,
         description="Legacy provider key accepted only when it resolves unambiguously.",
     )
-    expected_date: str = Field(..., description="The expected statement date (YYYY-MM-DD).")
+    expected_date: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description="Legacy expected statement date (YYYY-MM-DD).",
+    )
+    expected_period: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}$",
+        description="Canonical expected statement period (YYYY-MM).",
+    )
     document_id: str | None = Field(
         default=None,
         description="Paperless document ID if the statement was ingested.",
@@ -96,6 +105,8 @@ class StatementFoundRequest(BaseModel):
     def require_identity(self) -> StatementFoundRequest:
         if not self.expectation_id and not self.provider_key:
             raise ValueError("expectation_id or provider_key is required")
+        if not self.expected_period and not self.expected_date:
+            raise ValueError("expected_period or expected_date is required")
         return self
 
 
@@ -255,6 +266,7 @@ async def statement_found(request: Request, body: StatementFoundRequest) -> dict
     paperless_url = settings.paperless_url or config.source.paperless_url
     canonical_key = body.expectation_id or body.provider_key
     resolved_expectation_id = body.expectation_id
+    legacy_dedup_key = body.provider_key
     if paperless_url:
         policy_db = Database(config.runtime.database_path)
         try:
@@ -270,6 +282,7 @@ async def statement_found(request: Request, body: StatementFoundRequest) -> dict
                         },
                     )
                 canonical_key = expectation.id
+                legacy_dedup_key = expectation.legacy_provider_key
             elif body.provider_key:
                 resolution = policy_db.resolve_expectation_identity(
                     deployment_id, body.provider_key
@@ -289,16 +302,23 @@ async def statement_found(request: Request, body: StatementFoundRequest) -> dict
             policy_db.close()
 
     assert canonical_key is not None
+    canonical_period = body.expected_period or body.expected_date
+    if resolved_expectation_id and body.expected_period is None and body.expected_date:
+        canonical_period = body.expected_date[:7]
+    assert canonical_period is not None
     db = _get_db()
     try:
         # Mark a resolved tombstone so future recommendation cycles don't
         # re-alert for this provider+date, even if the recommendation engine
         # still lists it as missing (ingestion may not have happened yet).
-        db.mark_alerted(canonical_key, body.expected_date, "statement.found")
+        db.mark_alerted(canonical_key, canonical_period, "statement.found")
+        if legacy_dedup_key and legacy_dedup_key != canonical_key and body.expected_date:
+            db.mark_alerted(legacy_dedup_key, body.expected_date, "statement.found")
 
         payload = body.model_dump()
         payload["provider_key"] = canonical_key
         payload["expectation_id"] = resolved_expectation_id
+        payload["expected_period"] = canonical_period if resolved_expectation_id else None
 
         extra_urls: list[str] = []
         n8n_url = os.environ.get("N8N_WEBHOOK_URL")
@@ -314,6 +334,9 @@ async def statement_found(request: Request, body: StatementFoundRequest) -> dict
             "provider_key": canonical_key,
             "expectation_id": resolved_expectation_id,
             "expected_date": body.expected_date,
+            "expected_period": canonical_period
+            if resolved_expectation_id
+            else body.expected_period,
             "document_id": body.document_id,
             "deliveries": {url: ok for url, ok in results.items()},
         }
