@@ -149,11 +149,7 @@ def _register_exception_handlers(app: FastAPI) -> None:
         errors = [
             {
                 **error,
-                **(
-                    {"input": _redact_validation_input(error["input"])}
-                    if "input" in error
-                    else {}
-                ),
+                **({"input": _redact_validation_input(error["input"])} if "input" in error else {}),
             }
             for error in exc.errors()
         ]

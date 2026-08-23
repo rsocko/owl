@@ -1425,9 +1425,7 @@ class Database:
         assert result is not None
         return result
 
-    def get_external_signal_connection(
-        self, deployment_id: str
-    ) -> ExternalSignalConnection | None:
+    def get_external_signal_connection(self, deployment_id: str) -> ExternalSignalConnection | None:
         conn = self.connect()
         row = conn.execute(
             """SELECT c.*,

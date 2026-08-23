@@ -491,9 +491,7 @@ def test_candidate_sync_requires_saved_connection(client, app, tmp_path) -> None
     assert response.json()["error"]["code"] == "external_signal_source_not_configured"
 
 
-def test_external_connection_does_not_send_saved_token_to_new_origin(
-    client, app, tmp_path
-) -> None:
+def test_external_connection_does_not_send_saved_token_to_new_origin(client, app, tmp_path) -> None:
     _configure_statement_database(app, tmp_path)
     assert (
         client.put(
