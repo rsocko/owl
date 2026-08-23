@@ -35,7 +35,7 @@ class DocumentExpectationSignalsClient:
     ) -> DocumentExpectationSignalsV1:
         generation = quote(source_generation, safe="")
         response = await self._client.get(
-            f"/api/internal/v1/finance/insights/document-expectation-signals/{generation}",
+            f"/api/connector/v1/document-expectation-signals/{generation}",
             params={"connectorRef": connector_ref},
         )
         response.raise_for_status()
