@@ -102,9 +102,48 @@ records for several animals, while one bank may issue statements for several acc
 | `metadata_policy` | Required and forbidden metadata |
 | `acquisition_source_id` | How and where the document is obtained |
 
-`irregular` means that OWL validates a document when one appears but never reports a missing
-period. `suggested`, `dismissed`, `retired`, and `not_expected` expectations also cannot
-produce missing-document alerts.
+Expectation mode and expectation status answer different questions:
+
+| Choice | Meaning | Durable policy | Missing-document monitoring |
+|---|---|---:|---:|
+| `recurring` | A document is expected on a regular monthly cadence | Yes | Yes |
+| `periodic` | A document is expected on a less frequent or calendar-specific cadence | Yes | Yes |
+| `one_off` | One identified document is expected by a specific due window | Yes, until fulfilled or cancelled | Yes, for that occurrence only |
+| `irregular` | This is a recognized document series, but absence is not meaningful | Yes | No |
+| `not_expected` | OWL has an explicit negative policy that this source signal or candidate does not imply a document | Yes | No |
+| `dismissed` status | Reject this generated suggestion as noise; do not create active policy | No | No |
+| `retired` status | Preserve historical policy but stop using it | Historical only | No |
+
+`dismissed` must not be presented as another expectation mode. It is a decision about one
+suggestion and should suppress the same evidence fingerprint until materially new evidence
+appears. `not_expected` is intentionally durable so an external recurring-obligation signal
+does not repeatedly ask whether a document should exist. `irregular` remains useful for
+classification, metadata validation, title policy, and acquisition guidance when documents
+appear.
+
+A one-off expectation requires an occurrence identity and due window. Until those fields are
+implemented, the UI must not imply that choosing `one_off` will generate a useful missing-item
+alert.
+
+### Importance and monitoring policy
+
+Cadence alone is insufficient for documents such as tax forms, insurance renewals, legal
+notices, or annual compliance records. A confirmed expectation may additionally define:
+
+| Field | Purpose |
+|---|---|
+| `importance` | `routine`, `important`, or `critical`; affects prioritization, never inference |
+| `monitoring_mode` | `none`, `presence`, or `deadline` |
+| `calendar_rule` | Expected month, quarter, tax year, or explicit one-off due window |
+| `availability_window` | Earliest/latest reasonable arrival relative to the covered period |
+| `grace_period_days` | Delay before an absent document becomes missing |
+| `escalation_policy` | Reminder and escalation timing appropriate to importance |
+| `fulfillment_rule` | Which series, kind, period, and metadata satisfy the expectation |
+
+The review UI must let the user edit these fields rather than requiring enough historical
+documents to infer them. Suggested values remain advisory. For example, a user can define an
+important annual tax form expected each February even when Paperless contains only one prior
+year.
 
 ### Metadata Policy
 
@@ -201,7 +240,8 @@ Connectors refer to an external secret store or n8n credential ID.
 OWL may suggest:
 
 - recurring, periodic, or irregular behavior from document dates;
-- separate series from normalized titles, account hints, subject tags, and user corrections;
+- separate series from existing curated membership, document type, stable tag families,
+  account hints, normalized title similarity, and user corrections;
 - dominant title conventions;
 - common and missing tag families;
 - document-type consistency; and
@@ -209,6 +249,37 @@ OWL may suggest:
 
 Each suggestion retains its basis and confidence. Too little or contradictory evidence
 remains unknown rather than being forced into a category.
+
+Normalized title must not be the primary candidate identity. Candidate generation uses a
+weighted evidence model and exposes the contribution of each signal. Exact-title grouping is
+only a fallback signal. Unique or low-support titles remain ungrouped unless another stable
+signal supports them.
+
+Users can curate candidates before confirming policy:
+
+- create a named series from selected documents;
+- add or remove documents from a candidate;
+- merge candidates that represent the same series;
+- split a mixed candidate;
+- mark documents as unrelated/noise; and
+- define an expectation directly when history is incomplete.
+
+These operations reuse statement-series correction history where applicable. Non-statement
+expectations receive equivalent reviewed membership rather than relying indefinitely on title
+heuristics. Reanalysis preserves user-confirmed membership and never silently recreates a
+dismissed evidence fingerprint.
+
+### Analysis lifecycle
+
+Correspondent analysis is deterministic and local after Paperless metadata and documents are
+retrieved; it does not require Azure AI or an LLM. The potentially expensive operation is
+bounded Paperless retrieval, especially for bulk analysis.
+
+After correspondent synchronization, OWL should queue analysis for new or stale active
+profiles and persist a versioned analysis snapshot. Selecting a profile displays the latest
+snapshot immediately. The user-facing action is **Reanalyze**, with its reason and snapshot
+age visible, rather than a required first-run **Analyze** gate. Manual reanalysis remains
+available after Paperless history or grouping corrections change.
 
 ### From Tyrion
 
@@ -295,7 +366,27 @@ expectation, and reject ambiguous resolution. Existing statement-series history 
 5. **Preview:** identify existing violations and display exact title/tag/type changes,
    including representative title renders and missing template fields.
 6. **Apply:** explicitly selected changes are patched through the shared Paperless client.
-7. **Monitor:** only confirmed recurring/periodic expectations feed missing-document analysis.
+7. **Monitor:** only confirmed expectations with an applicable monitoring policy feed
+   missing-document analysis.
+
+The workspace supports large inventories without making the browser document list the unit of
+work:
+
+- independently scrollable inventory and detail panes with sticky headers;
+- search and filters for review state, lifecycle, analysis freshness, candidate state, and
+  expectation importance;
+- collapsed candidate summaries with expand-on-review detail;
+- candidate pagination or virtualization;
+- unresolved-candidate counts, next-unreviewed navigation, and progress;
+- explicit distinction between profile actions, suggestion decisions, expectation modes, and
+  expectation lifecycle actions; and
+- localized loading indicators that preserve the inventory, profile context, and prior
+  analysis while refresh or reanalysis is in progress.
+
+Marking a profile reviewed must either require all current suggestions to be resolved or offer
+an explicit acknowledgement that unresolved suggestions remain. Profile `ignore` and
+`retire`, suggestion `dismiss`, expectation mode, and expectation `retire` must never be
+presented as interchangeable choices.
 
 The general document list opens in Paperless. OWL owns the profile and policy review because
 the workflow depends on cross-document and cross-system evidence.
@@ -331,6 +422,15 @@ shared connector contract and at least two real providers require browser automa
 - Show title-template coverage, exceptions, and representative rendered examples.
 - Confirm profiles and expectations.
 - Show findings and Paperless deep links; perform no writes.
+
+### Phase 1b: Review quality and scale
+
+- Persist analysis snapshots and analyze new/stale profiles without a mandatory first-click.
+- Add user-defined, merge, split, add/remove, and noise decisions for candidate membership.
+- Replace title-primary grouping with explainable multi-signal candidate generation.
+- Add importance, calendar, one-off occurrence, fulfillment, and escalation policy.
+- Make the large review workspace searchable, independently scrollable, collapsible, and
+  progress-oriented.
 
 ### Phase 2: Explicit correction
 
