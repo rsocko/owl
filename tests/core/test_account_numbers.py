@@ -9,7 +9,9 @@ import pytest
 from doc_intelligence_hub.core.extractors.account_numbers import (
     ExtractionResult,
     extract_account_numbers,
+    normalize_masked_account_identifier,
     pick_best_account_identifier,
+    pick_masked_account_identifier,
     write_account_to_paperless,
 )
 
@@ -115,6 +117,20 @@ class TestPickBestAccountIdentifier:
 
     def test_empty_returns_none(self):
         assert pick_best_account_identifier([]) is None
+
+
+def test_normalizes_only_masked_account_identifiers() -> None:
+    assert normalize_masked_account_identifier(" xxxx-4321 ") == "ending 4321"
+    assert normalize_masked_account_identifier("Member Ending ab12") == "member ending AB12"
+    assert normalize_masked_account_identifier("ABC123456") is None
+
+
+def test_masks_full_extracted_identifier_to_short_suffix() -> None:
+    matches = [
+        {"pattern": "account_number_full", "value": "ABC123456", "normalized": "ABC123456"}
+    ]
+
+    assert pick_masked_account_identifier(matches) == "ending 3456"
 
 
 class TestExtractionResult:

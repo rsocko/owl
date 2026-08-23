@@ -18,6 +18,8 @@ class DocumentRecord(BaseModel):
     tag_ids: list[int] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     original_file_name: str | None = None
+    account_identifier: str | None = None
+    account_identifier_source: Literal["stored", "extracted", "extraction_failed"] | None = None
 
 
 class AnalysisPattern(BaseModel):

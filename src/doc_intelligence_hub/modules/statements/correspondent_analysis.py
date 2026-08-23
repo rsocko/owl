@@ -5,7 +5,11 @@ import statistics
 from collections import Counter, defaultdict
 from datetime import UTC, date, datetime
 
+from doc_intelligence_hub.core.extractors.account_numbers import (
+    normalize_masked_account_identifier,
+)
 from doc_intelligence_hub.modules.statements.correspondent_models import (
+    AccountIdentifierAnalysis,
     AcquisitionSuggestion,
     Cadence,
     CorrespondentAnalysisResult,
@@ -39,6 +43,7 @@ def analyze_correspondent_policy(
     statement_series: list[dict],
     *,
     analyzed_at: datetime | None = None,
+    account_identifier_extraction_requested: bool = False,
 ) -> CorrespondentAnalysisResult:
     """Build deterministic, explainable policy suggestions from Paperless metadata."""
     profile_documents = [
@@ -69,8 +74,10 @@ def analyze_correspondent_policy(
     for document in profile_documents:
         series = series_by_document.get(str(document.id))
         kind: DocumentKind = "statement" if series else classify_document_kind(document)
-        normalized = normalize_title(document.title) or kind
-        account_key = _account_group_key(document.title, identifier_counts)
+        normalized = _normalized_document_title(document) or kind
+        account_key = document.account_identifier or _account_group_key(
+            document.title, identifier_counts
+        )
         group_key = (
             f"series:{series['id']}"
             if series
@@ -135,6 +142,24 @@ def analyze_correspondent_policy(
         correspondent_name=correspondent_name,
         analyzed_at=timestamp,
         observed_summary=observed_summary,
+        account_identifiers=AccountIdentifierAnalysis(
+            extraction_requested=account_identifier_extraction_requested,
+            stored_document_count=sum(
+                document.account_identifier_source == "stored"
+                for document in profile_documents
+            ),
+            extracted_document_count=sum(
+                document.account_identifier_source == "extracted"
+                for document in profile_documents
+            ),
+            unresolved_document_count=sum(
+                document.account_identifier is None for document in profile_documents
+            ),
+            extraction_failed_document_count=sum(
+                document.account_identifier_source == "extraction_failed"
+                for document in profile_documents
+            ),
+        ),
         suggestions=suggestions,
     )
 
@@ -203,7 +228,7 @@ def _build_suggestion(
 
 
 def _dominant_title_pattern(documents: list[DocumentRecord]) -> str:
-    patterns = Counter(normalize_title(document.title) for document in documents)
+    patterns = Counter(_normalized_document_title(document) for document in documents)
     patterns.pop("", None)
     return patterns.most_common(1)[0][0] if patterns else ""
 
@@ -214,7 +239,10 @@ def _account_group_key(title: str, identifier_counts: Counter[str]) -> str | Non
         for identifier in _account_identifiers(title)
         if identifier_counts[identifier] >= 2
     ]
-    return "|".join(identifiers) if identifiers else None
+    normalized = [
+        normalize_masked_account_identifier(f"ending {identifier}") for identifier in identifiers
+    ]
+    return "|".join(identifier for identifier in normalized if identifier) or None
 
 
 def _account_identifiers(title: str) -> list[str]:
@@ -226,10 +254,30 @@ def _account_identifiers(title: str) -> list[str]:
     return re.findall(r"\b\d{3,12}\b", without_dates)
 
 
-def _redact_account_identifiers(title: str) -> str:
+def _normalized_document_title(document: DocumentRecord) -> str:
+    return normalize_title(
+        _redact_account_identifiers(document.title, document.account_identifier, replacement=" ")
+    )
+
+
+def _redact_account_identifiers(
+    title: str,
+    account_identifier: str | None = None,
+    *,
+    replacement: str = "[redacted]",
+) -> str:
     redacted = title
-    for identifier in _account_identifiers(title):
-        redacted = re.sub(rf"\b{re.escape(identifier)}\b", "[redacted]", redacted)
+    normalized_identifier = normalize_masked_account_identifier(account_identifier)
+    if normalized_identifier:
+        suffix = normalized_identifier.rsplit(" ", 1)[-1]
+        redacted = re.sub(
+            rf"(?<![A-Za-z0-9])[A-Za-z0-9*Xx.-]*{re.escape(suffix)}(?![A-Za-z0-9])",
+            replacement,
+            redacted,
+            flags=re.IGNORECASE,
+        )
+    for identifier in _account_identifiers(redacted):
+        redacted = re.sub(rf"\b{re.escape(identifier)}\b", replacement, redacted)
     return redacted
 
 
@@ -380,7 +428,9 @@ def _suggest_title_convention(
             examples.append(
                 TitleRenderExample(
                     document_id=document.id,
-                    before=_redact_account_identifiers(document.title)[:128],
+                    before=_redact_account_identifiers(
+                        document.title, document.account_identifier
+                    )[:128],
                     after=rendered,
                     missing_fields=missing_fields,
                 )

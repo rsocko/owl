@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from doc_intelligence_hub.core.paperless import PaperlessClient, load_fixture
+from doc_intelligence_hub.core.extractors.account_numbers import (
+    normalize_masked_account_identifier,
+)
+from doc_intelligence_hub.core.paperless import (
+    MetadataFieldKey,
+    PaperlessClient,
+    ResolvedMetadataSchema,
+    load_fixture,
+    resolve_metadata_value,
+)
 from doc_intelligence_hub.modules.statements.models import DocumentRecord
 
 
@@ -16,6 +25,8 @@ def build_document_records(
     correspondents: dict[int, str],
     tags: dict[int, str],
     document_types: dict[int, str],
+    *,
+    metadata_schema: ResolvedMetadataSchema | None = None,
 ) -> list[DocumentRecord]:
     """Convert Paperless API documents into the statement analysis contract."""
     records: list[DocumentRecord] = []
@@ -42,6 +53,16 @@ def build_document_records(
         tag_names = [
             tags.get(tag, str(tag)) if isinstance(tag, int) else str(tag) for tag in raw_tags
         ]
+        account_identifier = None
+        if metadata_schema is not None:
+            custom_fields = item.get("custom_fields")
+            if isinstance(custom_fields, list):
+                resolved_account = resolve_metadata_value(
+                    MetadataFieldKey.ACCOUNT_IDENTIFIER,
+                    custom_fields,
+                    metadata_schema,
+                )
+                account_identifier = normalize_masked_account_identifier(resolved_account.value)
         records.append(
             DocumentRecord(
                 id=item["id"],
@@ -55,6 +76,8 @@ def build_document_records(
                 tag_ids=tag_ids,
                 tags=tag_names,
                 original_file_name=item.get("original_file_name"),
+                account_identifier=account_identifier,
+                account_identifier_source="stored" if account_identifier else None,
             )
         )
     return records

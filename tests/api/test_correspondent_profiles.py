@@ -200,6 +200,97 @@ def test_correspondent_analysis_is_explainable_and_read_only(
     assert mock_paperless.aclose.await_count == 2
 
 
+def test_correspondent_analysis_uses_stored_masked_account_identifiers(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    _configure_statement_database(app, tmp_path)
+    mock_paperless.fetch_all_metadata.return_value = (
+        {42: "Example Bank"},
+        {7: "Finance"},
+        {3: "Statement"},
+    )
+    mock_paperless.list_custom_fields.return_value = [
+        {"id": 9, "name": "Account Identifier", "data_type": "string"}
+    ]
+    mock_paperless.list_documents.return_value = [
+        {
+            "id": document_id,
+            "title": f"Checking Statement 2026-{month:02d}",
+            "correspondent": 42,
+            "document_type": 3,
+            "created_date": f"2026-{month:02d}-03",
+            "tags": [7],
+            "custom_fields": [{"field": 9, "value": f"ending {account}"}],
+        }
+        for document_id, account, month in (
+            (1, 1234, 1),
+            (2, 1234, 2),
+            (3, 5678, 1),
+            (4, 5678, 2),
+        )
+    ]
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    assert client.post("/api/statements/correspondent-profiles/sync").status_code == 200
+
+    response = client.post("/api/statements/correspondent-profiles/42/analyze")
+
+    assert response.status_code == 200
+    assert len(response.json()["suggestions"]) == 2
+    assert response.json()["account_identifiers"] == {
+        "extraction_requested": False,
+        "stored_document_count": 4,
+        "extracted_document_count": 0,
+        "unresolved_document_count": 0,
+        "extraction_failed_document_count": 0,
+    }
+    mock_paperless.get.assert_not_awaited()
+
+
+def test_correspondent_analysis_can_extract_missing_identifiers_without_writing(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    _configure_statement_database(app, tmp_path)
+    mock_paperless.fetch_all_metadata.return_value = (
+        {42: "Example Bank"},
+        {7: "Finance"},
+        {3: "Statement"},
+    )
+    mock_paperless.list_documents.return_value = [
+        {
+            "id": document_id,
+            "title": f"Checking Statement 2026-{month:02d}",
+            "correspondent": 42,
+            "document_type": 3,
+            "created_date": f"2026-{month:02d}-03",
+            "tags": [7],
+            "custom_fields": [],
+        }
+        for document_id, month in ((1, 1), (2, 2), (3, 1), (4, 2))
+    ]
+    mock_paperless.get.side_effect = lambda path: {
+        "content": f"Account #****{'1234' if int(path.split('/')[-2]) <= 2 else '5678'}"
+    }
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    assert client.post("/api/statements/correspondent-profiles/sync").status_code == 200
+
+    response = client.post(
+        "/api/statements/correspondent-profiles/42/analyze"
+        "?extract_missing_account_identifiers=true"
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["suggestions"]) == 2
+    assert response.json()["account_identifiers"] == {
+        "extraction_requested": True,
+        "stored_document_count": 0,
+        "extracted_document_count": 4,
+        "unresolved_document_count": 0,
+        "extraction_failed_document_count": 0,
+    }
+    assert mock_paperless.get.await_count == 4
+    mock_paperless.update_custom_fields.assert_not_awaited()
+
+
 def test_statement_expectation_must_bind_existing_series(
     client, app, mock_paperless, tmp_path
 ) -> None:

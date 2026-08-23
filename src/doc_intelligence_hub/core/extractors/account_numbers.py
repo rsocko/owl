@@ -146,6 +146,53 @@ def pick_best_account_identifier(matches: list[dict[str, str]]) -> str | None:
     return matches[0]["value"]
 
 
+def normalize_masked_account_identifier(value: object) -> str | None:
+    """Normalize an approved masked identifier for comparison and display."""
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    ending_match = re.fullmatch(
+        r"(?:(member)\s+)?ending\s+([A-Za-z0-9]{2,8})",
+        stripped,
+        re.IGNORECASE,
+    )
+    if ending_match:
+        prefix = "member " if ending_match.group(1) else ""
+        return f"{prefix}ending {ending_match.group(2).upper()}"
+
+    masked_match = re.fullmatch(r"[*Xx.\s-]+([A-Za-z0-9]{2,8})", stripped)
+    if masked_match:
+        return f"ending {masked_match.group(1).upper()}"
+    return None
+
+
+def pick_masked_account_identifier(matches: list[dict[str, str]]) -> str | None:
+    """Pick an identifier while retaining only a short masked suffix."""
+    if not matches:
+        return None
+
+    preferred = (
+        "account_last4",
+        "ending_in",
+        "card_number",
+        "masked_number",
+        "account_number_full",
+        "member_id",
+        "policy_number",
+        "claim_number",
+    )
+    by_pattern = {pattern: index for index, pattern in enumerate(preferred)}
+    ordered = sorted(matches, key=lambda match: by_pattern.get(match.get("pattern", ""), len(preferred)))
+    for match in ordered:
+        normalized = re.sub(r"[^A-Za-z0-9]", "", match.get("normalized", "")).upper()
+        if len(normalized) < 2:
+            continue
+        suffix = normalized[-4:]
+        prefix = "member " if match.get("pattern") == "member_id" else ""
+        return f"{prefix}ending {suffix}"
+    return None
+
+
 async def extract_from_document(
     document_id: int,
     paperless_client: object,

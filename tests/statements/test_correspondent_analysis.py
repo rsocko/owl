@@ -134,6 +134,34 @@ def test_separates_numeric_account_candidates_without_exposing_identifiers() -> 
     assert "5678" not in serialized
 
 
+def test_prefers_existing_masked_identifiers_over_title_grouping() -> None:
+    documents = [
+        _document(
+            document_id,
+            f"Checking ABC{account} Statement 2026-{month:02d}",
+            date(2026, month, 3),
+        ).model_copy(update={"account_identifier": f"ending {account}"})
+        for document_id, account, month in (
+            (1, 1234, 1),
+            (2, 1234, 2),
+            (3, 5678, 1),
+            (4, 5678, 2),
+        )
+    ]
+
+    result = analyze_correspondent_policy(42, "Example Bank", documents, [])
+
+    assert len(result.suggestions) == 2
+    assert {item.series_discriminator for item in result.suggestions} == {
+        "Checking (Candidate 1)",
+        "Checking (Candidate 2)",
+    }
+    serialized = result.model_dump_json()
+    assert "1234" not in serialized
+    assert "5678" not in serialized
+    assert "ABC" not in serialized
+
+
 def test_does_not_split_series_on_unique_document_numbers() -> None:
     documents = [
         _document(
