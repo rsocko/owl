@@ -134,6 +134,31 @@ async def test_list_documents(client):
 
 
 @pytest.mark.asyncio
+async def test_list_documents_filters_by_correspondent_id_without_name_lookup(monkeypatch):
+    requests_seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests_seen.append(request)
+        return httpx.Response(200, json={"count": 0, "next": None, "results": []})
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    paperless = PaperlessClient(base_url="https://paperless.test", token="test-token")
+
+    await paperless.list_documents(correspondent_id=42)
+
+    assert len(requests_seen) == 1
+    assert requests_seen[0].url.path == "/api/documents/"
+    assert requests_seen[0].url.params["correspondent__id"] == "42"
+
+
+@pytest.mark.asyncio
 async def test_get_document(client):
     doc = await client.get_document(1)
     assert doc["title"] == "Doc A"

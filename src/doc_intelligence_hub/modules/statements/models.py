@@ -11,9 +11,11 @@ class DocumentRecord(BaseModel):
     title: str
     correspondent_id: int | None = None
     correspondent_name: str = "Unknown"
+    document_type_id: int | None = None
     document_type: str | None = None
     created: date
     added: str | None = None
+    tag_ids: list[int] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     original_file_name: str | None = None
 

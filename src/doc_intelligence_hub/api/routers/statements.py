@@ -23,6 +23,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSource,
     AcquisitionSourceCreate,
     AcquisitionSourceUpdate,
+    CorrespondentAnalysisResult,
     CorrespondentProfile,
     CorrespondentProfileUpdate,
     CorrespondentSyncResult,
@@ -43,6 +44,7 @@ from doc_intelligence_hub.modules.statements.models import (
     RenameSeriesRequest,
     SplitSeriesRequest,
 )
+from doc_intelligence_hub.modules.statements.paperless import build_document_records
 from doc_intelligence_hub.modules.statements.service import run_discovery, run_recommendations
 
 router = APIRouter(tags=["statement-tracker"])
@@ -251,6 +253,19 @@ def _raise_policy_error(exc: KeyError | ValueError) -> None:
     raise_api_error(409, "policy_conflict", str(exc))
 
 
+async def _load_policy_analysis_documents(request: Request, *, correspondent_id: int | None = None):
+    client = make_paperless_client(request, timeout=60.0)
+    try:
+        correspondents, tags, document_types = await client.fetch_all_metadata()
+        raw_documents = await client.list_documents(correspondent_id=correspondent_id)
+        return (
+            correspondents,
+            build_document_records(raw_documents, correspondents, tags, document_types),
+        )
+    finally:
+        await client.aclose()
+
+
 @router.post(
     "/correspondent-profiles/sync",
     response_model=CorrespondentSyncResult,
@@ -262,6 +277,49 @@ async def sync_correspondent_profiles(request: Request) -> CorrespondentSyncResu
     service = _get_policy_service(request)
     try:
         return service.synchronize(correspondents)
+    finally:
+        service.close()
+
+
+@router.post(
+    "/correspondent-profiles/analyze",
+    response_model=list[CorrespondentAnalysisResult],
+    summary="Analyze all Paperless correspondents for policy suggestions",
+)
+async def analyze_correspondent_profiles(request: Request) -> list[CorrespondentAnalysisResult]:
+    _, documents = await _load_policy_analysis_documents(request)
+    service = _get_policy_service(request)
+    try:
+        return [
+            service.analyze_profile(profile.correspondent_id, documents)
+            for profile in service.list_profiles()
+            if profile.lifecycle_status == "active"
+        ]
+    finally:
+        service.close()
+
+
+@router.post(
+    "/correspondent-profiles/{correspondent_id}/analyze",
+    response_model=CorrespondentAnalysisResult,
+    summary="Analyze one Paperless correspondent for policy suggestions",
+)
+async def analyze_correspondent_profile(
+    request: Request, correspondent_id: int
+) -> CorrespondentAnalysisResult:
+    service = _get_policy_service(request)
+    try:
+        profile = service.get_profile(correspondent_id)
+        if profile is None:
+            raise_api_error(
+                404,
+                "correspondent_profile_not_found",
+                "Correspondent profile not found.",
+            )
+        _, documents = await _load_policy_analysis_documents(
+            request, correspondent_id=correspondent_id
+        )
+        return service.analyze_profile(correspondent_id, documents)
     finally:
         service.close()
 

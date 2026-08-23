@@ -542,6 +542,7 @@ class PaperlessClient:
         tags: list[str] | None = None,
         query: str | None = None,
         correspondent: str | None = None,
+        correspondent_id: int | None = None,
         document_type: str | None = None,
         created_after: str | None = None,
         created_before: str | None = None,
@@ -577,6 +578,7 @@ class PaperlessClient:
                     tags,
                     query,
                     correspondent,
+                    correspondent_id,
                     document_type,
                     created_after,
                     created_before,
@@ -606,9 +608,15 @@ class PaperlessClient:
                 params["tags__id__in"] = ",".join(str(t) for t in tag_ids)
 
         if correspondent:
+            if correspondent_id is not None:
+                raise PaperlessError("correspondent and correspondent_id cannot be combined")
             corr_id = await self._resolve_correspondent_id(client, correspondent)
             if corr_id:
                 params["correspondent__id"] = corr_id
+        elif correspondent_id is not None:
+            if correspondent_id <= 0:
+                raise PaperlessError("correspondent_id must be positive")
+            params["correspondent__id"] = correspondent_id
 
         if document_type:
             type_id = await self._resolve_document_type_id(client, document_type)

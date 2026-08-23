@@ -11,6 +11,55 @@ def load_fixture_documents(fixture_path: str) -> list[DocumentRecord]:
     return [DocumentRecord.model_validate(item) for item in raw]
 
 
+def build_document_records(
+    raw_documents: list[dict],
+    correspondents: dict[int, str],
+    tags: dict[int, str],
+    document_types: dict[int, str],
+) -> list[DocumentRecord]:
+    """Convert Paperless API documents into the statement analysis contract."""
+    records: list[DocumentRecord] = []
+    for item in raw_documents:
+        raw_document_type = item.get("document_type")
+        document_type_id = (
+            raw_document_type
+            if isinstance(raw_document_type, int) and not isinstance(raw_document_type, bool)
+            else None
+        )
+        document_type = (
+            document_types.get(document_type_id)
+            if document_type_id is not None
+            else str(raw_document_type)
+            if raw_document_type
+            else None
+        )
+        raw_tags = item.get("tags", [])
+        tag_ids = [
+            tag_id
+            for tag_id in raw_tags
+            if isinstance(tag_id, int) and not isinstance(tag_id, bool)
+        ]
+        tag_names = [
+            tags.get(tag, str(tag)) if isinstance(tag, int) else str(tag) for tag in raw_tags
+        ]
+        records.append(
+            DocumentRecord(
+                id=item["id"],
+                title=item.get("title") or "Untitled",
+                correspondent_id=item.get("correspondent"),
+                correspondent_name=correspondents.get(item.get("correspondent"), "Unknown"),
+                document_type_id=document_type_id,
+                document_type=document_type,
+                created=item["created_date"] if item.get("created_date") else item["created"],
+                added=item.get("added"),
+                tag_ids=tag_ids,
+                tags=tag_names,
+                original_file_name=item.get("original_file_name"),
+            )
+        )
+    return records
+
+
 async def test_paperless_connection(
     base_url: str,
     api_token: str,
@@ -51,19 +100,4 @@ async def fetch_paperless_documents(
             "processing", "Processing documents...", len(raw_documents), len(raw_documents)
         )
 
-    return [
-        DocumentRecord(
-            id=item["id"],
-            title=item.get("title") or "Untitled",
-            correspondent_id=item.get("correspondent"),
-            correspondent_name=correspondents.get(item.get("correspondent"), "Unknown"),
-            document_type=document_types.get(item.get("document_type"))
-            if item.get("document_type") is not None
-            else None,
-            created=item["created_date"] if item.get("created_date") else item["created"],
-            added=item.get("added"),
-            tags=[tags.get(tag_id, str(tag_id)) for tag_id in item.get("tags", [])],
-            original_file_name=item.get("original_file_name"),
-        )
-        for item in raw_documents
-    ]
+    return build_document_records(raw_documents, correspondents, tags, document_types)
