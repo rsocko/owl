@@ -6,6 +6,7 @@ import DashboardView from './pages/DashboardView';
 import CorrectionHistory from './pages/CorrectionHistory';
 import Statements from './pages/Statements';
 import StatementSeriesDetail from './pages/StatementSeriesDetail';
+import CorrespondentReview from './pages/CorrespondentReview';
 import EobWorkspace from './pages/EobWorkspace';
 import ActionQueue from './pages/ActionQueue';
 import TriageQueue from './pages/TriageQueue';
@@ -40,6 +41,8 @@ function App() {
             <Route path="/corrections" element={<CorrectionHistory />} />
             <Route path="/statements" element={<Statements />} />
             <Route path="/statements/:seriesId" element={<StatementSeriesDetail />} />
+            <Route path="/correspondents" element={<CorrespondentReview />} />
+            <Route path="/correspondents/:correspondentId" element={<CorrespondentReview />} />
             <Route path="/eob" element={<EobWorkspace />} />
             {/* Legacy routes redirect into the unified workspace */}
             <Route path="/eob/matches/:matchId" element={<EobMatchRedirect />} />

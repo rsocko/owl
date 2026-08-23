@@ -21,6 +21,7 @@ const NAV_ENTRIES: NavEntry[] = [
     items: [
       { to: '/document-views', label: 'Document Views' },
       { to: '/statements', label: 'Statements' },
+      { to: '/correspondents', label: 'Correspondent Review' },
       { to: '/eob', label: 'EOB Matching' },
       { to: '/eob/benchmarks', label: 'Benchmarks' },
       { to: '/orphans', label: 'Orphans & Dupes' },
