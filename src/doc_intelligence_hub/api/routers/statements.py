@@ -776,9 +776,8 @@ async def sync_external_candidates(
         connection = service.get_external_signal_credentials()
         if connection is None:
             config = load_statement_config_from_request(request)
-            if (
-                not config.external_signals.base_url
-                or (body is None and not config.external_signals.connector_ref)
+            if not config.external_signals.base_url or (
+                body is None and not config.external_signals.connector_ref
             ):
                 raise_api_error(
                     409,

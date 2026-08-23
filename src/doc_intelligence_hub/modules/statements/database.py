@@ -378,9 +378,7 @@ class Database:
             for row in conn.execute("PRAGMA table_info(external_signal_connections)").fetchall()
         }
         if "connector_ref" not in connection_columns:
-            conn.execute(
-                "ALTER TABLE external_signal_connections ADD COLUMN connector_ref TEXT"
-            )
+            conn.execute("ALTER TABLE external_signal_connections ADD COLUMN connector_ref TEXT")
         conn.execute(
             """UPDATE document_expectations
                SET status = 'suggested', updated_at = datetime('now')
