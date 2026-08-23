@@ -60,6 +60,15 @@ def _mock_transport():
                     "next": None,
                 },
             )
+        if request.url.path == "/api/mail_rules/":
+            return httpx.Response(
+                200,
+                json={
+                    "count": 1,
+                    "results": [{"id": 7, "enabled": True, "assign_correspondent": 10}],
+                    "next": None,
+                },
+            )
         if request.url.path == "/api/tags/":
             return httpx.Response(
                 200,
@@ -131,6 +140,13 @@ async def test_list_documents(client):
     assert len(docs) == 2
     assert docs[0]["title"] == "Doc A"
     assert docs[1]["title"] == "Doc B"
+
+
+@pytest.mark.asyncio
+async def test_list_mail_rules(client):
+    rules = await client.list_mail_rules()
+
+    assert rules == [{"id": 7, "enabled": True, "assign_correspondent": 10}]
 
 
 @pytest.mark.asyncio
@@ -638,6 +654,18 @@ def _make_client_with_pages(monkeypatch, num_docs: int, page_size: int = 100):
 
 class TestFetchWithLimit:
     """A `limit` should stop pagination early instead of walking every page."""
+
+    @pytest.mark.asyncio
+    async def test_list_documents_filters_by_correspondent_id(self, monkeypatch):
+        client, requests_seen = _make_client_with_pages(monkeypatch, num_docs=3, page_size=100)
+
+        await client.list_documents(correspondent_id=42)
+
+        document_request = next(
+            request for request in requests_seen if request.url.path == "/api/documents/"
+        )
+        assert document_request.url.params.get("correspondent__id") == "42"
+        assert not any(request.url.path == "/api/correspondents/" for request in requests_seen)
 
     @pytest.mark.asyncio
     async def test_list_documents_stops_at_limit(self, monkeypatch):

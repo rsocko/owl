@@ -542,6 +542,7 @@ class PaperlessClient:
         tags: list[str] | None = None,
         query: str | None = None,
         correspondent: str | None = None,
+        correspondent_id: int | None = None,
         document_type: str | None = None,
         created_after: str | None = None,
         created_before: str | None = None,
@@ -577,6 +578,7 @@ class PaperlessClient:
                     tags,
                     query,
                     correspondent,
+                    correspondent_id,
                     document_type,
                     created_after,
                     created_before,
@@ -605,7 +607,13 @@ class PaperlessClient:
                 # Use __in for OR logic (docs with ANY of these tags)
                 params["tags__id__in"] = ",".join(str(t) for t in tag_ids)
 
-        if correspondent:
+        if correspondent and correspondent_id is not None:
+            raise PaperlessError("correspondent and correspondent_id cannot be combined")
+        if correspondent_id is not None:
+            if correspondent_id <= 0:
+                raise PaperlessError("correspondent_id must be positive")
+            params["correspondent__id"] = correspondent_id
+        elif correspondent:
             corr_id = await self._resolve_correspondent_id(client, correspondent)
             if corr_id:
                 params["correspondent__id"] = corr_id
@@ -857,6 +865,11 @@ class PaperlessClient:
         """List all correspondents (paginated, returns full list)."""
         client = self._get_client()
         return await self._paginate(client, "/api/correspondents/", {"page_size": 100})
+
+    async def list_mail_rules(self) -> list[dict]:
+        """List configured Paperless mail rules for read-only source evidence."""
+        client = self._get_client()
+        return await self._paginate(client, "/api/mail_rules/", {"page_size": 100})
 
     # ------------------------------------------------------------------
     # Custom fields
