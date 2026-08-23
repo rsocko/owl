@@ -661,6 +661,45 @@ export default function CorrespondentReview() {
     }),
     [profiles, expectationsByProfile],
   );
+  const profileGroups = useMemo(
+    () => sortedProfiles.reduce<Array<{
+      rank: number;
+      label: string;
+      profiles: CorrespondentProfile[];
+    }>>((groups, profile) => {
+      const priority = profilePriority(
+        profile,
+        expectationsByProfile[profile.correspondent_id]?.length ?? 0,
+      );
+      const currentGroup = groups.at(-1);
+      if (currentGroup?.rank === priority.rank) {
+        currentGroup.profiles.push(profile);
+      } else {
+        groups.push({ rank: priority.rank, label: priority.label, profiles: [profile] });
+      }
+      return groups;
+    }, []),
+    [expectationsByProfile, sortedProfiles],
+  );
+  const externalCandidateGroups = useMemo(
+    () => [
+      {
+        kind: 'accountStatementCandidate' as const,
+        label: 'Account statement candidates',
+        candidates: selectedExternalCandidates.filter(
+          (candidate) => candidate.kind === 'accountStatementCandidate',
+        ),
+      },
+      {
+        kind: 'recurringDocumentCandidate' as const,
+        label: 'Recurring document candidates',
+        candidates: selectedExternalCandidates.filter(
+          (candidate) => candidate.kind === 'recurringDocumentCandidate',
+        ),
+      },
+    ].filter((group) => group.candidates.length > 0),
+    [selectedExternalCandidates],
+  );
 
   const runAction = useCallback(async (action: () => Promise<unknown>, successMessage: string) => {
     setBusy(true);
@@ -873,34 +912,36 @@ export default function CorrespondentReview() {
   }, []);
 
   return (
-    <>
-      <PageHeader
-        title="Correspondent Review"
-        desc="Review Paperless history, confirm document expectations, and keep document editing in Paperless."
-        actions={
-          <div className="correspondent-actions">
-            <Button
-              disabled={busy}
-              onClick={() => void runAction(
-                () => endpoints.statements.syncCorrespondentProfiles(),
-                'Paperless correspondents synchronized.',
-              )}
-            >
-              Sync correspondents
-            </Button>
-            <Button
-              variant="primary"
-              disabled={busy || profiles.length === 0}
-              onClick={() => void runAction(
-                () => endpoints.statements.analyzeCorrespondentProfiles(),
-                'All active correspondents analyzed.',
-              )}
-            >
-              Analyze all
-            </Button>
-          </div>
-        }
-      />
+    <div className="correspondent-page">
+      <div className="correspondent-page-header">
+        <PageHeader
+          title="Correspondent Review"
+          desc="Review Paperless history, confirm document expectations, and keep document editing in Paperless."
+          actions={
+            <div className="correspondent-actions">
+              <Button
+                disabled={busy}
+                onClick={() => void runAction(
+                  () => endpoints.statements.syncCorrespondentProfiles(),
+                  'Paperless correspondents synchronized.',
+                )}
+              >
+                Sync correspondents
+              </Button>
+              <Button
+                variant="primary"
+                disabled={busy || profiles.length === 0}
+                onClick={() => void runAction(
+                  () => endpoints.statements.analyzeCorrespondentProfiles(),
+                  'All active correspondents analyzed.',
+                )}
+              >
+                Analyze all
+              </Button>
+            </div>
+          }
+        />
+      </div>
 
       {error ? <ErrorState message={error} onRetry={() => void loadWorkspace()} /> : null}
       {loading ? <SkeletonLoader variant="detail-panel" /> : null}
@@ -924,24 +965,35 @@ export default function CorrespondentReview() {
               <strong>Review queue</strong>
               <span>{profiles.filter((profile) => profile.review_status === 'unreviewed').length} unreviewed</span>
             </div>
-            {sortedProfiles.map((profile) => {
-              const expectations = expectationsByProfile[profile.correspondent_id]?.length ?? 0;
-              const priority = profilePriority(profile, expectations);
-              return (
-                <button
-                  key={profile.correspondent_id}
-                  type="button"
-                  className={`correspondent-inventory-item ${selectedId === profile.correspondent_id ? 'active' : ''}`}
-                  onClick={() => navigate(`/correspondents/${profile.correspondent_id}`)}
-                >
-                  <div>
-                    <strong>{redactSensitiveNumbers(profile.current_name)}</strong>
-                    <span>{profile.observed_summary.document_count} docs · {expectations} expectations</span>
+            <div className="correspondent-inventory-list">
+              {profileGroups.map((group) => (
+                <section className="correspondent-inventory-group" key={group.rank}>
+                  <div className="correspondent-inventory-group-header">
+                    <span>{group.label}</span>
+                    <span>{group.profiles.length}</span>
                   </div>
-                  <Badge tone={priority.tone}>{priority.label}</Badge>
-                </button>
-              );
-            })}
+                  {group.profiles.map((profile) => {
+                    const expectations = expectationsByProfile[profile.correspondent_id]?.length ?? 0;
+                    const priority = profilePriority(profile, expectations);
+                    return (
+                      <button
+                        key={profile.correspondent_id}
+                        type="button"
+                        className={`correspondent-inventory-item ${selectedId === profile.correspondent_id ? 'active' : ''}`}
+                        onClick={() => navigate(`/correspondents/${profile.correspondent_id}`)}
+                        aria-current={selectedId === profile.correspondent_id ? 'true' : undefined}
+                      >
+                        <div>
+                          <strong>{redactSensitiveNumbers(profile.current_name)}</strong>
+                          <span>{profile.observed_summary.document_count} docs · {expectations} expectations</span>
+                        </div>
+                        <Badge tone={priority.tone}>{priority.label}</Badge>
+                      </button>
+                    );
+                  })}
+                </section>
+              ))}
+            </div>
           </aside>
 
           <section className="correspondent-detail">
@@ -1057,6 +1109,16 @@ export default function CorrespondentReview() {
                   </div>
                 </Card>
 
+                <nav className="correspondent-section-nav" aria-label="Correspondent sections">
+                  <a href="#correspondent-expectations">Expectations <span>{selectedExpectations.length}</span></a>
+                  <a href="#correspondent-external-candidates">External candidates <span>{selectedExternalCandidates.length}</span></a>
+                  {analysis?.correspondent_id === selectedId ? (
+                    <a href="#correspondent-candidate-expectations">Candidate expectations <span>{analysis.suggestions.length}</span></a>
+                  ) : null}
+                  <a href="#correspondent-acquisition">Acquisition</a>
+                </nav>
+
+                <div id="correspondent-expectations" className="correspondent-section-anchor">
                 <Card title={`Expectations (${selectedExpectations.length})`}>
                   {selectedExpectations.length === 0 ? (
                     <div className="correspondent-muted">No reviewed expectations yet.</div>
@@ -1215,7 +1277,9 @@ export default function CorrespondentReview() {
                     </div>
                   )}
                 </Card>
+                </div>
 
+                <div id="correspondent-external-candidates" className="correspondent-section-anchor">
                 <Card title={`External candidates (${selectedExternalCandidates.length})`}>
                   <div className="correspondent-callout">
                     Account candidates are recurrence evidence only. They do not establish cadence
@@ -1225,8 +1289,15 @@ export default function CorrespondentReview() {
                   {selectedExternalCandidates.length === 0 ? (
                     <div className="correspondent-muted">No external candidates need review.</div>
                   ) : (
-                    <div className="correspondent-expectation-list">
-                      {selectedExternalCandidates.map((candidate) => (
+                    <div className="correspondent-candidate-groups">
+                      {externalCandidateGroups.map((group) => (
+                        <section className="correspondent-candidate-group" key={group.kind}>
+                          <div className="correspondent-candidate-group-header">
+                            <strong>{group.label}</strong>
+                            <span>{group.candidates.length}</span>
+                          </div>
+                          <div className="correspondent-expectation-list">
+                          {group.candidates.map((candidate) => (
                         <div className="correspondent-expectation" key={candidate.id}>
                           <div>
                             <strong>{redactSensitiveNumbers(candidate.display_hint)}</strong>
@@ -1301,13 +1372,18 @@ export default function CorrespondentReview() {
                             </Button>
                           </div>
                         </div>
+                          ))}
+                          </div>
+                        </section>
                       ))}
                     </div>
                   )}
                 </Card>
+                </div>
 
                 {detailLoading ? <SkeletonLoader variant="cards" /> : null}
                 {analysis?.correspondent_id === selectedId && !selectedProfileTerminal ? (
+                  <div id="correspondent-candidate-expectations" className="correspondent-section-anchor">
                   <Card title={`Candidate expectations (${analysis.suggestions.length})`}>
                     {analysis.suggestions.length === 0 ? (
                       <EmptyState icon="✓" title="No policy candidates" desc="Paperless history did not contain enough bounded evidence for a suggestion." />
@@ -1328,8 +1404,10 @@ export default function CorrespondentReview() {
                       </div>
                     )}
                   </Card>
+                  </div>
                 ) : null}
 
+                <div id="correspondent-acquisition" className="correspondent-section-anchor">
                 <Card title="Add acquisition source">
                   <div className="correspondent-form-grid">
                     <label>
@@ -1361,6 +1439,7 @@ export default function CorrespondentReview() {
                   <div className="correspondent-callout">Only credential-free portal landing pages are stored. Credentials and account details remain outside OWL.</div>
                   <Button disabled={busy} onClick={() => void createSource()}>Add source</Button>
                 </Card>
+                </div>
               </>
             )}
           </section>
@@ -1368,6 +1447,6 @@ export default function CorrespondentReview() {
       ) : null}
 
       {toast ? <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} /> : null}
-    </>
+    </div>
   );
 }
