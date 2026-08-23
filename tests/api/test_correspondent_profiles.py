@@ -4,9 +4,12 @@ from unittest.mock import AsyncMock, patch
 
 from doc_intelligence_hub.modules.statements.correspondent_models import (
     DocumentExpectationSignalsV1,
+    PolicyPatchOperation,
     paperless_deployment_identity,
 )
 from doc_intelligence_hub.modules.statements.database import Database
+from doc_intelligence_hub.modules.statements.policy_evaluation import policy_operation_id
+from doc_intelligence_hub.modules.triage.database import list_correction_events
 
 
 def _configure_statement_database(app, tmp_path) -> str:
@@ -350,3 +353,301 @@ def test_cross_correspondent_series_merge_fails_before_mutation(client, app, tmp
         assert database.get_series_documents("target") == []
     finally:
         database.close()
+
+
+def test_confirmed_expectation_policy_preview_is_read_only_and_apply_ready(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    database_path = _configure_statement_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    mock_paperless.fetch_all_metadata.return_value = (
+        {42: "Example Bank"},
+        {7: "Finance", 10: "DOG", 11: "DOG:Quinn", 12: "DOG:Avery", 99: "Old"},
+        {3: "Statement", 4: "Invoice"},
+    )
+    mock_paperless.list_documents.return_value = [
+        {
+            "id": 101,
+            "title": "Old statement title",
+            "correspondent": 42,
+            "document_type": 4,
+            "created_date": "2026-07-03",
+            "tags": [10, 99],
+        },
+        {
+            "id": 999,
+            "title": "Not in the series",
+            "correspondent": 42,
+            "document_type": 4,
+            "created_date": "2026-07-03",
+            "tags": [],
+        },
+    ]
+    assert client.post("/api/statements/correspondent-profiles/sync").status_code == 200
+    database = Database(database_path)
+    try:
+        database.create_series(
+            "checking-series",
+            "Checking",
+            "Example Bank",
+            correspondent_id=42,
+        )
+        database.add_documents_to_series(
+            "checking-series",
+            [
+                {
+                    "document_id": "101",
+                    "title": "Old statement title",
+                    "statement_date": "2026-07-03",
+                    "period_label": "2026-07",
+                }
+            ],
+        )
+    finally:
+        database.close()
+
+    created = client.post(
+        "/api/statements/correspondent-profiles/42/expectations",
+        json={
+            "kind": "statement",
+            "statement_series_id": "checking-series",
+            "series_discriminator": "Checking",
+            "expectation_mode": "recurring",
+            "status": "confirmed",
+            "cadence": {"frequency": "monthly"},
+            "evidence": {"source": "user"},
+            "title_convention": {
+                "template": "{series} - {kind} - {period}",
+                "date_basis": "period",
+                "example": "Checking - Statement - 2026-07",
+            },
+            "metadata_policy": {
+                "all_of": [7],
+                "any_of": [11, 12],
+                "none_of": [99],
+                "required_document_type_id": 3,
+            },
+        },
+    )
+    expectation_id = created.json()["id"]
+
+    first = client.post(f"/api/statements/document-expectations/{expectation_id}/policy-preview")
+    second = client.post(f"/api/statements/document-expectations/{expectation_id}/policy-preview")
+
+    assert first.status_code == 200
+    assert first.json() == second.json()
+    assert first.json()["matched_document_count"] == 1
+    operation = first.json()["findings"][0]["operation"]
+    assert operation["document_id"] == 101
+    assert operation["expected"]["title"] == "Old statement title"
+    assert operation["patch"] == {
+        "title": "Checking - Statement - 2026-07",
+        "tags": [7, 10],
+        "document_type": 3,
+    }
+    assert mock_paperless.update_document.await_count == 0
+    assert mock_paperless.aclose.await_count == 2
+
+    invoice = client.post(
+        "/api/statements/correspondent-profiles/42/expectations",
+        json={
+            "kind": "invoice",
+            "document_ids": [101],
+            "series_discriminator": "Veterinary invoices",
+            "expectation_mode": "irregular",
+            "status": "confirmed",
+            "evidence": {"source": "user"},
+            "metadata_policy": {"all_of": [7]},
+        },
+    )
+    invoice_preview = client.post(
+        f"/api/statements/document-expectations/{invoice.json()['id']}/policy-preview"
+    )
+    assert invoice_preview.status_code == 200
+    assert invoice_preview.json()["matched_document_count"] == 1
+    assert invoice_preview.json()["findings"][0]["operation"]["document_id"] == 101
+
+
+def test_selected_policy_apply_is_exact_audited_and_bounded_undo(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    _configure_statement_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    mock_paperless.fetch_all_metadata.return_value = (
+        {42: "Example Bank"},
+        {7: "Finance", 55: "Added later", 99: "Old"},
+        {3: "Statement", 4: "Invoice"},
+    )
+    old_document = {
+        "id": 101,
+        "title": "Account 123456789 statement",
+        "correspondent": 42,
+        "document_type": 4,
+        "created_date": "2026-07-03",
+        "tags": [99],
+    }
+    mock_paperless.list_documents.return_value = [old_document]
+    mock_paperless.get_document.return_value = old_document
+    assert client.post("/api/statements/correspondent-profiles/sync").status_code == 200
+    created = client.post(
+        "/api/statements/correspondent-profiles/42/expectations",
+        json={
+            "kind": "invoice",
+            "document_ids": [101],
+            "series_discriminator": "Checking",
+            "expectation_mode": "irregular",
+            "status": "confirmed",
+            "evidence": {"source": "user"},
+            "title_convention": {
+                "template": "{series} - {document_date}",
+                "date_basis": "document_date",
+                "example": "Checking - 2026-07-03",
+            },
+            "metadata_policy": {
+                "all_of": [7],
+                "none_of": [99],
+                "required_document_type_id": 3,
+            },
+        },
+    )
+    expectation_id = created.json()["id"]
+    finding = client.post(
+        f"/api/statements/document-expectations/{expectation_id}/policy-preview"
+    ).json()["findings"][0]
+
+    applied = client.post(
+        f"/api/statements/document-expectations/{expectation_id}/policy-apply",
+        json={
+            "actor": "reviewer",
+            "reason": "Approved account 123456789 correction",
+            "operations": [
+                {"preview_id": finding["preview_id"], "operation": finding["operation"]}
+            ],
+        },
+    )
+
+    assert applied.status_code == 200
+    result = applied.json()["results"][0]
+    assert result["status"] == "succeeded"
+    assert mock_paperless.update_document.await_args_list[0].args == (
+        101,
+        {"title": "Checking - 2026-07-03", "tags": [7], "document_type": 3},
+    )
+    audit = list_correction_events(event_type="paperless_policy_correction")[0]
+    assert audit["created_by"] == "reviewer"
+    assert audit["payload"]["expectation_id"] == expectation_id
+    assert audit["payload"]["reason"] == "Approved account [redacted] correction"
+    assert "123456789" not in str(audit["payload"])
+    assert audit["payload"]["old_display"]["title"] == "Account [redacted] statement"
+
+    mock_paperless.get_document.return_value = {
+        **old_document,
+        "title": "Changed after apply",
+        "document_type": 3,
+        "tags": [7, 55],
+    }
+    conflicted = client.post(
+        f"/api/statements/policy-corrections/{result['audit_event_id']}/undo",
+        json={
+            "actor": "reviewer",
+            "reason": "Revert selected correction",
+            "preview_id": finding["preview_id"],
+            "operation": finding["operation"],
+        },
+    )
+    assert conflicted.json()["error_code"] == "undo_conflict"
+
+    mock_paperless.get_document.return_value = {
+        **old_document,
+        "title": "Checking - 2026-07-03",
+        "document_type": 3,
+        "tags": [7, 55],
+    }
+    undone = client.post(
+        f"/api/statements/policy-corrections/{result['audit_event_id']}/undo",
+        json={
+            "actor": "reviewer",
+            "reason": "Revert selected correction",
+            "preview_id": finding["preview_id"],
+            "operation": finding["operation"],
+        },
+    )
+
+    assert undone.status_code == 200
+    assert undone.json()["status"] == "succeeded"
+    assert mock_paperless.update_document.await_args_list[1].args == (
+        101,
+        {
+            "title": "Account 123456789 statement",
+            "document_type": 4,
+            "tags": [55, 99],
+        },
+    )
+    events = list_correction_events(include_undone=True)
+    assert [event["event_type"] for event in events[:2]] == [
+        "paperless_policy_correction_undo",
+        "paperless_policy_correction",
+    ]
+    assert events[1]["undone"] is True
+
+
+def test_policy_apply_reports_tampered_and_stale_operations_independently(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    _configure_statement_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    mock_paperless.fetch_all_metadata.return_value = (
+        {42: "Example Bank"},
+        {7: "Finance", 99: "Old"},
+        {3: "Statement", 4: "Invoice"},
+    )
+    old_document = {
+        "id": 101,
+        "title": "Old title",
+        "correspondent": 42,
+        "document_type": 4,
+        "created_date": "2026-07-03",
+        "tags": [99],
+    }
+    mock_paperless.list_documents.return_value = [old_document]
+    assert client.post("/api/statements/correspondent-profiles/sync").status_code == 200
+    created = client.post(
+        "/api/statements/correspondent-profiles/42/expectations",
+        json={
+            "kind": "invoice",
+            "document_ids": [101],
+            "series_discriminator": "Checking",
+            "expectation_mode": "irregular",
+            "status": "confirmed",
+            "evidence": {"source": "user"},
+            "metadata_policy": {"all_of": [7], "none_of": [99]},
+        },
+    )
+    expectation_id = created.json()["id"]
+    finding = client.post(
+        f"/api/statements/document-expectations/{expectation_id}/policy-preview"
+    ).json()["findings"][0]
+    tampered = {
+        **finding["operation"],
+        "patch": {**finding["operation"]["patch"], "title": "Unapproved title"},
+    }
+    attacker_preview_id = policy_operation_id(PolicyPatchOperation.model_validate(tampered))
+    mock_paperless.get_document.return_value = {**old_document, "tags": [7, 99]}
+
+    response = client.post(
+        f"/api/statements/document-expectations/{expectation_id}/policy-apply",
+        json={
+            "reason": "Apply reviewed policy",
+            "operations": [
+                {"preview_id": attacker_preview_id, "operation": tampered},
+                {"preview_id": finding["preview_id"], "operation": finding["operation"]},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert [result["error_code"] for result in response.json()["results"]] == [
+        "tampered_preview",
+        "stale_document",
+    ]
+    mock_paperless.update_document.assert_not_awaited()

@@ -52,6 +52,7 @@ def _confirmed_statement(series_id: str) -> DocumentExpectationCreate:
     return DocumentExpectationCreate(
         kind="statement",
         statement_series_id=series_id,
+        document_ids=[103, 101, 103],
         series_discriminator="Checking 1234",
         expectation_mode="recurring",
         status="confirmed",
@@ -79,7 +80,7 @@ def _external_snapshot(
     )
 
 
-def test_schema_v5_migration_preserves_series_history(tmp_path) -> None:
+def test_correspondent_schema_migration_preserves_series_history(tmp_path) -> None:
     path = str(tmp_path / "statements.db")
     db = Database(path)
     db.create_series("series-1", "Checking", "Example Bank", correspondent_id=42)
@@ -140,6 +141,7 @@ def test_correspondent_sync_marks_orphans_and_requires_explicit_relink(tmp_path)
             DocumentExpectationUpdate(series_discriminator="Checking 5678"),
         )
         assert updated.series_discriminator == "Checking 5678"
+        assert updated.document_ids == [101, 103]
     finally:
         db.close()
 
@@ -164,6 +166,7 @@ def test_only_confirmed_cadenced_active_policy_is_alertable(tmp_path) -> None:
                 42,
                 DocumentExpectationCreate(
                     kind="invoice",
+                    document_ids=[1] if status == "confirmed" and mode != "not_expected" else [],
                     expectation_mode=mode,
                     status=status,
                     cadence=Cadence(frequency="monthly") if mode == "recurring" else None,

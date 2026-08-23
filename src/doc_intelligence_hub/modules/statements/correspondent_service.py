@@ -18,6 +18,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     DocumentExpectationCreate,
     DocumentExpectationSignalsV1,
     DocumentExpectationUpdate,
+    ExpectationPolicyPreview,
     ExternalCandidateReview,
     ExternalCandidateSnapshotResult,
     ExternalDocumentCandidate,
@@ -26,6 +27,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
 )
 from doc_intelligence_hub.modules.statements.database import Database
 from doc_intelligence_hub.modules.statements.models import DocumentRecord
+from doc_intelligence_hub.modules.statements.policy_evaluation import evaluate_expectation_policy
 
 
 class CorrespondentPolicyService:
@@ -112,6 +114,9 @@ class CorrespondentPolicyService:
     def list_expectations(self, correspondent_id: int | None = None) -> list[DocumentExpectation]:
         return self.database.list_document_expectations(self.deployment_id, correspondent_id)
 
+    def get_expectation(self, expectation_id: str) -> DocumentExpectation | None:
+        return self.database.get_document_expectation(self.deployment_id, expectation_id)
+
     def update_expectation(
         self, expectation_id: str, update: DocumentExpectationUpdate
     ) -> DocumentExpectation:
@@ -137,6 +142,48 @@ class CorrespondentPolicyService:
             self.deployment_id,
             candidate_id,
             review,
+        )
+
+    def preview_expectation_policy(
+        self,
+        expectation_id: str,
+        documents: list[DocumentRecord],
+        *,
+        tag_names: dict[int, str],
+        document_type_names: dict[int, str],
+        preview_signing_key: str | None = None,
+    ) -> ExpectationPolicyPreview:
+        expectation = self.database.get_document_expectation(self.deployment_id, expectation_id)
+        if expectation is None:
+            raise KeyError("document_expectation_not_found")
+        profile = self.get_profile(expectation.correspondent_id)
+        if profile is None:
+            raise KeyError("correspondent_profile_not_found")
+
+        series_documents: dict[int, dict] = {}
+        if expectation.statement_series_id:
+            rows = self.database.get_series_documents(expectation.statement_series_id)
+            series_documents = {int(row["document_id"]): row for row in rows}
+            documents = [document for document in documents if document.id in series_documents]
+        else:
+            if not expectation.document_ids:
+                raise ValueError("Confirmed expectation has no durable document scope")
+            scoped_ids = set(expectation.document_ids)
+            documents = [
+                document
+                for document in documents
+                if document.id in scoped_ids
+                and document.correspondent_id == expectation.correspondent_id
+            ]
+
+        return evaluate_expectation_policy(
+            expectation,
+            profile.current_name,
+            documents,
+            tag_names=tag_names,
+            document_type_names=document_type_names,
+            series_documents=series_documents,
+            preview_signing_key=preview_signing_key,
         )
 
     def create_acquisition_source(self, source: AcquisitionSourceCreate) -> AcquisitionSource:

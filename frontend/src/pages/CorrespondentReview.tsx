@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { MetadataMultiTypeahead, MetadataTypeahead, type MetadataOption } from '../components/MetadataTypeahead';
 import { Badge, Button, Card, ConfidenceBadge, EmptyState, ErrorState, PageHeader, SkeletonLoader, Toast } from '../components/ui';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
@@ -86,6 +87,7 @@ interface Suggestion {
     confidence?: number | null;
     reason_codes: string[];
   };
+  document_ids: number[];
   sample_document_ids: number[];
 }
 
@@ -110,6 +112,49 @@ interface DocumentExpectation {
   title_convention?: TitleConvention | null;
   metadata_policy: MetadataPolicy;
   acquisition_source_id?: string | null;
+}
+
+interface DocumentMetadataSnapshot {
+  title: string;
+  tag_ids: number[];
+  tag_names: string[];
+  document_type_id?: number | null;
+  document_type_name?: string | null;
+}
+
+interface PolicyViolationFinding {
+  preview_id: string;
+  operation: {
+    expectation_id: string;
+    document_id: number;
+    expected: DocumentMetadataSnapshot;
+    patch: {
+      title?: string;
+      tags?: number[];
+      document_type?: number;
+    };
+  };
+  proposed: DocumentMetadataSnapshot;
+  violations: string[];
+  unresolved_violations: string[];
+  missing_title_fields: string[];
+}
+
+interface ExpectationPolicyPreview {
+  expectation_id: string;
+  correspondent_id: number;
+  matched_document_count: number;
+  compliant_document_count: number;
+  findings: PolicyViolationFinding[];
+}
+
+interface PolicyOperationResult {
+  preview_id: string;
+  document_id: number;
+  status: 'succeeded' | 'failed';
+  audit_event_id?: string | null;
+  error_code?: string | null;
+  message: string;
 }
 
 interface AcquisitionSource {
@@ -140,9 +185,9 @@ interface SuggestionDraft {
   seriesDiscriminator: string;
   titleTemplate: string;
   acquisitionSourceId: string;
-  allOf: string;
-  anyOf: string;
-  noneOf: string;
+  allOf: number[];
+  anyOf: number[];
+  noneOf: number[];
   documentTypeId: string;
 }
 
@@ -175,6 +220,10 @@ function redactSensitiveNumbers(value: string): string {
   });
 }
 
+function formatMetadataList(values: string[]): string {
+  return values.length > 0 ? values.join(', ') : 'None';
+}
+
 function profilePriority(
   profile: CorrespondentProfile,
   expectationCount: number,
@@ -188,19 +237,6 @@ function profilePriority(
     return { rank: 3, label: 'Unmatched candidates', tone: 'info' };
   }
   return { rank: 4, label: 'Reviewed', tone: 'ok' };
-}
-
-function parseTagIds(value: string): number[] {
-  return Array.from(new Set(
-    value
-      .split(',')
-      .map((part) => Number(part.trim()))
-      .filter((tagId) => Number.isInteger(tagId) && tagId > 0),
-  )).sort((left, right) => left - right);
-}
-
-function isValidTagList(value: string): boolean {
-  return value.trim() === '' || value.split(',').every((part) => /^[1-9]\d*$/.test(part.trim()));
 }
 
 function escapeRegex(value: string): string {
@@ -250,8 +286,9 @@ function buildExpectationBody(
     : null;
   return {
     kind: suggestion.kind,
-    document_type_id: suggestion.metadata.policy.required_document_type_id ?? null,
+    document_type_id: draft.documentTypeId ? Number(draft.documentTypeId) : null,
     statement_series_id: suggestion.statement_series_id ?? null,
+    document_ids: suggestion.document_ids,
     series_discriminator: draft.seriesDiscriminator || null,
     expectation_mode: draft.mode,
     status,
@@ -264,9 +301,9 @@ function buildExpectationBody(
       ? { ...suggestion.title.convention, template: draft.titleTemplate, example: titleExample }
       : null,
     metadata_policy: {
-      all_of: parseTagIds(draft.allOf),
-      any_of: parseTagIds(draft.anyOf),
-      none_of: parseTagIds(draft.noneOf),
+      all_of: draft.allOf,
+      any_of: draft.anyOf,
+      none_of: draft.noneOf,
       required_document_type_id: draft.documentTypeId ? Number(draft.documentTypeId) : null,
     },
     acquisition_source_id: draft.acquisitionSourceId || null,
@@ -276,12 +313,16 @@ function buildExpectationBody(
 function SuggestionCard({
   suggestion,
   acquisitionSources,
+  tags,
+  documentTypes,
   paperlessUrl,
   busy,
   onDecision,
 }: {
   suggestion: Suggestion;
   acquisitionSources: AcquisitionSource[];
+  tags: MetadataOption[];
+  documentTypes: MetadataOption[];
   paperlessUrl: string;
   busy: boolean;
   onDecision: (suggestion: Suggestion, draft: SuggestionDraft, status: 'confirmed' | 'dismissed') => void;
@@ -291,25 +332,43 @@ function SuggestionCard({
     seriesDiscriminator: redactSensitiveNumbers(suggestion.series_discriminator),
     titleTemplate: suggestion.title.convention?.template ?? '',
     acquisitionSourceId: '',
-    allOf: suggestion.metadata.policy.all_of.join(', '),
-    anyOf: suggestion.metadata.policy.any_of.join(', '),
-    noneOf: suggestion.metadata.policy.none_of.join(', '),
+    allOf: suggestion.metadata.policy.all_of,
+    anyOf: suggestion.metadata.policy.any_of,
+    noneOf: suggestion.metadata.policy.none_of,
     documentTypeId: suggestion.metadata.policy.required_document_type_id?.toString() ?? '',
   });
+  const tagOptions = useMemo(() => {
+    const byId = new Map(tags.map((tag) => [tag.value, tag]));
+    Object.entries(suggestion.metadata.tag_names).forEach(([id, name]) => {
+      byId.set(id, { value: id, label: redactSensitiveNumbers(name) });
+    });
+    return [...byId.values()].sort((left, right) => left.label.localeCompare(right.label));
+  }, [suggestion.metadata.tag_names, tags]);
+  const documentTypeOptions = useMemo(() => {
+    const byId = new Map(documentTypes.map((documentType) => [documentType.value, documentType]));
+    const requiredId = suggestion.metadata.policy.required_document_type_id;
+    if (requiredId && suggestion.metadata.required_document_type_name) {
+      byId.set(String(requiredId), {
+        value: String(requiredId),
+        label: suggestion.metadata.required_document_type_name,
+      });
+    }
+    return [...byId.values()].sort((left, right) => left.label.localeCompare(right.label));
+  }, [
+    documentTypes,
+    suggestion.metadata.policy.required_document_type_id,
+    suggestion.metadata.required_document_type_name,
+  ]);
   const needsSeries = suggestion.kind === 'statement' && !suggestion.statement_series_id;
   const cadenceMissing =
     (draft.mode === 'recurring' || draft.mode === 'periodic') && !suggestion.cadence;
-  const tagListsValid = [draft.allOf, draft.anyOf, draft.noneOf].every(isValidTagList);
   const titlePreviews = suggestion.title.convention
     ? suggestion.title.examples.map((example) =>
       renderDraftTitle(suggestion.title.convention!, draft.titleTemplate, example.after))
     : [];
   const titleValid = !suggestion.title.convention
     || (titlePreviews.length > 0 && titlePreviews.every((preview) => preview.rendered));
-  const valid = Boolean(draft.mode) && !needsSeries && !cadenceMissing && tagListsValid && titleValid;
-  const formatTags = (tagIds: number[]) =>
-    tagIds.map((tagId) =>
-      redactSensitiveNumbers(suggestion.metadata.tag_names[String(tagId)] ?? `Tag #${tagId}`)).join(', ') || 'None';
+  const valid = Boolean(draft.mode) && !needsSeries && !cadenceMissing && titleValid;
 
   return (
     <article className="correspondent-suggestion">
@@ -385,42 +444,42 @@ function SuggestionCard({
             onChange={(event) => setDraft({ ...draft, titleTemplate: event.target.value })}
           />
         </label>
-        <label>
-          <span>All required tag IDs</span>
-          <input
-            aria-label={`All required tags for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
-            value={draft.allOf}
-            onChange={(event) => setDraft({ ...draft, allOf: event.target.value })}
+        <div className="correspondent-metadata-picker">
+          <span>All required tags</span>
+          <MetadataMultiTypeahead
+          ariaLabel="All required tags"
+          values={draft.allOf.map(String)}
+          options={tagOptions}
+          onChange={(allOf) => setDraft({ ...draft, allOf: allOf.map(Number) })}
           />
-          <small>{formatTags(parseTagIds(draft.allOf))}</small>
-        </label>
-        <label>
-          <span>Any required tag IDs</span>
-          <input
-            aria-label={`Any required tags for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
-            value={draft.anyOf}
-            onChange={(event) => setDraft({ ...draft, anyOf: event.target.value })}
+        </div>
+        <div className="correspondent-metadata-picker">
+          <span>Any required tags</span>
+          <MetadataMultiTypeahead
+          ariaLabel="Any required tags"
+          values={draft.anyOf.map(String)}
+          options={tagOptions}
+          onChange={(anyOf) => setDraft({ ...draft, anyOf: anyOf.map(Number) })}
           />
-          <small>{formatTags(parseTagIds(draft.anyOf))}</small>
-        </label>
-        <label>
-          <span>Forbidden tag IDs</span>
-          <input
-            aria-label={`Forbidden tags for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
-            value={draft.noneOf}
-            onChange={(event) => setDraft({ ...draft, noneOf: event.target.value })}
+        </div>
+        <div className="correspondent-metadata-picker">
+          <span>Forbidden tags</span>
+          <MetadataMultiTypeahead
+          ariaLabel="Forbidden tags"
+          values={draft.noneOf.map(String)}
+          options={tagOptions}
+          onChange={(noneOf) => setDraft({ ...draft, noneOf: noneOf.map(Number) })}
           />
-          <small>{formatTags(parseTagIds(draft.noneOf))}</small>
-        </label>
+        </div>
         <label>
-          <span>Required document type ID</span>
-          <input
-            type="number"
-            min="1"
+          <span>Required document type</span>
+          <MetadataTypeahead
+            ariaLabel="Required document type"
             value={draft.documentTypeId}
-            onChange={(event) => setDraft({ ...draft, documentTypeId: event.target.value })}
+            options={documentTypeOptions}
+            placeholder="Search document types…"
+            onChange={(documentTypeId) => setDraft({ ...draft, documentTypeId })}
           />
-          <small>{suggestion.metadata.required_document_type_name ?? 'No required type'}</small>
         </label>
       </div>
 
@@ -431,9 +490,6 @@ function SuggestionCard({
       ) : null}
       {cadenceMissing ? (
         <div className="correspondent-callout warning">Recurring and periodic expectations require established cadence evidence.</div>
-      ) : null}
-      {!tagListsValid ? (
-        <div className="correspondent-callout warning">Tag rules must contain only positive Paperless tag IDs separated by commas.</div>
       ) : null}
       {!titleValid ? (
         <div className="correspondent-callout warning">The title template must use available fields and render to 128 characters or fewer.</div>
@@ -491,9 +547,16 @@ export default function CorrespondentReview() {
   const [profiles, setProfiles] = useState<CorrespondentProfile[]>([]);
   const [expectationsByProfile, setExpectationsByProfile] = useState<Record<number, DocumentExpectation[]>>({});
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [policyPreviews, setPolicyPreviews] = useState<Record<string, ExpectationPolicyPreview>>({});
+  const [selectedPolicyOperations, setSelectedPolicyOperations] = useState<Record<string, string[]>>({});
+  const [policyReasons, setPolicyReasons] = useState<Record<string, string>>({});
+  const [policyResults, setPolicyResults] = useState<Record<string, PolicyOperationResult>>({});
+  const [undonePolicyOperations, setUndonePolicyOperations] = useState<string[]>([]);
   const [acquisitionSources, setAcquisitionSources] = useState<AcquisitionSource[]>([]);
   const [externalCandidates, setExternalCandidates] = useState<ExternalCandidate[]>([]);
   const [candidateExpectation, setCandidateExpectation] = useState<Record<string, string>>({});
+  const [tags, setTags] = useState<MetadataOption[]>([]);
+  const [documentTypes, setDocumentTypes] = useState<MetadataOption[]>([]);
   const [paperlessUrl, setPaperlessUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -521,15 +584,24 @@ export default function CorrespondentReview() {
     [externalCandidates, selectedId],
   );
 
-  const loadWorkspace = useCallback(async () => {
-    setLoading(true);
+  const loadWorkspace = useCallback(async (showSkeleton = true) => {
+    if (showSkeleton) setLoading(true);
     setError(null);
     try {
-      const [profilePayload, sourcePayload, paperlessPayload, candidatePayload] = await Promise.all([
+      const [
+        profilePayload,
+        sourcePayload,
+        paperlessPayload,
+        candidatePayload,
+        tagsPayload,
+        documentTypesPayload,
+      ] = await Promise.all([
         endpoints.statements.correspondentProfiles() as Promise<CorrespondentProfile[]>,
         endpoints.statements.acquisitionSources() as Promise<AcquisitionSource[]>,
         endpoints.statements.paperlessUrl() as Promise<{ paperless_url?: string | null }>,
         endpoints.statements.externalCandidates() as Promise<ExternalCandidate[]>,
+        endpoints.actionQueue.metadataTags() as Promise<{ tags?: Array<{ id: number; name: string }> }>,
+        endpoints.actionQueue.metadataDocumentTypes() as Promise<{ document_types?: Array<{ id: number; name: string }> }>,
       ]);
       const expectationPairs = await Promise.all(
         profilePayload.map(async (profile) => [
@@ -539,6 +611,11 @@ export default function CorrespondentReview() {
       );
       setProfiles(profilePayload);
       setAcquisitionSources(sourcePayload);
+      setTags((tagsPayload.tags ?? []).map((tag) => ({ value: String(tag.id), label: tag.name })));
+      setDocumentTypes((documentTypesPayload.document_types ?? []).map((documentType) => ({
+        value: String(documentType.id),
+        label: documentType.name,
+      })));
       setPaperlessUrl((paperlessPayload.paperless_url ?? '').replace(/\/$/, ''));
       setExternalCandidates(candidatePayload);
       setExpectationsByProfile(Object.fromEntries(expectationPairs));
@@ -555,6 +632,11 @@ export default function CorrespondentReview() {
 
   useEffect(() => {
     setAnalysis(null);
+    setPolicyPreviews({});
+    setSelectedPolicyOperations({});
+    setPolicyReasons({});
+    setPolicyResults({});
+    setUndonePolicyOperations([]);
     setRelinkTarget('');
   }, [selectedId]);
 
@@ -578,7 +660,7 @@ export default function CorrespondentReview() {
     try {
       await action();
       setToast({ message: successMessage, tone: 'success' });
-      await loadWorkspace();
+      await loadWorkspace(false);
     } catch (requestError) {
       setToast({ message: getErrorMessage(requestError), tone: 'error' });
     } finally {
@@ -594,7 +676,7 @@ export default function CorrespondentReview() {
       if (selectedIdRef.current !== result.correspondent_id) return;
       setAnalysis(result);
       setToast({ message: `Analyzed ${result.suggestions.length} candidate series.`, tone: 'success' });
-      await loadWorkspace();
+      await loadWorkspace(false);
     } catch (requestError) {
       setToast({ message: getErrorMessage(requestError), tone: 'error' });
     } finally {
@@ -643,7 +725,7 @@ export default function CorrespondentReview() {
           tone: 'error',
         });
       }
-      await loadWorkspace();
+      await loadWorkspace(false);
     } catch (requestError) {
       setToast({ message: getErrorMessage(requestError), tone: 'error' });
     } finally {
@@ -683,6 +765,96 @@ export default function CorrespondentReview() {
         : `Candidate marked ${humanize(outcome).toLowerCase()}.`,
     );
   }, [candidateExpectation, runAction, selectedId]);
+
+  const previewExpectation = useCallback(async (expectationId: string) => {
+    setBusy(true);
+    try {
+      const preview = await endpoints.statements.previewDocumentExpectationPolicy(
+        expectationId,
+      ) as ExpectationPolicyPreview;
+      setPolicyPreviews((current) => ({ ...current, [expectationId]: preview }));
+      setSelectedPolicyOperations((current) => ({ ...current, [expectationId]: [] }));
+      setPolicyResults((current) => {
+        const next = { ...current };
+        preview.findings.forEach((finding) => delete next[finding.preview_id]);
+        return next;
+      });
+      setToast({
+        message: preview.findings.length === 0
+          ? 'All matched documents satisfy this policy.'
+          : `Found ${preview.findings.length} policy violation previews.`,
+        tone: 'success',
+      });
+    } catch (requestError) {
+      setToast({ message: getErrorMessage(requestError), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const applySelectedPolicy = useCallback(async (expectationId: string) => {
+    const preview = policyPreviews[expectationId];
+    const selected = new Set(selectedPolicyOperations[expectationId] ?? []);
+    const reason = policyReasons[expectationId]?.trim() ?? '';
+    if (!preview || selected.size === 0 || !reason) return;
+    setBusy(true);
+    try {
+      const response = await endpoints.statements.applyDocumentExpectationPolicy(
+        expectationId,
+        {
+          actor: 'user',
+          reason,
+          operations: preview.findings
+            .filter((finding) => selected.has(finding.preview_id))
+            .map((finding) => ({
+              preview_id: finding.preview_id,
+              operation: finding.operation,
+            })),
+        },
+      ) as { results: PolicyOperationResult[] };
+      setPolicyResults((current) => ({
+        ...current,
+        ...Object.fromEntries(response.results.map((result) => [result.preview_id, result])),
+      }));
+      const succeeded = response.results.filter((result) => result.status === 'succeeded').length;
+      const failed = response.results.length - succeeded;
+      setToast({
+        message: `${succeeded} correction${succeeded === 1 ? '' : 's'} applied${failed ? `; ${failed} failed` : ''}.`,
+        tone: failed ? 'error' : 'success',
+      });
+    } catch (requestError) {
+      setToast({ message: getErrorMessage(requestError), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }, [policyPreviews, policyReasons, selectedPolicyOperations]);
+
+  const undoPolicyCorrection = useCallback(async (
+    finding: PolicyViolationFinding,
+    result: PolicyOperationResult,
+  ) => {
+    if (!result.audit_event_id) return;
+    setBusy(true);
+    try {
+      const undoResult = await endpoints.statements.undoDocumentExpectationPolicy(
+        result.audit_event_id,
+        {
+          actor: 'user',
+          reason: `Undo: ${result.message}`,
+          preview_id: finding.preview_id,
+          operation: finding.operation,
+        },
+      ) as PolicyOperationResult;
+      if (undoResult.status === 'succeeded') {
+        setUndonePolicyOperations((current) => [...current, finding.preview_id]);
+      }
+      setToast({ message: undoResult.message, tone: undoResult.status === 'succeeded' ? 'success' : 'error' });
+    } catch (requestError) {
+      setToast({ message: getErrorMessage(requestError), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   return (
     <>
@@ -867,31 +1039,156 @@ export default function CorrespondentReview() {
                     <div className="correspondent-muted">No reviewed expectations yet.</div>
                   ) : (
                     <div className="correspondent-expectation-list">
-                      {selectedExpectations.map((expectation) => (
-                        <div className="correspondent-expectation" key={expectation.id}>
-                          <div>
-                            <strong>{redactSensitiveNumbers(expectation.series_discriminator ?? humanize(expectation.kind))}</strong>
-                            <span>{humanize(expectation.expectation_mode)} · {expectation.cadence?.frequency ?? 'no cadence'}</span>
-                          </div>
-                          <div className="correspondent-actions">
-                            <Badge tone={expectation.status === 'confirmed' ? 'ok' : expectation.status === 'dismissed' ? 'muted' : 'warning'}>
-                              {humanize(expectation.status)}
-                            </Badge>
-                            {expectation.status !== 'retired' ? (
-                              <Button
-                                size="sm"
-                                disabled={busy || selectedProfileTerminal}
-                                onClick={() => void runAction(
-                                  () => endpoints.statements.updateDocumentExpectation(expectation.id, { status: 'retired' }),
-                                  'Expectation retired.',
-                                )}
-                              >
-                                Retire
-                              </Button>
+                      {selectedExpectations.map((expectation) => {
+                        const preview = policyPreviews[expectation.id];
+                        return (
+                          <div className="correspondent-expectation-item" key={expectation.id}>
+                            <div className="correspondent-expectation">
+                              <div>
+                                <strong>{redactSensitiveNumbers(expectation.series_discriminator ?? humanize(expectation.kind))}</strong>
+                                <span>{humanize(expectation.expectation_mode)} · {expectation.cadence?.frequency ?? 'no cadence'}</span>
+                              </div>
+                              <div className="correspondent-actions">
+                                <Badge tone={expectation.status === 'confirmed' ? 'ok' : expectation.status === 'dismissed' ? 'muted' : 'warning'}>
+                                  {humanize(expectation.status)}
+                                </Badge>
+                                {expectation.status === 'confirmed' && expectation.expectation_mode !== 'not_expected' ? (
+                                  <Button
+                                    size="sm"
+                                    disabled={busy || selectedProfileTerminal}
+                                    onClick={() => void previewExpectation(expectation.id)}
+                                  >
+                                    Preview violations
+                                  </Button>
+                                ) : null}
+                                {expectation.status !== 'retired' ? (
+                                  <Button
+                                    size="sm"
+                                    disabled={busy || selectedProfileTerminal}
+                                    onClick={() => void runAction(
+                                      () => endpoints.statements.updateDocumentExpectation(expectation.id, { status: 'retired' }),
+                                      'Expectation retired.',
+                                    )}
+                                  >
+                                    Retire
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+                            {preview ? (
+                              <div className="correspondent-policy-preview">
+                                <div className="correspondent-preview-header">
+                                  <strong>{preview.findings.length} violations</strong>
+                                  <span>{preview.compliant_document_count} of {preview.matched_document_count} compliant</span>
+                                </div>
+                                {preview.findings.map((finding) => {
+                                  const actionable = Object.keys(finding.operation.patch).length > 0;
+                                  const selected = (selectedPolicyOperations[expectation.id] ?? []).includes(finding.preview_id);
+                                  const result = policyResults[finding.preview_id];
+                                  return (
+                                  <div className="correspondent-policy-finding" key={finding.preview_id}>
+                                    <label className="correspondent-policy-select">
+                                      <input
+                                        type="checkbox"
+                                        checked={selected}
+                                        disabled={busy || !actionable || result?.status === 'succeeded'}
+                                        onChange={(event) => setSelectedPolicyOperations((current) => ({
+                                          ...current,
+                                          [expectation.id]: event.target.checked
+                                            ? [...(current[expectation.id] ?? []), finding.preview_id]
+                                            : (current[expectation.id] ?? []).filter((id) => id !== finding.preview_id),
+                                        }))}
+                                      />
+                                      Select document {finding.operation.document_id}
+                                    </label>
+                                    <div className="correspondent-badges">
+                                      {finding.violations.map((violation) => (
+                                        <Badge
+                                          key={violation}
+                                          tone={finding.unresolved_violations.includes(violation) ? 'warning' : 'info'}
+                                        >
+                                          {humanize(violation)}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                    <div className="correspondent-policy-change">
+                                      <span>Title</span>
+                                      <del>{finding.operation.expected.title}</del>
+                                      <strong>{finding.proposed.title}</strong>
+                                    </div>
+                                    <div className="correspondent-policy-change">
+                                      <span>Tags</span>
+                                      <del>{formatMetadataList(finding.operation.expected.tag_names)}</del>
+                                      <strong>{formatMetadataList(finding.proposed.tag_names)}</strong>
+                                    </div>
+                                    <div className="correspondent-policy-change">
+                                      <span>Document type</span>
+                                      <del>{finding.operation.expected.document_type_name ?? 'None'}</del>
+                                      <strong>{finding.proposed.document_type_name ?? 'None'}</strong>
+                                    </div>
+                                    {finding.missing_title_fields.length > 0 ? (
+                                      <div className="correspondent-callout warning">
+                                        Missing title fields: {finding.missing_title_fields.join(', ')}
+                                      </div>
+                                    ) : null}
+                                    {paperlessUrl ? (
+                                      <a
+                                        href={`${paperlessUrl}/documents/${finding.operation.document_id}/details`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                      >
+                                        Open document in Paperless
+                                      </a>
+                                    ) : null}
+                                    {result ? (
+                                      <div className={`correspondent-policy-result ${result.status}`}>
+                                        <span>{result.message}</span>
+                                        {result.audit_event_id
+                                          && (result.status === 'succeeded' || result.error_code === 'audit_finalize_failed')
+                                          && !undonePolicyOperations.includes(finding.preview_id) ? (
+                                          <Button
+                                            size="sm"
+                                            disabled={busy}
+                                            onClick={() => void undoPolicyCorrection(finding, result)}
+                                          >
+                                            Undo correction
+                                          </Button>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                  );
+                                })}
+                                <div className="correspondent-policy-apply">
+                                  <label>
+                                    <span>Reason for applying selected corrections</span>
+                                    <input
+                                      aria-label={`Reason for ${expectation.series_discriminator ?? expectation.kind}`}
+                                      value={policyReasons[expectation.id] ?? ''}
+                                      maxLength={200}
+                                      onChange={(event) => setPolicyReasons((current) => ({
+                                        ...current,
+                                        [expectation.id]: event.target.value,
+                                      }))}
+                                    />
+                                  </label>
+                                  <Button
+                                    variant="primary"
+                                    disabled={
+                                      busy
+                                      || !(policyReasons[expectation.id]?.trim())
+                                      || (selectedPolicyOperations[expectation.id]?.length ?? 0) === 0
+                                    }
+                                    onClick={() => void applySelectedPolicy(expectation.id)}
+                                  >
+                                    Apply selected
+                                  </Button>
+                                </div>
+                              </div>
                             ) : null}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </Card>
@@ -998,6 +1295,8 @@ export default function CorrespondentReview() {
                             key={suggestion.suggestion_key}
                             suggestion={suggestion}
                             acquisitionSources={acquisitionSources}
+                            tags={tags}
+                            documentTypes={documentTypes}
                             paperlessUrl={paperlessUrl}
                             busy={busy}
                             onDecision={(candidate, draft, status) => void decideSuggestion(candidate, draft, status)}

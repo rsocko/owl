@@ -6,7 +6,14 @@ from string import Formatter
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 ProfileReviewStatus = Literal["unreviewed", "reviewed", "ignored"]
 ProfileLifecycleStatus = Literal["active", "orphaned", "retired"]
@@ -387,6 +394,7 @@ class DocumentExpectationBase(PolicyModel):
     kind: DocumentKind
     document_type_id: int | None = Field(default=None, gt=0)
     statement_series_id: str | None = Field(default=None, min_length=1, max_length=200)
+    document_ids: list[int] = Field(default_factory=list)
     series_discriminator: str | None = Field(default=None, max_length=200)
     expectation_mode: ExpectationMode
     status: ExpectationStatus = "suggested"
@@ -395,6 +403,13 @@ class DocumentExpectationBase(PolicyModel):
     title_convention: TitleConvention | None = None
     metadata_policy: MetadataPolicy = Field(default_factory=MetadataPolicy)
     acquisition_source_id: str | None = None
+
+    @field_validator("document_ids")
+    @classmethod
+    def normalize_document_ids(cls, value: list[int]) -> list[int]:
+        if any(document_id <= 0 for document_id in value):
+            raise ValueError("Paperless document IDs must be positive")
+        return sorted(set(value))
 
     @model_validator(mode="after")
     def validate_policy_shape(self) -> DocumentExpectationBase:
@@ -409,6 +424,15 @@ class DocumentExpectationBase(PolicyModel):
         if self.status == "confirmed" and self.expectation_mode in {"recurring", "periodic"}:
             if self.cadence is None:
                 raise ValueError("Confirmed recurring or periodic expectations require cadence")
+        if (
+            self.status == "confirmed"
+            and self.kind != "statement"
+            and self.expectation_mode != "not_expected"
+            and not self.document_ids
+        ):
+            raise ValueError(
+                "Confirmed non-statement expectations require durable document membership"
+            )
         return self
 
     def can_emit_missing_alert(self, profile_lifecycle: ProfileLifecycleStatus = "active") -> bool:
@@ -426,6 +450,7 @@ class DocumentExpectationCreate(DocumentExpectationBase):
 
 class DocumentExpectationUpdate(PolicyModel):
     document_type_id: int | None = Field(default=None, gt=0)
+    document_ids: list[int] | None = None
     series_discriminator: str | None = Field(default=None, max_length=200)
     expectation_mode: ExpectationMode | None = None
     status: ExpectationStatus | None = None
@@ -434,6 +459,13 @@ class DocumentExpectationUpdate(PolicyModel):
     title_convention: TitleConvention | None = None
     metadata_policy: MetadataPolicy | None = None
     acquisition_source_id: str | None = None
+
+    @field_validator("document_ids")
+    @classmethod
+    def normalize_document_ids(cls, value: list[int] | None) -> list[int] | None:
+        if value is None:
+            return None
+        return DocumentExpectationBase.normalize_document_ids(value)
 
 
 class ExternalCandidateReview(PolicyModel):
@@ -466,6 +498,97 @@ class DocumentExpectation(DocumentExpectationBase):
     legacy_provider_key: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+
+PolicyViolationCode = Literal[
+    "missing_all_of",
+    "missing_any_of",
+    "forbidden_tags",
+    "wrong_document_type",
+    "title_mismatch",
+    "title_missing_fields",
+    "title_too_long",
+]
+
+
+class DocumentMetadataSnapshot(PolicyModel):
+    title: str = Field(max_length=128)
+    tag_ids: list[int] = Field(default_factory=list)
+    tag_names: list[str] = Field(default_factory=list)
+    document_type_id: int | None = None
+    document_type_name: str | None = None
+
+
+class PaperlessDocumentPatch(PolicyModel):
+    title: str | None = Field(default=None, max_length=128)
+    tags: list[int] | None = None
+    document_type: int | None = Field(default=None, gt=0)
+
+    @model_serializer
+    def serialize_patch(self) -> dict[str, str | int | list[int]]:
+        return {
+            key: value
+            for key, value in {
+                "title": self.title,
+                "tags": self.tags,
+                "document_type": self.document_type,
+            }.items()
+            if value is not None
+        }
+
+
+class PolicyPatchOperation(PolicyModel):
+    expectation_id: str
+    document_id: int = Field(gt=0)
+    expected: DocumentMetadataSnapshot
+    patch: PaperlessDocumentPatch
+
+
+class PolicyViolationPreview(PolicyModel):
+    preview_id: str
+    operation: PolicyPatchOperation
+    proposed: DocumentMetadataSnapshot
+    violations: list[PolicyViolationCode]
+    unresolved_violations: list[PolicyViolationCode] = Field(default_factory=list)
+    missing_title_fields: list[str] = Field(default_factory=list)
+
+
+class ExpectationPolicyPreview(PolicyModel):
+    expectation_id: str
+    correspondent_id: int = Field(gt=0)
+    matched_document_count: int = Field(ge=0)
+    compliant_document_count: int = Field(ge=0)
+    findings: list[PolicyViolationPreview] = Field(default_factory=list)
+
+
+class SelectedPolicyOperation(PolicyModel):
+    preview_id: str = Field(min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$")
+    operation: PolicyPatchOperation
+
+
+class PolicyApplyRequest(PolicyModel):
+    actor: str = Field(default="user", min_length=1, max_length=64)
+    reason: str = Field(min_length=1, max_length=200)
+    operations: list[SelectedPolicyOperation] = Field(min_length=1, max_length=100)
+
+
+class PolicyOperationResult(PolicyModel):
+    preview_id: str
+    document_id: int = Field(gt=0)
+    status: Literal["succeeded", "failed"]
+    audit_event_id: str | None = None
+    error_code: str | None = None
+    message: str
+
+
+class PolicyApplyResponse(PolicyModel):
+    expectation_id: str
+    results: list[PolicyOperationResult]
+
+
+class PolicyUndoRequest(SelectedPolicyOperation):
+    actor: str = Field(default="user", min_length=1, max_length=64)
+    reason: str = Field(min_length=1, max_length=200)
 
 
 class CorrespondentSyncResult(PolicyModel):
@@ -534,6 +657,7 @@ class ExpectationPolicySuggestion(PolicyModel):
     title: TitleConventionSuggestion
     metadata: MetadataPolicySuggestion
     acquisition: AcquisitionSuggestion
+    document_ids: list[int] = Field(default_factory=list)
     sample_document_ids: list[int] = Field(default_factory=list, max_length=3)
 
 

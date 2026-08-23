@@ -212,6 +212,7 @@ CREATE TABLE IF NOT EXISTS document_expectations (
         CHECK (kind IN ('statement', 'invoice', 'bill', 'receipt', 'record', 'other')),
     document_type_id INTEGER,
     statement_series_id TEXT,
+    document_ids_json TEXT NOT NULL DEFAULT '[]',
     series_discriminator TEXT,
     expectation_mode TEXT NOT NULL
         CHECK (expectation_mode IN ('recurring', 'periodic', 'one_off', 'irregular', 'not_expected')),
@@ -350,6 +351,23 @@ class Database:
         }
         if "statement_name" not in provider_columns:
             conn.execute("ALTER TABLE providers ADD COLUMN statement_name TEXT")
+        expectation_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(document_expectations)").fetchall()
+        }
+        if "document_ids_json" not in expectation_columns:
+            conn.execute(
+                "ALTER TABLE document_expectations "
+                "ADD COLUMN document_ids_json TEXT NOT NULL DEFAULT '[]'"
+            )
+        conn.execute(
+            """UPDATE document_expectations
+               SET status = 'suggested', updated_at = datetime('now')
+               WHERE status = 'confirmed'
+                 AND kind != 'statement'
+                 AND expectation_mode != 'not_expected'
+                 AND document_ids_json = '[]'"""
+        )
         row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
         if row is None:
             conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
@@ -864,6 +882,7 @@ class Database:
             kind=row["kind"],
             document_type_id=row["document_type_id"],
             statement_series_id=row["statement_series_id"],
+            document_ids=json.loads(row["document_ids_json"]),
             series_discriminator=row["series_discriminator"],
             expectation_mode=row["expectation_mode"],
             status=row["status"],
@@ -1296,10 +1315,11 @@ class Database:
         conn.execute(
             """INSERT INTO document_expectations (
                 id, deployment_id, correspondent_id, kind, document_type_id,
-                statement_series_id, series_discriminator, expectation_mode, status,
+                statement_series_id, document_ids_json, series_discriminator,
+                expectation_mode, status,
                 cadence_json, evidence_json, title_convention_json, metadata_policy_json,
                 acquisition_source_id, legacy_provider_key
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 expectation_id,
                 deployment_id,
@@ -1307,6 +1327,7 @@ class Database:
                 expectation.kind,
                 expectation.document_type_id,
                 expectation.statement_series_id,
+                json.dumps(expectation.document_ids),
                 expectation.series_discriminator,
                 expectation.expectation_mode,
                 expectation.status,
@@ -1364,13 +1385,15 @@ class Database:
         with conn:
             conn.execute(
                 """UPDATE document_expectations SET
-                    document_type_id = ?, series_discriminator = ?, expectation_mode = ?,
+                    document_type_id = ?, document_ids_json = ?, series_discriminator = ?,
+                    expectation_mode = ?,
                     status = ?, cadence_json = ?, evidence_json = ?,
                     title_convention_json = ?, metadata_policy_json = ?,
                     acquisition_source_id = ?, updated_at = datetime('now')
                    WHERE deployment_id = ? AND id = ?""",
                 (
                     validated.document_type_id,
+                    json.dumps(validated.document_ids),
                     validated.series_discriminator,
                     validated.expectation_mode,
                     validated.status,

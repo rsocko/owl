@@ -10,15 +10,33 @@ const mocks = vi.hoisted(() => ({
   updateProfile: vi.fn(),
   externalCandidates: vi.fn(),
   reviewCandidate: vi.fn(),
+  expectations: vi.fn(),
+  previewPolicy: vi.fn(),
+  applyPolicy: vi.fn(),
+  undoPolicy: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
   endpoints: {
+    actionQueue: {
+      metadataTags: vi.fn().mockResolvedValue({
+        tags: [
+          { id: 7, name: 'Finance' },
+          { id: 280, name: 'Work Expenses' },
+        ],
+      }),
+      metadataDocumentTypes: vi.fn().mockResolvedValue({
+        document_types: [
+          { id: 2, name: 'Receipt' },
+          { id: 3, name: 'Statement' },
+        ],
+      }),
+    },
     statements: {
       correspondentProfiles: mocks.profiles,
       acquisitionSources: vi.fn().mockResolvedValue([]),
       paperlessUrl: vi.fn().mockResolvedValue({ paperless_url: 'https://paperless.test' }),
-      correspondentExpectations: vi.fn().mockResolvedValue([]),
+      correspondentExpectations: mocks.expectations,
       analyzeCorrespondentProfile: mocks.analyze,
       createCorrespondentExpectation: mocks.createExpectation,
       updateCorrespondentProfile: mocks.updateProfile,
@@ -28,6 +46,9 @@ vi.mock('../lib/api', () => ({
       updateDocumentExpectation: vi.fn(),
       externalCandidates: mocks.externalCandidates,
       reviewExternalCandidate: mocks.reviewCandidate,
+      previewDocumentExpectationPolicy: mocks.previewPolicy,
+      applyDocumentExpectationPolicy: mocks.applyPolicy,
+      undoDocumentExpectationPolicy: mocks.undoPolicy,
       createAcquisitionSource: vi.fn(),
     },
   },
@@ -80,6 +101,7 @@ const suggestion = {
     channel: 'unknown',
     reason_codes: ['ingestion_source_unavailable'],
   },
+  document_ids: [1, 2, 3, 4],
   sample_document_ids: [2, 3, 4],
 };
 
@@ -117,6 +139,59 @@ beforeEach(() => {
   mocks.updateProfile.mockResolvedValue({});
   mocks.externalCandidates.mockResolvedValue([]);
   mocks.reviewCandidate.mockResolvedValue({});
+  mocks.expectations.mockResolvedValue([]);
+  mocks.previewPolicy.mockResolvedValue({
+    expectation_id: 'expectation-1',
+    correspondent_id: 42,
+    matched_document_count: 1,
+    compliant_document_count: 0,
+    findings: [{
+      preview_id: 'stable-preview',
+      operation: {
+        expectation_id: 'expectation-1',
+        document_id: 4,
+        expected: {
+          title: 'Old statement title',
+          tag_ids: [99],
+          tag_names: ['Old'],
+          document_type_id: 4,
+          document_type_name: 'Invoice',
+        },
+        patch: {
+          title: 'Checking - Statement - 2026-04',
+          tags: [7],
+          document_type: 3,
+        },
+      },
+      proposed: {
+        title: 'Checking - Statement - 2026-04',
+        tag_ids: [7],
+        tag_names: ['Finance'],
+        document_type_id: 3,
+        document_type_name: 'Statement',
+      },
+      violations: ['title_mismatch', 'forbidden_tags', 'wrong_document_type'],
+      unresolved_violations: [],
+      missing_title_fields: [],
+    }],
+  });
+  mocks.applyPolicy.mockResolvedValue({
+    expectation_id: 'expectation-1',
+    results: [{
+      preview_id: 'stable-preview',
+      document_id: 4,
+      status: 'succeeded',
+      audit_event_id: 'audit-1',
+      message: 'Approved metadata correction applied.',
+    }],
+  });
+  mocks.undoPolicy.mockResolvedValue({
+    preview_id: 'stable-preview',
+    document_id: 4,
+    status: 'succeeded',
+    audit_event_id: 'undo-1',
+    message: 'Correction undone without changing unrelated metadata.',
+  });
 });
 
 function renderPage() {
@@ -138,6 +213,10 @@ describe('Correspondent Review', () => {
 
     expect(await screen.findByText('Checking')).toBeInTheDocument();
     expect(screen.getByText('100% coverage · 0 exceptions')).toBeInTheDocument();
+    expect(screen.getAllByText('Finance').length).toBeGreaterThan(0);
+    expect(screen.getByRole('combobox', { name: 'Required document type' })).toHaveValue('Statement');
+    expect(screen.queryByText('All required tag IDs')).not.toBeInTheDocument();
+    expect(screen.queryByText('Required document type ID')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /open in paperless/i })).toHaveAttribute(
       'href',
       'https://paperless.test/documents/4/details',
@@ -149,9 +228,38 @@ describe('Correspondent Review', () => {
     expect(screen.getByText('Checking - 2026-04')).toBeInTheDocument();
   });
 
-  it('confirms policy locally without invoking document metadata endpoints', async () => {
+  it('keeps the workspace visible while analysis refreshes profile data', async () => {
+    const { container } = renderPage();
+    await screen.findAllByText('Example Bank');
+    const profilePayload = await mocks.profiles.mock.results[0].value;
+    let finishRefresh!: (value: unknown) => void;
+    mocks.profiles.mockReturnValueOnce(new Promise((resolve) => {
+      finishRefresh = resolve;
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: /analyze history/i }));
+
+    expect(await screen.findByText('Checking')).toBeInTheDocument();
+    expect(container.querySelector('.skeleton-cards')).toBeInTheDocument();
+    expect(container.querySelector('.skeleton-detail-panel')).not.toBeInTheDocument();
+
+    finishRefresh(profilePayload);
+    await waitFor(() => {
+      expect(container.querySelector('.skeleton-cards')).not.toBeInTheDocument();
+    });
+  });
+
+  it('submits selected metadata names as Paperless IDs', async () => {
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: /analyze history/i }));
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Any required tags' }), {
+      target: { value: 'work' },
+    });
+    fireEvent.click(screen.getByRole('option', { name: 'Work Expenses' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Required document type' }), {
+      target: { value: 'receipt' },
+    });
+    fireEvent.click(screen.getByRole('option', { name: 'Receipt' }));
     fireEvent.click(await screen.findByRole('button', { name: /confirm expectation/i }));
 
     await waitFor(() => {
@@ -161,6 +269,13 @@ describe('Correspondent Review', () => {
           statement_series_id: 'checking',
           status: 'confirmed',
           expectation_mode: 'recurring',
+          document_type_id: 2,
+          metadata_policy: {
+            all_of: [7],
+            any_of: [280],
+            none_of: [],
+            required_document_type_id: 2,
+          },
         }),
       );
       expect(mocks.updateProfile).toHaveBeenCalledWith(
@@ -246,5 +361,76 @@ describe('Correspondent Review', () => {
       });
     });
     expect(screen.getByText(/recurring obligations do not create invoice/i)).toBeInTheDocument();
+  });
+
+  it('shows exact old and proposed metadata from a read-only policy preview', async () => {
+    mocks.expectations.mockResolvedValue([{
+      id: 'expectation-1',
+      correspondent_id: 42,
+      kind: 'statement',
+      statement_series_id: 'checking',
+      series_discriminator: 'Checking',
+      expectation_mode: 'recurring',
+      status: 'confirmed',
+      cadence: suggestion.cadence,
+      evidence: suggestion.evidence,
+      title_convention: suggestion.title.convention,
+      metadata_policy: suggestion.metadata.policy,
+    }]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /preview violations/i }));
+
+    expect(await screen.findByText('Old statement title')).toBeInTheDocument();
+    expect(screen.getByText('Checking - Statement - 2026-04')).toBeInTheDocument();
+    expect(screen.getByText('Old')).toBeInTheDocument();
+    expect(screen.getByText('Finance')).toBeInTheDocument();
+    expect(screen.getByText('Invoice')).toBeInTheDocument();
+    expect(screen.getByText('Statement')).toBeInTheDocument();
+    expect(mocks.previewPolicy).toHaveBeenCalledWith('expectation-1');
+  });
+
+  it('applies only selected preview operations and offers bounded undo', async () => {
+    mocks.expectations.mockResolvedValue([{
+      id: 'expectation-1',
+      correspondent_id: 42,
+      kind: 'statement',
+      statement_series_id: 'checking',
+      series_discriminator: 'Checking',
+      expectation_mode: 'recurring',
+      status: 'confirmed',
+      cadence: suggestion.cadence,
+      evidence: suggestion.evidence,
+      title_convention: suggestion.title.convention,
+      metadata_policy: suggestion.metadata.policy,
+    }]);
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /preview violations/i }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /select document 4/i }));
+    fireEvent.change(screen.getByLabelText(/reason for checking/i), {
+      target: { value: 'Reviewed exact metadata changes' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /apply selected/i }));
+
+    await waitFor(() => expect(mocks.applyPolicy).toHaveBeenCalledWith(
+      'expectation-1',
+      {
+        actor: 'user',
+        reason: 'Reviewed exact metadata changes',
+        operations: [{
+          preview_id: 'stable-preview',
+          operation: expect.objectContaining({ document_id: 4 }),
+        }],
+      },
+    ));
+    fireEvent.click(await screen.findByRole('button', { name: /undo correction/i }));
+    await waitFor(() => expect(mocks.undoPolicy).toHaveBeenCalledWith(
+      'audit-1',
+      expect.objectContaining({
+        actor: 'user',
+        preview_id: 'stable-preview',
+        operation: expect.objectContaining({ document_id: 4 }),
+      }),
+    ));
   });
 });

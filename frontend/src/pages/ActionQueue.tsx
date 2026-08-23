@@ -20,6 +20,7 @@ import {
 } from '../components/ui';
 import { SortableTable, type SortableColumnDef } from '../components/SortableTable';
 import DocumentViewerModal from '../components/DocumentViewerModal';
+import { MetadataMultiTypeahead, MetadataTypeahead } from '../components/MetadataTypeahead';
 import { useStreamingAction } from '../hooks/useStreamingAction';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
@@ -396,11 +397,19 @@ export default function ActionQueue() {
     limit: '',
   });
   const [customRunMetadata, setCustomRunMetadata] = useState<{
+    tags: Array<{ id: number; name: string }>;
     saved_views: Array<{ id: number; name: string }>;
     correspondents: Array<{ id: number; name: string }>;
     document_types: Array<{ id: number; name: string }>;
     loaded: boolean;
-  }>({ saved_views: [], correspondents: [], document_types: [], loaded: false });
+  }>({ tags: [], saved_views: [], correspondents: [], document_types: [], loaded: false });
+  const correspondentOptions = useMemo(() => {
+    const names = new Set(customRunMetadata.correspondents.map((correspondent) => correspondent.name));
+    if (editDraft?.correspondent) names.add(editDraft.correspondent);
+    return [...names]
+      .sort((left, right) => left.localeCompare(right))
+      .map((name) => ({ value: name, label: name }));
+  }, [customRunMetadata.correspondents, editDraft?.correspondent]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -681,12 +690,14 @@ export default function ActionQueue() {
   const loadCustomRunMetadata = async () => {
     if (customRunMetadata.loaded) return;
     try {
-      const [views, correspondents, docTypes] = await Promise.all([
+      const [tags, views, correspondents, docTypes] = await Promise.all([
+        endpoints.actionQueue.metadataTags() as Promise<{ tags: Array<{ id: number; name: string }> }>,
         endpoints.actionQueue.metadataSavedViews() as Promise<{ saved_views: Array<{ id: number; name: string }> }>,
         endpoints.actionQueue.metadataCorrespondents() as Promise<{ correspondents: Array<{ id: number; name: string }> }>,
         endpoints.actionQueue.metadataDocumentTypes() as Promise<{ document_types: Array<{ id: number; name: string }> }>,
       ]);
       setCustomRunMetadata({
+        tags: tags.tags ?? [],
         saved_views: views.saved_views ?? [],
         correspondents: correspondents.correspondents ?? [],
         document_types: docTypes.document_types ?? [],
@@ -1250,12 +1261,18 @@ export default function ActionQueue() {
               {customRunMode === 'custom' && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
                   <div className="form-group">
-                    <label htmlFor="cr-tag-override">Tags override</label>
-                    <input
-                      id="cr-tag-override"
-                      placeholder="e.g. Inbox,Bills"
-                      value={customRunFilters.tag_override}
-                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, tag_override: e.target.value }))}
+                    <label>Tags override</label>
+                    <MetadataMultiTypeahead
+                      ariaLabel="Tags override"
+                      options={customRunMetadata.tags.map((tag) => ({ value: tag.name, label: tag.name }))}
+                      values={customRunFilters.tag_override
+                        .split(',')
+                        .map((tag) => tag.trim())
+                        .filter(Boolean)}
+                      onChange={(tags) => setCustomRunFilters((prev) => ({
+                        ...prev,
+                        tag_override: tags.join(','),
+                      }))}
                     />
                   </div>
                   <div className="form-group">
@@ -1272,30 +1289,33 @@ export default function ActionQueue() {
                     </select>
                   </div>
                   <div className="form-group">
-                    <label htmlFor="cr-correspondent">Correspondent</label>
-                    <select
-                      id="cr-correspondent"
+                    <label>Correspondent</label>
+                    <MetadataTypeahead
+                      ariaLabel="Custom run correspondent"
+                      options={customRunMetadata.correspondents.map((correspondent) => ({
+                        value: correspondent.name,
+                        label: correspondent.name,
+                      }))}
                       value={customRunFilters.correspondent}
-                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, correspondent: e.target.value }))}
-                    >
-                      <option value="">Any</option>
-                      {customRunMetadata.correspondents.map((c) => (
-                        <option key={c.id} value={c.name}>{c.name}</option>
-                      ))}
-                    </select>
+                      placeholder="Any correspondent"
+                      onChange={(correspondent) => setCustomRunFilters((prev) => ({ ...prev, correspondent }))}
+                    />
                   </div>
                   <div className="form-group">
-                    <label htmlFor="cr-doc-type">Document type</label>
-                    <select
-                      id="cr-doc-type"
+                    <label>Document type</label>
+                    <MetadataTypeahead
+                      ariaLabel="Custom run document type"
+                      options={customRunMetadata.document_types.map((documentType) => ({
+                        value: documentType.name,
+                        label: documentType.name,
+                      }))}
                       value={customRunFilters.document_type}
-                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, document_type: e.target.value }))}
-                    >
-                      <option value="">Any</option>
-                      {customRunMetadata.document_types.map((t) => (
-                        <option key={t.id} value={t.name}>{t.name}</option>
-                      ))}
-                    </select>
+                      placeholder="Any document type"
+                      onChange={(documentType) => setCustomRunFilters((prev) => ({
+                        ...prev,
+                        document_type: documentType,
+                      }))}
+                    />
                   </div>
                   <div className="form-group">
                     <label htmlFor="cr-created-after">Created after</label>
@@ -1685,6 +1705,7 @@ export default function ActionQueue() {
                       } else {
                         setEditDraft(buildEditDraft(selectedAction));
                         setIsEditingDetails(true);
+                        void loadCustomRunMetadata();
                       }
                     }}
                     disabled={busyKey !== null}
@@ -1761,10 +1782,14 @@ export default function ActionQueue() {
                     </label>
                     <label className="aq-edit-field">
                       <span>Correspondent</span>
-                      <input
-                        aria-label="Correspondent"
+                      <MetadataTypeahead
+                        ariaLabel="Correspondent"
+                        options={correspondentOptions}
                         value={editDraft.correspondent}
-                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, correspondent: e.target.value } : prev))}
+                        placeholder="Search correspondents…"
+                        onChange={(correspondent) => setEditDraft((prev) => (
+                          prev ? { ...prev, correspondent } : prev
+                        ))}
                       />
                     </label>
                     <div className="aq-edit-actions">

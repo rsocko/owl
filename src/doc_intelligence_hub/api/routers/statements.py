@@ -32,11 +32,16 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     DocumentExpectation,
     DocumentExpectationCreate,
     DocumentExpectationUpdate,
+    ExpectationPolicyPreview,
     ExternalCandidatePollRequest,
     ExternalCandidateReview,
     ExternalCandidateSnapshotResult,
     ExternalDocumentCandidate,
     LegacyOverrideReviewItem,
+    PolicyApplyRequest,
+    PolicyApplyResponse,
+    PolicyOperationResult,
+    PolicyUndoRequest,
     RelinkProfileRequest,
     paperless_deployment_identity,
 )
@@ -54,6 +59,10 @@ from doc_intelligence_hub.modules.statements.models import (
     SplitSeriesRequest,
 )
 from doc_intelligence_hub.modules.statements.paperless import build_document_records
+from doc_intelligence_hub.modules.statements.policy_corrections import (
+    apply_policy_operations,
+    undo_policy_operation,
+)
 from doc_intelligence_hub.modules.statements.service import run_discovery, run_recommendations
 
 router = APIRouter(tags=["statement-tracker"])
@@ -487,6 +496,100 @@ async def update_document_expectation(
             _raise_policy_error(exc)
     finally:
         service.close()
+
+
+@router.post(
+    "/document-expectations/{expectation_id}/policy-preview",
+    response_model=ExpectationPolicyPreview,
+    summary="Preview confirmed expectation policy violations",
+)
+async def preview_document_expectation_policy(
+    request: Request, expectation_id: str
+) -> ExpectationPolicyPreview:
+    client = make_paperless_client(request, timeout=60.0)
+    service = _get_policy_service(request)
+    try:
+        correspondents, tags, document_types = await client.fetch_all_metadata()
+        raw_documents = await client.list_documents()
+        documents = build_document_records(raw_documents, correspondents, tags, document_types)
+        try:
+            return service.preview_expectation_policy(
+                expectation_id,
+                documents,
+                tag_names=tags,
+                document_type_names=document_types,
+                preview_signing_key=client.token,
+            )
+        except (KeyError, ValueError) as exc:
+            _raise_policy_error(exc)
+    finally:
+        service.close()
+        await client.aclose()
+
+
+@router.post(
+    "/document-expectations/{expectation_id}/policy-apply",
+    response_model=PolicyApplyResponse,
+    summary="Apply selected expectation policy preview operations",
+)
+async def apply_document_expectation_policy(
+    request: Request,
+    expectation_id: str,
+    body: PolicyApplyRequest,
+) -> PolicyApplyResponse:
+    client = make_paperless_client(request, timeout=60.0)
+    service = _get_policy_service(request)
+    try:
+        expectation = service.get_expectation(expectation_id)
+        if expectation is None:
+            raise_api_error(
+                404,
+                "document_expectation_not_found",
+                "Document expectation not found.",
+            )
+        if expectation.status != "confirmed":
+            raise_api_error(
+                409,
+                "expectation_not_confirmed",
+                "Only confirmed expectations can apply policy corrections.",
+            )
+        _, tags, document_types = await client.fetch_all_metadata()
+        return await apply_policy_operations(
+            expectation_id=expectation_id,
+            request=body,
+            client=client,
+            tag_names=tags,
+            document_type_names=document_types,
+            preview_signing_key=client.token,
+        )
+    finally:
+        service.close()
+        await client.aclose()
+
+
+@router.post(
+    "/policy-corrections/{event_id}/undo",
+    response_model=PolicyOperationResult,
+    summary="Undo one audited expectation policy correction",
+)
+async def undo_document_expectation_policy(
+    request: Request,
+    event_id: str,
+    body: PolicyUndoRequest,
+) -> PolicyOperationResult:
+    client = make_paperless_client(request, timeout=60.0)
+    try:
+        _, tags, document_types = await client.fetch_all_metadata()
+        return await undo_policy_operation(
+            event_id=event_id,
+            request=body,
+            client=client,
+            tag_names=tags,
+            document_type_names=document_types,
+            preview_signing_key=client.token,
+        )
+    finally:
+        await client.aclose()
 
 
 @router.get(

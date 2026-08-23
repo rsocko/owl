@@ -94,6 +94,12 @@ export const endpoints = {
     externalCandidates: () => api.get('/api/statements/external-candidates'),
     reviewExternalCandidate: (id: string, body: unknown) =>
       api.put(`/api/statements/external-candidates/${id}/review`, body),
+    previewDocumentExpectationPolicy: (id: string) =>
+      api.post(`/api/statements/document-expectations/${id}/policy-preview`),
+    applyDocumentExpectationPolicy: (id: string, body: unknown) =>
+      api.post(`/api/statements/document-expectations/${id}/policy-apply`, body),
+    undoDocumentExpectationPolicy: (eventId: string, body: unknown) =>
+      api.post(`/api/statements/policy-corrections/${eventId}/undo`, body),
     acquisitionSources: () => api.get('/api/statements/acquisition-sources'),
     createAcquisitionSource: (body: unknown) => api.post('/api/statements/acquisition-sources', body),
     paperlessUrl: () => api.get('/api/statements/config/paperless-url'),
