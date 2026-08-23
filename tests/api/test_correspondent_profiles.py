@@ -12,9 +12,7 @@ from doc_intelligence_hub.modules.statements.policy_evaluation import policy_ope
 from doc_intelligence_hub.modules.triage.database import list_correction_events
 
 
-def _configure_statement_database(
-    app, tmp_path, *, tyrion_base_url: str | None = None
-) -> str:
+def _configure_statement_database(app, tmp_path, *, tyrion_base_url: str | None = None) -> str:
     database_path = str(tmp_path / "correspondent-policy.db")
     config_path = tmp_path / "statements.yaml"
     lines = [
