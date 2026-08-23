@@ -157,6 +157,15 @@
   font-weight: 650;
 }
 
+.correspondent-metadata-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
 .correspondent-form-grid input,
 .correspondent-form-grid select,
 .correspondent-form-grid textarea,

@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { api, endpoints } from '../lib/api';
+import { MetadataMultiTypeahead } from '../components/MetadataTypeahead';
 import { Badge, Button, Card, ErrorState, PageHeader, SkeletonLoader, StatCard, StatGrid, Toast } from '../components/ui';
 import { getToastDuration } from '../lib/toast';
 import { CronScheduleEditor } from '../components/CronScheduleEditor';
@@ -182,7 +183,6 @@ export default function Settings() {
   });
   const [aqAvailableTags, setAqAvailableTags] = useState<Array<{ id: number; name: string }>>([]);
   const [aqSavedViews, setAqSavedViews] = useState<Array<{ id: number; name: string }>>([]);
-  const [aqNewTag, setAqNewTag] = useState('');
 
   const [connection, setConnection] = useState<ConnectionDraft>({
     paperlessUrl: '',
@@ -290,21 +290,6 @@ export default function Settings() {
     } finally {
       setAqSourceSaving(false);
     }
-  };
-
-  const handleAddAqTag = () => {
-    const tag = aqNewTag.trim();
-    if (tag && !aqSource.monitor_tags.includes(tag)) {
-      setAqSource((prev) => ({ ...prev, monitor_tags: [...prev.monitor_tags, tag] }));
-    }
-    setAqNewTag('');
-  };
-
-  const handleRemoveAqTag = (tag: string) => {
-    setAqSource((prev) => ({
-      ...prev,
-      monitor_tags: prev.monitor_tags.filter((t) => t !== tag),
-    }));
   };
 
   const modelOptions = useMemo(() => {
@@ -733,52 +718,16 @@ export default function Settings() {
                   {aqSource.scan_mode === 'tags' && (
                     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 12, marginBottom: 16, background: 'var(--bg)' }}>
                       <div style={{ fontWeight: 600, marginBottom: 8 }}>Monitor tags</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-                        {aqSource.monitor_tags.map((tag) => (
-                          <span
-                            key={tag}
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              background: 'var(--surface-hover)',
-                              border: '1px solid var(--border)',
-                              borderRadius: 'var(--radius-sm)',
-                              padding: '2px 8px',
-                              fontSize: '0.82rem',
-                            }}
-                          >
-                            {tag}
-                            <button
-                              onClick={() => handleRemoveAqTag(tag)}
-                              disabled={aqSource.monitor_tags.length === 1}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '1rem', color: 'var(--text-muted)' }}
-                              aria-label={`Remove tag ${tag}`}
-                              title={aqSource.monitor_tags.length === 1 ? 'At least one intake tag is required' : undefined}
-                            >
-                              ×
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <select
-                          value={aqNewTag}
-                          onChange={(e) => setAqNewTag(e.target.value)}
-                          style={{ flex: 1 }}
-                        >
-                          <option value="">Select a tag…</option>
-                          {aqAvailableTags
-                            .filter((t) => !aqSource.monitor_tags.includes(t.name))
-                            .map((t) => (
-                              <option key={t.id} value={t.name}>{t.name}</option>
-                            ))
-                          }
-                        </select>
-                        <Button onClick={handleAddAqTag} disabled={!aqNewTag.trim()}>
-                          Add
-                        </Button>
-                      </div>
+                      <MetadataMultiTypeahead
+                        ariaLabel="Monitor tags"
+                        options={aqAvailableTags.map((tag) => ({ value: tag.name, label: tag.name }))}
+                        values={aqSource.monitor_tags}
+                        minimumSelections={1}
+                        onChange={(monitorTags) => setAqSource((current) => ({
+                          ...current,
+                          monitor_tags: monitorTags,
+                        }))}
+                      />
                     </div>
                   )}
 

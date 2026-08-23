@@ -45,7 +45,12 @@ vi.mock('../lib/api', () => ({
         remove_source_tag_on_resolve: true,
       }),
       updateSettings: updateSettingsMock,
-      metadataTags: vi.fn().mockResolvedValue({ tags: [{ id: 1, name: 'Inbox' }] }),
+      metadataTags: vi.fn().mockResolvedValue({
+        tags: [
+          { id: 1, name: 'Inbox' },
+          { id: 2, name: 'Finance' },
+        ],
+      }),
       metadataSavedViews: vi.fn().mockResolvedValue({ saved_views: [] }),
     },
   },
@@ -76,5 +81,17 @@ describe('Action Queue settings', () => {
         }),
       );
     });
+  });
+
+  it('searches, adds, and removes source tags by name', async () => {
+    render(<Settings />);
+
+    const typeahead = await screen.findByRole('combobox', { name: 'Monitor tags' });
+    fireEvent.change(typeahead, { target: { value: 'fin' } });
+    fireEvent.click(screen.getByRole('option', { name: 'Finance' }));
+    expect(screen.getByText('Finance')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Finance' }));
+    expect(screen.queryByText('Finance')).not.toBeInTheDocument();
   });
 });
