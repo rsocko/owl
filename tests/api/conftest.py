@@ -69,8 +69,8 @@ def _make_mock_paperless() -> AsyncMock:
     mock.token = "test-token"
     mock.health_check.return_value = {"status": "ok", "documents": 42}
     mock.list_tags.return_value = [
-        {"id": 1, "name": "Inbox"},
-        {"id": 2, "name": "Medical"},
+        {"id": 1, "name": "Inbox", "colour": "#1f6feb"},
+        {"id": 2, "name": "Medical", "colour": "#2da44e"},
     ]
     mock.list_correspondents.return_value = [
         {"id": 1, "name": "UnitedHealth"},
