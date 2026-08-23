@@ -282,8 +282,7 @@ def test_correspondent_analysis_can_extract_missing_identifiers_without_writing(
     assert client.post("/api/statements/correspondent-profiles/sync").status_code == 200
 
     response = client.post(
-        "/api/statements/correspondent-profiles/42/analyze"
-        "?extract_missing_account_identifiers=true"
+        "/api/statements/correspondent-profiles/42/analyze?extract_missing_account_identifiers=true"
     )
 
     assert response.status_code == 200

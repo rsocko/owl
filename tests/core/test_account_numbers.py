@@ -126,9 +126,7 @@ def test_normalizes_only_masked_account_identifiers() -> None:
 
 
 def test_masks_full_extracted_identifier_to_short_suffix() -> None:
-    matches = [
-        {"pattern": "account_number_full", "value": "ABC123456", "normalized": "ABC123456"}
-    ]
+    matches = [{"pattern": "account_number_full", "value": "ABC123456", "normalized": "ABC123456"}]
 
     assert pick_masked_account_identifier(matches) == "ending 3456"
 

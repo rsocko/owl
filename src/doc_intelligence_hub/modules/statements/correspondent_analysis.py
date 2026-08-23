@@ -145,12 +145,10 @@ def analyze_correspondent_policy(
         account_identifiers=AccountIdentifierAnalysis(
             extraction_requested=account_identifier_extraction_requested,
             stored_document_count=sum(
-                document.account_identifier_source == "stored"
-                for document in profile_documents
+                document.account_identifier_source == "stored" for document in profile_documents
             ),
             extracted_document_count=sum(
-                document.account_identifier_source == "extracted"
-                for document in profile_documents
+                document.account_identifier_source == "extracted" for document in profile_documents
             ),
             unresolved_document_count=sum(
                 document.account_identifier is None for document in profile_documents
@@ -428,9 +426,9 @@ def _suggest_title_convention(
             examples.append(
                 TitleRenderExample(
                     document_id=document.id,
-                    before=_redact_account_identifiers(
-                        document.title, document.account_identifier
-                    )[:128],
+                    before=_redact_account_identifiers(document.title, document.account_identifier)[
+                        :128
+                    ],
                     after=rendered,
                     missing_fields=missing_fields,
                 )

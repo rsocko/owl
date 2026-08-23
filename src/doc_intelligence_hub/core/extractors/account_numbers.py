@@ -182,7 +182,9 @@ def pick_masked_account_identifier(matches: list[dict[str, str]]) -> str | None:
         "claim_number",
     )
     by_pattern = {pattern: index for index, pattern in enumerate(preferred)}
-    ordered = sorted(matches, key=lambda match: by_pattern.get(match.get("pattern", ""), len(preferred)))
+    ordered = sorted(
+        matches, key=lambda match: by_pattern.get(match.get("pattern", ""), len(preferred))
+    )
     for match in ordered:
         normalized = re.sub(r"[^A-Za-z0-9]", "", match.get("normalized", "")).upper()
         if len(normalized) < 2:
