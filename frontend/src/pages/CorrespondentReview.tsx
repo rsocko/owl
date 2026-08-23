@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { MetadataMultiTypeahead, MetadataTypeahead, type MetadataOption } from '../components/MetadataTypeahead';
 import { Badge, Button, Card, ConfidenceBadge, EmptyState, ErrorState, PageHeader, SkeletonLoader, Toast } from '../components/ui';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
@@ -125,9 +126,9 @@ interface SuggestionDraft {
   seriesDiscriminator: string;
   titleTemplate: string;
   acquisitionSourceId: string;
-  allOf: string;
-  anyOf: string;
-  noneOf: string;
+  allOf: number[];
+  anyOf: number[];
+  noneOf: number[];
   documentTypeId: string;
 }
 
@@ -173,19 +174,6 @@ function profilePriority(
     return { rank: 3, label: 'Unmatched candidates', tone: 'info' };
   }
   return { rank: 4, label: 'Reviewed', tone: 'ok' };
-}
-
-function parseTagIds(value: string): number[] {
-  return Array.from(new Set(
-    value
-      .split(',')
-      .map((part) => Number(part.trim()))
-      .filter((tagId) => Number.isInteger(tagId) && tagId > 0),
-  )).sort((left, right) => left - right);
-}
-
-function isValidTagList(value: string): boolean {
-  return value.trim() === '' || value.split(',').every((part) => /^[1-9]\d*$/.test(part.trim()));
 }
 
 function escapeRegex(value: string): string {
@@ -235,7 +223,7 @@ function buildExpectationBody(
     : null;
   return {
     kind: suggestion.kind,
-    document_type_id: suggestion.metadata.policy.required_document_type_id ?? null,
+    document_type_id: draft.documentTypeId ? Number(draft.documentTypeId) : null,
     statement_series_id: suggestion.statement_series_id ?? null,
     series_discriminator: draft.seriesDiscriminator || null,
     expectation_mode: draft.mode,
@@ -249,9 +237,9 @@ function buildExpectationBody(
       ? { ...suggestion.title.convention, template: draft.titleTemplate, example: titleExample }
       : null,
     metadata_policy: {
-      all_of: parseTagIds(draft.allOf),
-      any_of: parseTagIds(draft.anyOf),
-      none_of: parseTagIds(draft.noneOf),
+      all_of: draft.allOf,
+      any_of: draft.anyOf,
+      none_of: draft.noneOf,
       required_document_type_id: draft.documentTypeId ? Number(draft.documentTypeId) : null,
     },
     acquisition_source_id: draft.acquisitionSourceId || null,
@@ -261,12 +249,16 @@ function buildExpectationBody(
 function SuggestionCard({
   suggestion,
   acquisitionSources,
+  tags,
+  documentTypes,
   paperlessUrl,
   busy,
   onDecision,
 }: {
   suggestion: Suggestion;
   acquisitionSources: AcquisitionSource[];
+  tags: MetadataOption[];
+  documentTypes: MetadataOption[];
   paperlessUrl: string;
   busy: boolean;
   onDecision: (suggestion: Suggestion, draft: SuggestionDraft, status: 'confirmed' | 'dismissed') => void;
@@ -276,25 +268,43 @@ function SuggestionCard({
     seriesDiscriminator: redactSensitiveNumbers(suggestion.series_discriminator),
     titleTemplate: suggestion.title.convention?.template ?? '',
     acquisitionSourceId: '',
-    allOf: suggestion.metadata.policy.all_of.join(', '),
-    anyOf: suggestion.metadata.policy.any_of.join(', '),
-    noneOf: suggestion.metadata.policy.none_of.join(', '),
+    allOf: suggestion.metadata.policy.all_of,
+    anyOf: suggestion.metadata.policy.any_of,
+    noneOf: suggestion.metadata.policy.none_of,
     documentTypeId: suggestion.metadata.policy.required_document_type_id?.toString() ?? '',
   });
+  const tagOptions = useMemo(() => {
+    const byId = new Map(tags.map((tag) => [tag.value, tag]));
+    Object.entries(suggestion.metadata.tag_names).forEach(([id, name]) => {
+      byId.set(id, { value: id, label: redactSensitiveNumbers(name) });
+    });
+    return [...byId.values()].sort((left, right) => left.label.localeCompare(right.label));
+  }, [suggestion.metadata.tag_names, tags]);
+  const documentTypeOptions = useMemo(() => {
+    const byId = new Map(documentTypes.map((documentType) => [documentType.value, documentType]));
+    const requiredId = suggestion.metadata.policy.required_document_type_id;
+    if (requiredId && suggestion.metadata.required_document_type_name) {
+      byId.set(String(requiredId), {
+        value: String(requiredId),
+        label: suggestion.metadata.required_document_type_name,
+      });
+    }
+    return [...byId.values()].sort((left, right) => left.label.localeCompare(right.label));
+  }, [
+    documentTypes,
+    suggestion.metadata.policy.required_document_type_id,
+    suggestion.metadata.required_document_type_name,
+  ]);
   const needsSeries = suggestion.kind === 'statement' && !suggestion.statement_series_id;
   const cadenceMissing =
     (draft.mode === 'recurring' || draft.mode === 'periodic') && !suggestion.cadence;
-  const tagListsValid = [draft.allOf, draft.anyOf, draft.noneOf].every(isValidTagList);
   const titlePreviews = suggestion.title.convention
     ? suggestion.title.examples.map((example) =>
       renderDraftTitle(suggestion.title.convention!, draft.titleTemplate, example.after))
     : [];
   const titleValid = !suggestion.title.convention
     || (titlePreviews.length > 0 && titlePreviews.every((preview) => preview.rendered));
-  const valid = Boolean(draft.mode) && !needsSeries && !cadenceMissing && tagListsValid && titleValid;
-  const formatTags = (tagIds: number[]) =>
-    tagIds.map((tagId) =>
-      redactSensitiveNumbers(suggestion.metadata.tag_names[String(tagId)] ?? `Tag #${tagId}`)).join(', ') || 'None';
+  const valid = Boolean(draft.mode) && !needsSeries && !cadenceMissing && titleValid;
 
   return (
     <article className="correspondent-suggestion">
@@ -370,42 +380,42 @@ function SuggestionCard({
             onChange={(event) => setDraft({ ...draft, titleTemplate: event.target.value })}
           />
         </label>
-        <label>
-          <span>All required tag IDs</span>
-          <input
-            aria-label={`All required tags for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
-            value={draft.allOf}
-            onChange={(event) => setDraft({ ...draft, allOf: event.target.value })}
+        <div className="correspondent-metadata-picker">
+          <span>All required tags</span>
+          <MetadataMultiTypeahead
+          ariaLabel="All required tags"
+          values={draft.allOf.map(String)}
+          options={tagOptions}
+          onChange={(allOf) => setDraft({ ...draft, allOf: allOf.map(Number) })}
           />
-          <small>{formatTags(parseTagIds(draft.allOf))}</small>
-        </label>
-        <label>
-          <span>Any required tag IDs</span>
-          <input
-            aria-label={`Any required tags for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
-            value={draft.anyOf}
-            onChange={(event) => setDraft({ ...draft, anyOf: event.target.value })}
+        </div>
+        <div className="correspondent-metadata-picker">
+          <span>Any required tags</span>
+          <MetadataMultiTypeahead
+          ariaLabel="Any required tags"
+          values={draft.anyOf.map(String)}
+          options={tagOptions}
+          onChange={(anyOf) => setDraft({ ...draft, anyOf: anyOf.map(Number) })}
           />
-          <small>{formatTags(parseTagIds(draft.anyOf))}</small>
-        </label>
-        <label>
-          <span>Forbidden tag IDs</span>
-          <input
-            aria-label={`Forbidden tags for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
-            value={draft.noneOf}
-            onChange={(event) => setDraft({ ...draft, noneOf: event.target.value })}
+        </div>
+        <div className="correspondent-metadata-picker">
+          <span>Forbidden tags</span>
+          <MetadataMultiTypeahead
+          ariaLabel="Forbidden tags"
+          values={draft.noneOf.map(String)}
+          options={tagOptions}
+          onChange={(noneOf) => setDraft({ ...draft, noneOf: noneOf.map(Number) })}
           />
-          <small>{formatTags(parseTagIds(draft.noneOf))}</small>
-        </label>
+        </div>
         <label>
-          <span>Required document type ID</span>
-          <input
-            type="number"
-            min="1"
+          <span>Required document type</span>
+          <MetadataTypeahead
+            ariaLabel="Required document type"
             value={draft.documentTypeId}
-            onChange={(event) => setDraft({ ...draft, documentTypeId: event.target.value })}
+            options={documentTypeOptions}
+            placeholder="Search document types…"
+            onChange={(documentTypeId) => setDraft({ ...draft, documentTypeId })}
           />
-          <small>{suggestion.metadata.required_document_type_name ?? 'No required type'}</small>
         </label>
       </div>
 
@@ -416,9 +426,6 @@ function SuggestionCard({
       ) : null}
       {cadenceMissing ? (
         <div className="correspondent-callout warning">Recurring and periodic expectations require established cadence evidence.</div>
-      ) : null}
-      {!tagListsValid ? (
-        <div className="correspondent-callout warning">Tag rules must contain only positive Paperless tag IDs separated by commas.</div>
       ) : null}
       {!titleValid ? (
         <div className="correspondent-callout warning">The title template must use available fields and render to 128 characters or fewer.</div>
@@ -477,6 +484,8 @@ export default function CorrespondentReview() {
   const [expectationsByProfile, setExpectationsByProfile] = useState<Record<number, DocumentExpectation[]>>({});
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [acquisitionSources, setAcquisitionSources] = useState<AcquisitionSource[]>([]);
+  const [tags, setTags] = useState<MetadataOption[]>([]);
+  const [documentTypes, setDocumentTypes] = useState<MetadataOption[]>([]);
   const [paperlessUrl, setPaperlessUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -502,10 +511,12 @@ export default function CorrespondentReview() {
     setLoading(true);
     setError(null);
     try {
-      const [profilePayload, sourcePayload, paperlessPayload] = await Promise.all([
+      const [profilePayload, sourcePayload, paperlessPayload, tagsPayload, documentTypesPayload] = await Promise.all([
         endpoints.statements.correspondentProfiles() as Promise<CorrespondentProfile[]>,
         endpoints.statements.acquisitionSources() as Promise<AcquisitionSource[]>,
         endpoints.statements.paperlessUrl() as Promise<{ paperless_url?: string | null }>,
+        endpoints.actionQueue.metadataTags() as Promise<{ tags?: Array<{ id: number; name: string }> }>,
+        endpoints.actionQueue.metadataDocumentTypes() as Promise<{ document_types?: Array<{ id: number; name: string }> }>,
       ]);
       const expectationPairs = await Promise.all(
         profilePayload.map(async (profile) => [
@@ -515,6 +526,11 @@ export default function CorrespondentReview() {
       );
       setProfiles(profilePayload);
       setAcquisitionSources(sourcePayload);
+      setTags((tagsPayload.tags ?? []).map((tag) => ({ value: String(tag.id), label: tag.name })));
+      setDocumentTypes((documentTypesPayload.document_types ?? []).map((documentType) => ({
+        value: String(documentType.id),
+        label: documentType.name,
+      })));
       setPaperlessUrl((paperlessPayload.paperless_url ?? '').replace(/\/$/, ''));
       setExpectationsByProfile(Object.fromEntries(expectationPairs));
     } catch (requestError) {
@@ -865,6 +881,8 @@ export default function CorrespondentReview() {
                             key={suggestion.suggestion_key}
                             suggestion={suggestion}
                             acquisitionSources={acquisitionSources}
+                            tags={tags}
+                            documentTypes={documentTypes}
                             paperlessUrl={paperlessUrl}
                             busy={busy}
                             onDecision={(candidate, draft, status) => void decideSuggestion(candidate, draft, status)}
