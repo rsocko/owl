@@ -422,7 +422,6 @@ def test_saved_external_connection_drives_candidate_sync(client, app, tmp_path) 
         "/api/statements/external-candidates/connection",
         json={
             "base_url": "https://tyrion-ui.test",
-            "connector_ref": "saved-connector",
             "api_token": "saved-secret",
             "verify_ssl": True,
             "timeout_seconds": 45,
@@ -433,7 +432,6 @@ def test_saved_external_connection_drives_candidate_sync(client, app, tmp_path) 
         "configured": True,
         "source": "saved",
         "base_url": "https://tyrion-ui.test",
-        "connector_ref": "saved-connector",
         "token_configured": True,
         "verify_ssl": True,
         "timeout_seconds": 45,
@@ -468,7 +466,7 @@ def test_saved_external_connection_drives_candidate_sync(client, app, tmp_path) 
         verify_ssl=True,
         timeout_seconds=45,
     )
-    source_client.fetch_latest.assert_awaited_once_with("saved-connector")
+    source_client.fetch_latest.assert_awaited_once_with()
 
     connection = client.get("/api/statements/external-candidates/connection")
     assert connection.status_code == 200
@@ -492,7 +490,6 @@ def test_external_connection_does_not_send_saved_token_to_new_origin(client, app
             "/api/statements/external-candidates/connection",
             json={
                 "base_url": "https://tyrion-one.test",
-                "connector_ref": "owl",
                 "api_token": "origin-one-secret",
             },
         ).status_code
@@ -503,7 +500,6 @@ def test_external_connection_does_not_send_saved_token_to_new_origin(client, app
         "/api/statements/external-candidates/connection",
         json={
             "base_url": "https://tyrion-two.test",
-            "connector_ref": "owl",
         },
     )
 
@@ -518,7 +514,6 @@ def test_external_connection_rejects_token_over_plain_http(client, app, tmp_path
         "/api/statements/external-candidates/connection",
         json={
             "base_url": "http://tyrion.test",
-            "connector_ref": "owl",
             "api_token": "insecure-secret",
         },
     )

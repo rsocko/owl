@@ -74,7 +74,6 @@ beforeEach(() => {
   updateTyrionMock.mockResolvedValue({
     configured: true,
     base_url: 'https://tyrion.test',
-    connector_ref: 'owl',
     token_configured: true,
     verify_ssl: true,
     timeout_seconds: 30,
@@ -111,9 +110,6 @@ describe('Action Queue settings', () => {
       fireEvent.change(await screen.findByLabelText('Tyrion base URL'), {
         target: { value: 'https://tyrion.test' },
       });
-      fireEvent.change(screen.getByLabelText('Tyrion connector reference'), {
-        target: { value: 'owl' },
-      });
       fireEvent.change(screen.getByLabelText('API token'), {
         target: { value: 'secret-token' },
       });
@@ -122,7 +118,6 @@ describe('Action Queue settings', () => {
       await waitFor(() => {
         expect(endpoints.statements.updateExternalCandidateConnection).toHaveBeenCalledWith({
           base_url: 'https://tyrion.test',
-          connector_ref: 'owl',
           api_token: 'secret-token',
           verify_ssl: true,
           timeout_seconds: 30,

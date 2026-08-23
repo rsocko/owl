@@ -142,11 +142,11 @@ async def test_client_pulls_latest_projection_without_generation_input() -> None
         transport=httpx.MockTransport(handler),
     )
     try:
-        snapshot = await client.fetch_latest("opaque connector")
+        snapshot = await client.fetch_latest()
     finally:
         await client.close()
 
     assert snapshot.source_generation == "generation-2"
     assert seen_request is not None
     assert seen_request.url.path == "/api/connector/v1/document-expectation-signals"
-    assert seen_request.url.params["connectorRef"] == "opaque connector"
+    assert "connectorRef" not in seen_request.url.params

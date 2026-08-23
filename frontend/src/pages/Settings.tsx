@@ -76,7 +76,6 @@ type TyrionConnection = {
   configured: boolean;
   source?: 'saved' | 'configuration' | null;
   base_url?: string | null;
-  connector_ref?: string | null;
   token_configured: boolean;
   verify_ssl: boolean;
   timeout_seconds: number;
@@ -87,7 +86,6 @@ type TyrionConnection = {
 
 type TyrionDraft = {
   baseUrl: string;
-  connectorRef: string;
   apiToken: string;
   verifySsl: boolean;
   timeoutSeconds: number;
@@ -220,7 +218,6 @@ export default function Settings() {
   });
   const [tyrion, setTyrion] = useState<TyrionDraft>({
     baseUrl: '',
-    connectorRef: '',
     apiToken: '',
     verifySsl: true,
     timeoutSeconds: 30,
@@ -273,7 +270,6 @@ export default function Settings() {
       setTyrionConnection(tyrionResponse);
       setTyrion({
         baseUrl: tyrionResponse.base_url ?? '',
-        connectorRef: tyrionResponse.connector_ref ?? '',
         apiToken: '',
         verifySsl: tyrionResponse.verify_ssl,
         timeoutSeconds: tyrionResponse.timeout_seconds,
@@ -386,7 +382,6 @@ export default function Settings() {
     try {
       const response = await endpoints.statements.updateExternalCandidateConnection({
         base_url: tyrion.baseUrl,
-        connector_ref: tyrion.connectorRef,
         ...(tyrion.apiToken ? { api_token: tyrion.apiToken } : {}),
         verify_ssl: tyrion.verifySsl,
         timeout_seconds: tyrion.timeoutSeconds,
@@ -413,7 +408,6 @@ export default function Settings() {
       });
       setTyrion({
         baseUrl: '',
-        connectorRef: '',
         apiToken: '',
         verifySsl: true,
         timeoutSeconds: 30,
@@ -642,18 +636,6 @@ export default function Settings() {
                   placeholder="https://tyrion.example.com"
                 />
               </div>
-              <div className="form-group">
-                <label htmlFor="tyrion-connector-ref">Tyrion connector reference</label>
-                <input
-                  id="tyrion-connector-ref"
-                  value={tyrion.connectorRef}
-                  onChange={(event) => setTyrion((current) => ({ ...current, connectorRef: event.target.value }))}
-                  placeholder="Connector reference from Tyrion"
-                />
-                <div className="text-muted" style={{ fontSize: '0.82rem', marginTop: 6 }}>
-                  This stable reference identifies Owl's connection. It is saved once and used automatically during sync.
-                </div>
-              </div>
               <div className="form-row">
                 <div className="form-group">
                   <label htmlFor="tyrion-token">API token</label>
@@ -707,7 +689,6 @@ export default function Settings() {
                   disabled={
                     tyrionSaving
                     || !tyrion.baseUrl.trim()
-                    || !tyrion.connectorRef.trim()
                     || (
                       tyrionConnection.source === 'configuration'
                       && tyrionConnection.token_configured
