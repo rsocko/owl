@@ -19,6 +19,8 @@ import OrphansDupes from './pages/OrphansDupes';
 import Settings from './pages/Settings';
 import NotFound from './pages/NotFound';
 import DocumentViews from './pages/DocumentViews';
+import Correspondents from './pages/Correspondents';
+import CorrespondentReview from './pages/CorrespondentReview';
 
 /** Redirect legacy /eob/matches/:matchId to the unified workspace. */
 function EobMatchRedirect() {
@@ -40,6 +42,8 @@ function App() {
             <Route path="/corrections" element={<CorrectionHistory />} />
             <Route path="/statements" element={<Statements />} />
             <Route path="/statements/:seriesId" element={<StatementSeriesDetail />} />
+            <Route path="/correspondents" element={<Correspondents />} />
+            <Route path="/correspondents/:correspondentId" element={<CorrespondentReview />} />
             <Route path="/eob" element={<EobWorkspace />} />
             {/* Legacy routes redirect into the unified workspace */}
             <Route path="/eob/matches/:matchId" element={<EobMatchRedirect />} />

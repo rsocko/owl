@@ -268,6 +268,17 @@ class CorrespondentProfile(PolicyModel):
     updated_at: str | None = None
 
 
+class CorrespondentInventoryItem(PolicyModel):
+    profile: CorrespondentProfile
+    expectation_count: int = Field(ge=0)
+    suggested_expectation_count: int = Field(ge=0)
+    statement_series_count: int = Field(ge=0)
+    analysis_stale: bool
+    priority_reasons: list[str] = Field(default_factory=list)
+    metadata_inconsistency_count: int | None = Field(default=None, ge=0)
+    unmatched_external_candidate_count: int | None = Field(default=None, ge=0)
+
+
 class DocumentExpectationBase(PolicyModel):
     kind: DocumentKind
     document_type_id: int | None = Field(default=None, gt=0)
@@ -307,6 +318,7 @@ class DocumentExpectationCreate(DocumentExpectationBase):
 
 class DocumentExpectationUpdate(PolicyModel):
     document_type_id: int | None = Field(default=None, gt=0)
+    statement_series_id: str | None = Field(default=None, min_length=1, max_length=200)
     series_discriminator: str | None = Field(default=None, max_length=200)
     expectation_mode: ExpectationMode | None = None
     status: ExpectationStatus | None = None
@@ -336,6 +348,13 @@ class CorrespondentSyncResult(PolicyModel):
 
 class RelinkProfileRequest(PolicyModel):
     correspondent_id: int = Field(gt=0)
+
+
+class SuggestionDispositionRequest(PolicyModel):
+    statement_series_id: str | None = Field(default=None, max_length=200)
+    source_statement_series_id: str | None = Field(default=None, max_length=200)
+    series_discriminator: str | None = Field(default=None, max_length=200)
+    kind: DocumentKind
 
 
 class LegacyOverrideReviewItem(PolicyModel):

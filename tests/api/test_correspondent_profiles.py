@@ -152,6 +152,41 @@ def test_sync_marks_deleted_correspondent_orphaned(client, app, mock_paperless, 
     assert by_id[84]["lifecycle_status"] == "active"
 
 
+def test_inventory_prioritizes_supported_review_states(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    database_path = _configure_statement_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [
+        {"id": 42, "name": "Reviewed Bank"},
+        {"id": 84, "name": "Unreviewed Bank"},
+    ]
+    assert client.post("/api/statements/correspondent-profiles/sync").status_code == 200
+    assert client.patch(
+        "/api/statements/correspondent-profiles/42",
+        json={"review_status": "reviewed", "last_analyzed_at": "2026-08-22T12:00:00Z"},
+    ).status_code == 200
+    database = Database(database_path)
+    try:
+        database.create_series(
+            "unreviewed-series",
+            "Savings",
+            "Unreviewed Bank",
+            correspondent_id=84,
+        )
+    finally:
+        database.close()
+
+    response = client.get("/api/statements/correspondent-profiles/inventory")
+
+    assert response.status_code == 200
+    items = response.json()
+    assert [item["profile"]["correspondent_id"] for item in items] == [84, 42]
+    assert items[0]["statement_series_count"] == 1
+    assert "unreviewed_profile" in items[0]["priority_reasons"]
+    assert items[0]["metadata_inconsistency_count"] is None
+    assert items[0]["unmatched_external_candidate_count"] is None
+
+
 def test_statement_expectation_must_bind_existing_series(
     client, app, mock_paperless, tmp_path
 ) -> None:
@@ -170,6 +205,75 @@ def test_statement_expectation_must_bind_existing_series(
     )
 
     assert response.status_code == 422
+
+
+def test_expectation_can_rebind_to_another_series(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    database_path = _configure_statement_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    client.post("/api/statements/correspondent-profiles/sync")
+    database = Database(database_path)
+    try:
+        database.create_series("checking", "Checking", "Example Bank", correspondent_id=42)
+        database.create_series("savings", "Savings", "Example Bank", correspondent_id=42)
+    finally:
+        database.close()
+    created = client.post(
+        "/api/statements/correspondent-profiles/42/expectations",
+        json={
+            "kind": "statement",
+            "statement_series_id": "checking",
+            "expectation_mode": "irregular",
+            "status": "confirmed",
+            "evidence": {"source": "user"},
+        },
+    ).json()
+
+    response = client.patch(
+        f"/api/statements/document-expectations/{created['id']}",
+        json={"statement_series_id": "savings", "series_discriminator": "Savings"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["statement_series_id"] == "savings"
+    assert response.json()["series_discriminator"] == "Savings"
+
+
+def test_expectation_rebind_conflict_returns_policy_conflict(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    database_path = _configure_statement_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    client.post("/api/statements/correspondent-profiles/sync")
+    database = Database(database_path)
+    try:
+        database.create_series("checking", "Checking", "Example Bank", correspondent_id=42)
+        database.create_series("savings", "Savings", "Example Bank", correspondent_id=42)
+    finally:
+        database.close()
+    payload = {
+        "kind": "statement",
+        "expectation_mode": "irregular",
+        "status": "confirmed",
+        "evidence": {"source": "user"},
+    }
+    first = client.post(
+        "/api/statements/correspondent-profiles/42/expectations",
+        json={**payload, "statement_series_id": "checking"},
+    ).json()
+    client.post(
+        "/api/statements/correspondent-profiles/42/expectations",
+        json={**payload, "statement_series_id": "savings"},
+    )
+
+    response = client.patch(
+        f"/api/statements/document-expectations/{first['id']}",
+        json={"statement_series_id": "savings"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "policy_conflict"
 
 
 def test_correspondent_analysis_is_typed_and_read_only(
@@ -234,6 +338,67 @@ def test_correspondent_analysis_is_typed_and_read_only(
     assert "Private rule name" not in response.text
     assert client.get("/api/statements/correspondent-profiles/42/expectations").json() == []
     mock_paperless.list_documents.assert_awaited_once_with(correspondent_id=42)
+
+
+def test_correspondent_suggestion_dismissal_is_durable(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    database_path = _configure_statement_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    client.post("/api/statements/correspondent-profiles/sync")
+    database = Database(database_path)
+    try:
+        database.create_series(
+            "checking",
+            "Checking",
+            "Example Bank",
+            correspondent_id=42,
+            frequency="monthly",
+        )
+        database.add_documents_to_series(
+            "checking",
+            [
+                {
+                    "document_id": str(index),
+                    "title": f"Statement - 2026-0{index}",
+                    "statement_date": f"2026-0{index}-03",
+                    "period_label": f"2026-0{index}",
+                }
+                for index in range(1, 4)
+            ],
+        )
+    finally:
+        database.close()
+    mock_paperless.list_documents.return_value = [
+        {
+            "id": index,
+            "title": f"Statement - 2026-0{index}",
+            "created": f"2026-0{index}-03",
+            "added": f"2026-0{index}-04T08:00:00Z",
+            "tags": [],
+            "document_type": 1,
+        }
+        for index in range(1, 4)
+    ]
+    mock_paperless.list_mail_rules.return_value = []
+    mock_paperless.fetch_all_metadata.return_value = ({42: "Example Bank"}, {}, {1: "Statement"})
+    first = client.get("/api/statements/correspondent-profiles/42/analysis").json()
+    suggestion = first["suggestions"][0]
+
+    dismissed = client.post(
+        "/api/statements/correspondent-profiles/42/suggestions/dismiss",
+        json={
+            "statement_series_id": suggestion["statement_series_id"],
+            "source_statement_series_id": suggestion["source_statement_series_id"],
+            "series_discriminator": suggestion["series_discriminator"],
+            "kind": suggestion["kind"],
+        },
+    )
+
+    assert dismissed.status_code == 204
+    assert client.get("/api/statements/correspondent-profiles/42/analysis").json()[
+        "suggestions"
+    ] == []
 
 
 def test_acquisition_source_rejects_credential_bearing_url(client, app, tmp_path) -> None:

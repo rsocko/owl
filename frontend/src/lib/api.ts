@@ -90,6 +90,35 @@ export const endpoints = {
       api.post(`/api/statements/series/${id}/reassign`, body),
     seriesRename: (id: string, body: { name?: string; account_identifier?: string }) =>
       api.post(`/api/statements/series/${id}/rename`, body),
+    correspondentProfiles: {
+      inventory: () => api.get('/api/statements/correspondent-profiles/inventory'),
+      sync: () => api.post('/api/statements/correspondent-profiles/sync'),
+      get: (correspondentId: number) =>
+        api.get(`/api/statements/correspondent-profiles/${correspondentId}`),
+      update: (correspondentId: number, body: unknown) =>
+        api.patch(`/api/statements/correspondent-profiles/${correspondentId}`, body),
+      relink: (correspondentId: number, targetCorrespondentId: number) =>
+        api.post(`/api/statements/correspondent-profiles/${correspondentId}/relink`, {
+          correspondent_id: targetCorrespondentId,
+        }),
+      expectations: (correspondentId: number) =>
+        api.get(`/api/statements/correspondent-profiles/${correspondentId}/expectations`),
+      analysis: (correspondentId: number) =>
+        api.get(`/api/statements/correspondent-profiles/${correspondentId}/analysis`),
+      dismissSuggestion: (correspondentId: number, body: unknown) =>
+        api.post(`/api/statements/correspondent-profiles/${correspondentId}/suggestions/dismiss`, body),
+      createExpectation: (correspondentId: number, body: unknown) =>
+        api.post(`/api/statements/correspondent-profiles/${correspondentId}/expectations`, body),
+    },
+    updateExpectation: (expectationId: string, body: unknown) =>
+      api.patch(`/api/statements/document-expectations/${expectationId}`, body),
+    acquisitionSources: {
+      list: () => api.get('/api/statements/acquisition-sources'),
+      create: (body: unknown) => api.post('/api/statements/acquisition-sources', body),
+      update: (sourceId: string, body: unknown) =>
+        api.patch(`/api/statements/acquisition-sources/${sourceId}`, body),
+    },
+    paperlessUrl: () => api.get('/api/statements/config/paperless-url'),
   },
   eob: {
     check: () => api.get('/api/eob/check'),
