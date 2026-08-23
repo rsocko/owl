@@ -259,3 +259,116 @@ def test_cross_correspondent_series_merge_fails_before_mutation(client, app, tmp
         assert database.get_series_documents("target") == []
     finally:
         database.close()
+
+
+def test_confirmed_expectation_policy_preview_is_read_only_and_apply_ready(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    database_path = _configure_statement_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    mock_paperless.fetch_all_metadata.return_value = (
+        {42: "Example Bank"},
+        {7: "Finance", 10: "DOG", 11: "DOG:Quinn", 12: "DOG:Avery", 99: "Old"},
+        {3: "Statement", 4: "Invoice"},
+    )
+    mock_paperless.list_documents.return_value = [
+        {
+            "id": 101,
+            "title": "Old statement title",
+            "correspondent": 42,
+            "document_type": 4,
+            "created_date": "2026-07-03",
+            "tags": [10, 99],
+        },
+        {
+            "id": 999,
+            "title": "Not in the series",
+            "correspondent": 42,
+            "document_type": 4,
+            "created_date": "2026-07-03",
+            "tags": [],
+        },
+    ]
+    assert client.post("/api/statements/correspondent-profiles/sync").status_code == 200
+    database = Database(database_path)
+    try:
+        database.create_series(
+            "checking-series",
+            "Checking",
+            "Example Bank",
+            correspondent_id=42,
+        )
+        database.add_documents_to_series(
+            "checking-series",
+            [
+                {
+                    "document_id": "101",
+                    "title": "Old statement title",
+                    "statement_date": "2026-07-03",
+                    "period_label": "2026-07",
+                }
+            ],
+        )
+    finally:
+        database.close()
+
+    created = client.post(
+        "/api/statements/correspondent-profiles/42/expectations",
+        json={
+            "kind": "statement",
+            "statement_series_id": "checking-series",
+            "series_discriminator": "Checking",
+            "expectation_mode": "recurring",
+            "status": "confirmed",
+            "cadence": {"frequency": "monthly"},
+            "evidence": {"source": "user"},
+            "title_convention": {
+                "template": "{series} - {kind} - {period}",
+                "date_basis": "period",
+                "example": "Checking - Statement - 2026-07",
+            },
+            "metadata_policy": {
+                "all_of": [7],
+                "any_of": [11, 12],
+                "none_of": [99],
+                "required_document_type_id": 3,
+            },
+        },
+    )
+    expectation_id = created.json()["id"]
+
+    first = client.post(f"/api/statements/document-expectations/{expectation_id}/policy-preview")
+    second = client.post(f"/api/statements/document-expectations/{expectation_id}/policy-preview")
+
+    assert first.status_code == 200
+    assert first.json() == second.json()
+    assert first.json()["matched_document_count"] == 1
+    operation = first.json()["findings"][0]["operation"]
+    assert operation["document_id"] == 101
+    assert operation["expected"]["title"] == "Old statement title"
+    assert operation["patch"] == {
+        "title": "Checking - Statement - 2026-07",
+        "tags": [7, 10],
+        "document_type": 3,
+    }
+    assert mock_paperless.update_document.await_count == 0
+    assert mock_paperless.aclose.await_count == 2
+
+    invoice = client.post(
+        "/api/statements/correspondent-profiles/42/expectations",
+        json={
+            "kind": "invoice",
+            "document_ids": [101],
+            "series_discriminator": "Veterinary invoices",
+            "expectation_mode": "irregular",
+            "status": "confirmed",
+            "evidence": {"source": "user"},
+            "metadata_policy": {"all_of": [7]},
+        },
+    )
+    invoice_preview = client.post(
+        f"/api/statements/document-expectations/{invoice.json()['id']}/policy-preview"
+    )
+    assert invoice_preview.status_code == 200
+    assert invoice_preview.json()["matched_document_count"] == 1
+    assert invoice_preview.json()["findings"][0]["operation"]["document_id"] == 101

@@ -91,6 +91,8 @@ export const endpoints = {
       api.post(`/api/statements/correspondent-profiles/${id}/expectations`, body),
     updateDocumentExpectation: (id: string, body: unknown) =>
       api.patch(`/api/statements/document-expectations/${id}`, body),
+    previewDocumentExpectationPolicy: (id: string) =>
+      api.post(`/api/statements/document-expectations/${id}/policy-preview`),
     acquisitionSources: () => api.get('/api/statements/acquisition-sources'),
     createAcquisitionSource: (body: unknown) => api.post('/api/statements/acquisition-sources', body),
     paperlessUrl: () => api.get('/api/statements/config/paperless-url'),
