@@ -7,3 +7,7 @@ export function buildQueueRunBody(dryRun: boolean, documentId?: string | number 
   }
   return body;
 }
+
+export function buildBackfillBody(dryRun: boolean) {
+  return { dry_run: dryRun, force: true };
+}

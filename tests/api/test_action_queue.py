@@ -516,6 +516,25 @@ class TestBackfill:
         assert resp.status_code == 200
         assert resp.json()["would_sync"] == 1
 
+    def test_forced_backfill_includes_already_synced_actions(self, client, seed_actions):
+        from doc_intelligence_hub.modules.action_queue.database import Action, get_session
+
+        db = get_session()
+        try:
+            for action in db.query(Action).all():
+                action.last_synced_status = action.status
+            db.commit()
+        finally:
+            db.close()
+
+        resp = client.post(
+            "/api/queue/actions/backfill",
+            json={"dry_run": True, "force": True},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["would_sync"] == 3
+
 
 class TestQueueSettings:
     """Tests for GET/PUT /api/queue/settings."""

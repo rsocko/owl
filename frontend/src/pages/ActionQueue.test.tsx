@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import ActionQueue from './ActionQueue';
 import { customReminderUntil, reminderUntil } from './actionReminder';
-import { buildQueueRunBody } from './actionQueueRunBody';
+import { buildBackfillBody, buildQueueRunBody } from './actionQueueRunBody';
 import { TooltipProvider } from '../components/ui';
 
 const { statusMock, actionsMock, updateActionMock, refreshActionMock, feedbackMock } = vi.hoisted(() => ({
@@ -305,5 +305,15 @@ describe('buildQueueRunBody', () => {
 
   it('forces an explicit single-document live rerun', () => {
     expect(buildQueueRunBody(false, 1234)).toEqual({ dry_run: false, force: true });
+  });
+});
+
+describe('buildBackfillBody', () => {
+  it('forces a live backfill so previously synced actions are repaired', () => {
+    expect(buildBackfillBody(false)).toEqual({ dry_run: false, force: true });
+  });
+
+  it('forces the preview to match the live backfill candidate set', () => {
+    expect(buildBackfillBody(true)).toEqual({ dry_run: true, force: true });
   });
 });
