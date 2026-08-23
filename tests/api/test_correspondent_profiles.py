@@ -161,10 +161,13 @@ def test_inventory_prioritizes_supported_review_states(
         {"id": 84, "name": "Unreviewed Bank"},
     ]
     assert client.post("/api/statements/correspondent-profiles/sync").status_code == 200
-    assert client.patch(
-        "/api/statements/correspondent-profiles/42",
-        json={"review_status": "reviewed", "last_analyzed_at": "2026-08-22T12:00:00Z"},
-    ).status_code == 200
+    assert (
+        client.patch(
+            "/api/statements/correspondent-profiles/42",
+            json={"review_status": "reviewed", "last_analyzed_at": "2026-08-22T12:00:00Z"},
+        ).status_code
+        == 200
+    )
     database = Database(database_path)
     try:
         database.create_series(
@@ -207,9 +210,7 @@ def test_statement_expectation_must_bind_existing_series(
     assert response.status_code == 422
 
 
-def test_expectation_can_rebind_to_another_series(
-    client, app, mock_paperless, tmp_path
-) -> None:
+def test_expectation_can_rebind_to_another_series(client, app, mock_paperless, tmp_path) -> None:
     database_path = _configure_statement_database(app, tmp_path)
     mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
     client.post("/api/statements/correspondent-profiles/sync")
@@ -396,9 +397,9 @@ def test_correspondent_suggestion_dismissal_is_durable(
     )
 
     assert dismissed.status_code == 204
-    assert client.get("/api/statements/correspondent-profiles/42/analysis").json()[
-        "suggestions"
-    ] == []
+    assert (
+        client.get("/api/statements/correspondent-profiles/42/analysis").json()["suggestions"] == []
+    )
 
 
 def test_acquisition_source_rejects_credential_bearing_url(client, app, tmp_path) -> None:

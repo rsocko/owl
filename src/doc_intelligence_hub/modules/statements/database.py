@@ -1141,9 +1141,7 @@ class Database:
             (deployment_id, correspondent_id),
         ).fetchall()
         return {
-            key
-            for row in rows
-            if (key := json.loads(row["payload_json"]).get("suggestion_key"))
+            key for row in rows if (key := json.loads(row["payload_json"]).get("suggestion_key"))
         }
 
     def get_acquisition_source(
