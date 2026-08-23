@@ -82,18 +82,19 @@ graph TB
     
     subgraph future["Future: Automation (Phase 3)"]
         orchestrator["Workflow Orchestrator<br/>(n8n)"]
-        scraper["Web Scraper"]
+        mail["Mail Connector"]
         apiint["API Integrator"]
         
         recommender -.-> orchestrator
-        orchestrator --> scraper
+        orchestrator --> mail
         orchestrator --> apiint
     end
     
     api -->|Pull Documents| analyzer
     dashboard -->|Display Insights| interface
     review -->|User Confirmation| catalog
-    scraper -.->|Upload| api
+    mail -.->|Upload| api
+    apiint -.->|Upload| api
     
     style paperless fill:#4a90e2,stroke:#2e5c8a,color:#fff
     style tracker fill:#7b68ee,stroke:#5a4ab0,color:#fff
@@ -1235,48 +1236,19 @@ def safe_pattern_detection(documents):
 
 ### Extensibility for Future Automation
 
-**Design Considerations:**
-1. **Plugin Architecture** - Support for custom downloaders
-2. **API Integration Layer** - Standardized interface for provider APIs
-3. **Scraper Framework** - Playwright/Puppeteer integration
-4. **Workflow Engine** - n8n workflow hooks
-5. **Event System** - Emit events for external automation
+The authoritative acquisition and correspondent-policy design is
+[Correspondent Intelligence and Acquisition](../../design/active/correspondent-intelligence-and-acquisition.md).
+The staged decision is to:
 
-**Example Plugin Interface:**
-```python
-class ProviderDownloader(ABC):
-    """Base class for provider-specific downloaders"""
-    
-    @abstractmethod
-    def authenticate(self, credentials):
-        """Authenticate with provider"""
-        pass
-    
-    @abstractmethod
-    def list_available_statements(self):
-        """Get list of available statements"""
-        pass
-    
-    @abstractmethod
-    def download_statement(self, statement_id, output_path):
-        """Download specific statement"""
-        pass
-    
-    @abstractmethod
-    def get_expected_availability(self, period):
-        """When statement should be available"""
-        pass
+1. reuse Paperless mail rules and API/consume-folder ingestion;
+2. implement narrow direct email/API connectors through n8n;
+3. store only non-secret connector references and manual retrieval guidance in OWL; and
+4. defer credentialed browser automation.
 
-# Implementation example
-class ChaseDownloader(ProviderDownloader):
-    def authenticate(self, credentials):
-        # Chase-specific login
-        pass
-    
-    def list_available_statements(self):
-        # Scrape or API call to get statements
-        pass
-```
+Do not introduce a generic downloader or Playwright/Puppeteer framework before at least two
+real provider integrations demonstrate a shared contract. Missing-document alerts must come
+only from confirmed expectations, not directly from financial-account or recurring-payment
+signals.
 
 ---
 
@@ -1301,6 +1273,7 @@ class ChaseDownloader(ProviderDownloader):
 3. Statement confirmation workflow
 4. Recommendations display
 5. Settings and configuration
+6. Correspondent/expectation review with title-template examples
 
 ### Phase 3: Enhanced Detection
 **Timeline: 2-3 weeks**
@@ -1310,15 +1283,15 @@ class ChaseDownloader(ProviderDownloader):
 3. Add quarterly and annual support
 4. Custom recurrence patterns
 5. Exception handling
+6. Explicit metadata correction and Tyrion candidate reconciliation
 
-### Phase 4: Automation Framework
-**Timeline: 3-4 weeks**
+### Phase 4: Acquisition
 
-1. Plugin architecture
-2. n8n workflow integration
-3. Scraper framework (Playwright)
-4. Provider API integrations
-5. Automated download orchestration
+1. Paperless mail-rule configuration
+2. Direct email/API provider integrations through n8n
+3. Idempotent Paperless upload and statement-found reconciliation
+4. Acquisition health and manual portal guidance
+5. Browser-automation feasibility assessment only
 
 ### Phase 5: ML Enhancement (Optional)
 **Timeline: 4-6 weeks**
@@ -1385,7 +1358,7 @@ class ChaseDownloader(ProviderDownloader):
 - **Time Series Pattern Recognition** - Prophet, ARIMA models
 - **Document Classification** - BERT, DistilBERT for text classification
 - **Self-Hosted ML** - Ollama, llama.cpp for local inference
-- **Web Automation** - Playwright, Puppeteer for scraping
+- **Document Acquisition** - Paperless mail rules and narrow provider email/API connectors
 - **Workflow Orchestration** - n8n for automation
 
 ---

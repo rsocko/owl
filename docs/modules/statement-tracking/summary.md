@@ -183,20 +183,19 @@ Identifies gaps in statement collection:
 1. **Discovery Phase:** Paperless → Analyzer → Detector → Catalog
 2. **Tracking Phase:** Catalog → Scheduler → Recommender → Dashboard
 3. **User Action:** Dashboard → Catalog → Paperless (verify)
-4. **Automated (Future):** Recommender → n8n → Scraper → Paperless
+4. **Acquisition (Future):** Confirmed Expectation → n8n email/API connector → Paperless
 
 ---
 
 ## Data Models Designed
 
-### Provider
-- ID, name, type (credit card, utility, insurance, etc.)
-- Paperless correspondent mapping
-- Account identifier
-- Recurrence pattern
-- Importance level
-- Source URL (for manual downloads)
-- Active status
+### Correspondent Profile and Document Expectation
+
+The original provider concept is superseded by
+[Correspondent Intelligence and Acquisition](../../design/active/correspondent-intelligence-and-acquisition.md).
+A Paperless correspondent may own several scoped expectations, each with its own document
+kind, series discriminator, cadence, metadata policy, and acquisition source. OWL stores
+reviewed policy locally and treats inferred Paperless or Tyrion facts as suggestions.
 
 ### Recurrence Pattern
 - Frequency (monthly, quarterly, annual, custom)
@@ -307,20 +306,18 @@ Identifies gaps in statement collection:
 
 **Outcome:** More accurate detection and tracking
 
-### Phase 4: Automation Framework
-**Timeline:** 3-4 weeks  
-**Effort:** High
+### Phase 4: Acquisition
+**Effort:** Medium-High
 
 **Deliverables:**
-- [ ] Plugin architecture for downloaders
-- [ ] n8n workflow integration
-- [ ] Web scraping framework (Playwright)
-- [ ] Provider API integrations (where available)
-- [ ] Automated download orchestration
-- [ ] Retry and error handling
-- [ ] Credential management
+- [ ] Paperless mail-rule configuration
+- [ ] Direct email/API provider connectors through n8n
+- [ ] Idempotent Paperless upload and statement-found reconciliation
+- [ ] Acquisition health, manual portal instructions, and physical-delivery tracking
+- [ ] External credential references; no credentials stored in OWL
+- [ ] Browser-automation feasibility assessment only
 
-**Outcome:** Automated statement retrieval (no manual downloads)
+**Outcome:** Automate supported push/API channels while retaining a safe manual fallback
 
 ### Phase 5: ML Enhancement (Optional)
 **Timeline:** 4-6 weeks  

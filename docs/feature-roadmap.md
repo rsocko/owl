@@ -61,6 +61,9 @@ This document delineates what's **built and working today** versus what's **plan
 |---------|----------|--------|-------|
 | Statement series timeline + split/merge UI (built in admin, exposed to MC) | LOW | M | #902 (done in admin) |
 | Statement grouping correction UX improvements | LOW | S | — |
+| Correspondent profile + expectation/title-format review | MEDIUM | L | — |
+| Tyrion account/recurring candidate reconciliation | LOW | L | — |
+| Paperless mail + direct email/API acquisition | LOW | L | — |
 
 ---
 
