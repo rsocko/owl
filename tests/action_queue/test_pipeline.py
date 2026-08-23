@@ -10,7 +10,7 @@ import pytest
 
 from doc_intelligence_hub.modules.action_queue import analyzer as analyzer_module
 from doc_intelligence_hub.modules.action_queue.config import settings as aq_settings
-from doc_intelligence_hub.modules.action_queue.database import init_db
+from doc_intelligence_hub.modules.action_queue.database import Action, get_session, init_db
 from doc_intelligence_hub.modules.action_queue.pipeline import Pipeline
 
 VALID_EXTRACTION = {
@@ -185,6 +185,26 @@ class TestPipelineErrorIsolation:
         assert repeated["processed"] == 0
         assert repeated["skipped"] == 1
         assert analyze_calls == 1
+
+    def test_store_action_resolves_numeric_tag_ids(self, db):
+        pipeline = Pipeline()
+        pipeline._correspondent_cache = {}
+        pipeline._doc_type_cache = {}
+        pipeline._tag_cache = {9: "Inbox", 343: "Utilities"}
+        session = get_session()
+        try:
+            pipeline._store_action(
+                session,
+                {"id": 42, "title": "Electric Bill", "tags": [9, 343]},
+                VALID_EXTRACTION["actions"][0],
+                VALID_EXTRACTION["document_assessment"],
+            )
+            session.commit()
+
+            action = session.query(Action).filter_by(document_id=42).one()
+            assert action.tags == ["Inbox", "Utilities"]
+        finally:
+            session.close()
 
     @pytest.mark.asyncio
     async def test_no_action_classification_updates_paperless(self, db, monkeypatch):
