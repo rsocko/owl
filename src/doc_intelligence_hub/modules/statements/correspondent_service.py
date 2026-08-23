@@ -110,6 +110,9 @@ class CorrespondentPolicyService:
     def list_expectations(self, correspondent_id: int | None = None) -> list[DocumentExpectation]:
         return self.database.list_document_expectations(self.deployment_id, correspondent_id)
 
+    def get_expectation(self, expectation_id: str) -> DocumentExpectation | None:
+        return self.database.get_document_expectation(self.deployment_id, expectation_id)
+
     def update_expectation(
         self, expectation_id: str, update: DocumentExpectationUpdate
     ) -> DocumentExpectation:
@@ -122,6 +125,7 @@ class CorrespondentPolicyService:
         *,
         tag_names: dict[int, str],
         document_type_names: dict[int, str],
+        preview_signing_key: str | None = None,
     ) -> ExpectationPolicyPreview:
         expectation = self.database.get_document_expectation(self.deployment_id, expectation_id)
         if expectation is None:
@@ -153,6 +157,7 @@ class CorrespondentPolicyService:
             tag_names=tag_names,
             document_type_names=document_type_names,
             series_documents=series_documents,
+            preview_signing_key=preview_signing_key,
         )
 
     def create_acquisition_source(self, source: AcquisitionSourceCreate) -> AcquisitionSource:

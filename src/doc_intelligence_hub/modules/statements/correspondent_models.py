@@ -418,6 +418,36 @@ class ExpectationPolicyPreview(PolicyModel):
     findings: list[PolicyViolationPreview] = Field(default_factory=list)
 
 
+class SelectedPolicyOperation(PolicyModel):
+    preview_id: str = Field(min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$")
+    operation: PolicyPatchOperation
+
+
+class PolicyApplyRequest(PolicyModel):
+    actor: str = Field(default="user", min_length=1, max_length=64)
+    reason: str = Field(min_length=1, max_length=200)
+    operations: list[SelectedPolicyOperation] = Field(min_length=1, max_length=100)
+
+
+class PolicyOperationResult(PolicyModel):
+    preview_id: str
+    document_id: int = Field(gt=0)
+    status: Literal["succeeded", "failed"]
+    audit_event_id: str | None = None
+    error_code: str | None = None
+    message: str
+
+
+class PolicyApplyResponse(PolicyModel):
+    expectation_id: str
+    results: list[PolicyOperationResult]
+
+
+class PolicyUndoRequest(SelectedPolicyOperation):
+    actor: str = Field(default="user", min_length=1, max_length=64)
+    reason: str = Field(min_length=1, max_length=200)
+
+
 class CorrespondentSyncResult(PolicyModel):
     created: int
     updated: int

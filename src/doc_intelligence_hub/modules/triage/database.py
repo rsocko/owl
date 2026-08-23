@@ -6,6 +6,7 @@ Mirrors the pattern used by the EOB Matching module (SQLAlchemy ORM + init_db).
 from __future__ import annotations
 
 import contextlib
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -1190,6 +1191,93 @@ def mark_correction_synced(event_id: str) -> bool:
         event.paperless_synced_at = datetime.now(UTC)
         session.commit()
         return True
+    finally:
+        session.close()
+
+
+def create_policy_correction_event(
+    *,
+    document_id: int,
+    actor: str,
+    payload: dict[str, Any],
+) -> str:
+    """Create a pending policy-correction audit event before mutating Paperless."""
+    session = get_session()
+    try:
+        event = CorrectionEvent(
+            event_type="paperless_policy_correction",
+            target_type="paperless_document",
+            target_id=str(document_id),
+            payload_json=json.dumps(payload, sort_keys=True, separators=(",", ":")),
+            created_by=actor,
+        )
+        session.add(event)
+        session.commit()
+        return event.id
+    finally:
+        session.close()
+
+
+def get_policy_correction_event(event_id: str) -> dict[str, Any] | None:
+    """Return one successful policy correction eligible for bounded undo."""
+    session = get_session()
+    try:
+        event = (
+            session.query(CorrectionEvent)
+            .filter(
+                CorrectionEvent.id == event_id,
+                CorrectionEvent.event_type == "paperless_policy_correction",
+            )
+            .first()
+        )
+        if event is None:
+            return None
+        return {
+            "id": event.id,
+            "target_id": event.target_id,
+            "payload": json.loads(event.payload_json),
+            "paperless_synced": bool(event.paperless_synced),
+            "undone": bool(event.undone),
+        }
+    finally:
+        session.close()
+
+
+def complete_policy_correction_undo(
+    event_id: str,
+    *,
+    actor: str,
+    payload: dict[str, Any],
+) -> str:
+    """Mark a policy correction undone and append its explicit undo audit event."""
+    session = get_session()
+    try:
+        event = (
+            session.query(CorrectionEvent)
+            .filter(
+                CorrectionEvent.id == event_id,
+                CorrectionEvent.event_type == "paperless_policy_correction",
+            )
+            .first()
+        )
+        if event is None:
+            raise KeyError("policy_correction_not_found")
+        if event.undone:
+            raise ValueError("policy_correction_already_undone")
+        event.undone = 1
+        event.undone_at = datetime.now(UTC)
+        undo_event = CorrectionEvent(
+            event_type="paperless_policy_correction_undo",
+            target_type=event.target_type,
+            target_id=event.target_id,
+            payload_json=json.dumps(payload, sort_keys=True, separators=(",", ":")),
+            paperless_synced=1,
+            paperless_synced_at=datetime.now(UTC),
+            created_by=actor,
+        )
+        session.add(undo_event)
+        session.commit()
+        return undo_event.id
     finally:
         session.close()
 
