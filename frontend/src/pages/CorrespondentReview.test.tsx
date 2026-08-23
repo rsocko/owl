@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   analyze: vi.fn(),
   createExpectation: vi.fn(),
   updateProfile: vi.fn(),
+  expectations: vi.fn(),
+  previewPolicy: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
@@ -16,7 +18,7 @@ vi.mock('../lib/api', () => ({
       correspondentProfiles: mocks.profiles,
       acquisitionSources: vi.fn().mockResolvedValue([]),
       paperlessUrl: vi.fn().mockResolvedValue({ paperless_url: 'https://paperless.test' }),
-      correspondentExpectations: vi.fn().mockResolvedValue([]),
+      correspondentExpectations: mocks.expectations,
       analyzeCorrespondentProfile: mocks.analyze,
       createCorrespondentExpectation: mocks.createExpectation,
       updateCorrespondentProfile: mocks.updateProfile,
@@ -24,6 +26,7 @@ vi.mock('../lib/api', () => ({
       analyzeCorrespondentProfiles: vi.fn(),
       relinkCorrespondentProfile: vi.fn(),
       updateDocumentExpectation: vi.fn(),
+      previewDocumentExpectationPolicy: mocks.previewPolicy,
       createAcquisitionSource: vi.fn(),
     },
   },
@@ -76,6 +79,7 @@ const suggestion = {
     channel: 'unknown',
     reason_codes: ['ingestion_source_unavailable'],
   },
+  document_ids: [1, 2, 3, 4],
   sample_document_ids: [2, 3, 4],
 };
 
@@ -111,6 +115,42 @@ beforeEach(() => {
   });
   mocks.createExpectation.mockResolvedValue({ id: 'expectation-1' });
   mocks.updateProfile.mockResolvedValue({});
+  mocks.expectations.mockResolvedValue([]);
+  mocks.previewPolicy.mockResolvedValue({
+    expectation_id: 'expectation-1',
+    correspondent_id: 42,
+    matched_document_count: 1,
+    compliant_document_count: 0,
+    findings: [{
+      preview_id: 'stable-preview',
+      operation: {
+        expectation_id: 'expectation-1',
+        document_id: 4,
+        expected: {
+          title: 'Old statement title',
+          tag_ids: [99],
+          tag_names: ['Old'],
+          document_type_id: 4,
+          document_type_name: 'Invoice',
+        },
+        patch: {
+          title: 'Checking - Statement - 2026-04',
+          tags: [7],
+          document_type: 3,
+        },
+      },
+      proposed: {
+        title: 'Checking - Statement - 2026-04',
+        tag_ids: [7],
+        tag_names: ['Finance'],
+        document_type_id: 3,
+        document_type_name: 'Statement',
+      },
+      violations: ['title_mismatch', 'forbidden_tags', 'wrong_document_type'],
+      unresolved_violations: [],
+      missing_title_fields: [],
+    }],
+  });
 });
 
 function renderPage() {
@@ -188,5 +228,32 @@ describe('Correspondent Review', () => {
     expect(screen.getByRole('button', { name: /analyze history/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /mark reviewed/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /return to review/i })).toBeEnabled();
+  });
+
+  it('shows exact old and proposed metadata from a read-only policy preview', async () => {
+    mocks.expectations.mockResolvedValue([{
+      id: 'expectation-1',
+      correspondent_id: 42,
+      kind: 'statement',
+      statement_series_id: 'checking',
+      series_discriminator: 'Checking',
+      expectation_mode: 'recurring',
+      status: 'confirmed',
+      cadence: suggestion.cadence,
+      evidence: suggestion.evidence,
+      title_convention: suggestion.title.convention,
+      metadata_policy: suggestion.metadata.policy,
+    }]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /preview violations/i }));
+
+    expect(await screen.findByText('Old statement title')).toBeInTheDocument();
+    expect(screen.getByText('Checking - Statement - 2026-04')).toBeInTheDocument();
+    expect(screen.getByText('Old')).toBeInTheDocument();
+    expect(screen.getByText('Finance')).toBeInTheDocument();
+    expect(screen.getByText('Invoice')).toBeInTheDocument();
+    expect(screen.getByText('Statement')).toBeInTheDocument();
+    expect(mocks.previewPolicy).toHaveBeenCalledWith('expectation-1');
   });
 });
