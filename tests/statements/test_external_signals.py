@@ -114,3 +114,39 @@ async def test_client_pulls_generation_addressed_projection() -> None:
         b"/api/connector/v1/document-expectation-signals/generation%2Fone"
     )
     assert "connectorRef" not in seen_request.url.params
+
+
+@pytest.mark.asyncio
+async def test_client_pulls_latest_projection_without_generation_input() -> None:
+    seen_request: httpx.Request | None = None
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal seen_request
+        seen_request = request
+        return httpx.Response(
+            200,
+            json={
+                "contractVersion": "1",
+                "connectorRef": "opaque connector",
+                "sourceGeneration": "generation-2",
+                "sourceAsOf": "2026-08-23T00:00:00Z",
+                "completeness": "complete",
+                "signals": [],
+            },
+        )
+
+    client = DocumentExpectationSignalsClient("https://tyrion.test")
+    await client.close()
+    client._client = httpx.AsyncClient(  # noqa: SLF001 - transport injection for contract test
+        base_url="https://tyrion.test",
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        snapshot = await client.fetch_latest("opaque connector")
+    finally:
+        await client.close()
+
+    assert snapshot.source_generation == "generation-2"
+    assert seen_request is not None
+    assert seen_request.url.path == "/api/connector/v1/document-expectation-signals"
+    assert seen_request.url.params["connectorRef"] == "opaque connector"

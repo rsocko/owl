@@ -26,6 +26,7 @@ runtime:
 # Optional advanced deployment configuration. The same connection can be managed in Settings.
 external_signals:
   base_url: https://tyrion.example.com
+  connector_ref: owl
   api_token_env: TYRION_API_TOKEN
   verify_ssl: true
   timeout_seconds: 30

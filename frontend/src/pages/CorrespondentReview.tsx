@@ -569,7 +569,6 @@ export default function CorrespondentReview() {
   const [acquisitionSources, setAcquisitionSources] = useState<AcquisitionSource[]>([]);
   const [externalCandidates, setExternalCandidates] = useState<ExternalCandidate[]>([]);
   const [externalConnection, setExternalConnection] = useState<ExternalSignalConnection>({ configured: false });
-  const [sourceGeneration, setSourceGeneration] = useState('');
   const [candidateExpectation, setCandidateExpectation] = useState<Record<string, string>>({});
   const [tags, setTags] = useState<MetadataOption[]>([]);
   const [documentTypes, setDocumentTypes] = useState<MetadataOption[]>([]);
@@ -834,29 +833,26 @@ export default function CorrespondentReview() {
   }, [candidateExpectation, runAction, selectedId]);
 
   const syncExternalCandidates = useCallback(async () => {
-    const generation = sourceGeneration.trim();
-    if (!generation) return;
     setBusy(true);
     try {
-      const result = await endpoints.statements.syncExternalCandidates(generation) as {
+      const result = await endpoints.statements.syncExternalCandidates() as {
         active_candidates: number;
         deactivated_candidates: number;
         idempotent: boolean;
       };
       setToast({
         message: result.idempotent
-          ? 'That Tyrion generation was already synchronized.'
+          ? 'Tyrion is already up to date.'
           : `Synchronized ${result.active_candidates} active candidate${result.active_candidates === 1 ? '' : 's'}${result.deactivated_candidates ? `; ${result.deactivated_candidates} deactivated` : ''}.`,
         tone: 'success',
       });
-      setSourceGeneration('');
       await loadWorkspace(false);
     } catch (requestError) {
       setToast({ message: getErrorMessage(requestError), tone: 'error' });
     } finally {
       setBusy(false);
     }
-  }, [loadWorkspace, sourceGeneration]);
+  }, [loadWorkspace]);
 
   const previewExpectation = useCallback(async (expectationId: string) => {
     setBusy(true);
@@ -1320,19 +1316,12 @@ export default function CorrespondentReview() {
                 <Card title={`External candidates (${selectedExternalCandidates.length})`}>
                   {externalConnection.configured ? (
                     <div className="correspondent-actions" style={{ marginBottom: 12 }}>
-                      <input
-                        aria-label="Tyrion source generation"
-                        value={sourceGeneration}
-                        maxLength={200}
-                        onChange={(event) => setSourceGeneration(event.target.value)}
-                        placeholder="Tyrion source generation"
-                      />
                       <Button
                         variant="primary"
-                        disabled={busy || !sourceGeneration.trim()}
+                        disabled={busy}
                         onClick={() => void syncExternalCandidates()}
                       >
-                        Sync Tyrion candidates
+                        {busy ? 'Syncing Tyrion…' : 'Sync Tyrion candidates'}
                       </Button>
                       {externalConnection.last_synced_at ? (
                         <span className="correspondent-muted">

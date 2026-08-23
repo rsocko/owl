@@ -271,6 +271,7 @@ CREATE INDEX IF NOT EXISTS idx_correspondent_profile_events_profile
 CREATE TABLE IF NOT EXISTS external_signal_connections (
     deployment_id TEXT PRIMARY KEY,
     base_url TEXT NOT NULL,
+    connector_ref TEXT,
     api_token TEXT,
     verify_ssl INTEGER NOT NULL DEFAULT 1,
     timeout_seconds INTEGER NOT NULL DEFAULT 30,
@@ -376,27 +377,8 @@ class Database:
             row["name"]
             for row in conn.execute("PRAGMA table_info(external_signal_connections)").fetchall()
         }
-        if "connector_ref" in connection_columns:
-            conn.executescript(
-                """ALTER TABLE external_signal_connections
-                       RENAME TO external_signal_connections_legacy;
-                   CREATE TABLE external_signal_connections (
-                       deployment_id TEXT PRIMARY KEY,
-                       base_url TEXT NOT NULL,
-                       api_token TEXT,
-                       verify_ssl INTEGER NOT NULL DEFAULT 1,
-                       timeout_seconds INTEGER NOT NULL DEFAULT 30,
-                       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-                   );
-                   INSERT INTO external_signal_connections (
-                       deployment_id, base_url, api_token, verify_ssl,
-                       timeout_seconds, updated_at
-                   )
-                   SELECT deployment_id, base_url, api_token, verify_ssl,
-                          timeout_seconds, updated_at
-                   FROM external_signal_connections_legacy;
-                   DROP TABLE external_signal_connections_legacy;"""
-            )
+        if "connector_ref" not in connection_columns:
+            conn.execute("ALTER TABLE external_signal_connections ADD COLUMN connector_ref TEXT")
         conn.execute(
             """UPDATE document_expectations
                SET status = 'suggested', updated_at = datetime('now')
@@ -1471,9 +1453,10 @@ class Database:
         if row is None:
             return None
         return ExternalSignalConnection(
-            configured=True,
+            configured=row["connector_ref"] is not None,
             source="saved",
             base_url=row["base_url"],
+            connector_ref=row["connector_ref"],
             token_configured=row["api_token"] is not None,
             verify_ssl=bool(row["verify_ssl"]),
             timeout_seconds=row["timeout_seconds"],
@@ -1523,11 +1506,12 @@ class Database:
         with conn:
             conn.execute(
                 """INSERT INTO external_signal_connections (
-                       deployment_id, base_url, api_token,
+                       deployment_id, base_url, connector_ref, api_token,
                        verify_ssl, timeout_seconds
-                   ) VALUES (?, ?, ?, ?, ?)
+                   ) VALUES (?, ?, ?, ?, ?, ?)
                    ON CONFLICT(deployment_id) DO UPDATE SET
                        base_url = excluded.base_url,
+                       connector_ref = excluded.connector_ref,
                        api_token = excluded.api_token,
                        verify_ssl = excluded.verify_ssl,
                        timeout_seconds = excluded.timeout_seconds,
@@ -1535,6 +1519,7 @@ class Database:
                 (
                     deployment_id,
                     update.base_url,
+                    update.connector_ref,
                     api_token,
                     int(update.verify_ssl),
                     update.timeout_seconds,

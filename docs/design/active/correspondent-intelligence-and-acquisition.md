@@ -364,9 +364,10 @@ but cannot overwrite newer candidate state. Two active account signals remain di
 when they share an institution; OWL rejects mapping both to one expectation and leaves the
 second mapping in review.
 
-The finalized Tyrion V1 pull endpoint uses Tyrion's authenticated connector gateway:
+The Tyrion V1 pull endpoints use Tyrion's authenticated connector gateway:
 
 ```text
+GET /api/connector/v1/document-expectation-signals
 GET /api/connector/v1/document-expectation-signals/{sourceGeneration}
 ```
 
@@ -375,9 +376,11 @@ token remains server-side in OWL's local application database and is never retur
 browser. Tyrion authenticates the request with the same bearer-token pattern as its other
 server-to-server connector routes and resolves the connector from that authentication. YAML and
 environment configuration under `external_signals` remains an advanced
-deployment alternative. In **Documents → Correspondent Review**, the user supplies the opaque
-source generation and selects **Sync Tyrion candidates**. OWL calls the generation-addressed
-projection and accepts at most 6,000 signals per response. A repeated generation is a no-op.
+deployment alternative. In **Documents → Correspondent Review**, the user selects **Sync Tyrion
+candidates**. OWL requests the latest projection and stores its opaque source generation
+internally. The generation-addressed endpoint remains available for replay and diagnostics, but
+the implementation detail is not exposed in the UI. OWL accepts at most 6,000 signals per
+response. A repeated generation is a no-op.
 Omitted candidates are deactivated only for a `complete` projection; `partial` omissions leave
 the previous snapshot
 active. Explicit `active: false` is retained as a review finding. OWL exposes only a derived
