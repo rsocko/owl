@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
+import httpx
+
 from doc_intelligence_hub.modules.statements.correspondent_models import (
     DocumentExpectationSignalsV1,
     PolicyPatchOperation,
@@ -481,6 +483,47 @@ def test_candidate_sync_requires_saved_connection(client, app, tmp_path) -> None
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "external_signal_source_not_configured"
+
+
+def test_candidate_sync_reports_rejected_tyrion_credentials(client, app, tmp_path) -> None:
+    _configure_statement_database(app, tmp_path)
+    assert (
+        client.put(
+            "/api/statements/external-candidates/connection",
+            json={
+                "base_url": "https://tyrion.test",
+                "api_token": "expired-secret",
+            },
+        ).status_code
+        == 200
+    )
+    request = httpx.Request(
+        "GET", "https://tyrion.test/api/connector/v1/document-expectation-signals"
+    )
+    response = httpx.Response(401, request=request)
+    with patch(
+        "doc_intelligence_hub.api.routers.statements.DocumentExpectationSignalsClient"
+    ) as client_type:
+        source_client = client_type.return_value
+        source_client.fetch_latest = AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "Unauthorized",
+                request=request,
+                response=response,
+            )
+        )
+        source_client.close = AsyncMock()
+        result = client.post("/api/statements/external-candidates/sync")
+
+    assert result.status_code == 502
+    assert result.json()["error"] == {
+        "code": "external_signal_source_failed",
+        "message": (
+            "Tyrion rejected the saved credentials. Update the Tyrion API token in Settings."
+        ),
+        "details": {"upstream_status": 401},
+    }
+    assert "expired-secret" not in result.text
 
 
 def test_external_connection_does_not_send_saved_token_to_new_origin(client, app, tmp_path) -> None:
