@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date
 
-from doc_intelligence_hub.modules.statements.database import Database
+from doc_intelligence_hub.modules.statements.database import SCHEMA_VERSION, Database
 from doc_intelligence_hub.modules.statements.models import (
     AnalysisPattern,
     DiscoveryResult,
@@ -136,7 +136,7 @@ def test_database_migrates_statement_name_column(tmp_path) -> None:
         }
         version = connection.execute("SELECT version FROM schema_version").fetchone()["version"]
         assert "statement_name" in columns
-        assert version == 4
+        assert version == SCHEMA_VERSION
     finally:
         db.close()
 

@@ -202,7 +202,7 @@ describe('Correspondent Review', () => {
       kind: 'accountStatementCandidate',
       active: true,
       display_hint: 'Credit account',
-      confidence: 0.85,
+      confidence: 0.6,
       basis: ['active_non_cash_account'],
       outcome: 'unreviewed',
       correspondent_id: null,
@@ -220,5 +220,31 @@ describe('Correspondent Review', () => {
       });
     });
     expect(screen.getByText(/do not establish cadence/i)).toBeInTheDocument();
+  });
+
+  it('records documentless external evidence as durable not-expected policy', async () => {
+    mocks.externalCandidates.mockResolvedValue([{
+      id: 'candidate-1',
+      kind: 'recurringDocumentCandidate',
+      active: true,
+      display_hint: 'Recurring expense',
+      confidence: 0.6,
+      basis: ['active_recurring_obligation'],
+      outcome: 'unreviewed',
+      correspondent_id: null,
+      likely_multiple_statement_series: false,
+      recurrence_evidence: 'none',
+    }]);
+
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /record not expected/i }));
+
+    await waitFor(() => {
+      expect(mocks.reviewCandidate).toHaveBeenCalledWith('candidate-1', {
+        outcome: 'not_applicable',
+        correspondent_id: 42,
+      });
+    });
+    expect(screen.getByText(/recurring obligations do not create invoice/i)).toBeInTheDocument();
   });
 });

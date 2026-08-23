@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from doc_intelligence_hub.modules.statements.correspondent_models import (
     DocumentExpectationSignalsV1,
+    paperless_deployment_identity,
 )
 from doc_intelligence_hub.modules.statements.database import Database
 
@@ -240,7 +241,15 @@ def test_acquisition_source_rejects_credential_bearing_url(client, app, tmp_path
 
 
 def test_external_candidate_poll_and_review_contract(client, app, tmp_path) -> None:
-    _configure_statement_database(app, tmp_path)
+    database_path = _configure_statement_database(app, tmp_path)
+    database = Database(database_path)
+    try:
+        database.reconcile_correspondents(
+            paperless_deployment_identity("http://paperless.test"),
+            [{"id": 42, "name": "Example Bank"}],
+        )
+    finally:
+        database.close()
     snapshot = DocumentExpectationSignalsV1.model_validate(
         {
             "contractVersion": "1",
@@ -256,7 +265,7 @@ def test_external_candidate_poll_and_review_contract(client, app, tmp_path) -> N
                     "displayHint": "Credit account",
                     "cadence": None,
                     "nextExpectedDate": None,
-                    "confidence": 0.85,
+                    "confidence": 0.6,
                     "basis": ["active_non_cash_account"],
                 }
             ],
@@ -299,6 +308,19 @@ def test_external_candidate_poll_and_review_contract(client, app, tmp_path) -> N
     )
     assert reviewed.status_code == 200
     assert reviewed.json()["outcome"] == "ambiguous"
+
+    documentless = client.put(
+        f"/api/statements/external-candidates/{candidate['id']}/review",
+        json={"outcome": "not_applicable", "correspondent_id": 42},
+    )
+    assert documentless.status_code == 200
+    assert documentless.json()["outcome"] == "not_applicable"
+    assert documentless.json()["expectation_id"]
+
+    expectations = client.get("/api/statements/correspondent-profiles/42/expectations")
+    assert expectations.status_code == 200
+    assert expectations.json()[0]["expectation_mode"] == "not_expected"
+    assert expectations.json()[0]["status"] == "confirmed"
 
 
 def test_cross_correspondent_series_merge_fails_before_mutation(client, app, tmp_path) -> None:

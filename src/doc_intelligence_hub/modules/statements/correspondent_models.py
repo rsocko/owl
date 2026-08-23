@@ -64,9 +64,8 @@ class DocumentExpectationSignalV1(PolicyModel):
         validation_alias="displayHint",
         serialization_alias="displayHint",
     )
-    cadence: CadenceFrequency | None = None
-    next_expected_date: date | None = Field(
-        default=None,
+    cadence: None
+    next_expected_date: None = Field(
         validation_alias="nextExpectedDate",
         serialization_alias="nextExpectedDate",
     )
@@ -399,7 +398,11 @@ class DocumentExpectationBase(PolicyModel):
 
     @model_validator(mode="after")
     def validate_policy_shape(self) -> DocumentExpectationBase:
-        if self.kind == "statement" and self.statement_series_id is None:
+        if (
+            self.kind == "statement"
+            and self.expectation_mode != "not_expected"
+            and self.statement_series_id is None
+        ):
             raise ValueError("Statement expectations must bind to a StatementSeries")
         if self.expectation_mode in {"one_off", "irregular", "not_expected"} and self.cadence:
             raise ValueError(f"{self.expectation_mode} expectations cannot define cadence")
@@ -448,6 +451,8 @@ class ExternalCandidateReview(PolicyModel):
                 raise ValueError("suggested reviews require correspondent_id")
             if self.expectation is not None and self.expectation.status != "suggested":
                 raise ValueError("candidate-created expectations must remain suggested")
+        if self.outcome == "not_applicable" and self.correspondent_id is None:
+            raise ValueError("not_applicable reviews require correspondent_id")
         if self.outcome in {"ambiguous", "not_applicable"} and (
             self.expectation_id is not None or self.expectation is not None
         ):

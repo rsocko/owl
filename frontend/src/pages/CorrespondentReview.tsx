@@ -673,10 +673,14 @@ export default function CorrespondentReview() {
     if (!selectedId) return;
     const body: Record<string, unknown> = { outcome };
     if (outcome === 'mapped') body.expectation_id = candidateExpectation[candidate.id];
-    if (outcome === 'suggested' || outcome === 'ambiguous') body.correspondent_id = selectedId;
+    if (outcome === 'suggested' || outcome === 'ambiguous' || outcome === 'not_applicable') {
+      body.correspondent_id = selectedId;
+    }
     await runAction(
       () => endpoints.statements.reviewExternalCandidate(candidate.id, body),
-      `Candidate marked ${humanize(outcome).toLowerCase()}.`,
+      outcome === 'not_applicable'
+        ? 'Not-expected policy recorded.'
+        : `Candidate marked ${humanize(outcome).toLowerCase()}.`,
     );
   }, [candidateExpectation, runAction, selectedId]);
 
@@ -910,7 +914,7 @@ export default function CorrespondentReview() {
                               {candidate.kind === 'accountStatementCandidate'
                                 ? 'Account statement candidate'
                                 : 'Recurring document candidate'}
-                              {' · '}{Math.round(candidate.confidence * 100)}% confidence
+                              {' · '}{Math.round(candidate.confidence * 100)}% source confidence
                             </span>
                             {candidate.review_finding ? (
                               <span>{humanize(candidate.review_finding)}</span>
@@ -973,7 +977,7 @@ export default function CorrespondentReview() {
                               disabled={busy || selectedProfileTerminal}
                               onClick={() => void reviewCandidate(candidate, 'not_applicable')}
                             >
-                              Not applicable
+                              Record not expected
                             </Button>
                           </div>
                         </div>

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from threading import Barrier
 
 import pytest
 
@@ -63,13 +65,14 @@ def _external_snapshot(
     signals: list[dict],
     *,
     completeness: str = "complete",
+    source_as_of: str = "2026-08-23T00:00:00Z",
 ) -> DocumentExpectationSignalsV1:
     return DocumentExpectationSignalsV1.model_validate(
         {
             "contractVersion": "1",
             "connectorRef": "opaque-connector",
             "sourceGeneration": generation,
-            "sourceAsOf": "2026-08-23T00:00:00Z",
+            "sourceAsOf": source_as_of,
             "completeness": completeness,
             "signals": signals,
         }
@@ -188,7 +191,7 @@ def test_external_snapshot_replacement_is_generation_idempotent_and_bounded(tmp_
                 "displayHint": "Credit account",
                 "cadence": None,
                 "nextExpectedDate": None,
-                "confidence": 0.85,
+                "confidence": 0.6,
                 "basis": ["active_non_cash_account"],
             },
             {
@@ -198,7 +201,7 @@ def test_external_snapshot_replacement_is_generation_idempotent_and_bounded(tmp_
                 "displayHint": "Deposit account",
                 "cadence": None,
                 "nextExpectedDate": None,
-                "confidence": 0.85,
+                "confidence": 0.6,
                 "basis": ["active_non_cash_account"],
             },
         ],
@@ -238,7 +241,7 @@ def test_external_snapshot_replacement_is_generation_idempotent_and_bounded(tmp_
                     "displayHint": "Credit account",
                     "cadence": None,
                     "nextExpectedDate": None,
-                    "confidence": 0.85,
+                    "confidence": 0.6,
                     "basis": ["inactive_non_cash_account"],
                 }
             ],
@@ -283,7 +286,9 @@ def test_external_candidate_reviews_preserve_confirmed_policy_and_detect_series(
                         "kind": "accountStatementCandidate",
                         "active": True,
                         "displayHint": "Credit account",
-                        "confidence": 0.85,
+                        "cadence": None,
+                        "nextExpectedDate": None,
+                        "confidence": 0.6,
                         "basis": ["active_non_cash_account"],
                     },
                     {
@@ -291,7 +296,9 @@ def test_external_candidate_reviews_preserve_confirmed_policy_and_detect_series(
                         "kind": "accountStatementCandidate",
                         "active": True,
                         "displayHint": "Deposit account",
-                        "confidence": 0.85,
+                        "cadence": None,
+                        "nextExpectedDate": None,
+                        "confidence": 0.6,
                         "basis": ["active_non_cash_account"],
                     },
                 ],
@@ -303,6 +310,12 @@ def test_external_candidate_reviews_preserve_confirmed_policy_and_detect_series(
             candidates[0].id,
             ExternalCandidateReview(outcome="mapped", expectation_id=checking.id),
         )
+        with pytest.raises(ValueError, match="already maps to this expectation"):
+            db.review_external_candidate(
+                DEPLOYMENT_ID,
+                candidates[1].id,
+                ExternalCandidateReview(outcome="mapped", expectation_id=checking.id),
+            )
         db.review_external_candidate(
             DEPLOYMENT_ID,
             candidates[1].id,
@@ -323,6 +336,188 @@ def test_external_candidate_reviews_preserve_confirmed_policy_and_detect_series(
         )
         assert db.get_document_expectation(DEPLOYMENT_ID, checking.id).status == "confirmed"
         assert db.get_document_expectation(DEPLOYMENT_ID, savings.id).status == "confirmed"
+
+        db.review_external_candidate(
+            DEPLOYMENT_ID,
+            inactive[1].id,
+            ExternalCandidateReview(outcome="mapped", expectation_id=checking.id),
+        )
+        db.replace_external_candidate_snapshot(
+            DEPLOYMENT_ID,
+            _external_snapshot(
+                "generation-3",
+                [
+                    {
+                        "seriesRef": "opaque-one",
+                        "kind": "accountStatementCandidate",
+                        "active": True,
+                        "displayHint": "Credit account",
+                        "cadence": None,
+                        "nextExpectedDate": None,
+                        "confidence": 0.6,
+                        "basis": ["active_non_cash_account"],
+                    },
+                    {
+                        "seriesRef": "opaque-two",
+                        "kind": "accountStatementCandidate",
+                        "active": True,
+                        "displayHint": "Deposit account",
+                        "cadence": None,
+                        "nextExpectedDate": None,
+                        "confidence": 0.6,
+                        "basis": ["active_non_cash_account"],
+                    },
+                ],
+            ),
+        )
+        reactivated = db.list_external_candidates(DEPLOYMENT_ID, correspondent_id=42)
+        assert {candidate.outcome for candidate in reactivated} == {"ambiguous", "mapped"}
+        assert db.get_document_expectation(DEPLOYMENT_ID, checking.id).status == "confirmed"
+        assert db.get_document_expectation(DEPLOYMENT_ID, savings.id).status == "confirmed"
+    finally:
+        db.close()
+
+
+def test_stale_unseen_external_generation_cannot_overwrite_newer_snapshot(tmp_path) -> None:
+    db = Database(str(tmp_path / "statements.db"))
+    try:
+        newer = _external_snapshot(
+            "opaque-newer",
+            [
+                {
+                    "seriesRef": "opaque-account",
+                    "kind": "accountStatementCandidate",
+                    "active": True,
+                    "displayHint": "Current label",
+                    "cadence": None,
+                    "nextExpectedDate": None,
+                    "confidence": 0.6,
+                    "basis": ["active_non_cash_account"],
+                }
+            ],
+            source_as_of="2026-08-23T12:00:00Z",
+        )
+        stale = _external_snapshot(
+            "opaque-stale",
+            [],
+            source_as_of="2026-08-23T11:00:00Z",
+        )
+
+        db.replace_external_candidate_snapshot(DEPLOYMENT_ID, newer)
+        result = db.replace_external_candidate_snapshot(DEPLOYMENT_ID, stale)
+
+        assert result.idempotent is True
+        assert result.active_candidates == 1
+        candidate = db.list_external_candidates(DEPLOYMENT_ID)[0]
+        assert candidate.active is True
+        assert candidate.display_hint == "Current label"
+        assert db.replace_external_candidate_snapshot(DEPLOYMENT_ID, stale).idempotent is True
+    finally:
+        db.close()
+
+
+def test_external_not_applicable_creates_durable_policy_and_suppresses_repeat_prompt(
+    tmp_path,
+) -> None:
+    db = Database(str(tmp_path / "statements.db"))
+    try:
+        db.reconcile_correspondents(DEPLOYMENT_ID, [{"id": 42, "name": "Example Bank"}])
+        first = _external_snapshot(
+            "generation-1",
+            [
+                {
+                    "seriesRef": "opaque-recurring",
+                    "kind": "recurringDocumentCandidate",
+                    "active": True,
+                    "displayHint": "Recurring expense",
+                    "cadence": None,
+                    "nextExpectedDate": None,
+                    "confidence": 0.6,
+                    "basis": ["active_recurring_obligation"],
+                }
+            ],
+        )
+        db.replace_external_candidate_snapshot(DEPLOYMENT_ID, first)
+        candidate = db.list_external_candidates(DEPLOYMENT_ID)[0]
+
+        barrier = Barrier(2)
+
+        def record_not_expected():
+            concurrent_db = Database(db.path)
+            try:
+                concurrent_db.connect()
+                barrier.wait()
+                return concurrent_db.review_external_candidate(
+                    DEPLOYMENT_ID,
+                    candidate.id,
+                    ExternalCandidateReview(outcome="not_applicable", correspondent_id=42),
+                )
+            finally:
+                concurrent_db.close()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            reviewed, concurrent_repeat = executor.map(
+                lambda _: record_not_expected(),
+                range(2),
+            )
+
+        assert concurrent_repeat.expectation_id == reviewed.expectation_id
+        expectation = db.get_document_expectation(DEPLOYMENT_ID, reviewed.expectation_id or "")
+
+        assert reviewed.outcome == "not_applicable"
+        assert expectation is not None
+        assert expectation.kind == "other"
+        assert expectation.expectation_mode == "not_expected"
+        assert expectation.status == "confirmed"
+        assert expectation.statement_series_id is None
+        assert expectation.evidence.reason_codes == ["external_signal_documentless"]
+
+        repeated = db.review_external_candidate(
+            DEPLOYMENT_ID,
+            candidate.id,
+            ExternalCandidateReview(outcome="not_applicable", correspondent_id=42),
+        )
+        assert repeated.expectation_id == reviewed.expectation_id
+        assert len(db.list_document_expectations(DEPLOYMENT_ID)) == 1
+
+        unchanged = _external_snapshot(
+            "generation-2",
+            [
+                {
+                    "seriesRef": "opaque-recurring",
+                    "kind": "recurringDocumentCandidate",
+                    "active": True,
+                    "displayHint": "Updated advisory label",
+                    "cadence": None,
+                    "nextExpectedDate": None,
+                    "confidence": 0.6,
+                    "basis": ["active_recurring_obligation"],
+                }
+            ],
+        )
+        db.replace_external_candidate_snapshot(DEPLOYMENT_ID, unchanged)
+        reconciled = db.list_external_candidates(DEPLOYMENT_ID)[0]
+        assert reconciled.outcome == "not_applicable"
+        assert reconciled.expectation_id == reviewed.expectation_id
+
+        db.replace_external_candidate_snapshot(
+            DEPLOYMENT_ID,
+            _external_snapshot("generation-3", []),
+        )
+        inactive = db.list_external_candidates(DEPLOYMENT_ID)[0]
+        assert inactive.active is False
+        assert inactive.review_finding == "source_candidate_inactive_confirmed_policy_preserved"
+        assert (
+            db.get_document_expectation(DEPLOYMENT_ID, reviewed.expectation_id or "").status
+            == "confirmed"
+        )
+
+        with pytest.raises(ValueError, match="Retire the confirmed not_expected policy"):
+            db.review_external_candidate(
+                DEPLOYMENT_ID,
+                candidate.id,
+                ExternalCandidateReview(outcome="ambiguous", correspondent_id=42),
+            )
     finally:
         db.close()
 
@@ -340,8 +535,10 @@ def test_recurring_obligation_alone_cannot_suggest_document_requirement(tmp_path
                         "seriesRef": "opaque-recurring",
                         "kind": "recurringDocumentCandidate",
                         "active": True,
-                        "displayHint": "Utility provider",
-                        "confidence": 0.9,
+                        "displayHint": "Recurring expense",
+                        "cadence": None,
+                        "nextExpectedDate": None,
+                        "confidence": 0.6,
                         "basis": ["active_recurring_obligation"],
                     }
                 ],

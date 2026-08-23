@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -1271,36 +1271,55 @@ class Database:
         conn = self.connect()
         expectation_id = expectation_id or uuid.uuid4().hex
         with conn:
-            conn.execute(
-                """INSERT INTO document_expectations (
-                    id, deployment_id, correspondent_id, kind, document_type_id,
-                    statement_series_id, series_discriminator, expectation_mode, status,
-                    cadence_json, evidence_json, title_convention_json, metadata_policy_json,
-                    acquisition_source_id, legacy_provider_key
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    expectation_id,
-                    deployment_id,
-                    correspondent_id,
-                    expectation.kind,
-                    expectation.document_type_id,
-                    expectation.statement_series_id,
-                    expectation.series_discriminator,
-                    expectation.expectation_mode,
-                    expectation.status,
-                    expectation.cadence.model_dump_json() if expectation.cadence else None,
-                    expectation.evidence.model_dump_json(),
-                    expectation.title_convention.model_dump_json()
-                    if expectation.title_convention
-                    else None,
-                    expectation.metadata_policy.model_dump_json(),
-                    expectation.acquisition_source_id,
-                    legacy_provider_key,
-                ),
+            self._insert_document_expectation(
+                conn,
+                deployment_id,
+                correspondent_id,
+                expectation,
+                expectation_id=expectation_id,
+                legacy_provider_key=legacy_provider_key,
             )
         created = self.get_document_expectation(deployment_id, expectation_id)
         assert created is not None
         return created
+
+    @staticmethod
+    def _insert_document_expectation(
+        conn: sqlite3.Connection,
+        deployment_id: str,
+        correspondent_id: int,
+        expectation: DocumentExpectationCreate,
+        *,
+        expectation_id: str,
+        legacy_provider_key: str | None = None,
+    ) -> None:
+        conn.execute(
+            """INSERT INTO document_expectations (
+                id, deployment_id, correspondent_id, kind, document_type_id,
+                statement_series_id, series_discriminator, expectation_mode, status,
+                cadence_json, evidence_json, title_convention_json, metadata_policy_json,
+                acquisition_source_id, legacy_provider_key
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                expectation_id,
+                deployment_id,
+                correspondent_id,
+                expectation.kind,
+                expectation.document_type_id,
+                expectation.statement_series_id,
+                expectation.series_discriminator,
+                expectation.expectation_mode,
+                expectation.status,
+                expectation.cadence.model_dump_json() if expectation.cadence else None,
+                expectation.evidence.model_dump_json(),
+                expectation.title_convention.model_dump_json()
+                if expectation.title_convention
+                else None,
+                expectation.metadata_policy.model_dump_json(),
+                expectation.acquisition_source_id,
+                legacy_provider_key,
+            ),
+        )
 
     def get_document_expectation(
         self, deployment_id: str, expectation_id: str
@@ -1410,6 +1429,7 @@ class Database:
     ) -> ExternalCandidateSnapshotResult:
         """Replace one connector's bounded projection when its opaque generation changes."""
         conn = self.connect()
+        conn.execute("BEGIN IMMEDIATE")
         processed = conn.execute(
             """SELECT 1 FROM external_signal_generations
                WHERE deployment_id = ? AND connector_ref = ? AND source_generation = ?""",
@@ -1421,6 +1441,35 @@ class Database:
                    WHERE deployment_id = ? AND connector_ref = ? AND active = 1""",
                 (deployment_id, snapshot.connector_ref),
             ).fetchone()[0]
+            result = ExternalCandidateSnapshotResult(
+                source_generation=snapshot.source_generation,
+                idempotent=True,
+                active_candidates=active,
+                deactivated_candidates=0,
+            )
+            conn.commit()
+            return result
+
+        current_source = conn.execute(
+            """SELECT source_as_of FROM external_signal_sources
+               WHERE deployment_id = ? AND connector_ref = ?""",
+            (deployment_id, snapshot.connector_ref),
+        ).fetchone()
+        if current_source and snapshot.source_as_of < datetime.fromisoformat(
+            current_source["source_as_of"]
+        ):
+            conn.execute(
+                """INSERT INTO external_signal_generations (
+                    deployment_id, connector_ref, source_generation
+                ) VALUES (?, ?, ?)""",
+                (deployment_id, snapshot.connector_ref, snapshot.source_generation),
+            )
+            active = conn.execute(
+                """SELECT COUNT(*) FROM external_document_candidates
+                   WHERE deployment_id = ? AND connector_ref = ? AND active = 1""",
+                (deployment_id, snapshot.connector_ref),
+            ).fetchone()[0]
+            conn.commit()
             return ExternalCandidateSnapshotResult(
                 source_generation=snapshot.source_generation,
                 idempotent=True,
@@ -1503,6 +1552,37 @@ class Database:
                         json.dumps(signal.basis),
                     ),
                 )
+                if signal.active and signal.kind == "accountStatementCandidate":
+                    candidate_mapping = conn.execute(
+                        """SELECT outcome, expectation_id
+                           FROM external_document_candidates
+                           WHERE deployment_id = ? AND connector_ref = ? AND series_ref = ?""",
+                        (deployment_id, snapshot.connector_ref, signal.series_ref),
+                    ).fetchone()
+                    if (
+                        candidate_mapping["outcome"] == "mapped"
+                        and candidate_mapping["expectation_id"]
+                    ):
+                        mapping_conflict = conn.execute(
+                            """SELECT 1 FROM external_document_candidates
+                               WHERE deployment_id = ? AND connector_ref = ?
+                                 AND series_ref != ? AND kind = 'accountStatementCandidate'
+                                 AND active = 1 AND outcome = 'mapped' AND expectation_id = ?""",
+                            (
+                                deployment_id,
+                                snapshot.connector_ref,
+                                signal.series_ref,
+                                candidate_mapping["expectation_id"],
+                            ),
+                        ).fetchone()
+                        if mapping_conflict:
+                            conn.execute(
+                                """UPDATE external_document_candidates
+                                   SET outcome = 'ambiguous', expectation_id = NULL,
+                                       reviewed_at = datetime('now'), updated_at = datetime('now')
+                                   WHERE deployment_id = ? AND connector_ref = ? AND series_ref = ?""",
+                                (deployment_id, snapshot.connector_ref, signal.series_ref),
+                            )
             conn.execute(
                 """INSERT INTO external_signal_sources (
                     deployment_id, connector_ref, source_generation, source_as_of, completeness
@@ -1612,6 +1692,25 @@ class Database:
         review: ExternalCandidateReview,
     ) -> ExternalDocumentCandidate:
         conn = self.connect()
+        conn.execute("BEGIN IMMEDIATE")
+        with conn:
+            self._review_external_candidate_locked(
+                conn,
+                deployment_id,
+                candidate_id,
+                review,
+            )
+        return next(
+            item for item in self.list_external_candidates(deployment_id) if item.id == candidate_id
+        )
+
+    def _review_external_candidate_locked(
+        self,
+        conn: sqlite3.Connection,
+        deployment_id: str,
+        candidate_id: str,
+        review: ExternalCandidateReview,
+    ) -> None:
         candidate = conn.execute(
             """SELECT * FROM external_document_candidates
                WHERE deployment_id = ? AND id = ?""",
@@ -1620,12 +1719,52 @@ class Database:
         if candidate is None:
             raise KeyError("external_candidate_not_found")
 
+        linked_expectation = (
+            self.get_document_expectation(deployment_id, candidate["expectation_id"])
+            if candidate["expectation_id"]
+            else None
+        )
+        if (
+            candidate["outcome"] == "not_applicable"
+            and linked_expectation is not None
+            and linked_expectation.status == "confirmed"
+            and linked_expectation.expectation_mode == "not_expected"
+        ):
+            if review.outcome == "not_applicable":
+                if review.correspondent_id != linked_expectation.correspondent_id:
+                    raise ValueError(
+                        "The external signal already has not_expected policy for another "
+                        "correspondent"
+                    )
+                return
+            raise ValueError(
+                "Retire the confirmed not_expected policy before changing this candidate review"
+            )
+
         expectation_id = review.expectation_id
         correspondent_id = review.correspondent_id
         if review.outcome == "mapped":
             expectation = self.get_document_expectation(deployment_id, review.expectation_id or "")
             if expectation is None:
                 raise KeyError("document_expectation_not_found")
+            if candidate["kind"] == "accountStatementCandidate" and candidate["active"]:
+                conflicting_mapping = conn.execute(
+                    """SELECT 1 FROM external_document_candidates
+                       WHERE deployment_id = ? AND connector_ref = ?
+                         AND id != ? AND kind = 'accountStatementCandidate'
+                         AND active = 1 AND outcome = 'mapped' AND expectation_id = ?""",
+                    (
+                        deployment_id,
+                        candidate["connector_ref"],
+                        candidate_id,
+                        expectation.id,
+                    ),
+                ).fetchone()
+                if conflicting_mapping:
+                    raise ValueError(
+                        "Another active account candidate already maps to this expectation; "
+                        "leave the mapping ambiguous or choose a distinct expectation"
+                    )
             expectation_id = expectation.id
             correspondent_id = expectation.correspondent_id
         elif review.outcome == "suggested":
@@ -1646,30 +1785,57 @@ class Database:
                     raise ValueError(
                         "A recurring obligation alone cannot suggest an invoice, bill, or receipt"
                     )
-                expectation_id = self.create_document_expectation(
+                self._validate_expectation_references(
                     deployment_id,
                     review.correspondent_id,
                     review.expectation,
-                ).id
-
-        with conn:
-            conn.execute(
-                """UPDATE external_document_candidates
-                   SET outcome = ?, expectation_id = ?, correspondent_id = ?,
-                       reviewed_at = datetime('now'), updated_at = datetime('now')
-                   WHERE deployment_id = ? AND id = ?""",
-                (
-                    review.outcome,
-                    expectation_id,
-                    correspondent_id,
+                )
+                expectation_id = uuid.uuid4().hex
+                self._insert_document_expectation(
+                    conn,
                     deployment_id,
-                    candidate_id,
+                    review.correspondent_id,
+                    review.expectation,
+                    expectation_id=expectation_id,
+                )
+        elif review.outcome == "not_applicable":
+            assert review.correspondent_id is not None
+            negative_policy = DocumentExpectationCreate(
+                kind=("statement" if candidate["kind"] == "accountStatementCandidate" else "other"),
+                expectation_mode="not_expected",
+                status="confirmed",
+                evidence=ExpectationEvidence(
+                    source="user",
+                    reason_codes=["external_signal_documentless"],
                 ),
             )
-        reviewed = next(
-            item for item in self.list_external_candidates(deployment_id) if item.id == candidate_id
+            self._validate_expectation_references(
+                deployment_id,
+                review.correspondent_id,
+                negative_policy,
+            )
+            expectation_id = uuid.uuid4().hex
+            self._insert_document_expectation(
+                conn,
+                deployment_id,
+                review.correspondent_id,
+                negative_policy,
+                expectation_id=expectation_id,
+            )
+
+        conn.execute(
+            """UPDATE external_document_candidates
+               SET outcome = ?, expectation_id = ?, correspondent_id = ?,
+                   reviewed_at = datetime('now'), updated_at = datetime('now')
+               WHERE deployment_id = ? AND id = ?""",
+            (
+                review.outcome,
+                expectation_id,
+                correspondent_id,
+                deployment_id,
+                candidate_id,
+            ),
         )
-        return reviewed
 
     def reconcile_expectations_for_series_merge(
         self, deployment_id: str, source_series_id: str, target_series_id: str

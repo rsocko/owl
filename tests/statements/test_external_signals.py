@@ -38,6 +38,46 @@ def test_projection_rejects_non_contract_snake_case_keys() -> None:
         )
 
 
+def test_projection_requires_null_advisory_timing() -> None:
+    base_signal = {
+        "seriesRef": "opaque-account",
+        "kind": "accountStatementCandidate",
+        "active": True,
+        "displayHint": "Credit account",
+        "cadence": None,
+        "nextExpectedDate": None,
+        "confidence": 0.6,
+        "basis": ["active_non_cash_account"],
+    }
+    payload = {
+        "contractVersion": "1",
+        "connectorRef": "opaque-connector",
+        "sourceGeneration": "generation-1",
+        "sourceAsOf": "2026-08-23T00:00:00Z",
+        "completeness": "complete",
+        "signals": [base_signal],
+    }
+
+    DocumentExpectationSignalsV1.model_validate(payload)
+    with pytest.raises(ValidationError):
+        DocumentExpectationSignalsV1.model_validate(
+            {**payload, "signals": [{**base_signal, "cadence": "monthly"}]}
+        )
+    with pytest.raises(ValidationError):
+        DocumentExpectationSignalsV1.model_validate(
+            {**payload, "signals": [{**base_signal, "nextExpectedDate": "2026-09-01"}]}
+        )
+    with pytest.raises(ValidationError):
+        DocumentExpectationSignalsV1.model_validate(
+            {
+                **payload,
+                "signals": [
+                    {key: value for key, value in base_signal.items() if key != "nextExpectedDate"}
+                ],
+            }
+        )
+
+
 @pytest.mark.asyncio
 async def test_client_pulls_generation_addressed_projection() -> None:
     seen_request: httpx.Request | None = None
