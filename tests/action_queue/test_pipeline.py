@@ -10,7 +10,7 @@ import pytest
 
 from doc_intelligence_hub.modules.action_queue import analyzer as analyzer_module
 from doc_intelligence_hub.modules.action_queue.config import settings as aq_settings
-from doc_intelligence_hub.modules.action_queue.database import init_db
+from doc_intelligence_hub.modules.action_queue.database import Action, get_session, init_db
 from doc_intelligence_hub.modules.action_queue.pipeline import Pipeline
 
 VALID_EXTRACTION = {
@@ -127,6 +127,23 @@ class TestPipelineErrorIsolation:
         assert "simulated fetch failure" in stats["errors"][0]["error"]
         assert stats["timed_out"] is False
 
+    def test_resolves_paperless_metadata_for_analysis(self):
+        pipeline = Pipeline()
+        pipeline._correspondent_cache = {7: "City Utilities"}
+        pipeline._doc_type_cache = {5: "Receipt"}
+        pipeline._tag_cache = {9: "Inbox", 12: "Utilities"}
+        document = {
+            "correspondent": 7,
+            "document_type": 5,
+            "tags": [9, 12],
+        }
+
+        pipeline._resolve_document_metadata(document)
+
+        assert document["correspondent_name"] == "City Utilities"
+        assert document["document_type_name"] == "Receipt"
+        assert document["tag_names"] == ["Inbox", "Utilities"]
+
     @pytest.mark.asyncio
     async def test_repeated_non_force_run_skips_processed_document(self, db, monkeypatch):
         docs = _make_docs(1)
@@ -185,6 +202,26 @@ class TestPipelineErrorIsolation:
         assert repeated["processed"] == 0
         assert repeated["skipped"] == 1
         assert analyze_calls == 1
+
+    def test_store_action_resolves_numeric_tag_ids(self, db):
+        pipeline = Pipeline()
+        pipeline._correspondent_cache = {}
+        pipeline._doc_type_cache = {}
+        pipeline._tag_cache = {9: "Inbox", 343: "Utilities"}
+        session = get_session()
+        try:
+            pipeline._store_action(
+                session,
+                {"id": 42, "title": "Electric Bill", "tags": [9, 343]},
+                VALID_EXTRACTION["actions"][0],
+                VALID_EXTRACTION["document_assessment"],
+            )
+            session.commit()
+
+            action = session.query(Action).filter_by(document_id=42).one()
+            assert action.tags == ["Inbox", "Utilities"]
+        finally:
+            session.close()
 
     @pytest.mark.asyncio
     async def test_no_action_classification_updates_paperless(self, db, monkeypatch):

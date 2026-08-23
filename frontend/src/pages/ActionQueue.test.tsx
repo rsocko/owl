@@ -5,12 +5,13 @@ import { customReminderUntil, reminderUntil } from './actionReminder';
 import { buildBackfillBody, buildQueueRunBody } from './actionQueueRunBody';
 import { TooltipProvider } from '../components/ui';
 
-const { statusMock, actionsMock, updateActionMock, refreshActionMock, feedbackMock } = vi.hoisted(() => ({
+const { statusMock, actionsMock, updateActionMock, refreshActionMock, feedbackMock, metadataTagsMock } = vi.hoisted(() => ({
   statusMock: vi.fn(),
   actionsMock: vi.fn(),
   updateActionMock: vi.fn(),
   refreshActionMock: vi.fn(),
   feedbackMock: vi.fn(),
+  metadataTagsMock: vi.fn(),
 }));
 
 vi.mock('../hooks/useStreamingAction', () => ({
@@ -34,7 +35,7 @@ vi.mock('../lib/api', () => ({
       feedback: feedbackMock,
       settings: vi.fn(),
       updateSettings: vi.fn(),
-      metadataTags: vi.fn(),
+      metadataTags: metadataTagsMock,
       metadataSavedViews: vi.fn(),
       metadataCorrespondents: vi.fn(),
       metadataDocumentTypes: vi.fn(),
@@ -77,6 +78,7 @@ const initialAction = {
     ],
   },
   preview_url: '/documents/1/details',
+  tags: ['9', '2', '343', '4'],
   version: 3,
   created_at: '2026-07-20T10:00:00Z',
 };
@@ -107,6 +109,15 @@ beforeEach(() => {
   updateActionMock.mockReset();
   refreshActionMock.mockReset();
   feedbackMock.mockReset();
+  metadataTagsMock.mockReset();
+  metadataTagsMock.mockResolvedValue({
+    tags: [
+      { id: 9, name: 'Inbox', colour: '#1f6feb' },
+      { id: 2, name: 'Utilities', colour: '#fbca04' },
+      { id: 343, name: 'Bills', colour: '#d73a4a' },
+      { id: 4, name: 'Household', colour: '#7057ff' },
+    ],
+  });
   statusMock.mockResolvedValue({
     status: 'idle',
     database: {
@@ -137,6 +148,17 @@ beforeEach(() => {
 });
 
 describe('ActionQueue', () => {
+  it('shows Paperless tag names in their configured colors', async () => {
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    const inbox = await screen.findByText('Inbox');
+    expect(inbox).toHaveStyle({ backgroundColor: '#1f6feb', color: '#ffffff' });
+    expect(screen.getByText('Utilities')).toBeTruthy();
+    expect(screen.getByText('Bills')).toBeTruthy();
+    expect(screen.queryByText('343')).toBeNull();
+    expect(screen.getByText('+1')).toBeTruthy();
+  });
+
   it('shows outcome-oriented actions instead of acknowledge and dismiss', async () => {
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
 

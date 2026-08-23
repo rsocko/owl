@@ -577,6 +577,7 @@ export default function CorrespondentReview() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [externalSyncError, setExternalSyncError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
   const [relinkTarget, setRelinkTarget] = useState('');
   const [sourceDraft, setSourceDraft] = useState({
@@ -834,6 +835,7 @@ export default function CorrespondentReview() {
 
   const syncExternalCandidates = useCallback(async () => {
     setBusy(true);
+    setExternalSyncError(null);
     try {
       const result = await endpoints.statements.syncExternalCandidates() as {
         active_candidates: number;
@@ -848,7 +850,9 @@ export default function CorrespondentReview() {
       });
       await loadWorkspace(false);
     } catch (requestError) {
-      setToast({ message: getErrorMessage(requestError), tone: 'error' });
+      const message = getErrorMessage(requestError);
+      setExternalSyncError(message);
+      setToast({ message, tone: 'error' });
     } finally {
       setBusy(false);
     }
@@ -1336,6 +1340,12 @@ export default function CorrespondentReview() {
                       <Button size="sm" onClick={() => navigate('/settings')}>Open Settings</Button>
                     </div>
                   )}
+                  {externalSyncError ? (
+                    <div className="correspondent-callout" role="alert" style={{ marginBottom: 12 }}>
+                      {externalSyncError}{' '}
+                      <Button size="sm" onClick={() => navigate('/settings')}>Open Settings</Button>
+                    </div>
+                  ) : null}
                   <div className="correspondent-callout">
                     Account candidates are recurrence evidence only. They do not establish cadence
                     or prove that a statement exists. Recurring obligations do not create invoice

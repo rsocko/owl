@@ -264,6 +264,21 @@ describe('Correspondent Review', () => {
     expect(screen.getByText('Account statement candidates')).toBeInTheDocument();
   });
 
+  it('keeps Tyrion synchronization failures visible next to the action', async () => {
+    mocks.syncCandidates.mockRejectedValueOnce(
+      new Error('Tyrion rejected the saved credentials. Update the Tyrion API token in Settings.'),
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /sync tyrion candidates/i }));
+
+    const alerts = await screen.findAllByRole('alert');
+    expect(alerts.some((alert) => alert.textContent?.includes(
+      'Tyrion rejected the saved credentials. Update the Tyrion API token in Settings.',
+    ))).toBe(true);
+    expect(screen.getByRole('button', { name: /sync tyrion candidates/i })).toBeEnabled();
+  });
+
   it('keeps the workspace visible while analysis refreshes profile data', async () => {
     const { container } = renderPage();
     await screen.findAllByText('Example Bank');
