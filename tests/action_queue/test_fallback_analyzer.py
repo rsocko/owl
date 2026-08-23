@@ -162,9 +162,7 @@ class TestFileDetection:
         result = analyzer.analyze_document(
             {
                 "title": "Pay Utility Bill - $142.50",
-                "content": (
-                    "City Utilities payment. Amount $142.50. Thank you for your payment."
-                ),
+                "content": ("City Utilities payment. Amount $142.50. Thank you for your payment."),
                 "document_type_name": "Receipt",
                 "tag_names": ["Inbox"],
             }
