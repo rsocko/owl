@@ -4,7 +4,13 @@
 
 The Document Intelligence Hub exposes webhook endpoints that integrate with
 [n8n](https://n8n.io/) (or any HTTP-capable automation engine) to automate
-the missing-statement retrieval workflow.
+supported missing-statement retrieval workflows. This integration is an execution
+mechanism, not the authority for deciding that a document is expected. See
+[Correspondent Intelligence and Acquisition](../../design/active/correspondent-intelligence-and-acquisition.md).
+
+Initial connectors should use Paperless-native email ingestion, provider email, or supported
+provider APIs. OWL stores only a non-secret connector reference. Credentials remain in n8n or
+another external secret store. Credentialed browser automation is outside the initial scope.
 
 ## Architecture Overview
 
@@ -14,8 +20,8 @@ the missing-statement retrieval workflow.
 │                         │        │                   │
 │  Scheduled gap check ───┼──POST──▶  Webhook trigger  │
 │    (recommendations)    │        │       │           │
-│                         │        │  Fetch statement  │
-│  POST /statement-found ◀┼──POST──│  from provider    │
+│                         │        │  Fetch via email  │
+│  POST /statement-found ◀┼──POST──│  or provider API  │
 │                         │        │       │           │
 │  Clear alert state      │        │  Upload to        │
 │  Notify subscribers     │        │  Paperless-ngx    │
@@ -170,8 +176,8 @@ already been alerted in the `webhook_alert_state` table. This ensures:
 
 ```
 ┌───────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│ Webhook Node  │────▶│ IF status ==     │────▶│ HTTP Request     │
-│ (trigger)     │     │ "missing"        │     │ Login to provider│
+│ Webhook Node  │────▶│ IF status ==     │────▶│ Email/API        │
+│ (trigger)     │     │ "missing"        │     │ connector        │
 └───────────────┘     └──────────────────┘     └────────┬─────────┘
                                                         │
                       ┌──────────────────┐     ┌────────▼─────────┐
@@ -185,6 +191,10 @@ already been alerted in the `webhook_alert_state` table. This ensures:
                       │ Paperless-ngx    │
                       └──────────────────┘
 ```
+
+The connector must confirm that the Paperless upload succeeded and resolve the created
+document ID before calling `statement-found`. Retries must be idempotent and duplicate-safe.
+Manual portal or snail-mail expectations do not execute this workflow.
 
 ### n8n Workflow JSON (minimal example)
 
