@@ -65,6 +65,14 @@ class RuntimeConfig(BaseModel):
     database_path: str = "data/statement_tracker.db"
 
 
+class ExternalSignalsConfig(BaseModel):
+    base_url: str | None = None
+    api_token: str | None = Field(default=None, exclude=True, repr=False)
+    api_token_env: str | None = None
+    verify_ssl: bool = True
+    timeout_seconds: int = Field(default=30, ge=1, le=300)
+
+
 class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8001
@@ -74,6 +82,7 @@ class AppConfig(BaseModel):
     source: SourceConfig = Field(default_factory=SourceConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    external_signals: ExternalSignalsConfig = Field(default_factory=ExternalSignalsConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     provider_hints: list[ProviderHint] = Field(default_factory=list)
 
@@ -117,3 +126,11 @@ def resolve_api_token(config: AppConfig) -> str | None:
     if not config.source.api_token_env:
         return None
     return os.getenv(config.source.api_token_env)
+
+
+def resolve_external_signal_token(config: AppConfig) -> str | None:
+    if config.external_signals.api_token:
+        return config.external_signals.api_token
+    if not config.external_signals.api_token_env:
+        return None
+    return os.getenv(config.external_signals.api_token_env)

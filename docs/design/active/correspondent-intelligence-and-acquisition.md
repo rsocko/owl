@@ -264,6 +264,20 @@ document content, and raw account identifiers. OWL polls by generation and repla
 bounded snapshot idempotently. Deactivating a source candidate does not delete a confirmed
 OWL expectation; it creates a review finding.
 
+The finalized Tyrion V1 pull endpoint is:
+
+```text
+GET /api/internal/v1/finance/insights/document-expectation-signals/{sourceGeneration}
+    ?connectorRef={connectorRef}
+```
+
+OWL configures the source under `external_signals`, calls
+`POST /api/statements/external-candidates/poll` with the two opaque references, and accepts at
+most 6,000 signals per projection. A repeated generation is a no-op. Omitted candidates are
+deactivated only for a `complete` projection; `partial` omissions leave the previous snapshot
+active. Explicit `active: false` is retained as a review finding. OWL exposes only a derived
+candidate ID to the browser and never uses `displayHint` as an identity or match key.
+
 ## Relationship to existing statement models
 
 This is a policy layer over the current statement implementation, not a parallel replacement:

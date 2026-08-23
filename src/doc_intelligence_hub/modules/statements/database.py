@@ -23,8 +23,12 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     CorrespondentSyncResult,
     DocumentExpectation,
     DocumentExpectationCreate,
+    DocumentExpectationSignalsV1,
     DocumentExpectationUpdate,
     ExpectationEvidence,
+    ExternalCandidateReview,
+    ExternalCandidateSnapshotResult,
+    ExternalDocumentCandidate,
     IdentityResolution,
     LegacyOverrideReviewItem,
     MetadataPolicy,
@@ -40,7 +44,7 @@ from doc_intelligence_hub.modules.statements.models import (
     RecommendationResult,
 )
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -259,6 +263,55 @@ CREATE TABLE IF NOT EXISTS correspondent_profile_events (
 
 CREATE INDEX IF NOT EXISTS idx_correspondent_profile_events_profile
     ON correspondent_profile_events(deployment_id, correspondent_id, created_at);
+
+CREATE TABLE IF NOT EXISTS external_signal_sources (
+    deployment_id TEXT NOT NULL,
+    connector_ref TEXT NOT NULL,
+    source_generation TEXT NOT NULL,
+    source_as_of TEXT NOT NULL,
+    completeness TEXT NOT NULL CHECK (completeness IN ('complete', 'partial')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (deployment_id, connector_ref)
+);
+
+CREATE TABLE IF NOT EXISTS external_signal_generations (
+    deployment_id TEXT NOT NULL,
+    connector_ref TEXT NOT NULL,
+    source_generation TEXT NOT NULL,
+    processed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (deployment_id, connector_ref, source_generation)
+);
+
+CREATE TABLE IF NOT EXISTS external_document_candidates (
+    id TEXT PRIMARY KEY,
+    deployment_id TEXT NOT NULL,
+    connector_ref TEXT NOT NULL,
+    series_ref TEXT NOT NULL,
+    source_generation TEXT NOT NULL,
+    source_as_of TEXT NOT NULL,
+    kind TEXT NOT NULL
+        CHECK (kind IN ('accountStatementCandidate', 'recurringDocumentCandidate')),
+    active INTEGER NOT NULL,
+    display_hint TEXT NOT NULL,
+    cadence TEXT,
+    next_expected_date TEXT,
+    confidence REAL NOT NULL,
+    basis_json TEXT NOT NULL,
+    outcome TEXT NOT NULL DEFAULT 'unreviewed'
+        CHECK (outcome IN ('unreviewed', 'mapped', 'suggested', 'ambiguous', 'not_applicable')),
+    expectation_id TEXT,
+    correspondent_id INTEGER,
+    reviewed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (deployment_id, connector_ref, series_ref),
+    FOREIGN KEY (expectation_id) REFERENCES document_expectations(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_candidates_review
+    ON external_document_candidates(deployment_id, active, outcome);
+CREATE INDEX IF NOT EXISTS idx_external_candidates_correspondent
+    ON external_document_candidates(deployment_id, correspondent_id, kind, active);
 """
 
 
@@ -1349,6 +1402,274 @@ class Database:
             raise KeyError("document_expectation_not_found")
         expectation = self._expectation_row_to_model(row)
         return expectation.can_emit_missing_alert(row["profile_lifecycle"])
+
+    def replace_external_candidate_snapshot(
+        self,
+        deployment_id: str,
+        snapshot: DocumentExpectationSignalsV1,
+    ) -> ExternalCandidateSnapshotResult:
+        """Replace one connector's bounded projection when its opaque generation changes."""
+        conn = self.connect()
+        processed = conn.execute(
+            """SELECT 1 FROM external_signal_generations
+               WHERE deployment_id = ? AND connector_ref = ? AND source_generation = ?""",
+            (deployment_id, snapshot.connector_ref, snapshot.source_generation),
+        ).fetchone()
+        if processed:
+            active = conn.execute(
+                """SELECT COUNT(*) FROM external_document_candidates
+                   WHERE deployment_id = ? AND connector_ref = ? AND active = 1""",
+                (deployment_id, snapshot.connector_ref),
+            ).fetchone()[0]
+            return ExternalCandidateSnapshotResult(
+                source_generation=snapshot.source_generation,
+                idempotent=True,
+                active_candidates=active,
+                deactivated_candidates=0,
+            )
+
+        incoming_refs = {signal.series_ref for signal in snapshot.signals}
+        existing_active = {
+            row["series_ref"]
+            for row in conn.execute(
+                """SELECT series_ref FROM external_document_candidates
+                   WHERE deployment_id = ? AND connector_ref = ? AND active = 1""",
+                (deployment_id, snapshot.connector_ref),
+            ).fetchall()
+        }
+        deactivated_refs = existing_active & {
+            signal.series_ref for signal in snapshot.signals if not signal.active
+        }
+        with conn:
+            if snapshot.completeness == "complete":
+                missing_refs = sorted(existing_active - incoming_refs)
+                deactivated_refs.update(missing_refs)
+                if missing_refs:
+                    placeholders = ",".join("?" for _ in missing_refs)
+                    conn.execute(
+                        f"""UPDATE external_document_candidates
+                            SET active = 0, source_generation = ?, source_as_of = ?,
+                                updated_at = datetime('now')
+                            WHERE deployment_id = ? AND connector_ref = ?
+                              AND series_ref IN ({placeholders})""",
+                        (
+                            snapshot.source_generation,
+                            snapshot.source_as_of.isoformat(),
+                            deployment_id,
+                            snapshot.connector_ref,
+                            *missing_refs,
+                        ),
+                    )
+            for signal in snapshot.signals:
+                candidate_id = uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    (
+                        f"owl:{deployment_id}:external-candidate:"
+                        f"{snapshot.connector_ref}:{signal.series_ref}"
+                    ),
+                ).hex
+                conn.execute(
+                    """INSERT INTO external_document_candidates (
+                        id, deployment_id, connector_ref, series_ref, source_generation,
+                        source_as_of, kind, active, display_hint, cadence,
+                        next_expected_date, confidence, basis_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(deployment_id, connector_ref, series_ref) DO UPDATE SET
+                        source_generation = excluded.source_generation,
+                        source_as_of = excluded.source_as_of,
+                        kind = excluded.kind,
+                        active = excluded.active,
+                        display_hint = excluded.display_hint,
+                        cadence = excluded.cadence,
+                        next_expected_date = excluded.next_expected_date,
+                        confidence = excluded.confidence,
+                        basis_json = excluded.basis_json,
+                        updated_at = datetime('now')""",
+                    (
+                        candidate_id,
+                        deployment_id,
+                        snapshot.connector_ref,
+                        signal.series_ref,
+                        snapshot.source_generation,
+                        snapshot.source_as_of.isoformat(),
+                        signal.kind,
+                        int(signal.active),
+                        signal.display_hint,
+                        signal.cadence,
+                        signal.next_expected_date.isoformat()
+                        if signal.next_expected_date
+                        else None,
+                        signal.confidence,
+                        json.dumps(signal.basis),
+                    ),
+                )
+            conn.execute(
+                """INSERT INTO external_signal_sources (
+                    deployment_id, connector_ref, source_generation, source_as_of, completeness
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(deployment_id, connector_ref) DO UPDATE SET
+                    source_generation = excluded.source_generation,
+                    source_as_of = excluded.source_as_of,
+                    completeness = excluded.completeness,
+                    updated_at = datetime('now')""",
+                (
+                    deployment_id,
+                    snapshot.connector_ref,
+                    snapshot.source_generation,
+                    snapshot.source_as_of.isoformat(),
+                    snapshot.completeness,
+                ),
+            )
+            conn.execute(
+                """INSERT OR IGNORE INTO external_signal_generations (
+                    deployment_id, connector_ref, source_generation
+                ) VALUES (?, ?, ?)""",
+                (deployment_id, snapshot.connector_ref, snapshot.source_generation),
+            )
+
+        active = conn.execute(
+            """SELECT COUNT(*) FROM external_document_candidates
+               WHERE deployment_id = ? AND connector_ref = ? AND active = 1""",
+            (deployment_id, snapshot.connector_ref),
+        ).fetchone()[0]
+        return ExternalCandidateSnapshotResult(
+            source_generation=snapshot.source_generation,
+            idempotent=False,
+            active_candidates=active,
+            deactivated_candidates=len(deactivated_refs),
+        )
+
+    def list_external_candidates(
+        self,
+        deployment_id: str,
+        *,
+        correspondent_id: int | None = None,
+    ) -> list[ExternalDocumentCandidate]:
+        conn = self.connect()
+        sql = """
+            SELECT c.*, e.status AS expectation_status
+            FROM external_document_candidates c
+            LEFT JOIN document_expectations e
+              ON e.deployment_id = c.deployment_id AND e.id = c.expectation_id
+            WHERE c.deployment_id = ?
+        """
+        params: list[Any] = [deployment_id]
+        if correspondent_id is not None:
+            sql += " AND c.correspondent_id = ?"
+            params.append(correspondent_id)
+        sql += " ORDER BY c.active DESC, c.outcome, c.display_hint, c.id"
+        rows = conn.execute(sql, params).fetchall()
+        series_counts = {
+            row["correspondent_id"]: row["candidate_count"]
+            for row in conn.execute(
+                """SELECT correspondent_id, COUNT(DISTINCT id) AS candidate_count
+                   FROM external_document_candidates
+                   WHERE deployment_id = ? AND active = 1
+                     AND kind = 'accountStatementCandidate'
+                     AND correspondent_id IS NOT NULL
+                   GROUP BY correspondent_id""",
+                (deployment_id,),
+            ).fetchall()
+        }
+        return [
+            ExternalDocumentCandidate(
+                id=row["id"],
+                kind=row["kind"],
+                active=bool(row["active"]),
+                display_hint=row["display_hint"],
+                cadence=row["cadence"],
+                next_expected_date=date.fromisoformat(row["next_expected_date"])
+                if row["next_expected_date"]
+                else None,
+                confidence=row["confidence"],
+                basis=json.loads(row["basis_json"]),
+                source_as_of=row["source_as_of"],
+                outcome=row["outcome"],
+                expectation_id=row["expectation_id"],
+                correspondent_id=row["correspondent_id"],
+                likely_multiple_statement_series=series_counts.get(row["correspondent_id"], 0) > 1,
+                recurrence_evidence=(
+                    "high"
+                    if row["active"] and row["kind"] == "accountStatementCandidate"
+                    else "none"
+                ),
+                review_finding=(
+                    "source_candidate_inactive_confirmed_policy_preserved"
+                    if not row["active"] and row["expectation_status"] == "confirmed"
+                    else "source_candidate_inactive"
+                    if not row["active"]
+                    else None
+                ),
+                reviewed_at=row["reviewed_at"],
+            )
+            for row in rows
+        ]
+
+    def review_external_candidate(
+        self,
+        deployment_id: str,
+        candidate_id: str,
+        review: ExternalCandidateReview,
+    ) -> ExternalDocumentCandidate:
+        conn = self.connect()
+        candidate = conn.execute(
+            """SELECT * FROM external_document_candidates
+               WHERE deployment_id = ? AND id = ?""",
+            (deployment_id, candidate_id),
+        ).fetchone()
+        if candidate is None:
+            raise KeyError("external_candidate_not_found")
+
+        expectation_id = review.expectation_id
+        correspondent_id = review.correspondent_id
+        if review.outcome == "mapped":
+            expectation = self.get_document_expectation(deployment_id, review.expectation_id or "")
+            if expectation is None:
+                raise KeyError("document_expectation_not_found")
+            expectation_id = expectation.id
+            correspondent_id = expectation.correspondent_id
+        elif review.outcome == "suggested":
+            assert review.correspondent_id is not None
+            if review.expectation is not None:
+                if (
+                    candidate["kind"] == "accountStatementCandidate"
+                    and review.expectation.kind != "statement"
+                ):
+                    raise ValueError("Account candidates may only suggest statement expectations")
+                if candidate[
+                    "kind"
+                ] == "recurringDocumentCandidate" and review.expectation.kind in {
+                    "invoice",
+                    "bill",
+                    "receipt",
+                }:
+                    raise ValueError(
+                        "A recurring obligation alone cannot suggest an invoice, bill, or receipt"
+                    )
+                expectation_id = self.create_document_expectation(
+                    deployment_id,
+                    review.correspondent_id,
+                    review.expectation,
+                ).id
+
+        with conn:
+            conn.execute(
+                """UPDATE external_document_candidates
+                   SET outcome = ?, expectation_id = ?, correspondent_id = ?,
+                       reviewed_at = datetime('now'), updated_at = datetime('now')
+                   WHERE deployment_id = ? AND id = ?""",
+                (
+                    review.outcome,
+                    expectation_id,
+                    correspondent_id,
+                    deployment_id,
+                    candidate_id,
+                ),
+            )
+        reviewed = next(
+            item for item in self.list_external_candidates(deployment_id) if item.id == candidate_id
+        )
+        return reviewed
 
     def reconcile_expectations_for_series_merge(
         self, deployment_id: str, source_series_id: str, target_series_id: str

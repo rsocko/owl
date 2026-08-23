@@ -8,8 +8,10 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     Cadence,
     CorrespondentProfileUpdate,
     DocumentExpectationCreate,
+    DocumentExpectationSignalsV1,
     DocumentExpectationUpdate,
     ExpectationEvidence,
+    ExternalCandidateReview,
 )
 from doc_intelligence_hub.modules.statements.correspondent_service import (
     CorrespondentPolicyService,
@@ -56,7 +58,25 @@ def _confirmed_statement(series_id: str) -> DocumentExpectationCreate:
     )
 
 
-def test_schema_v4_migration_preserves_series_history(tmp_path) -> None:
+def _external_snapshot(
+    generation: str,
+    signals: list[dict],
+    *,
+    completeness: str = "complete",
+) -> DocumentExpectationSignalsV1:
+    return DocumentExpectationSignalsV1.model_validate(
+        {
+            "contractVersion": "1",
+            "connectorRef": "opaque-connector",
+            "sourceGeneration": generation,
+            "sourceAsOf": "2026-08-23T00:00:00Z",
+            "completeness": completeness,
+            "signals": signals,
+        }
+    )
+
+
+def test_schema_v5_migration_preserves_series_history(tmp_path) -> None:
     path = str(tmp_path / "statements.db")
     db = Database(path)
     db.create_series("series-1", "Checking", "Example Bank", correspondent_id=42)
@@ -77,7 +97,13 @@ def test_schema_v4_migration_preserves_series_history(tmp_path) -> None:
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
-        assert {"correspondent_profiles", "document_expectations"} <= tables
+        assert {
+            "correspondent_profiles",
+            "document_expectations",
+            "external_signal_sources",
+            "external_signal_generations",
+            "external_document_candidates",
+        } <= tables
     finally:
         migrated.close()
 
@@ -146,6 +172,196 @@ def test_only_confirmed_cadenced_active_policy_is_alertable(tmp_path) -> None:
 
         db.reconcile_correspondents(DEPLOYMENT_ID, [])
         assert not db.expectation_can_emit_missing_alert(DEPLOYMENT_ID, alertable.id)
+    finally:
+        db.close()
+
+
+def test_external_snapshot_replacement_is_generation_idempotent_and_bounded(tmp_path) -> None:
+    db = Database(str(tmp_path / "statements.db"))
+    first = _external_snapshot(
+        "generation-1",
+        [
+            {
+                "seriesRef": "opaque-account-one",
+                "kind": "accountStatementCandidate",
+                "active": True,
+                "displayHint": "Credit account",
+                "cadence": None,
+                "nextExpectedDate": None,
+                "confidence": 0.85,
+                "basis": ["active_non_cash_account"],
+            },
+            {
+                "seriesRef": "opaque-account-two",
+                "kind": "accountStatementCandidate",
+                "active": True,
+                "displayHint": "Deposit account",
+                "cadence": None,
+                "nextExpectedDate": None,
+                "confidence": 0.85,
+                "basis": ["active_non_cash_account"],
+            },
+        ],
+    )
+    try:
+        result = db.replace_external_candidate_snapshot(DEPLOYMENT_ID, first)
+        repeated = db.replace_external_candidate_snapshot(DEPLOYMENT_ID, first)
+
+        assert result.active_candidates == 2
+        assert repeated.idempotent is True
+        candidates = db.list_external_candidates(DEPLOYMENT_ID)
+        assert len(candidates) == 2
+        assert all(candidate.recurrence_evidence == "high" for candidate in candidates)
+        assert not any(
+            key
+            in dict(
+                db.connect()
+                .execute("SELECT * FROM external_document_candidates LIMIT 1")
+                .fetchone()
+            )
+            for key in ("balance", "transactions", "account_identifier")
+        )
+
+        partial = _external_snapshot("generation-2", [], completeness="partial")
+        partial_result = db.replace_external_candidate_snapshot(DEPLOYMENT_ID, partial)
+        assert partial_result.deactivated_candidates == 0
+        assert partial_result.active_candidates == 2
+        assert all(candidate.active for candidate in db.list_external_candidates(DEPLOYMENT_ID))
+
+        explicit_inactive = _external_snapshot(
+            "generation-3",
+            [
+                {
+                    "seriesRef": "opaque-account-one",
+                    "kind": "accountStatementCandidate",
+                    "active": False,
+                    "displayHint": "Credit account",
+                    "cadence": None,
+                    "nextExpectedDate": None,
+                    "confidence": 0.85,
+                    "basis": ["inactive_non_cash_account"],
+                }
+            ],
+            completeness="partial",
+        )
+        inactive_result = db.replace_external_candidate_snapshot(DEPLOYMENT_ID, explicit_inactive)
+        assert inactive_result.deactivated_candidates == 1
+        assert inactive_result.active_candidates == 1
+
+        complete = _external_snapshot("generation-4", [])
+        assert (
+            db.replace_external_candidate_snapshot(DEPLOYMENT_ID, complete).deactivated_candidates
+            == 1
+        )
+        assert not any(candidate.active for candidate in db.list_external_candidates(DEPLOYMENT_ID))
+
+        stale_replay = db.replace_external_candidate_snapshot(DEPLOYMENT_ID, first)
+        assert stale_replay.idempotent is True
+        assert stale_replay.active_candidates == 0
+        assert not any(candidate.active for candidate in db.list_external_candidates(DEPLOYMENT_ID))
+    finally:
+        db.close()
+
+
+def test_external_candidate_reviews_preserve_confirmed_policy_and_detect_series(tmp_path) -> None:
+    db = Database(str(tmp_path / "statements.db"))
+    try:
+        db.reconcile_correspondents(DEPLOYMENT_ID, [{"id": 42, "name": "Example Bank"}])
+        db.create_series("checking", "Checking", "Example Bank", correspondent_id=42)
+        db.create_series("savings", "Savings", "Example Bank", correspondent_id=42)
+        checking = db.create_document_expectation(
+            DEPLOYMENT_ID, 42, _confirmed_statement("checking")
+        )
+        savings = db.create_document_expectation(DEPLOYMENT_ID, 42, _confirmed_statement("savings"))
+        db.replace_external_candidate_snapshot(
+            DEPLOYMENT_ID,
+            _external_snapshot(
+                "generation-1",
+                [
+                    {
+                        "seriesRef": "opaque-one",
+                        "kind": "accountStatementCandidate",
+                        "active": True,
+                        "displayHint": "Credit account",
+                        "confidence": 0.85,
+                        "basis": ["active_non_cash_account"],
+                    },
+                    {
+                        "seriesRef": "opaque-two",
+                        "kind": "accountStatementCandidate",
+                        "active": True,
+                        "displayHint": "Deposit account",
+                        "confidence": 0.85,
+                        "basis": ["active_non_cash_account"],
+                    },
+                ],
+            ),
+        )
+        candidates = db.list_external_candidates(DEPLOYMENT_ID)
+        db.review_external_candidate(
+            DEPLOYMENT_ID,
+            candidates[0].id,
+            ExternalCandidateReview(outcome="mapped", expectation_id=checking.id),
+        )
+        db.review_external_candidate(
+            DEPLOYMENT_ID,
+            candidates[1].id,
+            ExternalCandidateReview(outcome="mapped", expectation_id=savings.id),
+        )
+
+        mapped = db.list_external_candidates(DEPLOYMENT_ID, correspondent_id=42)
+        assert all(candidate.likely_multiple_statement_series for candidate in mapped)
+
+        db.replace_external_candidate_snapshot(
+            DEPLOYMENT_ID,
+            _external_snapshot("generation-2", []),
+        )
+        inactive = db.list_external_candidates(DEPLOYMENT_ID, correspondent_id=42)
+        assert all(
+            candidate.review_finding == "source_candidate_inactive_confirmed_policy_preserved"
+            for candidate in inactive
+        )
+        assert db.get_document_expectation(DEPLOYMENT_ID, checking.id).status == "confirmed"
+        assert db.get_document_expectation(DEPLOYMENT_ID, savings.id).status == "confirmed"
+    finally:
+        db.close()
+
+
+def test_recurring_obligation_alone_cannot_suggest_document_requirement(tmp_path) -> None:
+    db = Database(str(tmp_path / "statements.db"))
+    try:
+        db.reconcile_correspondents(DEPLOYMENT_ID, [{"id": 42, "name": "Example Bank"}])
+        db.replace_external_candidate_snapshot(
+            DEPLOYMENT_ID,
+            _external_snapshot(
+                "generation-1",
+                [
+                    {
+                        "seriesRef": "opaque-recurring",
+                        "kind": "recurringDocumentCandidate",
+                        "active": True,
+                        "displayHint": "Utility provider",
+                        "confidence": 0.9,
+                        "basis": ["active_recurring_obligation"],
+                    }
+                ],
+            ),
+        )
+        candidate = db.list_external_candidates(DEPLOYMENT_ID)[0]
+        review = ExternalCandidateReview(
+            outcome="suggested",
+            correspondent_id=42,
+            expectation=DocumentExpectationCreate(
+                kind="invoice",
+                expectation_mode="irregular",
+                status="suggested",
+                evidence=ExpectationEvidence(source="user"),
+            ),
+        )
+
+        with pytest.raises(ValueError, match="recurring obligation alone"):
+            db.review_external_candidate(DEPLOYMENT_ID, candidate.id, review)
+        assert db.list_document_expectations(DEPLOYMENT_ID) == []
     finally:
         db.close()
 

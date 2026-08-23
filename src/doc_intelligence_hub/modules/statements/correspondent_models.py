@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import date
+from datetime import date, datetime
 from string import Formatter
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -15,6 +15,10 @@ ExpectationMode = Literal["recurring", "periodic", "one_off", "irregular", "not_
 ExpectationStatus = Literal["suggested", "confirmed", "dismissed", "retired"]
 CadenceFrequency = Literal["monthly", "quarterly", "annual"]
 EvidenceSource = Literal["paperless", "user", "legacy_override"]
+ExternalSignalKind = Literal["accountStatementCandidate", "recurringDocumentCandidate"]
+ExternalCandidateOutcome = Literal[
+    "unreviewed", "mapped", "suggested", "ambiguous", "not_applicable"
+]
 SuggestedExpectationMode = Literal[
     "recurring", "periodic", "one_off", "irregular", "not_expected", "unknown"
 ]
@@ -35,7 +39,119 @@ TITLE_FIELDS = frozenset({"correspondent", "series", "kind", "period", "document
 
 
 class PolicyModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
+
+
+class DocumentExpectationSignalV1(PolicyModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        validate_by_alias=True,
+        validate_by_name=False,
+    )
+
+    series_ref: str = Field(
+        min_length=1,
+        max_length=200,
+        validation_alias="seriesRef",
+        serialization_alias="seriesRef",
+    )
+    kind: ExternalSignalKind
+    active: bool
+    display_hint: str = Field(
+        min_length=1,
+        max_length=200,
+        validation_alias="displayHint",
+        serialization_alias="displayHint",
+    )
+    cadence: CadenceFrequency | None = None
+    next_expected_date: date | None = Field(
+        default=None,
+        validation_alias="nextExpectedDate",
+        serialization_alias="nextExpectedDate",
+    )
+    confidence: float = Field(ge=0, le=1)
+    basis: list[str] = Field(min_length=1, max_length=20)
+
+    @field_validator("basis")
+    @classmethod
+    def normalize_basis(cls, value: list[str]) -> list[str]:
+        normalized = []
+        for reason in value:
+            if not reason or len(reason) > 64 or not reason.replace("_", "").isalnum():
+                raise ValueError("Signal basis values must be short alphanumeric identifiers")
+            normalized.append(reason.lower())
+        return sorted(set(normalized))
+
+
+class DocumentExpectationSignalsV1(PolicyModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        validate_by_alias=True,
+        validate_by_name=False,
+    )
+
+    contract_version: Literal["1"] = Field(
+        validation_alias="contractVersion",
+        serialization_alias="contractVersion",
+    )
+    connector_ref: str = Field(
+        min_length=1,
+        max_length=200,
+        validation_alias="connectorRef",
+        serialization_alias="connectorRef",
+    )
+    source_generation: str = Field(
+        min_length=1,
+        max_length=200,
+        validation_alias="sourceGeneration",
+        serialization_alias="sourceGeneration",
+    )
+    source_as_of: datetime = Field(
+        validation_alias="sourceAsOf",
+        serialization_alias="sourceAsOf",
+    )
+    completeness: Literal["complete", "partial"]
+    signals: list[DocumentExpectationSignalV1] = Field(max_length=6000)
+
+    @model_validator(mode="after")
+    def validate_unique_series_refs(self) -> DocumentExpectationSignalsV1:
+        refs = [signal.series_ref for signal in self.signals]
+        if len(refs) != len(set(refs)):
+            raise ValueError("signals must contain unique seriesRef values")
+        return self
+
+
+class ExternalCandidateSnapshotResult(PolicyModel):
+    source_generation: str
+    idempotent: bool
+    active_candidates: int = Field(ge=0)
+    deactivated_candidates: int = Field(ge=0)
+
+
+class ExternalCandidatePollRequest(PolicyModel):
+    connector_ref: str = Field(min_length=1, max_length=200)
+    source_generation: str = Field(min_length=1, max_length=200)
+
+
+class ExternalDocumentCandidate(PolicyModel):
+    id: str
+    kind: ExternalSignalKind
+    active: bool
+    display_hint: str
+    cadence: CadenceFrequency | None = None
+    next_expected_date: date | None = None
+    confidence: float = Field(ge=0, le=1)
+    basis: list[str]
+    source_as_of: str
+    outcome: ExternalCandidateOutcome = "unreviewed"
+    expectation_id: str | None = None
+    correspondent_id: int | None = Field(default=None, gt=0)
+    likely_multiple_statement_series: bool = False
+    recurrence_evidence: Literal["high", "none"] = "none"
+    review_finding: str | None = None
+    reviewed_at: str | None = None
 
 
 def paperless_deployment_identity(base_url: str) -> str:
@@ -315,6 +431,28 @@ class DocumentExpectationUpdate(PolicyModel):
     title_convention: TitleConvention | None = None
     metadata_policy: MetadataPolicy | None = None
     acquisition_source_id: str | None = None
+
+
+class ExternalCandidateReview(PolicyModel):
+    outcome: Literal["mapped", "suggested", "ambiguous", "not_applicable"]
+    expectation_id: str | None = None
+    correspondent_id: int | None = Field(default=None, gt=0)
+    expectation: DocumentExpectationCreate | None = None
+
+    @model_validator(mode="after")
+    def validate_review_action(self) -> ExternalCandidateReview:
+        if self.outcome == "mapped" and not self.expectation_id:
+            raise ValueError("mapped reviews require expectation_id")
+        if self.outcome == "suggested":
+            if self.correspondent_id is None:
+                raise ValueError("suggested reviews require correspondent_id")
+            if self.expectation is not None and self.expectation.status != "suggested":
+                raise ValueError("candidate-created expectations must remain suggested")
+        if self.outcome in {"ambiguous", "not_applicable"} and (
+            self.expectation_id is not None or self.expectation is not None
+        ):
+            raise ValueError(f"{self.outcome} reviews cannot bind an expectation")
+        return self
 
 
 class DocumentExpectation(DocumentExpectationBase):

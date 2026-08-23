@@ -120,6 +120,21 @@ interface AcquisitionSource {
   portal_url?: string | null;
 }
 
+interface ExternalCandidate {
+  id: string;
+  kind: 'accountStatementCandidate' | 'recurringDocumentCandidate';
+  active: boolean;
+  display_hint: string;
+  confidence: number;
+  basis: string[];
+  outcome: 'unreviewed' | 'mapped' | 'suggested' | 'ambiguous' | 'not_applicable';
+  expectation_id?: string | null;
+  correspondent_id?: number | null;
+  likely_multiple_statement_series: boolean;
+  recurrence_evidence: 'high' | 'none';
+  review_finding?: string | null;
+}
+
 interface SuggestionDraft {
   mode: ExpectationMode | '';
   seriesDiscriminator: string;
@@ -477,6 +492,8 @@ export default function CorrespondentReview() {
   const [expectationsByProfile, setExpectationsByProfile] = useState<Record<number, DocumentExpectation[]>>({});
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [acquisitionSources, setAcquisitionSources] = useState<AcquisitionSource[]>([]);
+  const [externalCandidates, setExternalCandidates] = useState<ExternalCandidate[]>([]);
+  const [candidateExpectation, setCandidateExpectation] = useState<Record<string, string>>({});
   const [paperlessUrl, setPaperlessUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -497,15 +514,22 @@ export default function CorrespondentReview() {
     () => selectedId ? expectationsByProfile[selectedId] ?? [] : [],
     [expectationsByProfile, selectedId],
   );
+  const selectedExternalCandidates = useMemo(
+    () => externalCandidates.filter((candidate) =>
+      candidate.correspondent_id === selectedId
+      || (candidate.correspondent_id == null && candidate.active && candidate.outcome === 'unreviewed')),
+    [externalCandidates, selectedId],
+  );
 
   const loadWorkspace = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [profilePayload, sourcePayload, paperlessPayload] = await Promise.all([
+      const [profilePayload, sourcePayload, paperlessPayload, candidatePayload] = await Promise.all([
         endpoints.statements.correspondentProfiles() as Promise<CorrespondentProfile[]>,
         endpoints.statements.acquisitionSources() as Promise<AcquisitionSource[]>,
         endpoints.statements.paperlessUrl() as Promise<{ paperless_url?: string | null }>,
+        endpoints.statements.externalCandidates() as Promise<ExternalCandidate[]>,
       ]);
       const expectationPairs = await Promise.all(
         profilePayload.map(async (profile) => [
@@ -516,6 +540,7 @@ export default function CorrespondentReview() {
       setProfiles(profilePayload);
       setAcquisitionSources(sourcePayload);
       setPaperlessUrl((paperlessPayload.paperless_url ?? '').replace(/\/$/, ''));
+      setExternalCandidates(candidatePayload);
       setExpectationsByProfile(Object.fromEntries(expectationPairs));
     } catch (requestError) {
       setError(getErrorMessage(requestError));
@@ -640,6 +665,20 @@ export default function CorrespondentReview() {
       'Acquisition source added.',
     );
   }, [runAction, sourceDraft]);
+
+  const reviewCandidate = useCallback(async (
+    candidate: ExternalCandidate,
+    outcome: 'mapped' | 'suggested' | 'ambiguous' | 'not_applicable',
+  ) => {
+    if (!selectedId) return;
+    const body: Record<string, unknown> = { outcome };
+    if (outcome === 'mapped') body.expectation_id = candidateExpectation[candidate.id];
+    if (outcome === 'suggested' || outcome === 'ambiguous') body.correspondent_id = selectedId;
+    await runAction(
+      () => endpoints.statements.reviewExternalCandidate(candidate.id, body),
+      `Candidate marked ${humanize(outcome).toLowerCase()}.`,
+    );
+  }, [candidateExpectation, runAction, selectedId]);
 
   return (
     <>
@@ -846,6 +885,96 @@ export default function CorrespondentReview() {
                                 Retire
                               </Button>
                             ) : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+
+                <Card title={`External candidates (${selectedExternalCandidates.length})`}>
+                  <div className="correspondent-callout">
+                    Account candidates are recurrence evidence only. They do not establish cadence
+                    or prove that a statement exists. Recurring obligations do not create invoice
+                    or receipt requirements.
+                  </div>
+                  {selectedExternalCandidates.length === 0 ? (
+                    <div className="correspondent-muted">No external candidates need review.</div>
+                  ) : (
+                    <div className="correspondent-expectation-list">
+                      {selectedExternalCandidates.map((candidate) => (
+                        <div className="correspondent-expectation" key={candidate.id}>
+                          <div>
+                            <strong>{redactSensitiveNumbers(candidate.display_hint)}</strong>
+                            <span>
+                              {candidate.kind === 'accountStatementCandidate'
+                                ? 'Account statement candidate'
+                                : 'Recurring document candidate'}
+                              {' · '}{Math.round(candidate.confidence * 100)}% confidence
+                            </span>
+                            {candidate.review_finding ? (
+                              <span>{humanize(candidate.review_finding)}</span>
+                            ) : null}
+                          </div>
+                          <div className="correspondent-actions">
+                            {!candidate.active ? <Badge tone="warning">Inactive source</Badge> : null}
+                            {candidate.likely_multiple_statement_series ? (
+                              <Badge tone="info">Multiple statement series likely</Badge>
+                            ) : null}
+                            <Badge tone={candidate.outcome === 'mapped' ? 'ok' : 'warning'}>
+                              {humanize(candidate.outcome)}
+                            </Badge>
+                            <select
+                              aria-label={`Expectation for ${candidate.display_hint}`}
+                              value={candidateExpectation[candidate.id] ?? candidate.expectation_id ?? ''}
+                              onChange={(event) => setCandidateExpectation({
+                                ...candidateExpectation,
+                                [candidate.id]: event.target.value,
+                              })}
+                            >
+                              <option value="">Map to expectation</option>
+                              {selectedExpectations
+                                .filter((expectation) => expectation.status !== 'retired')
+                                .map((expectation) => (
+                                  <option key={expectation.id} value={expectation.id}>
+                                    {redactSensitiveNumbers(
+                                      expectation.series_discriminator ?? humanize(expectation.kind),
+                                    )}
+                                  </option>
+                                ))}
+                            </select>
+                            <Button
+                              size="sm"
+                              disabled={
+                                busy
+                                || selectedProfileTerminal
+                                || !(candidateExpectation[candidate.id] ?? candidate.expectation_id)
+                              }
+                              onClick={() => void reviewCandidate(candidate, 'mapped')}
+                            >
+                              Map
+                            </Button>
+                            <Button
+                              size="sm"
+                              disabled={busy || selectedProfileTerminal}
+                              onClick={() => void reviewCandidate(candidate, 'suggested')}
+                            >
+                              Create suggestion
+                            </Button>
+                            <Button
+                              size="sm"
+                              disabled={busy || selectedProfileTerminal}
+                              onClick={() => void reviewCandidate(candidate, 'ambiguous')}
+                            >
+                              Leave ambiguous
+                            </Button>
+                            <Button
+                              size="sm"
+                              disabled={busy || selectedProfileTerminal}
+                              onClick={() => void reviewCandidate(candidate, 'not_applicable')}
+                            >
+                              Not applicable
+                            </Button>
                           </div>
                         </div>
                       ))}

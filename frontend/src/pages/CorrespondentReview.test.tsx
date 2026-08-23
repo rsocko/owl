@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   analyze: vi.fn(),
   createExpectation: vi.fn(),
   updateProfile: vi.fn(),
+  externalCandidates: vi.fn(),
+  reviewCandidate: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
@@ -24,6 +26,8 @@ vi.mock('../lib/api', () => ({
       analyzeCorrespondentProfiles: vi.fn(),
       relinkCorrespondentProfile: vi.fn(),
       updateDocumentExpectation: vi.fn(),
+      externalCandidates: mocks.externalCandidates,
+      reviewExternalCandidate: mocks.reviewCandidate,
       createAcquisitionSource: vi.fn(),
     },
   },
@@ -111,6 +115,8 @@ beforeEach(() => {
   });
   mocks.createExpectation.mockResolvedValue({ id: 'expectation-1' });
   mocks.updateProfile.mockResolvedValue({});
+  mocks.externalCandidates.mockResolvedValue([]);
+  mocks.reviewCandidate.mockResolvedValue({});
 });
 
 function renderPage() {
@@ -188,5 +194,31 @@ describe('Correspondent Review', () => {
     expect(screen.getByRole('button', { name: /analyze history/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /mark reviewed/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /return to review/i })).toBeEnabled();
+  });
+
+  it('supports explicit external candidate review without inferring cadence', async () => {
+    mocks.externalCandidates.mockResolvedValue([{
+      id: 'candidate-1',
+      kind: 'accountStatementCandidate',
+      active: true,
+      display_hint: 'Credit account',
+      confidence: 0.85,
+      basis: ['active_non_cash_account'],
+      outcome: 'unreviewed',
+      correspondent_id: null,
+      likely_multiple_statement_series: false,
+      recurrence_evidence: 'high',
+    }]);
+
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /create suggestion/i }));
+
+    await waitFor(() => {
+      expect(mocks.reviewCandidate).toHaveBeenCalledWith('candidate-1', {
+        outcome: 'suggested',
+        correspondent_id: 42,
+      });
+    });
+    expect(screen.getByText(/do not establish cadence/i)).toBeInTheDocument();
   });
 });
