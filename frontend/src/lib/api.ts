@@ -95,6 +95,13 @@ export const endpoints = {
       api.post(`/api/statements/correspondent-profiles/${id}/expectations`, body),
     updateDocumentExpectation: (id: string, body: unknown) =>
       api.patch(`/api/statements/document-expectations/${id}`, body),
+    externalCandidateConnection: () => api.get('/api/statements/external-candidates/connection'),
+    updateExternalCandidateConnection: (body: unknown) =>
+      api.put('/api/statements/external-candidates/connection', body),
+    deleteExternalCandidateConnection: () =>
+      api.delete('/api/statements/external-candidates/connection'),
+    syncExternalCandidates: (sourceGeneration: string) =>
+      api.post('/api/statements/external-candidates/sync', { source_generation: sourceGeneration }),
     externalCandidates: () => api.get('/api/statements/external-candidates'),
     reviewExternalCandidate: (id: string, body: unknown) =>
       api.put(`/api/statements/external-candidates/${id}/review`, body),

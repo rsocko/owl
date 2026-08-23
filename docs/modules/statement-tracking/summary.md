@@ -201,7 +201,9 @@ Tyrion/Mission Control integration is pull-only and generation-addressed. OWL pe
 the bounded V1 candidate fields (`kind`, active state, display hint, optional document timing,
 confidence, and basis) behind an opaque local candidate ID. It never stores balances, raw
 transactions, or raw account identifiers. Review can map the candidate to an existing
-expectation, associate it as a suggestion, leave it ambiguous, or mark it not applicable.
+expectation, associate it as a suggestion, leave it ambiguous, or mark it not applicable from
+the Correspondent Review workspace. The Tyrion connection is managed in the Settings UI by
+default, with deployment configuration retained as an advanced alternative.
 The last action creates durable confirmed `not_expected` policy keyed through the candidate's
 opaque connector and series references; unchanged generations do not prompt again. Inactive or
 removed candidates create findings without deleting confirmed or negative policy. Multiple

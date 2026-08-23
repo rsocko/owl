@@ -119,6 +119,21 @@ def _load_statement_tracker_config(path: str) -> Any | None:
         return None
 
 
+def _redact_validation_input(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: (
+                "[redacted]"
+                if any(marker in str(key).lower() for marker in ("token", "password", "secret"))
+                else _redact_validation_input(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_validation_input(item) for item in value]
+    return value
+
+
 def _register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(HTTPException)
     async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
@@ -131,13 +146,20 @@ def _register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+        errors = [
+            {
+                **error,
+                **({"input": _redact_validation_input(error["input"])} if "input" in error else {}),
+            }
+            for error in exc.errors()
+        ]
         return JSONResponse(
             status_code=422,
             content={
                 "error": {
                     "code": "validation_error",
                     "message": "Invalid request payload.",
-                    "details": jsonable_encoder(exc.errors(), custom_encoder={ValueError: str}),
+                    "details": jsonable_encoder(errors, custom_encoder={ValueError: str}),
                 }
             },
         )

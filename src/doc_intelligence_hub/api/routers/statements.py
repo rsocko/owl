@@ -42,6 +42,9 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     ExternalCandidateReview,
     ExternalCandidateSnapshotResult,
     ExternalDocumentCandidate,
+    ExternalSignalConnection,
+    ExternalSignalConnectionUpdate,
+    ExternalSignalSyncRequest,
     LegacyOverrideReviewItem,
     PolicyApplyRequest,
     PolicyApplyResponse,
@@ -694,6 +697,114 @@ async def poll_external_candidates(
 
     service = _get_policy_service(request)
     try:
+        return service.replace_external_candidates(snapshot)
+    finally:
+        service.close()
+
+
+@router.get(
+    "/external-candidates/connection",
+    response_model=ExternalSignalConnection,
+    summary="Get the saved Tyrion connection",
+)
+async def get_external_candidate_connection(request: Request) -> ExternalSignalConnection:
+    service = _get_policy_service(request)
+    try:
+        saved = service.get_external_signal_connection()
+        if saved is not None:
+            return saved
+        config = load_statement_config_from_request(request)
+        if config.external_signals.base_url and config.external_signals.connector_ref:
+            return ExternalSignalConnection(
+                configured=True,
+                source="configuration",
+                base_url=config.external_signals.base_url,
+                connector_ref=config.external_signals.connector_ref,
+                token_configured=resolve_external_signal_token(config) is not None,
+                verify_ssl=config.external_signals.verify_ssl,
+                timeout_seconds=config.external_signals.timeout_seconds,
+            )
+        return ExternalSignalConnection(configured=False)
+    finally:
+        service.close()
+
+
+@router.put(
+    "/external-candidates/connection",
+    response_model=ExternalSignalConnection,
+    summary="Save the Tyrion connection",
+)
+async def update_external_candidate_connection(
+    request: Request,
+    body: ExternalSignalConnectionUpdate,
+) -> ExternalSignalConnection:
+    service = _get_policy_service(request)
+    try:
+        try:
+            return service.update_external_signal_connection(body)
+        except ValueError as exc:
+            raise_api_error(409, "invalid_external_signal_connection", str(exc))
+    finally:
+        service.close()
+
+
+@router.delete(
+    "/external-candidates/connection",
+    status_code=204,
+    summary="Remove the saved Tyrion connection",
+)
+async def delete_external_candidate_connection(request: Request) -> Response:
+    service = _get_policy_service(request)
+    try:
+        service.delete_external_signal_connection()
+        return Response(status_code=204)
+    finally:
+        service.close()
+
+
+@router.post(
+    "/external-candidates/sync",
+    response_model=ExternalCandidateSnapshotResult,
+    summary="Synchronize a Tyrion candidate generation using the saved connection",
+)
+async def sync_external_candidates(
+    request: Request,
+    body: ExternalSignalSyncRequest,
+) -> ExternalCandidateSnapshotResult:
+    service = _get_policy_service(request)
+    try:
+        connection = service.get_external_signal_credentials()
+        if connection is None:
+            config = load_statement_config_from_request(request)
+            if not config.external_signals.base_url or not config.external_signals.connector_ref:
+                raise_api_error(
+                    409,
+                    "external_signal_source_not_configured",
+                    "Configure the Tyrion connection in Settings before synchronizing candidates.",
+                )
+            connection = {
+                "base_url": config.external_signals.base_url,
+                "connector_ref": config.external_signals.connector_ref,
+                "api_token": resolve_external_signal_token(config),
+                "verify_ssl": config.external_signals.verify_ssl,
+                "timeout_seconds": config.external_signals.timeout_seconds,
+            }
+        client = DocumentExpectationSignalsClient(
+            connection["base_url"],
+            api_token=connection["api_token"],
+            verify_ssl=bool(connection["verify_ssl"]),
+            timeout_seconds=connection["timeout_seconds"],
+        )
+        try:
+            snapshot = await client.fetch(connection["connector_ref"], body.source_generation)
+        except (httpx.HTTPError, ValueError):
+            raise_api_error(
+                502,
+                "external_signal_source_failed",
+                "The Tyrion candidate projection could not be retrieved or validated.",
+            )
+        finally:
+            await client.close()
         return service.replace_external_candidates(snapshot)
     finally:
         service.close()

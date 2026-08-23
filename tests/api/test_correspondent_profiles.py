@@ -416,6 +416,123 @@ def test_external_candidate_poll_and_review_contract(client, app, tmp_path) -> N
     assert expectations.json()[0]["status"] == "confirmed"
 
 
+def test_saved_external_connection_drives_candidate_sync(client, app, tmp_path) -> None:
+    _configure_statement_database(app, tmp_path)
+    saved = client.put(
+        "/api/statements/external-candidates/connection",
+        json={
+            "base_url": "https://tyrion-ui.test",
+            "connector_ref": "saved-connector",
+            "api_token": "saved-secret",
+            "verify_ssl": True,
+            "timeout_seconds": 45,
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json() == {
+        "configured": True,
+        "source": "saved",
+        "base_url": "https://tyrion-ui.test",
+        "connector_ref": "saved-connector",
+        "token_configured": True,
+        "verify_ssl": True,
+        "timeout_seconds": 45,
+        "last_source_generation": None,
+        "last_source_as_of": None,
+        "last_synced_at": None,
+    }
+    assert "saved-secret" not in saved.text
+
+    snapshot = DocumentExpectationSignalsV1.model_validate(
+        {
+            "contractVersion": "1",
+            "connectorRef": "saved-connector",
+            "sourceGeneration": "generation-2",
+            "sourceAsOf": "2026-08-23T10:00:00Z",
+            "completeness": "complete",
+            "signals": [],
+        }
+    )
+    with patch(
+        "doc_intelligence_hub.api.routers.statements.DocumentExpectationSignalsClient"
+    ) as client_type:
+        source_client = client_type.return_value
+        source_client.fetch = AsyncMock(return_value=snapshot)
+        source_client.close = AsyncMock()
+        response = client.post(
+            "/api/statements/external-candidates/sync",
+            json={"source_generation": "generation-2"},
+        )
+
+    assert response.status_code == 200
+    client_type.assert_called_once_with(
+        "https://tyrion-ui.test",
+        api_token="saved-secret",
+        verify_ssl=True,
+        timeout_seconds=45,
+    )
+    source_client.fetch.assert_awaited_once_with("saved-connector", "generation-2")
+
+    connection = client.get("/api/statements/external-candidates/connection")
+    assert connection.status_code == 200
+    assert connection.json()["last_source_generation"] == "generation-2"
+    assert connection.json()["last_source_as_of"] == "2026-08-23T10:00:00Z"
+
+
+def test_candidate_sync_requires_saved_connection(client, app, tmp_path) -> None:
+    _configure_statement_database(app, tmp_path)
+
+    response = client.post(
+        "/api/statements/external-candidates/sync",
+        json={"source_generation": "generation-2"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "external_signal_source_not_configured"
+
+
+def test_external_connection_does_not_send_saved_token_to_new_origin(client, app, tmp_path) -> None:
+    _configure_statement_database(app, tmp_path)
+    assert (
+        client.put(
+            "/api/statements/external-candidates/connection",
+            json={
+                "base_url": "https://tyrion-one.test",
+                "connector_ref": "connector",
+                "api_token": "origin-one-secret",
+            },
+        ).status_code
+        == 200
+    )
+
+    changed = client.put(
+        "/api/statements/external-candidates/connection",
+        json={
+            "base_url": "https://tyrion-two.test",
+            "connector_ref": "connector",
+        },
+    )
+
+    assert changed.status_code == 200
+    assert changed.json()["token_configured"] is False
+
+
+def test_external_connection_rejects_token_over_plain_http(client, app, tmp_path) -> None:
+    _configure_statement_database(app, tmp_path)
+
+    response = client.put(
+        "/api/statements/external-candidates/connection",
+        json={
+            "base_url": "http://tyrion.test",
+            "connector_ref": "connector",
+            "api_token": "insecure-secret",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "insecure-secret" not in response.text
+
+
 def test_cross_correspondent_series_merge_fails_before_mutation(client, app, tmp_path) -> None:
     database_path = _configure_statement_database(app, tmp_path)
     database = Database(database_path)

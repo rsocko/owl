@@ -187,6 +187,14 @@ interface ExternalCandidate {
   review_finding?: string | null;
 }
 
+interface ExternalSignalConnection {
+  configured: boolean;
+  connector_ref?: string | null;
+  last_source_generation?: string | null;
+  last_source_as_of?: string | null;
+  last_synced_at?: string | null;
+}
+
 interface SuggestionDraft {
   mode: ExpectationMode | '';
   seriesDiscriminator: string;
@@ -561,6 +569,8 @@ export default function CorrespondentReview() {
   const [undonePolicyOperations, setUndonePolicyOperations] = useState<string[]>([]);
   const [acquisitionSources, setAcquisitionSources] = useState<AcquisitionSource[]>([]);
   const [externalCandidates, setExternalCandidates] = useState<ExternalCandidate[]>([]);
+  const [externalConnection, setExternalConnection] = useState<ExternalSignalConnection>({ configured: false });
+  const [sourceGeneration, setSourceGeneration] = useState('');
   const [candidateExpectation, setCandidateExpectation] = useState<Record<string, string>>({});
   const [tags, setTags] = useState<MetadataOption[]>([]);
   const [documentTypes, setDocumentTypes] = useState<MetadataOption[]>([]);
@@ -600,6 +610,7 @@ export default function CorrespondentReview() {
         sourcePayload,
         paperlessPayload,
         candidatePayload,
+        connectionPayload,
         tagsPayload,
         documentTypesPayload,
       ] = await Promise.all([
@@ -607,6 +618,7 @@ export default function CorrespondentReview() {
         endpoints.statements.acquisitionSources() as Promise<AcquisitionSource[]>,
         endpoints.statements.paperlessUrl() as Promise<{ paperless_url?: string | null }>,
         endpoints.statements.externalCandidates() as Promise<ExternalCandidate[]>,
+        endpoints.statements.externalCandidateConnection() as Promise<ExternalSignalConnection>,
         endpoints.actionQueue.metadataTags() as Promise<{ tags?: Array<{ id: number; name: string }> }>,
         endpoints.actionQueue.metadataDocumentTypes() as Promise<{ document_types?: Array<{ id: number; name: string }> }>,
       ]);
@@ -625,6 +637,7 @@ export default function CorrespondentReview() {
       })));
       setPaperlessUrl((paperlessPayload.paperless_url ?? '').replace(/\/$/, ''));
       setExternalCandidates(candidatePayload);
+      setExternalConnection(connectionPayload);
       setExpectationsByProfile(Object.fromEntries(expectationPairs));
     } catch (requestError) {
       setError(getErrorMessage(requestError));
@@ -820,6 +833,31 @@ export default function CorrespondentReview() {
         : `Candidate marked ${humanize(outcome).toLowerCase()}.`,
     );
   }, [candidateExpectation, runAction, selectedId]);
+
+  const syncExternalCandidates = useCallback(async () => {
+    const generation = sourceGeneration.trim();
+    if (!generation) return;
+    setBusy(true);
+    try {
+      const result = await endpoints.statements.syncExternalCandidates(generation) as {
+        active_candidates: number;
+        deactivated_candidates: number;
+        idempotent: boolean;
+      };
+      setToast({
+        message: result.idempotent
+          ? 'That Tyrion generation was already synchronized.'
+          : `Synchronized ${result.active_candidates} active candidate${result.active_candidates === 1 ? '' : 's'}${result.deactivated_candidates ? `; ${result.deactivated_candidates} deactivated` : ''}.`,
+        tone: 'success',
+      });
+      setSourceGeneration('');
+      await loadWorkspace(false);
+    } catch (requestError) {
+      setToast({ message: getErrorMessage(requestError), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }, [loadWorkspace, sourceGeneration]);
 
   const previewExpectation = useCallback(async (expectationId: string) => {
     setBusy(true);
@@ -1281,6 +1319,35 @@ export default function CorrespondentReview() {
 
                 <div id="correspondent-external-candidates" className="correspondent-section-anchor">
                 <Card title={`External candidates (${selectedExternalCandidates.length})`}>
+                  {externalConnection.configured ? (
+                    <div className="correspondent-actions" style={{ marginBottom: 12 }}>
+                      <input
+                        aria-label="Tyrion source generation"
+                        value={sourceGeneration}
+                        maxLength={200}
+                        onChange={(event) => setSourceGeneration(event.target.value)}
+                        placeholder="Tyrion source generation"
+                      />
+                      <Button
+                        variant="primary"
+                        disabled={busy || !sourceGeneration.trim()}
+                        onClick={() => void syncExternalCandidates()}
+                      >
+                        Sync Tyrion candidates
+                      </Button>
+                      {externalConnection.last_synced_at ? (
+                        <span className="correspondent-muted">
+                          Last synced {formatDate(externalConnection.last_synced_at)}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="correspondent-callout" style={{ marginBottom: 12 }}>
+                      Tyrion is not connected. Configure it in Settings before synchronizing candidates.
+                      {' '}
+                      <Button size="sm" onClick={() => navigate('/settings')}>Open Settings</Button>
+                    </div>
+                  )}
                   <div className="correspondent-callout">
                     Account candidates are recurrence evidence only. They do not establish cadence
                     or prove that a statement exists. Recurring obligations do not create invoice

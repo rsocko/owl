@@ -1,9 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { endpoints } from '../lib/api';
 import Settings from './Settings';
 
-const { updateSettingsMock } = vi.hoisted(() => ({
+const { updateSettingsMock, updateTyrionMock } = vi.hoisted(() => ({
   updateSettingsMock: vi.fn(),
+  updateTyrionMock: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
@@ -34,6 +36,16 @@ vi.mock('../lib/api', () => ({
       test: vi.fn(),
     },
     paperlessHealth: vi.fn().mockResolvedValue({ status: 'ok' }),
+    statements: {
+      externalCandidateConnection: vi.fn().mockResolvedValue({
+        configured: false,
+        token_configured: false,
+        verify_ssl: true,
+        timeout_seconds: 30,
+      }),
+      updateExternalCandidateConnection: updateTyrionMock,
+      deleteExternalCandidateConnection: vi.fn(),
+    },
     actionQueue: {
       settings: vi.fn().mockResolvedValue({
         scan_mode: 'tags',
@@ -59,6 +71,14 @@ vi.mock('../lib/api', () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   updateSettingsMock.mockResolvedValue({ status: 'ok' });
+  updateTyrionMock.mockResolvedValue({
+    configured: true,
+    base_url: 'https://tyrion.test',
+    connector_ref: 'connector',
+    token_configured: true,
+    verify_ssl: true,
+    timeout_seconds: 30,
+  });
 });
 
 describe('Action Queue settings', () => {
@@ -68,6 +88,7 @@ describe('Action Queue settings', () => {
     const checkbox = await screen.findByRole('checkbox', {
       name: /remove intake tags when resolved/i,
     });
+
     expect((checkbox as HTMLInputElement).checked).toBe(true);
 
     fireEvent.click(checkbox);
@@ -80,6 +101,33 @@ describe('Action Queue settings', () => {
           remove_source_tag_on_resolve: false,
         }),
       );
+    });
+  });
+
+  describe('Tyrion settings', () => {
+    it('saves a user-managed Tyrion connection', async () => {
+      render(<Settings />);
+
+      fireEvent.change(await screen.findByLabelText('Tyrion base URL'), {
+        target: { value: 'https://tyrion.test' },
+      });
+      fireEvent.change(screen.getByLabelText('Connector reference'), {
+        target: { value: 'opaque-connector' },
+      });
+      fireEvent.change(screen.getByLabelText('API token'), {
+        target: { value: 'secret-token' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /save tyrion connection/i }));
+
+      await waitFor(() => {
+        expect(endpoints.statements.updateExternalCandidateConnection).toHaveBeenCalledWith({
+          base_url: 'https://tyrion.test',
+          connector_ref: 'opaque-connector',
+          api_token: 'secret-token',
+          verify_ssl: true,
+          timeout_seconds: 30,
+        });
+      });
     });
   });
 

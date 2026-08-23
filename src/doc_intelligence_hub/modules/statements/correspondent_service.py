@@ -22,6 +22,8 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     ExternalCandidateReview,
     ExternalCandidateSnapshotResult,
     ExternalDocumentCandidate,
+    ExternalSignalConnection,
+    ExternalSignalConnectionUpdate,
     IdentityResolution,
     LegacyOverrideReviewItem,
 )
@@ -128,6 +130,20 @@ class CorrespondentPolicyService:
         self, snapshot: DocumentExpectationSignalsV1
     ) -> ExternalCandidateSnapshotResult:
         return self.database.replace_external_candidate_snapshot(self.deployment_id, snapshot)
+
+    def get_external_signal_connection(self) -> ExternalSignalConnection | None:
+        return self.database.get_external_signal_connection(self.deployment_id)
+
+    def get_external_signal_credentials(self) -> dict[str, Any] | None:
+        return self.database.get_external_signal_credentials(self.deployment_id)
+
+    def update_external_signal_connection(
+        self, update: ExternalSignalConnectionUpdate
+    ) -> ExternalSignalConnection:
+        return self.database.update_external_signal_connection(self.deployment_id, update)
+
+    def delete_external_signal_connection(self) -> bool:
+        return self.database.delete_external_signal_connection(self.deployment_id)
 
     def list_external_candidates(
         self, correspondent_id: int | None = None
