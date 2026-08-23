@@ -102,6 +102,42 @@ class TestPromptBuildingWithIntegerTags:
             prompt_sent = mock_chat.call_args[0][0]
             assert "1, manual-tag, 99" in prompt_sent
 
+    @pytest.mark.asyncio
+    async def test_receipt_document_type_skips_llm_and_pay_action(self, analyzer):
+        document = {
+            "title": "Town water payment",
+            "content": "Water bill payment $1,382.28. Thank you for your payment.",
+            "document_type_name": "Receipt",
+            "tag_names": ["Inbox"],
+        }
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.analyzer.chat_json", new_callable=AsyncMock
+        ) as mock_chat:
+            result = await analyzer.analyze_document(document)
+
+        assert result["actions"] == []
+        assert result["document_assessment"]["requires_action"] is False
+        mock_chat.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_document_type_is_included_in_prompt(self, analyzer):
+        document = {
+            "title": "Policy notice",
+            "content": "Please review this policy notice.",
+            "document_type_name": "Correspondence",
+            "tag_names": ["Inbox"],
+        }
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.analyzer.chat_json", new_callable=AsyncMock
+        ) as mock_chat:
+            mock_chat.return_value = {
+                "actions": [],
+                "document_assessment": {"requires_action": False},
+            }
+            await analyzer.analyze_document(document)
+
+        assert "- Document type: Correspondence" in mock_chat.call_args[0][0]
+
 
 def test_normalize_extracted_data_keeps_safe_links_and_rejects_unsafe_urls():
     extracted = normalize_extracted_data(

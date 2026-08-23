@@ -127,6 +127,23 @@ class TestPipelineErrorIsolation:
         assert "simulated fetch failure" in stats["errors"][0]["error"]
         assert stats["timed_out"] is False
 
+    def test_resolves_paperless_metadata_for_analysis(self):
+        pipeline = Pipeline()
+        pipeline._correspondent_cache = {7: "Town of Natick"}
+        pipeline._doc_type_cache = {5: "Receipt"}
+        pipeline._tag_cache = {9: "Inbox", 12: "Utilities"}
+        document = {
+            "correspondent": 7,
+            "document_type": 5,
+            "tags": [9, 12],
+        }
+
+        pipeline._resolve_document_metadata(document)
+
+        assert document["correspondent_name"] == "Town of Natick"
+        assert document["document_type_name"] == "Receipt"
+        assert document["tag_names"] == ["Inbox", "Utilities"]
+
     @pytest.mark.asyncio
     async def test_repeated_non_force_run_skips_processed_document(self, db, monkeypatch):
         docs = _make_docs(1)

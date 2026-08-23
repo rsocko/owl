@@ -147,8 +147,10 @@ class Pipeline:
 
         # Build a document type ID→name cache
         self._doc_type_cache: dict[int, str] = {}
+        self._tag_cache: dict[int, str] = {}
         try:
-            _, _, doc_types = await self.paperless.fetch_all_metadata()
+            _, tags, doc_types = await self.paperless.fetch_all_metadata()
+            self._tag_cache = tags
             self._doc_type_cache = doc_types
         except (httpx.TimeoutException, httpx.ConnectError, OSError) as exc:
             logger.info("Could not load document type cache (will use IDs): %s", exc)
@@ -368,6 +370,7 @@ class Pipeline:
                 # Fetch full content if not already present
                 if "content" not in doc or not doc["content"]:
                     doc["content"] = await self.paperless.get_document_content(doc_id)
+                self._resolve_document_metadata(doc)
 
                 # Compute basic text quality metrics
                 content = doc.get("content", "")
@@ -783,6 +786,40 @@ class Pipeline:
             )
             db.add(action)
             return action
+
+    def _resolve_document_metadata(self, document: dict) -> None:
+        """Add resolved Paperless metadata names used by both analyzers."""
+        correspondent = document.get("correspondent")
+        if isinstance(correspondent, int):
+            document["correspondent_name"] = self._correspondent_cache.get(
+                correspondent, str(correspondent)
+            )
+        elif correspondent and str(correspondent).isdigit():
+            document["correspondent_name"] = self._correspondent_cache.get(
+                int(correspondent), str(correspondent)
+            )
+
+        document_type = document.get("document_type")
+        if isinstance(document_type, int):
+            document["document_type_name"] = self._doc_type_cache.get(
+                document_type, str(document_type)
+            )
+        elif document_type and str(document_type).isdigit():
+            document["document_type_name"] = self._doc_type_cache.get(
+                int(document_type), str(document_type)
+            )
+        elif document_type:
+            document["document_type_name"] = str(document_type)
+
+        resolved_tags = []
+        for tag in document.get("tag_names", document.get("tags", [])):
+            if isinstance(tag, int):
+                resolved_tags.append(self._tag_cache.get(tag, str(tag)))
+            elif str(tag).isdigit():
+                resolved_tags.append(self._tag_cache.get(int(tag), str(tag)))
+            else:
+                resolved_tags.append(str(tag))
+        document["tag_names"] = resolved_tags
 
     def _record_history(
         self,

@@ -158,6 +158,33 @@ class TestReviewDetection:
 
 
 class TestFileDetection:
+    def test_receipt_document_type_is_not_a_pay_action(self, analyzer):
+        result = analyzer.analyze_document(
+            {
+                "title": "Pay Water Bill - $1,382.28",
+                "content": (
+                    "Town of Natick water payment. Amount $1,382.28. Thank you for your payment."
+                ),
+                "document_type_name": "Receipt",
+                "tag_names": ["Inbox"],
+            }
+        )
+
+        assert result["actions"] == []
+        assert result["document_assessment"]["requires_action"] is False
+
+    def test_receipt_tag_is_not_a_pay_action(self, analyzer):
+        result = analyzer.analyze_document(
+            {
+                "title": "Town water payment",
+                "content": "Water utility payment received. Total $1,382.28.",
+                "tag_names": ["Inbox", "Receipt"],
+            }
+        )
+
+        assert result["actions"] == []
+        assert result["document_assessment"]["requires_action"] is False
+
     def test_tax_form(self, analyzer):
         result = analyzer.analyze_document(
             {

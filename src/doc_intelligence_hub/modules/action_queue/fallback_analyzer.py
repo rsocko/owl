@@ -8,7 +8,11 @@ ensures the pipeline still produces useful results without AI.
 import re
 from datetime import date, timedelta
 
-from .analyzer import _normalize_cta, normalize_extracted_data
+from .analyzer import (
+    _normalize_cta,
+    normalize_extracted_data,
+    receipt_no_action_result,
+)
 
 # Keyword patterns for action type detection
 _PAY_KEYWORDS = re.compile(
@@ -109,6 +113,10 @@ class RuleBasedAnalyzer:
 
         Returns the same format as OllamaAnalyzer for compatibility.
         """
+        receipt_result = receipt_no_action_result(document)
+        if receipt_result:
+            return receipt_result
+
         title = document.get("title", "")
         content = document.get("content", "")
         correspondent = str(document.get("correspondent_name", document.get("correspondent", "")))
