@@ -106,11 +106,11 @@ def _audit_payload(
         "changed_fields": fields,
         "old_display": {
             "title": _safe_display(old.title) if patch.title is not None else None,
-            "tags": [_safe_display(name) for name in old.tag_names] if patch.tags is not None else None,
+            "tags": [_safe_display(name) for name in old.tag_names]
+            if patch.tags is not None
+            else None,
             "document_type": (
-                _safe_display(old.document_type_name)
-                if patch.document_type is not None
-                else None
+                _safe_display(old.document_type_name) if patch.document_type is not None else None
             ),
         },
         "new_display": {
@@ -130,9 +130,7 @@ def _audit_payload(
         "new_digest": _digest(proposed.model_dump(mode="json")),
         "tag_ids_added": sorted(new_tags - old_tags),
         "tag_ids_removed": sorted(old_tags - new_tags),
-        "old_document_type_id": (
-            old.document_type_id if patch.document_type is not None else None
-        ),
+        "old_document_type_id": (old.document_type_id if patch.document_type is not None else None),
         "new_document_type_id": (
             proposed.document_type_id if patch.document_type is not None else None
         ),
@@ -154,15 +152,16 @@ async def apply_policy_operations(
         operation = selected.operation
         if operation.expectation_id != expectation_id:
             results.append(
-                _failure(selected, "expectation_mismatch", "Operation belongs to another expectation.")
+                _failure(
+                    selected, "expectation_mismatch", "Operation belongs to another expectation."
+                )
             )
             continue
-        if (
-            policy_operation_id(operation, signing_key=preview_signing_key)
-            != selected.preview_id
-        ):
+        if policy_operation_id(operation, signing_key=preview_signing_key) != selected.preview_id:
             results.append(
-                _failure(selected, "tampered_preview", "Preview operation failed integrity validation.")
+                _failure(
+                    selected, "tampered_preview", "Preview operation failed integrity validation."
+                )
             )
             continue
         if operation.document_id in seen_documents:
@@ -260,7 +259,9 @@ async def undo_policy_operation(
         policy_operation_id(request.operation, signing_key=preview_signing_key)
         != request.preview_id
     ):
-        return _failure(selected, "tampered_preview", "Preview operation failed integrity validation.")
+        return _failure(
+            selected, "tampered_preview", "Preview operation failed integrity validation."
+        )
     try:
         audit = get_policy_correction_event(event_id)
     except (SQLAlchemyError, json.JSONDecodeError):
@@ -278,10 +279,9 @@ async def undo_policy_operation(
         return _failure(selected, "audit_mismatch", "Undo request does not match the audit record.")
 
     proposed = _proposed(request.operation, tag_names, document_type_names)
-    if (
-        payload.get("old_digest") != _digest(request.operation.expected.model_dump(mode="json"))
-        or payload.get("new_digest") != _digest(proposed.model_dump(mode="json"))
-    ):
+    if payload.get("old_digest") != _digest(
+        request.operation.expected.model_dump(mode="json")
+    ) or payload.get("new_digest") != _digest(proposed.model_dump(mode="json")):
         return _failure(selected, "audit_mismatch", "Undo values do not match the audit record.")
     try:
         current = _snapshot(
@@ -307,7 +307,9 @@ async def undo_policy_operation(
         added = set(payload.get("tag_ids_added") or [])
         removed = set(payload.get("tag_ids_removed") or [])
         if not added.issubset(current_tags) or removed & current_tags:
-            return _failure(selected, "undo_conflict", "Policy-managed tags changed after correction.")
+            return _failure(
+                selected, "undo_conflict", "Policy-managed tags changed after correction."
+            )
         restore_patch["tags"] = sorted((current_tags - added) | removed)
 
     try:
