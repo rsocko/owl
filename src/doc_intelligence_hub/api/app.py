@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
@@ -136,7 +137,7 @@ def _register_exception_handlers(app: FastAPI) -> None:
                 "error": {
                     "code": "validation_error",
                     "message": "Invalid request payload.",
-                    "details": exc.errors(),
+                    "details": jsonable_encoder(exc.errors(), custom_encoder={ValueError: str}),
                 }
             },
         )

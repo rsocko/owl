@@ -11,15 +11,20 @@ import logging
 import os
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field, model_validator
 
+from doc_intelligence_hub.api.routers import load_statement_config_from_request
 from doc_intelligence_hub.core.webhooks import (
     VALID_EVENT_TYPES,
     WebhookDB,
     dispatch_to_subscribers,
     get_webhook_db,
 )
+from doc_intelligence_hub.modules.statements.correspondent_models import (
+    paperless_deployment_identity,
+)
+from doc_intelligence_hub.modules.statements.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +73,14 @@ class WebhookSubscriptionResponse(BaseModel):
 class StatementFoundRequest(BaseModel):
     """Payload n8n sends when it has retrieved a missing statement."""
 
-    provider_key: str = Field(..., description="The provider key from the missing-statement alert.")
+    expectation_id: str | None = Field(
+        default=None,
+        description="The stable OWL expectation ID from a missing-statement alert.",
+    )
+    provider_key: str | None = Field(
+        default=None,
+        description="Legacy provider key accepted only when it resolves unambiguously.",
+    )
     expected_date: str = Field(..., description="The expected statement date (YYYY-MM-DD).")
     document_id: str | None = Field(
         default=None,
@@ -79,6 +91,12 @@ class StatementFoundRequest(BaseModel):
         description="Source system that found the statement.",
     )
     notes: str | None = None
+
+    @model_validator(mode="after")
+    def require_identity(self) -> StatementFoundRequest:
+        if not self.expectation_id and not self.provider_key:
+            raise ValueError("expectation_id or provider_key is required")
+        return self
 
 
 class StatementMissingNotification(BaseModel):
@@ -231,15 +249,56 @@ async def notify_statement_missing(
         "a previously-missing statement has been successfully retrieved."
     ),
 )
-async def statement_found(body: StatementFoundRequest) -> dict[str, Any]:
+async def statement_found(request: Request, body: StatementFoundRequest) -> dict[str, Any]:
+    config = load_statement_config_from_request(request)
+    settings = request.app.state.hub_settings
+    paperless_url = settings.paperless_url or config.source.paperless_url
+    canonical_key = body.expectation_id or body.provider_key
+    resolved_expectation_id = body.expectation_id
+    if paperless_url:
+        policy_db = Database(config.runtime.database_path)
+        try:
+            deployment_id = paperless_deployment_identity(paperless_url)
+            if body.expectation_id:
+                expectation = policy_db.get_document_expectation(deployment_id, body.expectation_id)
+                if expectation is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail={
+                            "code": "document_expectation_not_found",
+                            "message": "Document expectation not found.",
+                        },
+                    )
+                canonical_key = expectation.id
+            elif body.provider_key:
+                resolution = policy_db.resolve_expectation_identity(
+                    deployment_id, body.provider_key
+                )
+                if resolution.status == "ambiguous":
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "ambiguous_legacy_provider_key",
+                            "message": "Legacy provider key requires explicit review.",
+                        },
+                    )
+                if resolution.status == "resolved":
+                    canonical_key = resolution.canonical_key
+                    resolved_expectation_id = resolution.canonical_key
+        finally:
+            policy_db.close()
+
+    assert canonical_key is not None
     db = _get_db()
     try:
         # Mark a resolved tombstone so future recommendation cycles don't
         # re-alert for this provider+date, even if the recommendation engine
         # still lists it as missing (ingestion may not have happened yet).
-        db.mark_alerted(body.provider_key, body.expected_date, "statement.found")
+        db.mark_alerted(canonical_key, body.expected_date, "statement.found")
 
         payload = body.model_dump()
+        payload["provider_key"] = canonical_key
+        payload["expectation_id"] = resolved_expectation_id
 
         extra_urls: list[str] = []
         n8n_url = os.environ.get("N8N_WEBHOOK_URL")
@@ -252,7 +311,8 @@ async def statement_found(body: StatementFoundRequest) -> dict[str, Any]:
 
         return {
             "status": "acknowledged",
-            "provider_key": body.provider_key,
+            "provider_key": canonical_key,
+            "expectation_id": resolved_expectation_id,
             "expected_date": body.expected_date,
             "document_id": body.document_id,
             "deliveries": {url: ok for url, ok in results.items()},

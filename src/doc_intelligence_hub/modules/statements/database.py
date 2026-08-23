@@ -8,9 +8,30 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import uuid
 from datetime import date
 from pathlib import Path
+from typing import Any
 
+from doc_intelligence_hub.modules.statements.correspondent_models import (
+    AcquisitionSource,
+    AcquisitionSourceCreate,
+    AcquisitionSourceUpdate,
+    Cadence,
+    CorrespondentProfile,
+    CorrespondentProfileUpdate,
+    CorrespondentSyncResult,
+    DocumentExpectation,
+    DocumentExpectationCreate,
+    DocumentExpectationUpdate,
+    ExpectationEvidence,
+    IdentityResolution,
+    LegacyOverrideReviewItem,
+    MetadataPolicy,
+    ObservedSummary,
+    ProfileDefaults,
+    TitleConvention,
+)
 from doc_intelligence_hub.modules.statements.models import (
     AnalysisPattern,
     DiscoveryResult,
@@ -19,7 +40,7 @@ from doc_intelligence_hub.modules.statements.models import (
     RecommendationResult,
 )
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -132,6 +153,111 @@ CREATE TABLE IF NOT EXISTS series_overrides (
 );
 
 CREATE INDEX IF NOT EXISTS idx_series_overrides_series ON series_overrides(series_id);
+
+-- Correspondent policy tables (schema v4)
+CREATE TABLE IF NOT EXISTS correspondent_profiles (
+    deployment_id TEXT NOT NULL,
+    correspondent_id INTEGER NOT NULL,
+    current_name TEXT NOT NULL,
+    review_status TEXT NOT NULL DEFAULT 'unreviewed'
+        CHECK (review_status IN ('unreviewed', 'reviewed', 'ignored')),
+    lifecycle_status TEXT NOT NULL DEFAULT 'active'
+        CHECK (lifecycle_status IN ('active', 'orphaned', 'retired')),
+    aliases_json TEXT NOT NULL DEFAULT '[]',
+    notes TEXT,
+    profile_defaults_json TEXT NOT NULL DEFAULT '{}',
+    observed_summary_json TEXT NOT NULL DEFAULT '{}',
+    last_analyzed_at TEXT,
+    last_reviewed_at TEXT,
+    orphaned_at TEXT,
+    relinked_from_correspondent_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (deployment_id, correspondent_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_correspondent_profiles_review
+    ON correspondent_profiles(deployment_id, lifecycle_status, review_status);
+
+CREATE TABLE IF NOT EXISTS acquisition_sources (
+    id TEXT PRIMARY KEY,
+    deployment_id TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    delivery_mode TEXT NOT NULL,
+    instructions TEXT,
+    portal_url TEXT,
+    automation_state TEXT NOT NULL,
+    connector_type TEXT,
+    connector_ref TEXT,
+    availability_delay_days INTEGER,
+    last_success_at TEXT,
+    browser_feasibility TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_acquisition_sources_deployment
+    ON acquisition_sources(deployment_id);
+
+CREATE TABLE IF NOT EXISTS document_expectations (
+    id TEXT PRIMARY KEY,
+    deployment_id TEXT NOT NULL,
+    correspondent_id INTEGER NOT NULL,
+    kind TEXT NOT NULL
+        CHECK (kind IN ('statement', 'invoice', 'bill', 'receipt', 'record', 'other')),
+    document_type_id INTEGER,
+    statement_series_id TEXT,
+    series_discriminator TEXT,
+    expectation_mode TEXT NOT NULL
+        CHECK (expectation_mode IN ('recurring', 'periodic', 'one_off', 'irregular', 'not_expected')),
+    status TEXT NOT NULL
+        CHECK (status IN ('suggested', 'confirmed', 'dismissed', 'retired')),
+    cadence_json TEXT,
+    evidence_json TEXT NOT NULL,
+    title_convention_json TEXT,
+    metadata_policy_json TEXT NOT NULL DEFAULT '{}',
+    acquisition_source_id TEXT,
+    legacy_provider_key TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (deployment_id, correspondent_id)
+        REFERENCES correspondent_profiles(deployment_id, correspondent_id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_expectations_profile
+    ON document_expectations(deployment_id, correspondent_id);
+CREATE INDEX IF NOT EXISTS idx_expectations_alert_policy
+    ON document_expectations(deployment_id, status, expectation_mode);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_expectations_active_statement_series
+    ON document_expectations(deployment_id, statement_series_id)
+    WHERE statement_series_id IS NOT NULL AND status != 'retired';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_expectations_legacy_key
+    ON document_expectations(deployment_id, legacy_provider_key)
+    WHERE legacy_provider_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS legacy_override_migrations (
+    deployment_id TEXT NOT NULL,
+    provider_key TEXT NOT NULL,
+    resolution_status TEXT NOT NULL
+        CHECK (resolution_status IN ('migrated', 'review_required', 'unmigrated')),
+    reason_code TEXT NOT NULL,
+    expectation_id TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (deployment_id, provider_key)
+);
+
+CREATE TABLE IF NOT EXISTS correspondent_profile_events (
+    id TEXT PRIMARY KEY,
+    deployment_id TEXT NOT NULL,
+    correspondent_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_correspondent_profile_events_profile
+    ON correspondent_profile_events(deployment_id, correspondent_id, created_at);
 """
 
 
@@ -165,10 +291,17 @@ class Database:
     def _initialize_schema(self) -> None:
         conn = self._conn
         conn.executescript(_SCHEMA_SQL)
-        row = conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()
-        if row[0] == 0:
+        row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
+        if row is None:
             conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
-            conn.commit()
+        elif row["version"] < SCHEMA_VERSION:
+            conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
+        elif row["version"] > SCHEMA_VERSION:
+            raise RuntimeError(
+                f"Statement database schema {row['version']} is newer than supported "
+                f"version {SCHEMA_VERSION}"
+            )
+        conn.commit()
 
     # ----- Discovery persistence -----
 
@@ -621,10 +754,9 @@ class Database:
         return result
 
     def delete_series(self, series_id: str) -> None:
-        """Delete a series and its document associations."""
+        """Delete a series and its documents while retaining correction history."""
         conn = self.connect()
         conn.execute("DELETE FROM series_documents WHERE series_id = ?", (series_id,))
-        conn.execute("DELETE FROM series_overrides WHERE series_id = ?", (series_id,))
         conn.execute("DELETE FROM statement_series WHERE id = ?", (series_id,))
         conn.commit()
 
@@ -641,3 +773,874 @@ class Database:
                 return None  # No mapping configured — use keyword fallback
             return set()  # Mapping exists but nothing enabled
         return {row["document_type_name"] for row in rows}
+
+    # ----- Correspondent profiles and expectations -----
+
+    @staticmethod
+    def _profile_row_to_model(row: sqlite3.Row) -> CorrespondentProfile:
+        return CorrespondentProfile(
+            correspondent_id=row["correspondent_id"],
+            current_name=row["current_name"],
+            review_status=row["review_status"],
+            lifecycle_status=row["lifecycle_status"],
+            aliases=json.loads(row["aliases_json"]),
+            notes=row["notes"],
+            profile_defaults=ProfileDefaults.model_validate_json(row["profile_defaults_json"]),
+            observed_summary=ObservedSummary.model_validate_json(row["observed_summary_json"]),
+            last_analyzed_at=row["last_analyzed_at"],
+            last_reviewed_at=row["last_reviewed_at"],
+            orphaned_at=row["orphaned_at"],
+            relinked_from_correspondent_id=row["relinked_from_correspondent_id"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _expectation_row_to_model(row: sqlite3.Row) -> DocumentExpectation:
+        return DocumentExpectation(
+            id=row["id"],
+            correspondent_id=row["correspondent_id"],
+            kind=row["kind"],
+            document_type_id=row["document_type_id"],
+            statement_series_id=row["statement_series_id"],
+            series_discriminator=row["series_discriminator"],
+            expectation_mode=row["expectation_mode"],
+            status=row["status"],
+            cadence=Cadence.model_validate_json(row["cadence_json"])
+            if row["cadence_json"]
+            else None,
+            evidence=ExpectationEvidence.model_validate_json(row["evidence_json"]),
+            title_convention=TitleConvention.model_validate_json(row["title_convention_json"])
+            if row["title_convention_json"]
+            else None,
+            metadata_policy=MetadataPolicy.model_validate_json(row["metadata_policy_json"]),
+            acquisition_source_id=row["acquisition_source_id"],
+            legacy_provider_key=row["legacy_provider_key"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _acquisition_row_to_model(row: sqlite3.Row) -> AcquisitionSource:
+        return AcquisitionSource(
+            id=row["id"],
+            channel=row["channel"],
+            delivery_mode=row["delivery_mode"],
+            instructions=row["instructions"],
+            portal_url=row["portal_url"],
+            automation_state=row["automation_state"],
+            connector_type=row["connector_type"],
+            connector_ref=row["connector_ref"],
+            availability_delay_days=row["availability_delay_days"],
+            last_success_at=row["last_success_at"],
+            browser_feasibility=row["browser_feasibility"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def reconcile_correspondents(
+        self, deployment_id: str, correspondents: list[dict[str, Any]]
+    ) -> CorrespondentSyncResult:
+        """Sync Paperless identities without guessing rename, deletion, or merge relationships."""
+        conn = self.connect()
+        current: dict[int, str] = {}
+        for item in correspondents:
+            correspondent_id = int(item["id"])
+            name = str(item["name"]).strip()
+            if correspondent_id <= 0 or not name:
+                raise ValueError(
+                    "Paperless correspondents require a positive ID and non-empty name"
+                )
+            current[correspondent_id] = name
+
+        created = updated = orphaned = restored = 0
+        with conn:
+            existing_rows = conn.execute(
+                "SELECT * FROM correspondent_profiles WHERE deployment_id = ?",
+                (deployment_id,),
+            ).fetchall()
+            existing = {row["correspondent_id"]: row for row in existing_rows}
+
+            for correspondent_id, name in current.items():
+                row = existing.get(correspondent_id)
+                if row is None:
+                    conn.execute(
+                        """INSERT INTO correspondent_profiles
+                           (deployment_id, correspondent_id, current_name)
+                           VALUES (?, ?, ?)""",
+                        (deployment_id, correspondent_id, name),
+                    )
+                    created += 1
+                    continue
+
+                lifecycle = row["lifecycle_status"]
+                next_lifecycle = "active" if lifecycle == "orphaned" else lifecycle
+                if row["current_name"] != name or next_lifecycle != lifecycle:
+                    conn.execute(
+                        """UPDATE correspondent_profiles
+                           SET current_name = ?, lifecycle_status = ?, orphaned_at = NULL,
+                               updated_at = datetime('now')
+                           WHERE deployment_id = ? AND correspondent_id = ?""",
+                        (name, next_lifecycle, deployment_id, correspondent_id),
+                    )
+                    updated += 1
+                    if lifecycle == "orphaned":
+                        restored += 1
+
+            for correspondent_id, row in existing.items():
+                if correspondent_id not in current and row["lifecycle_status"] == "active":
+                    conn.execute(
+                        """UPDATE correspondent_profiles
+                           SET lifecycle_status = 'orphaned',
+                               orphaned_at = datetime('now'),
+                               updated_at = datetime('now')
+                           WHERE deployment_id = ? AND correspondent_id = ?""",
+                        (deployment_id, correspondent_id),
+                    )
+                    self._insert_profile_event(
+                        conn,
+                        deployment_id,
+                        correspondent_id,
+                        "paperless_correspondent_orphaned",
+                    )
+                    orphaned += 1
+
+        return CorrespondentSyncResult(
+            created=created,
+            updated=updated,
+            orphaned=orphaned,
+            restored=restored,
+        )
+
+    def list_correspondent_profiles(self, deployment_id: str) -> list[CorrespondentProfile]:
+        conn = self.connect()
+        rows = conn.execute(
+            """SELECT * FROM correspondent_profiles
+               WHERE deployment_id = ?
+               ORDER BY lifecycle_status, current_name COLLATE NOCASE""",
+            (deployment_id,),
+        ).fetchall()
+        return [self._profile_row_to_model(row) for row in rows]
+
+    def get_correspondent_profile(
+        self, deployment_id: str, correspondent_id: int
+    ) -> CorrespondentProfile | None:
+        conn = self.connect()
+        row = conn.execute(
+            """SELECT * FROM correspondent_profiles
+               WHERE deployment_id = ? AND correspondent_id = ?""",
+            (deployment_id, correspondent_id),
+        ).fetchone()
+        return self._profile_row_to_model(row) if row else None
+
+    def update_correspondent_profile(
+        self,
+        deployment_id: str,
+        correspondent_id: int,
+        update: CorrespondentProfileUpdate,
+    ) -> CorrespondentProfile:
+        conn = self.connect()
+        if self.get_correspondent_profile(deployment_id, correspondent_id) is None:
+            raise KeyError("correspondent_profile_not_found")
+
+        values = update.model_dump(exclude_unset=True)
+        columns: dict[str, Any] = {}
+        direct_fields = {
+            "review_status",
+            "lifecycle_status",
+            "notes",
+            "last_analyzed_at",
+            "last_reviewed_at",
+        }
+        for field in direct_fields & values.keys():
+            if values[field] is not None or field == "notes":
+                columns[field] = values[field]
+        if "aliases" in values and values["aliases"] is not None:
+            columns["aliases_json"] = json.dumps(values["aliases"])
+        if "profile_defaults" in values:
+            defaults = update.profile_defaults or ProfileDefaults()
+            columns["profile_defaults_json"] = defaults.model_dump_json()
+        if "observed_summary" in values:
+            summary = update.observed_summary or ObservedSummary()
+            columns["observed_summary_json"] = summary.model_dump_json()
+        if not columns:
+            profile = self.get_correspondent_profile(deployment_id, correspondent_id)
+            assert profile is not None
+            return profile
+
+        assignments = ", ".join(f"{column} = ?" for column in columns)
+        with conn:
+            conn.execute(
+                f"""UPDATE correspondent_profiles
+                    SET {assignments}, updated_at = datetime('now')
+                    WHERE deployment_id = ? AND correspondent_id = ?""",
+                [*columns.values(), deployment_id, correspondent_id],
+            )
+            self._insert_profile_event(
+                conn,
+                deployment_id,
+                correspondent_id,
+                "profile_updated",
+                {"fields": sorted(values)},
+            )
+        profile = self.get_correspondent_profile(deployment_id, correspondent_id)
+        assert profile is not None
+        return profile
+
+    def relink_correspondent_profile(
+        self,
+        deployment_id: str,
+        old_correspondent_id: int,
+        new_correspondent_id: int,
+        new_name: str,
+    ) -> CorrespondentProfile:
+        """Explicitly relink an orphan to a current Paperless identity."""
+        conn = self.connect()
+        source = conn.execute(
+            """SELECT * FROM correspondent_profiles
+               WHERE deployment_id = ? AND correspondent_id = ?""",
+            (deployment_id, old_correspondent_id),
+        ).fetchone()
+        if source is None:
+            raise KeyError("correspondent_profile_not_found")
+        if source["lifecycle_status"] != "orphaned":
+            raise ValueError("Only orphaned profiles can be relinked")
+
+        target = conn.execute(
+            """SELECT * FROM correspondent_profiles
+               WHERE deployment_id = ? AND correspondent_id = ?""",
+            (deployment_id, new_correspondent_id),
+        ).fetchone()
+        if target is not None:
+            target_expectations = conn.execute(
+                """SELECT COUNT(*) FROM document_expectations
+                   WHERE deployment_id = ? AND correspondent_id = ?""",
+                (deployment_id, new_correspondent_id),
+            ).fetchone()[0]
+            target_has_policy = (
+                target_expectations > 0
+                or target["review_status"] != "unreviewed"
+                or bool(target["notes"])
+                or json.loads(target["aliases_json"])
+            )
+            if target_has_policy:
+                raise ValueError("Target correspondent already has reviewed OWL policy")
+
+        with conn:
+            if target is not None:
+                conn.execute(
+                    """DELETE FROM correspondent_profiles
+                       WHERE deployment_id = ? AND correspondent_id = ?""",
+                    (deployment_id, new_correspondent_id),
+                )
+            conn.execute(
+                """UPDATE statement_series
+                   SET correspondent_id = ?, correspondent_name = ?
+                   WHERE correspondent_id = ?""",
+                (new_correspondent_id, new_name, old_correspondent_id),
+            )
+            conn.execute(
+                """UPDATE correspondent_profiles
+                   SET correspondent_id = ?, current_name = ?, lifecycle_status = 'active',
+                       orphaned_at = NULL, relinked_from_correspondent_id = ?,
+                       updated_at = datetime('now')
+                   WHERE deployment_id = ? AND correspondent_id = ?""",
+                (
+                    new_correspondent_id,
+                    new_name,
+                    old_correspondent_id,
+                    deployment_id,
+                    old_correspondent_id,
+                ),
+            )
+            self._insert_profile_event(
+                conn,
+                deployment_id,
+                new_correspondent_id,
+                "profile_relinked",
+                {"from_correspondent_id": old_correspondent_id},
+            )
+
+        profile = self.get_correspondent_profile(deployment_id, new_correspondent_id)
+        assert profile is not None
+        return profile
+
+    @staticmethod
+    def _insert_profile_event(
+        conn: sqlite3.Connection,
+        deployment_id: str,
+        correspondent_id: int,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        conn.execute(
+            """INSERT INTO correspondent_profile_events
+               (id, deployment_id, correspondent_id, event_type, payload_json)
+               VALUES (?, ?, ?, ?, ?)""",
+            (
+                uuid.uuid4().hex,
+                deployment_id,
+                correspondent_id,
+                event_type,
+                json.dumps(payload or {}, sort_keys=True),
+            ),
+        )
+
+    def create_acquisition_source(
+        self, deployment_id: str, source: AcquisitionSourceCreate
+    ) -> AcquisitionSource:
+        conn = self.connect()
+        source_id = uuid.uuid4().hex
+        with conn:
+            conn.execute(
+                """INSERT INTO acquisition_sources (
+                    id, deployment_id, channel, delivery_mode, instructions, portal_url,
+                    automation_state, connector_type, connector_ref, availability_delay_days,
+                    last_success_at, browser_feasibility
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    source_id,
+                    deployment_id,
+                    source.channel,
+                    source.delivery_mode,
+                    source.instructions,
+                    source.portal_url,
+                    source.automation_state,
+                    source.connector_type,
+                    source.connector_ref,
+                    source.availability_delay_days,
+                    source.last_success_at,
+                    source.browser_feasibility,
+                ),
+            )
+        created = self.get_acquisition_source(deployment_id, source_id)
+        assert created is not None
+        return created
+
+    def get_acquisition_source(
+        self, deployment_id: str, source_id: str
+    ) -> AcquisitionSource | None:
+        conn = self.connect()
+        row = conn.execute(
+            "SELECT * FROM acquisition_sources WHERE deployment_id = ? AND id = ?",
+            (deployment_id, source_id),
+        ).fetchone()
+        return self._acquisition_row_to_model(row) if row else None
+
+    def list_acquisition_sources(self, deployment_id: str) -> list[AcquisitionSource]:
+        conn = self.connect()
+        rows = conn.execute(
+            """SELECT * FROM acquisition_sources
+               WHERE deployment_id = ? ORDER BY created_at, id""",
+            (deployment_id,),
+        ).fetchall()
+        return [self._acquisition_row_to_model(row) for row in rows]
+
+    def update_acquisition_source(
+        self,
+        deployment_id: str,
+        source_id: str,
+        update: AcquisitionSourceUpdate,
+    ) -> AcquisitionSource:
+        current = self.get_acquisition_source(deployment_id, source_id)
+        if current is None:
+            raise KeyError("acquisition_source_not_found")
+        data = current.model_dump(exclude={"id", "created_at", "updated_at"})
+        data.update(update.model_dump(exclude_unset=True))
+        validated = AcquisitionSourceCreate.model_validate(data)
+        conn = self.connect()
+        with conn:
+            conn.execute(
+                """UPDATE acquisition_sources SET
+                    channel = ?, delivery_mode = ?, instructions = ?, portal_url = ?,
+                    automation_state = ?, connector_type = ?, connector_ref = ?,
+                    availability_delay_days = ?, last_success_at = ?,
+                    browser_feasibility = ?, updated_at = datetime('now')
+                   WHERE deployment_id = ? AND id = ?""",
+                (
+                    validated.channel,
+                    validated.delivery_mode,
+                    validated.instructions,
+                    validated.portal_url,
+                    validated.automation_state,
+                    validated.connector_type,
+                    validated.connector_ref,
+                    validated.availability_delay_days,
+                    validated.last_success_at,
+                    validated.browser_feasibility,
+                    deployment_id,
+                    source_id,
+                ),
+            )
+        result = self.get_acquisition_source(deployment_id, source_id)
+        assert result is not None
+        return result
+
+    def _validate_expectation_references(
+        self,
+        deployment_id: str,
+        correspondent_id: int,
+        expectation: DocumentExpectationCreate | DocumentExpectation,
+    ) -> None:
+        if self.get_correspondent_profile(deployment_id, correspondent_id) is None:
+            raise KeyError("correspondent_profile_not_found")
+        if expectation.statement_series_id:
+            series = self.get_series(expectation.statement_series_id)
+            if series is None:
+                raise KeyError("statement_series_not_found")
+            if series.get("correspondent_id") not in (None, correspondent_id):
+                raise ValueError("StatementSeries belongs to a different correspondent")
+        if (
+            expectation.acquisition_source_id
+            and self.get_acquisition_source(deployment_id, expectation.acquisition_source_id)
+            is None
+        ):
+            raise KeyError("acquisition_source_not_found")
+
+    def create_document_expectation(
+        self,
+        deployment_id: str,
+        correspondent_id: int,
+        expectation: DocumentExpectationCreate,
+        *,
+        expectation_id: str | None = None,
+        legacy_provider_key: str | None = None,
+    ) -> DocumentExpectation:
+        self._validate_expectation_references(deployment_id, correspondent_id, expectation)
+        conn = self.connect()
+        expectation_id = expectation_id or uuid.uuid4().hex
+        with conn:
+            conn.execute(
+                """INSERT INTO document_expectations (
+                    id, deployment_id, correspondent_id, kind, document_type_id,
+                    statement_series_id, series_discriminator, expectation_mode, status,
+                    cadence_json, evidence_json, title_convention_json, metadata_policy_json,
+                    acquisition_source_id, legacy_provider_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    expectation_id,
+                    deployment_id,
+                    correspondent_id,
+                    expectation.kind,
+                    expectation.document_type_id,
+                    expectation.statement_series_id,
+                    expectation.series_discriminator,
+                    expectation.expectation_mode,
+                    expectation.status,
+                    expectation.cadence.model_dump_json() if expectation.cadence else None,
+                    expectation.evidence.model_dump_json(),
+                    expectation.title_convention.model_dump_json()
+                    if expectation.title_convention
+                    else None,
+                    expectation.metadata_policy.model_dump_json(),
+                    expectation.acquisition_source_id,
+                    legacy_provider_key,
+                ),
+            )
+        created = self.get_document_expectation(deployment_id, expectation_id)
+        assert created is not None
+        return created
+
+    def get_document_expectation(
+        self, deployment_id: str, expectation_id: str
+    ) -> DocumentExpectation | None:
+        conn = self.connect()
+        row = conn.execute(
+            "SELECT * FROM document_expectations WHERE deployment_id = ? AND id = ?",
+            (deployment_id, expectation_id),
+        ).fetchone()
+        return self._expectation_row_to_model(row) if row else None
+
+    def list_document_expectations(
+        self, deployment_id: str, correspondent_id: int | None = None
+    ) -> list[DocumentExpectation]:
+        conn = self.connect()
+        sql = "SELECT * FROM document_expectations WHERE deployment_id = ?"
+        params: list[Any] = [deployment_id]
+        if correspondent_id is not None:
+            sql += " AND correspondent_id = ?"
+            params.append(correspondent_id)
+        sql += " ORDER BY created_at, id"
+        rows = conn.execute(sql, params).fetchall()
+        return [self._expectation_row_to_model(row) for row in rows]
+
+    def update_document_expectation(
+        self,
+        deployment_id: str,
+        expectation_id: str,
+        update: DocumentExpectationUpdate,
+    ) -> DocumentExpectation:
+        current = self.get_document_expectation(deployment_id, expectation_id)
+        if current is None:
+            raise KeyError("document_expectation_not_found")
+        data = current.model_dump(
+            exclude={"id", "correspondent_id", "legacy_provider_key", "created_at", "updated_at"}
+        )
+        data.update(update.model_dump(exclude_unset=True))
+        validated = DocumentExpectationCreate.model_validate(data)
+        self._validate_expectation_references(deployment_id, current.correspondent_id, validated)
+
+        conn = self.connect()
+        with conn:
+            conn.execute(
+                """UPDATE document_expectations SET
+                    document_type_id = ?, series_discriminator = ?, expectation_mode = ?,
+                    status = ?, cadence_json = ?, evidence_json = ?,
+                    title_convention_json = ?, metadata_policy_json = ?,
+                    acquisition_source_id = ?, updated_at = datetime('now')
+                   WHERE deployment_id = ? AND id = ?""",
+                (
+                    validated.document_type_id,
+                    validated.series_discriminator,
+                    validated.expectation_mode,
+                    validated.status,
+                    validated.cadence.model_dump_json() if validated.cadence else None,
+                    validated.evidence.model_dump_json(),
+                    validated.title_convention.model_dump_json()
+                    if validated.title_convention
+                    else None,
+                    validated.metadata_policy.model_dump_json(),
+                    validated.acquisition_source_id,
+                    deployment_id,
+                    expectation_id,
+                ),
+            )
+        result = self.get_document_expectation(deployment_id, expectation_id)
+        assert result is not None
+        return result
+
+    def list_alertable_expectations(self, deployment_id: str) -> list[DocumentExpectation]:
+        conn = self.connect()
+        rows = conn.execute(
+            """SELECT e.*, p.lifecycle_status AS profile_lifecycle
+               FROM document_expectations e
+               JOIN correspondent_profiles p
+                 ON p.deployment_id = e.deployment_id
+                AND p.correspondent_id = e.correspondent_id
+               WHERE e.deployment_id = ?
+                 AND e.status = 'confirmed'
+                 AND e.expectation_mode IN ('recurring', 'periodic')
+                 AND e.cadence_json IS NOT NULL
+                 AND p.lifecycle_status = 'active'""",
+            (deployment_id,),
+        ).fetchall()
+        return [self._expectation_row_to_model(row) for row in rows]
+
+    def expectation_can_emit_missing_alert(self, deployment_id: str, expectation_id: str) -> bool:
+        conn = self.connect()
+        row = conn.execute(
+            """SELECT e.*, p.lifecycle_status AS profile_lifecycle
+               FROM document_expectations e
+               JOIN correspondent_profiles p
+                 ON p.deployment_id = e.deployment_id
+                AND p.correspondent_id = e.correspondent_id
+               WHERE e.deployment_id = ? AND e.id = ?""",
+            (deployment_id, expectation_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError("document_expectation_not_found")
+        expectation = self._expectation_row_to_model(row)
+        return expectation.can_emit_missing_alert(row["profile_lifecycle"])
+
+    def reconcile_expectations_for_series_merge(
+        self, deployment_id: str, source_series_id: str, target_series_id: str
+    ) -> None:
+        """Rebind or retire source policy without deleting its review history."""
+        conn = self.connect()
+        source = conn.execute(
+            """SELECT * FROM document_expectations
+               WHERE deployment_id = ? AND statement_series_id = ? AND status != 'retired'""",
+            (deployment_id, source_series_id),
+        ).fetchone()
+        if source is None:
+            return
+        target = conn.execute(
+            """SELECT * FROM document_expectations
+               WHERE deployment_id = ? AND statement_series_id = ? AND status != 'retired'""",
+            (deployment_id, target_series_id),
+        ).fetchone()
+        with conn:
+            if target is None:
+                conn.execute(
+                    """UPDATE document_expectations
+                       SET statement_series_id = ?, updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (target_series_id, source["id"]),
+                )
+            else:
+                conn.execute(
+                    """UPDATE document_expectations
+                       SET status = 'retired', updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (source["id"],),
+                )
+            self._insert_profile_event(
+                conn,
+                deployment_id,
+                source["correspondent_id"],
+                "expectation_series_merged",
+                {
+                    "expectation_id": source["id"],
+                    "source_series_id": source_series_id,
+                    "target_series_id": target_series_id,
+                    "resolution": "rebound" if target is None else "retired_duplicate",
+                },
+            )
+
+    def validate_expectations_for_series_merge(
+        self, deployment_id: str, source_series_id: str, target_series_id: str
+    ) -> None:
+        """Fail before mutation when a merge would cross correspondent policy."""
+        conn = self.connect()
+        target_series = conn.execute(
+            "SELECT correspondent_id FROM statement_series WHERE id = ?",
+            (target_series_id,),
+        ).fetchone()
+        if target_series is None:
+            raise KeyError("statement_series_not_found")
+        source_expectation = conn.execute(
+            """SELECT correspondent_id FROM document_expectations
+               WHERE deployment_id = ? AND statement_series_id = ?
+                 AND status != 'retired'""",
+            (deployment_id, source_series_id),
+        ).fetchone()
+        if source_expectation is not None and target_series["correspondent_id"] not in (
+            None,
+            source_expectation["correspondent_id"],
+        ):
+            raise ValueError(
+                "Cannot merge a statement expectation into another correspondent's series"
+            )
+
+    def migrate_legacy_provider_overrides(self, deployment_id: str) -> tuple[int, int]:
+        """Migrate only overrides that resolve to exactly one existing series."""
+        conn = self.connect()
+        overrides = conn.execute("SELECT * FROM provider_overrides").fetchall()
+        latest_run = conn.execute(
+            "SELECT id FROM discovery_runs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        migrated = review_required = 0
+
+        for override in overrides:
+            prior = conn.execute(
+                """SELECT resolution_status FROM legacy_override_migrations
+                   WHERE deployment_id = ? AND provider_key = ?""",
+                (deployment_id, override["provider_key"]),
+            ).fetchone()
+            if prior and prior["resolution_status"] == "migrated":
+                continue
+
+            provider = None
+            if latest_run:
+                provider = conn.execute(
+                    """SELECT * FROM providers
+                       WHERE discovery_run_id = ? AND provider_key = ?""",
+                    (latest_run["id"], override["provider_key"]),
+                ).fetchone()
+            if provider is None or provider["correspondent_id"] is None:
+                self._record_legacy_resolution(
+                    deployment_id,
+                    override["provider_key"],
+                    "unmigrated",
+                    "provider_identity_unavailable",
+                )
+                review_required += 1
+                continue
+
+            profile = self.get_correspondent_profile(deployment_id, provider["correspondent_id"])
+            if profile is None:
+                self._record_legacy_resolution(
+                    deployment_id,
+                    override["provider_key"],
+                    "unmigrated",
+                    "profile_not_synchronized",
+                )
+                review_required += 1
+                continue
+
+            exact = conn.execute(
+                "SELECT * FROM statement_series WHERE id = ?",
+                (override["provider_key"],),
+            ).fetchall()
+            candidates = (
+                exact
+                or conn.execute(
+                    "SELECT * FROM statement_series WHERE correspondent_id = ?",
+                    (provider["correspondent_id"],),
+                ).fetchall()
+            )
+
+            if len(candidates) != 1:
+                reason = (
+                    "ambiguous_statement_series"
+                    if len(candidates) > 1
+                    else "statement_series_not_found"
+                )
+                self._record_legacy_resolution(
+                    deployment_id,
+                    override["provider_key"],
+                    "review_required",
+                    reason,
+                )
+                review_required += 1
+                continue
+
+            series = candidates[0]
+            existing = conn.execute(
+                """SELECT id, legacy_provider_key FROM document_expectations
+                   WHERE deployment_id = ? AND statement_series_id = ?
+                     AND status != 'retired'""",
+                (deployment_id, series["id"]),
+            ).fetchone()
+            if existing:
+                existing_key = existing["legacy_provider_key"]
+                if existing_key not in (None, override["provider_key"]):
+                    self._record_legacy_resolution(
+                        deployment_id,
+                        override["provider_key"],
+                        "review_required",
+                        "expectation_identity_conflict",
+                    )
+                    review_required += 1
+                    continue
+                if existing_key is None:
+                    with conn:
+                        conn.execute(
+                            """UPDATE document_expectations
+                              SET legacy_provider_key = ?, updated_at = datetime('now')
+                              WHERE id = ?""",
+                            (override["provider_key"], existing["id"]),
+                        )
+                expectation_id = existing["id"]
+            else:
+                frequency = override["frequency_override"] or series["frequency"]
+                cadence = (
+                    Cadence(
+                        frequency=frequency,
+                        expected_day=override["anchor_day_override"],
+                    )
+                    if frequency in {"monthly", "quarterly", "annual"}
+                    else None
+                )
+                status = {
+                    "confirmed": "confirmed",
+                    "ignored": "dismissed",
+                    "dismissed": "dismissed",
+                }.get(override["status"], "suggested")
+                if status == "confirmed" and cadence is None:
+                    status = "suggested"
+                expectation_id = uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"owl:{deployment_id}:legacy-provider:{override['provider_key']}",
+                ).hex
+                request = DocumentExpectationCreate(
+                    kind="statement",
+                    statement_series_id=series["id"],
+                    series_discriminator=override["display_name"] or series["name"],
+                    expectation_mode="recurring" if cadence else "irregular",
+                    status=status,
+                    cadence=cadence,
+                    evidence=ExpectationEvidence(
+                        source="legacy_override",
+                        reason_codes=["legacy_provider_override"],
+                        confidence=1.0,
+                    ),
+                )
+                try:
+                    self.create_document_expectation(
+                        deployment_id,
+                        provider["correspondent_id"],
+                        request,
+                        expectation_id=expectation_id,
+                        legacy_provider_key=override["provider_key"],
+                    )
+                except sqlite3.IntegrityError:
+                    self._record_legacy_resolution(
+                        deployment_id,
+                        override["provider_key"],
+                        "review_required",
+                        "expectation_identity_conflict",
+                    )
+                    review_required += 1
+                    continue
+
+            if override["notes"] and not profile.notes:
+                self.update_correspondent_profile(
+                    deployment_id,
+                    profile.correspondent_id,
+                    CorrespondentProfileUpdate(notes=override["notes"]),
+                )
+            self._record_legacy_resolution(
+                deployment_id,
+                override["provider_key"],
+                "migrated",
+                "unambiguous_statement_series",
+                expectation_id,
+            )
+            migrated += 1
+
+        return migrated, review_required
+
+    def _record_legacy_resolution(
+        self,
+        deployment_id: str,
+        provider_key: str,
+        status: str,
+        reason_code: str,
+        expectation_id: str | None = None,
+    ) -> None:
+        conn = self.connect()
+        with conn:
+            conn.execute(
+                """INSERT INTO legacy_override_migrations (
+                    deployment_id, provider_key, resolution_status, reason_code,
+                    expectation_id, updated_at
+                ) VALUES (?, ?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(deployment_id, provider_key) DO UPDATE SET
+                    resolution_status = excluded.resolution_status,
+                    reason_code = excluded.reason_code,
+                    expectation_id = excluded.expectation_id,
+                    updated_at = datetime('now')""",
+                (deployment_id, provider_key, status, reason_code, expectation_id),
+            )
+
+    def list_legacy_override_review(self, deployment_id: str) -> list[LegacyOverrideReviewItem]:
+        conn = self.connect()
+        rows = conn.execute(
+            """SELECT provider_key, resolution_status, reason_code, expectation_id
+               FROM legacy_override_migrations
+               WHERE deployment_id = ?
+               ORDER BY provider_key""",
+            (deployment_id,),
+        ).fetchall()
+        return [LegacyOverrideReviewItem.model_validate(dict(row)) for row in rows]
+
+    def resolve_expectation_identity(self, deployment_id: str, identity: str) -> IdentityResolution:
+        expectation = self.get_document_expectation(deployment_id, identity)
+        if expectation is not None:
+            return IdentityResolution(
+                status="resolved", canonical_key=expectation.id, expectation=expectation
+            )
+
+        conn = self.connect()
+        rows = conn.execute(
+            """SELECT * FROM document_expectations
+               WHERE deployment_id = ? AND legacy_provider_key = ?""",
+            (deployment_id, identity),
+        ).fetchall()
+        if len(rows) == 1:
+            resolved = self._expectation_row_to_model(rows[0])
+            return IdentityResolution(
+                status="resolved", canonical_key=resolved.id, expectation=resolved
+            )
+        if len(rows) > 1:
+            return IdentityResolution(status="ambiguous")
+
+        migration = conn.execute(
+            """SELECT resolution_status, reason_code FROM legacy_override_migrations
+               WHERE deployment_id = ? AND provider_key = ?""",
+            (deployment_id, identity),
+        ).fetchone()
+        if migration and migration["resolution_status"] == "review_required":
+            return IdentityResolution(status="ambiguous")
+        return IdentityResolution(status="unmapped")
