@@ -337,12 +337,8 @@ def test_confirmed_expectation_policy_preview_is_read_only_and_apply_ready(
     )
     expectation_id = created.json()["id"]
 
-    first = client.post(
-        f"/api/statements/document-expectations/{expectation_id}/policy-preview"
-    )
-    second = client.post(
-        f"/api/statements/document-expectations/{expectation_id}/policy-preview"
-    )
+    first = client.post(f"/api/statements/document-expectations/{expectation_id}/policy-preview")
+    second = client.post(f"/api/statements/document-expectations/{expectation_id}/policy-preview")
 
     assert first.status_code == 200
     assert first.json() == second.json()

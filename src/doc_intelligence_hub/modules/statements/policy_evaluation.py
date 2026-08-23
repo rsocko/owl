@@ -106,7 +106,9 @@ def _evaluate_document(
             series_document,
             proposed_tags,
         )
-        missing_title_fields = _required_missing_fields(expectation.title_convention.template, values)
+        missing_title_fields = _required_missing_fields(
+            expectation.title_convention.template, values
+        )
         if missing_title_fields:
             violations.append("title_missing_fields")
             unresolved.append("title_missing_fields")
@@ -174,9 +176,7 @@ def _title_values(
     proposed_tag_ids: list[int],
 ) -> dict[str, str | date | None]:
     period = _document_period(document, expectation, series_document)
-    subject = _subject_from_any_of(
-        expectation.metadata_policy.any_of, proposed_tag_ids, tag_names
-    )
+    subject = _subject_from_any_of(expectation.metadata_policy.any_of, proposed_tag_ids, tag_names)
     return {
         "correspondent": correspondent_name,
         "series": expectation.series_discriminator,
@@ -218,13 +218,9 @@ def _subject_from_any_of(
     return name.split(":", 1)[1].strip() if ":" in name else name
 
 
-def _required_missing_fields(
-    template: str, values: dict[str, str | date | None]
-) -> list[str]:
+def _required_missing_fields(template: str, values: dict[str, str | date | None]) -> list[str]:
     required = {
-        field_name
-        for _, field_name, _, _ in Formatter().parse(template)
-        if field_name is not None
+        field_name for _, field_name, _, _ in Formatter().parse(template) if field_name is not None
     }
     return sorted(field for field in required if values.get(field) in (None, ""))
 

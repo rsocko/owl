@@ -181,6 +181,4 @@ def test_series_period_uses_statement_date_with_canonical_quarter_format() -> No
         series_documents={101: {"statement_date": "2026-12-31", "period_label": None}},
     )
 
-    assert preview.findings[0].operation.patch.model_dump() == {
-        "title": "Checking - 2026-Q4"
-    }
+    assert preview.findings[0].operation.patch.model_dump() == {"title": "Checking - 2026-Q4"}
