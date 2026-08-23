@@ -76,6 +76,24 @@ export const endpoints = {
     providerOverrides: () => api.get('/api/statements/providers/overrides'),
     setProviderOverride: (key: string, body: unknown) => api.post(`/api/statements/providers/${key}/override`, body),
     clearProviderOverride: (key: string) => api.delete(`/api/statements/providers/${key}/override`),
+    correspondentProfiles: () => api.get('/api/statements/correspondent-profiles'),
+    correspondentProfile: (id: number) => api.get(`/api/statements/correspondent-profiles/${id}`),
+    syncCorrespondentProfiles: () => api.post('/api/statements/correspondent-profiles/sync'),
+    analyzeCorrespondentProfiles: () => api.post('/api/statements/correspondent-profiles/analyze'),
+    analyzeCorrespondentProfile: (id: number) => api.post(`/api/statements/correspondent-profiles/${id}/analyze`),
+    updateCorrespondentProfile: (id: number, body: unknown) =>
+      api.patch(`/api/statements/correspondent-profiles/${id}`, body),
+    relinkCorrespondentProfile: (id: number, body: { correspondent_id: number }) =>
+      api.post(`/api/statements/correspondent-profiles/${id}/relink`, body),
+    correspondentExpectations: (id: number) =>
+      api.get(`/api/statements/correspondent-profiles/${id}/expectations`),
+    createCorrespondentExpectation: (id: number, body: unknown) =>
+      api.post(`/api/statements/correspondent-profiles/${id}/expectations`, body),
+    updateDocumentExpectation: (id: string, body: unknown) =>
+      api.patch(`/api/statements/document-expectations/${id}`, body),
+    acquisitionSources: () => api.get('/api/statements/acquisition-sources'),
+    createAcquisitionSource: (body: unknown) => api.post('/api/statements/acquisition-sources', body),
+    paperlessUrl: () => api.get('/api/statements/config/paperless-url'),
     documentPreview: (docId: string) => `/api/statements/documents/${docId}/preview`,
     documentThumb: (docId: string) => `/api/statements/documents/${docId}/thumb`,
     // Series grouping
