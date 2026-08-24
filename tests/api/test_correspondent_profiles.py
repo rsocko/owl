@@ -481,21 +481,11 @@ def test_external_connection_test_uses_effective_configuration_without_syncing(
     client, app, tmp_path
 ) -> None:
     _configure_statement_database(app, tmp_path, tyrion_base_url="https://tyrion.test")
-    snapshot = DocumentExpectationSignalsV1.model_validate(
-        {
-            "contractVersion": "1",
-            "connectorRef": "test-only",
-            "sourceGeneration": "test-generation",
-            "sourceAsOf": "2026-08-23T10:00:00Z",
-            "completeness": "complete",
-            "signals": [],
-        }
-    )
     with patch(
         "doc_intelligence_hub.api.routers.statements.DocumentExpectationSignalsClient"
     ) as client_type:
         source_client = client_type.return_value
-        source_client.fetch_latest = AsyncMock(return_value=snapshot)
+        source_client.check_health = AsyncMock()
         source_client.close = AsyncMock()
         response = client.post("/api/statements/external-candidates/connection/test")
 
@@ -510,7 +500,7 @@ def test_external_connection_test_uses_effective_configuration_without_syncing(
         verify_ssl=True,
         timeout_seconds=30,
     )
-    source_client.fetch_latest.assert_awaited_once_with()
+    source_client.check_health.assert_awaited_once_with()
     assert client.get("/api/statements/external-candidates").json() == []
     connection = client.get("/api/statements/external-candidates/connection").json()
     assert connection["last_source_generation"] is None
@@ -549,15 +539,13 @@ def test_external_connection_test_sanitizes_upstream_errors(
         ).status_code
         == 200
     )
-    request = httpx.Request(
-        "GET", "https://tyrion.test/api/connector/v1/document-expectation-signals"
-    )
+    request = httpx.Request("GET", "https://tyrion.test/api/connector/v1/health")
     upstream_response = httpx.Response(upstream_status, request=request)
     with patch(
         "doc_intelligence_hub.api.routers.statements.DocumentExpectationSignalsClient"
     ) as client_type:
         source_client = client_type.return_value
-        source_client.fetch_latest = AsyncMock(
+        source_client.check_health = AsyncMock(
             side_effect=httpx.HTTPStatusError(
                 "Upstream failure",
                 request=request,
@@ -575,7 +563,7 @@ def test_external_connection_test_sanitizes_upstream_errors(
     }
     assert secret not in response.text
     assert secret not in caplog.text
-    source_client.fetch_latest.assert_awaited_once_with()
+    source_client.check_health.assert_awaited_once_with()
 
 
 def test_candidate_sync_requires_saved_connection(client, app, tmp_path) -> None:
