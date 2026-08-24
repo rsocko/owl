@@ -247,6 +247,11 @@ describe('Correspondent Review', () => {
       display_hint: 'Credit account',
       confidence: 0.6,
       basis: ['active_non_cash_account'],
+      account_name: 'Travel Rewards',
+      institution_name: 'Example Bank',
+      account_type: 'credit',
+      account_last_four: '1234',
+      source_as_of: '2026-08-24T15:40:34Z',
       outcome: 'unreviewed',
       correspondent_id: null,
       likely_multiple_statement_series: false,
@@ -257,11 +262,16 @@ describe('Correspondent Review', () => {
 
     expect((await screen.findAllByText('Unreviewed')).length).toBeGreaterThan(0);
     expect(container.querySelector('.correspondent-inventory-list')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /external candidates 1/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /linked external candidates 0/i })).toHaveAttribute(
       'href',
       '#correspondent-external-candidates',
     );
-    expect(screen.getByText('Account statement candidates')).toBeInTheDocument();
+    expect(screen.getByText('Unassigned account signals')).toBeInTheDocument();
+    expect(screen.getByText(/household-wide signals and are not associated with example bank/i)).toBeInTheDocument();
+    expect(screen.getByText('Source: Monarch account inventory via Tyrion')).toBeInTheDocument();
+    expect(screen.getByText('Travel Rewards')).toBeInTheDocument();
+    expect(screen.getByText(/Example Bank · Credit · Account ending in 1234/)).toBeInTheDocument();
+    expect(screen.getByText(/Evidence: Active Non Cash Account/i)).toBeInTheDocument();
   });
 
   it('keeps Tyrion synchronization failures visible next to the action', async () => {
@@ -370,6 +380,7 @@ describe('Correspondent Review', () => {
       display_hint: 'Credit account',
       confidence: 0.6,
       basis: ['active_non_cash_account'],
+      source_as_of: '2026-08-24T15:40:34Z',
       outcome: 'unreviewed',
       correspondent_id: null,
       likely_multiple_statement_series: false,
@@ -407,6 +418,7 @@ describe('Correspondent Review', () => {
       display_hint: 'Recurring expense',
       confidence: 0.6,
       basis: ['active_recurring_obligation'],
+      source_as_of: '2026-08-24T15:40:34Z',
       outcome: 'unreviewed',
       correspondent_id: null,
       likely_multiple_statement_series: false,

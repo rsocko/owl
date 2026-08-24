@@ -79,6 +79,33 @@ class DocumentExpectationSignalV1(PolicyModel):
     )
     confidence: float = Field(ge=0, le=1)
     basis: list[str] = Field(min_length=1, max_length=20)
+    account_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=120,
+        validation_alias="accountName",
+        serialization_alias="accountName",
+    )
+    institution_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=120,
+        validation_alias="institutionName",
+        serialization_alias="institutionName",
+    )
+    account_type: (
+        Literal["checking", "savings", "credit", "cash", "loan", "investment", "other"] | None
+    ) = Field(
+        default=None,
+        validation_alias="accountType",
+        serialization_alias="accountType",
+    )
+    account_last_four: str | None = Field(
+        default=None,
+        pattern=r"^[0-9]{4}$",
+        validation_alias="accountLastFour",
+        serialization_alias="accountLastFour",
+    )
 
     @field_validator("basis")
     @classmethod
@@ -89,6 +116,20 @@ class DocumentExpectationSignalV1(PolicyModel):
                 raise ValueError("Signal basis values must be short alphanumeric identifiers")
             normalized.append(reason.lower())
         return sorted(set(normalized))
+
+    @model_validator(mode="after")
+    def validate_account_details(self) -> DocumentExpectationSignalV1:
+        if self.kind == "recurringDocumentCandidate" and any(
+            value is not None
+            for value in (
+                self.account_name,
+                self.institution_name,
+                self.account_type,
+                self.account_last_four,
+            )
+        ):
+            raise ValueError("Recurring document candidates cannot include account details")
+        return self
 
 
 class DocumentExpectationSignalsV1(PolicyModel):
@@ -204,6 +245,12 @@ class ExternalDocumentCandidate(PolicyModel):
     next_expected_date: date | None = None
     confidence: float = Field(ge=0, le=1)
     basis: list[str]
+    account_name: str | None = None
+    institution_name: str | None = None
+    account_type: (
+        Literal["checking", "savings", "credit", "cash", "loan", "investment", "other"] | None
+    ) = None
+    account_last_four: str | None = Field(default=None, pattern=r"^[0-9]{4}$")
     source_as_of: str
     outcome: ExternalCandidateOutcome = "unreviewed"
     expectation_id: str | None = None

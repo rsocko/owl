@@ -310,6 +310,10 @@ CREATE TABLE IF NOT EXISTS external_document_candidates (
     next_expected_date TEXT,
     confidence REAL NOT NULL,
     basis_json TEXT NOT NULL,
+    account_name TEXT,
+    institution_name TEXT,
+    account_type TEXT,
+    account_last_four TEXT,
     outcome TEXT NOT NULL DEFAULT 'unreviewed'
         CHECK (outcome IN ('unreviewed', 'mapped', 'suggested', 'ambiguous', 'not_applicable')),
     expectation_id TEXT,
@@ -397,6 +401,18 @@ class Database:
                    FROM external_signal_connections_legacy;
                    DROP TABLE external_signal_connections_legacy;"""
             )
+        candidate_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(external_document_candidates)").fetchall()
+        }
+        for column in (
+            "account_name",
+            "institution_name",
+            "account_type",
+            "account_last_four",
+        ):
+            if column not in candidate_columns:
+                conn.execute(f"ALTER TABLE external_document_candidates ADD COLUMN {column} TEXT")
         conn.execute(
             """UPDATE document_expectations
                SET status = 'suggested', updated_at = datetime('now')
@@ -1685,8 +1701,9 @@ class Database:
                     """INSERT INTO external_document_candidates (
                         id, deployment_id, connector_ref, series_ref, source_generation,
                         source_as_of, kind, active, display_hint, cadence,
-                        next_expected_date, confidence, basis_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        next_expected_date, confidence, basis_json, account_name,
+                        institution_name, account_type, account_last_four
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(deployment_id, connector_ref, series_ref) DO UPDATE SET
                         source_generation = excluded.source_generation,
                         source_as_of = excluded.source_as_of,
@@ -1697,6 +1714,10 @@ class Database:
                         next_expected_date = excluded.next_expected_date,
                         confidence = excluded.confidence,
                         basis_json = excluded.basis_json,
+                        account_name = excluded.account_name,
+                        institution_name = excluded.institution_name,
+                        account_type = excluded.account_type,
+                        account_last_four = excluded.account_last_four,
                         updated_at = datetime('now')""",
                     (
                         candidate_id,
@@ -1714,6 +1735,10 @@ class Database:
                         else None,
                         signal.confidence,
                         json.dumps(signal.basis),
+                        signal.account_name,
+                        signal.institution_name,
+                        signal.account_type,
+                        signal.account_last_four,
                     ),
                 )
                 if signal.active and signal.kind == "accountStatementCandidate":
@@ -1827,6 +1852,10 @@ class Database:
                 else None,
                 confidence=row["confidence"],
                 basis=json.loads(row["basis_json"]),
+                account_name=row["account_name"],
+                institution_name=row["institution_name"],
+                account_type=row["account_type"],
+                account_last_four=row["account_last_four"],
                 source_as_of=row["source_as_of"],
                 outcome=row["outcome"],
                 expectation_id=row["expectation_id"],

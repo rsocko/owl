@@ -48,6 +48,10 @@ def test_projection_requires_null_advisory_timing() -> None:
         "nextExpectedDate": None,
         "confidence": 0.6,
         "basis": ["active_non_cash_account"],
+        "accountName": "Travel Rewards",
+        "institutionName": "Example Bank",
+        "accountType": "credit",
+        "accountLastFour": "1234",
     }
     payload = {
         "contractVersion": "1",
@@ -59,6 +63,13 @@ def test_projection_requires_null_advisory_timing() -> None:
     }
 
     DocumentExpectationSignalsV1.model_validate(payload)
+    recurring = {
+        **base_signal,
+        "kind": "recurringDocumentCandidate",
+        "basis": ["active_recurring_obligation"],
+    }
+    with pytest.raises(ValidationError):
+        DocumentExpectationSignalsV1.model_validate({**payload, "signals": [recurring]})
     with pytest.raises(ValidationError):
         DocumentExpectationSignalsV1.model_validate(
             {**payload, "signals": [{**base_signal, "cadence": "monthly"}]}
