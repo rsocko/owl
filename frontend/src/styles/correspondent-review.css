@@ -22,37 +22,257 @@
   margin-bottom: 18px;
 }
 
-.correspondent-reconciliation-list {
-  display: grid;
-  gap: 12px;
-}
-
-.correspondent-reconciliation-item {
-  display: grid;
-  gap: 14px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.correspondent-reconciliation-header,
-.correspondent-reconciliation-step-heading {
+.tyrion-reconciliation-header,
+.tyrion-audit-summary,
+.correspondent-reconciliation-step-heading,
+.tyrion-editor-header,
+.tyrion-editor-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.correspondent-reconciliation-header > div:first-child {
-  display: grid;
-  gap: 4px;
+.tyrion-reconciliation-header {
+  align-items: flex-start;
+  padding-bottom: 14px;
 }
 
-.correspondent-reconciliation-header span,
+.tyrion-reconciliation-header h2 {
+  margin: 0 0 3px;
+  font-size: 1.05rem;
+}
+
+.tyrion-reconciliation-header p,
+.tyrion-editor-header span,
+.tyrion-audit-summary span,
 .correspondent-reconciliation-step > label > span,
-.correspondent-reconciliation-step-heading > span {
+.correspondent-reconciliation-step-heading > span,
+.tyrion-queue-item small {
   color: var(--text-muted);
   font-size: 0.78rem;
+}
+
+.tyrion-reconciliation-header p {
+  margin: 0;
+}
+
+.tyrion-view-tabs {
+  display: flex;
+  gap: 4px;
+  width: fit-content;
+  margin: 12px 0;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+}
+
+.tyrion-view-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.tyrion-view-tabs button.active {
+  color: var(--text);
+  background: var(--card);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 8%);
+}
+
+.tyrion-view-tabs button span {
+  min-width: 19px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--surface-hover);
+  font-size: 0.7rem;
+}
+
+.tyrion-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tyrion-toolbar input,
+.tyrion-toolbar select {
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text);
+}
+
+.tyrion-workbench {
+  display: grid;
+  grid-template-columns: minmax(330px, 0.8fr) minmax(430px, 1.2fr);
+  min-height: 540px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.tyrion-queue {
+  min-width: 0;
+  border-right: 1px solid var(--border);
+  background: var(--card);
+}
+
+.tyrion-queue-summary,
+.tyrion-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tyrion-queue-summary {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tyrion-queue-summary span {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.tyrion-queue-scroll {
+  max-height: 640px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.tyrion-group-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tyrion-queue-item {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 13px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.tyrion-queue-item:hover,
+.tyrion-queue-item.active {
+  background: var(--selected-bg);
+}
+
+.tyrion-queue-item.active {
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.tyrion-queue-item > span:first-child,
+.tyrion-queue-item-status,
+.tyrion-editor-header > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.tyrion-queue-item > span:first-child {
+  min-width: 0;
+}
+
+.tyrion-queue-item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tyrion-queue-item-status {
+  justify-items: end;
+  align-content: space-between;
+}
+
+.tyrion-editor {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  background: var(--card);
+}
+
+.tyrion-editor-header {
+  align-items: flex-start;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, var(--selected-bg), var(--card));
+}
+
+.tyrion-editor-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.tyrion-review-progress {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 12px 16px 0;
+}
+
+.tyrion-review-progress span {
+  padding-top: 7px;
+  border-top: 3px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 750;
+}
+
+.tyrion-review-progress span.active,
+.tyrion-review-progress span.complete {
+  border-color: var(--accent);
+}
+
+.tyrion-review-progress span.complete {
+  color: var(--accent);
+}
+
+.tyrion-review-progress span.active {
+  color: var(--text);
+}
+
+.tyrion-editor-body {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: 14px;
+  padding: 16px;
+}
+
+.tyrion-editor-footer {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
 }
 
 .correspondent-reconciliation-step {
@@ -100,6 +320,108 @@
 
 .correspondent-series-options label > span {
   flex: 1;
+}
+
+.tyrion-empty {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  padding: 32px 16px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.tyrion-empty strong {
+  color: var(--text);
+}
+
+.tyrion-empty.compact {
+  padding: 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.tyrion-audit {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.tyrion-audit-summary {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tyrion-audit-summary > div {
+  display: grid;
+  gap: 3px;
+}
+
+.tyrion-audit-table-wrap {
+  overflow-x: auto;
+}
+
+.tyrion-audit-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tyrion-audit-table th,
+.tyrion-audit-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.tyrion-audit-table th {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tyrion-audit-table td:first-child {
+  min-width: 210px;
+}
+
+.tyrion-audit-table td:first-child strong,
+.tyrion-audit-table td:first-child span {
+  display: block;
+}
+
+.tyrion-audit-table td:first-child span {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.tyrion-series-chip {
+  display: inline-flex;
+  margin: 2px 4px 2px 0;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--selected-bg);
+  color: var(--text);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.tyrion-series-chip.muted {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .correspondent-inventory {
@@ -518,10 +840,27 @@
     grid-template-columns: 1fr;
   }
 
-  .correspondent-reconciliation-header,
+  .tyrion-reconciliation-header,
+  .tyrion-editor-header,
+  .tyrion-editor-footer,
+  .tyrion-audit-summary,
   .correspondent-reconciliation-step-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .tyrion-toolbar,
+  .tyrion-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .tyrion-queue {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tyrion-queue-scroll {
+    max-height: 360px;
   }
 
   .correspondent-policy-change {
