@@ -217,6 +217,10 @@ def test_external_snapshot_replacement_is_generation_idempotent_and_bounded(tmp_
                 "nextExpectedDate": None,
                 "confidence": 0.6,
                 "basis": ["active_non_cash_account"],
+                "accountName": "Travel Rewards",
+                "institutionName": "Example Bank",
+                "accountType": "credit",
+                "accountLastFour": "1234",
             },
             {
                 "seriesRef": "opaque-account-two",
@@ -239,6 +243,11 @@ def test_external_snapshot_replacement_is_generation_idempotent_and_bounded(tmp_
         candidates = db.list_external_candidates(DEPLOYMENT_ID)
         assert len(candidates) == 2
         assert all(candidate.recurrence_evidence == "high" for candidate in candidates)
+        enriched = next(candidate for candidate in candidates if candidate.account_name)
+        assert enriched.account_name == "Travel Rewards"
+        assert enriched.institution_name == "Example Bank"
+        assert enriched.account_type == "credit"
+        assert enriched.account_last_four == "1234"
         assert not any(
             key
             in dict(

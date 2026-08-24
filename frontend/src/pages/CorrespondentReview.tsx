@@ -179,6 +179,11 @@ interface ExternalCandidate {
   display_hint: string;
   confidence: number;
   basis: string[];
+  account_name?: string | null;
+  institution_name?: string | null;
+  account_type?: 'checking' | 'savings' | 'credit' | 'cash' | 'loan' | 'investment' | 'other' | null;
+  account_last_four?: string | null;
+  source_as_of: string;
   outcome: 'unreviewed' | 'mapped' | 'suggested' | 'ambiguous' | 'not_applicable';
   expectation_id?: string | null;
   correspondent_id?: number | null;
@@ -225,6 +230,12 @@ function formatDate(value?: string | null): string {
 
 function humanize(value: string): string {
   return value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function externalCandidateSource(candidate: ExternalCandidate): string {
+  return candidate.kind === 'accountStatementCandidate'
+    ? 'Monarch account inventory via Tyrion'
+    : 'Monarch recurring transaction analysis via Tyrion';
 }
 
 function redactSensitiveNumbers(value: string): string {
@@ -594,10 +605,13 @@ export default function CorrespondentReview() {
     [expectationsByProfile, selectedId],
   );
   const selectedExternalCandidates = useMemo(
-    () => externalCandidates.filter((candidate) =>
-      candidate.correspondent_id === selectedId
-      || (candidate.correspondent_id == null && candidate.active && candidate.outcome === 'unreviewed')),
+    () => externalCandidates.filter((candidate) => candidate.correspondent_id === selectedId),
     [externalCandidates, selectedId],
+  );
+  const unassignedExternalCandidates = useMemo(
+    () => externalCandidates.filter((candidate) =>
+      candidate.correspondent_id == null && candidate.active && candidate.outcome === 'unreviewed'),
+    [externalCandidates],
   );
 
   const loadWorkspace = useCallback(async (showSkeleton = true) => {
@@ -697,20 +711,38 @@ export default function CorrespondentReview() {
     () => [
       {
         kind: 'accountStatementCandidate' as const,
-        label: 'Account statement candidates',
+        scope: 'linked' as const,
+        label: 'Linked account statement candidates',
         candidates: selectedExternalCandidates.filter(
           (candidate) => candidate.kind === 'accountStatementCandidate',
         ),
       },
       {
         kind: 'recurringDocumentCandidate' as const,
-        label: 'Recurring document candidates',
+        scope: 'linked' as const,
+        label: 'Linked recurring document candidates',
         candidates: selectedExternalCandidates.filter(
           (candidate) => candidate.kind === 'recurringDocumentCandidate',
         ),
       },
+      {
+        kind: 'accountStatementCandidate' as const,
+        scope: 'unassigned' as const,
+        label: 'Unassigned account signals',
+        candidates: unassignedExternalCandidates.filter(
+          (candidate) => candidate.kind === 'accountStatementCandidate',
+        ),
+      },
+      {
+        kind: 'recurringDocumentCandidate' as const,
+        scope: 'unassigned' as const,
+        label: 'Unassigned recurring transaction signals',
+        candidates: unassignedExternalCandidates.filter(
+          (candidate) => candidate.kind === 'recurringDocumentCandidate',
+        ),
+      },
     ].filter((group) => group.candidates.length > 0),
-    [selectedExternalCandidates],
+    [selectedExternalCandidates, unassignedExternalCandidates],
   );
 
   const runAction = useCallback(async (action: () => Promise<unknown>, successMessage: string) => {
@@ -1148,7 +1180,7 @@ export default function CorrespondentReview() {
 
                 <nav className="correspondent-section-nav" aria-label="Correspondent sections">
                   <a href="#correspondent-expectations">Expectations <span>{selectedExpectations.length}</span></a>
-                  <a href="#correspondent-external-candidates">External candidates <span>{selectedExternalCandidates.length}</span></a>
+                  <a href="#correspondent-external-candidates">Linked external candidates <span>{selectedExternalCandidates.length}</span></a>
                   {analysis?.correspondent_id === selectedId ? (
                     <a href="#correspondent-candidate-expectations">Candidate expectations <span>{analysis.suggestions.length}</span></a>
                   ) : null}
@@ -1317,7 +1349,7 @@ export default function CorrespondentReview() {
                 </div>
 
                 <div id="correspondent-external-candidates" className="correspondent-section-anchor">
-                <Card title={`External candidates (${selectedExternalCandidates.length})`}>
+                <Card title={`External candidates for ${redactSensitiveNumbers(selectedProfile.current_name)} (${selectedExternalCandidates.length})`}>
                   {externalConnection.configured ? (
                     <div className="correspondent-actions" style={{ marginBottom: 12 }}>
                       <Button
@@ -1351,26 +1383,66 @@ export default function CorrespondentReview() {
                     or prove that a statement exists. Recurring obligations do not create invoice
                     or receipt requirements.
                   </div>
-                  {selectedExternalCandidates.length === 0 ? (
-                    <div className="correspondent-muted">No external candidates need review.</div>
+                  {unassignedExternalCandidates.length > 0 ? (
+                    <div className="correspondent-callout warning">
+                      {unassignedExternalCandidates.length} unassigned Tyrion candidates are shown
+                      separately below. They are household-wide signals and are not associated with
+                      {' '}{redactSensitiveNumbers(selectedProfile.current_name)} unless you explicitly
+                      assign one.
+                    </div>
+                  ) : null}
+                  {externalCandidateGroups.length === 0 ? (
+                    <div className="correspondent-muted">
+                      No linked or unassigned external candidates need review.
+                    </div>
                   ) : (
                     <div className="correspondent-candidate-groups">
                       {externalCandidateGroups.map((group) => (
-                        <section className="correspondent-candidate-group" key={group.kind}>
+                        <section
+                          className="correspondent-candidate-group"
+                          key={`${group.scope}-${group.kind}`}
+                        >
                           <div className="correspondent-candidate-group-header">
                             <strong>{group.label}</strong>
                             <span>{group.candidates.length}</span>
                           </div>
+                          {group.scope === 'unassigned' ? (
+                            <div className="correspondent-muted">
+                              Not yet linked to any Paperless correspondent.
+                            </div>
+                          ) : null}
                           <div className="correspondent-expectation-list">
                           {group.candidates.map((candidate) => (
                         <div className="correspondent-expectation" key={candidate.id}>
                           <div>
-                            <strong>{redactSensitiveNumbers(candidate.display_hint)}</strong>
+                            <strong>
+                              {redactSensitiveNumbers(candidate.account_name ?? candidate.display_hint)}
+                            </strong>
+                            {candidate.kind === 'accountStatementCandidate' ? (
+                              <span>
+                                {[
+                                  candidate.institution_name,
+                                  candidate.account_type ? humanize(candidate.account_type) : null,
+                                  candidate.account_last_four
+                                    ? `Account ending in ${candidate.account_last_four}`
+                                    : null,
+                                ].filter(Boolean).join(' · ') || 'No additional account details supplied'}
+                              </span>
+                            ) : null}
                             <span>
-                              {candidate.kind === 'accountStatementCandidate'
-                                ? 'Account statement candidate'
-                                : 'Recurring document candidate'}
-                              {' · '}{Math.round(candidate.confidence * 100)}% source confidence
+                              Source: {externalCandidateSource(candidate)}
+                            </span>
+                            <span>
+                              Signal: {candidate.kind === 'accountStatementCandidate'
+                                ? 'Account inventory candidate'
+                                : 'Outgoing recurring transaction candidate'}
+                            </span>
+                            <span>
+                              Evidence: {candidate.basis.map(humanize).join(', ')}
+                              {' · '}{Math.round(candidate.confidence * 100)}% classification confidence
+                            </span>
+                            <span>
+                              Source data as of {formatDate(candidate.source_as_of)}
                             </span>
                             {candidate.review_finding ? (
                               <span>{humanize(candidate.review_finding)}</span>
