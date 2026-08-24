@@ -190,6 +190,11 @@ class ExternalSignalConnection(PolicyModel):
     last_synced_at: datetime | None = None
 
 
+class ExternalSignalConnectionTest(PolicyModel):
+    status: Literal["connected"]
+    message: str
+
+
 class ExternalDocumentCandidate(PolicyModel):
     id: str
     kind: ExternalSignalKind

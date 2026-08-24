@@ -100,6 +100,8 @@ export const endpoints = {
       api.put('/api/statements/external-candidates/connection', body),
     deleteExternalCandidateConnection: () =>
       api.delete('/api/statements/external-candidates/connection'),
+    testExternalCandidateConnection: () =>
+      api.post('/api/statements/external-candidates/connection/test'),
     syncExternalCandidates: () =>
       api.post('/api/statements/external-candidates/sync'),
     externalCandidates: () => api.get('/api/statements/external-candidates'),

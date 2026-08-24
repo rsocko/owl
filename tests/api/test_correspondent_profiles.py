@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import pytest
 
 from doc_intelligence_hub.modules.statements.correspondent_models import (
     DocumentExpectationSignalsV1,
@@ -474,6 +475,107 @@ def test_saved_external_connection_drives_candidate_sync(client, app, tmp_path) 
     assert connection.status_code == 200
     assert connection.json()["last_source_generation"] == "generation-2"
     assert connection.json()["last_source_as_of"] == "2026-08-23T10:00:00Z"
+
+
+def test_external_connection_test_uses_effective_configuration_without_syncing(
+    client, app, tmp_path
+) -> None:
+    _configure_statement_database(app, tmp_path, tyrion_base_url="https://tyrion.test")
+    snapshot = DocumentExpectationSignalsV1.model_validate(
+        {
+            "contractVersion": "1",
+            "connectorRef": "test-only",
+            "sourceGeneration": "test-generation",
+            "sourceAsOf": "2026-08-23T10:00:00Z",
+            "completeness": "complete",
+            "signals": [],
+        }
+    )
+    with patch(
+        "doc_intelligence_hub.api.routers.statements.DocumentExpectationSignalsClient"
+    ) as client_type:
+        source_client = client_type.return_value
+        source_client.fetch_latest = AsyncMock(return_value=snapshot)
+        source_client.close = AsyncMock()
+        response = client.post("/api/statements/external-candidates/connection/test")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "connected",
+        "message": "OWL successfully connected to Tyrion.",
+    }
+    client_type.assert_called_once_with(
+        "https://tyrion.test",
+        api_token=None,
+        verify_ssl=True,
+        timeout_seconds=30,
+    )
+    source_client.fetch_latest.assert_awaited_once_with()
+    assert client.get("/api/statements/external-candidates").json() == []
+    connection = client.get("/api/statements/external-candidates/connection").json()
+    assert connection["last_source_generation"] is None
+    assert connection["last_synced_at"] is None
+
+
+@pytest.mark.parametrize(
+    ("upstream_status", "expected_message"),
+    [
+        (
+            401,
+            "Tyrion rejected the saved credentials. Update the Tyrion API token in Settings.",
+        ),
+        (
+            403,
+            "Tyrion rejected the saved credentials. Update the Tyrion API token in Settings.",
+        ),
+        (
+            404,
+            "Tyrion's candidate endpoint was not found. Check the Tyrion base URL and version.",
+        ),
+    ],
+)
+def test_external_connection_test_sanitizes_upstream_errors(
+    client, app, tmp_path, caplog, upstream_status, expected_message
+) -> None:
+    _configure_statement_database(app, tmp_path)
+    secret = "never-return-or-log-this-token"
+    assert (
+        client.put(
+            "/api/statements/external-candidates/connection",
+            json={
+                "base_url": "https://tyrion.test",
+                "api_token": secret,
+            },
+        ).status_code
+        == 200
+    )
+    request = httpx.Request(
+        "GET", "https://tyrion.test/api/connector/v1/document-expectation-signals"
+    )
+    upstream_response = httpx.Response(upstream_status, request=request)
+    with patch(
+        "doc_intelligence_hub.api.routers.statements.DocumentExpectationSignalsClient"
+    ) as client_type:
+        source_client = client_type.return_value
+        source_client.fetch_latest = AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "Upstream failure",
+                request=request,
+                response=upstream_response,
+            )
+        )
+        source_client.close = AsyncMock()
+        response = client.post("/api/statements/external-candidates/connection/test")
+
+    assert response.status_code == 502
+    assert response.json()["error"] == {
+        "code": "external_signal_source_failed",
+        "message": expected_message,
+        "details": {"upstream_status": upstream_status},
+    }
+    assert secret not in response.text
+    assert secret not in caplog.text
+    source_client.fetch_latest.assert_awaited_once_with()
 
 
 def test_candidate_sync_requires_saved_connection(client, app, tmp_path) -> None:
