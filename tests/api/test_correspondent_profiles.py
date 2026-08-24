@@ -616,6 +616,56 @@ def test_candidate_sync_reports_rejected_tyrion_credentials(client, app, tmp_pat
     assert "expired-secret" not in result.text
 
 
+def test_candidate_sync_reports_missing_tyrion_snapshot(client, app, tmp_path) -> None:
+    _configure_statement_database(app, tmp_path)
+    assert (
+        client.put(
+            "/api/statements/external-candidates/connection",
+            json={
+                "base_url": "https://tyrion.test",
+                "api_token": "valid-secret",
+            },
+        ).status_code
+        == 200
+    )
+    request = httpx.Request(
+        "GET", "https://tyrion.test/api/connector/v1/document-expectation-signals"
+    )
+    response = httpx.Response(
+        404,
+        request=request,
+        json={
+            "error": {
+                "code": "source_generation_not_found",
+                "message": "Source generation was not found",
+            }
+        },
+    )
+    with patch(
+        "doc_intelligence_hub.api.routers.statements.DocumentExpectationSignalsClient"
+    ) as client_type:
+        source_client = client_type.return_value
+        source_client.fetch_latest = AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "Not found",
+                request=request,
+                response=response,
+            )
+        )
+        source_client.close = AsyncMock()
+        result = client.post("/api/statements/external-candidates/sync")
+
+    assert result.status_code == 502
+    assert result.json()["error"] == {
+        "code": "external_signal_source_failed",
+        "message": (
+            "Tyrion is connected, but it has not published candidate data yet. "
+            "Sync Tyrion's finance data, then try again."
+        ),
+        "details": {"upstream_status": 404},
+    }
+
+
 def test_external_connection_does_not_send_saved_token_to_new_origin(client, app, tmp_path) -> None:
     _configure_statement_database(app, tmp_path)
     assert (
