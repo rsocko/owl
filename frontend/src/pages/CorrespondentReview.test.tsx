@@ -239,9 +239,7 @@ describe('Correspondent Review', () => {
     expect(screen.getByText('Checking - 2026-04')).toBeInTheDocument();
   });
 
-  it('groups the review queue and provides candidate section navigation', async () => {
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
+  it('shows each unassigned TYRION account once in an account-first reconciliation queue', async () => {
     mocks.externalCandidates.mockResolvedValue([{
       id: 'candidate-1',
       kind: 'accountStatementCandidate',
@@ -255,6 +253,8 @@ describe('Correspondent Review', () => {
       account_last_four: '1234',
       source_as_of: '2026-08-24T15:40:34Z',
       outcome: 'unreviewed',
+      expectation_ids: [],
+      identifier_match_expectation_ids: [],
       correspondent_id: null,
       likely_multiple_statement_series: false,
       recurrence_evidence: 'high',
@@ -264,15 +264,12 @@ describe('Correspondent Review', () => {
 
     expect((await screen.findAllByText('Unreviewed')).length).toBeGreaterThan(0);
     expect(container.querySelector('.correspondent-inventory-list')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /linked external candidates 0/i }));
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
-    expect(screen.getByText('Unassigned account signals')).toBeInTheDocument();
-    expect(screen.getByText(/household-wide signals and are not associated with example bank/i)).toBeInTheDocument();
-    expect(screen.getByText('Source: Monarch account inventory via Tyrion')).toBeInTheDocument();
-    expect(screen.getByText('Travel Rewards (...1234)')).toBeInTheDocument();
+    expect(screen.getByText(/TYRION account reconciliation/)).toBeInTheDocument();
+    expect(screen.getAllByText('Travel Rewards (...1234)')).toHaveLength(1);
     expect(screen.queryByText(/Travel Rewards.*redacted/)).not.toBeInTheDocument();
     expect(screen.getByText(/Example Bank · Credit · Account ending in 1234/)).toBeInTheDocument();
-    expect(screen.getByText(/Evidence: Active Non Cash Account/i)).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /paperless correspondent for credit account/i }))
+      .toHaveValue('');
   });
 
   it('keeps Tyrion synchronization failures visible next to the action', async () => {
@@ -281,13 +278,13 @@ describe('Correspondent Review', () => {
     );
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: /sync tyrion candidates/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /sync tyrion accounts/i }));
 
     const alerts = await screen.findAllByRole('alert');
     expect(alerts.some((alert) => alert.textContent?.includes(
       'Tyrion rejected the saved credentials. Update the Tyrion API token in Settings.',
     ))).toBe(true);
-    expect(screen.getByRole('button', { name: /sync tyrion candidates/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /sync tyrion accounts/i })).toBeEnabled();
   });
 
   it('keeps the workspace visible while analysis refreshes profile data', async () => {
@@ -373,7 +370,25 @@ describe('Correspondent Review', () => {
     expect(screen.getByRole('button', { name: /return to review/i })).toBeEnabled();
   });
 
-  it('supports explicit external candidate review without inferring cadence', async () => {
+  it('maps one TYRION account to a correspondent and multiple document series', async () => {
+    mocks.expectations.mockResolvedValue([
+      {
+        id: 'monthly-statement',
+        correspondent_id: 42,
+        kind: 'statement',
+        series_discriminator: 'Monthly mortgage statement',
+        expectation_mode: 'recurring',
+        status: 'confirmed',
+      },
+      {
+        id: 'annual-tax-form',
+        correspondent_id: 42,
+        kind: 'record',
+        series_discriminator: 'Annual mortgage tax form',
+        expectation_mode: 'irregular',
+        status: 'suggested',
+      },
+    ]);
     mocks.externalCandidates.mockResolvedValue([{
       id: 'candidate-1',
       kind: 'accountStatementCandidate',
@@ -381,29 +396,42 @@ describe('Correspondent Review', () => {
       display_hint: 'Credit account',
       confidence: 0.6,
       basis: ['active_non_cash_account'],
+      account_last_four: '1234',
       source_as_of: '2026-08-24T15:40:34Z',
       outcome: 'unreviewed',
+      expectation_ids: [],
+      identifier_match_expectation_ids: ['monthly-statement'],
       correspondent_id: null,
       likely_multiple_statement_series: false,
       recurrence_evidence: 'high',
     }]);
 
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /create suggestion/i }));
+    fireEvent.change(await screen.findByRole('combobox', {
+      name: /paperless correspondent for credit account/i,
+    }), { target: { value: '42' } });
+    expect(screen.getByText(/account suffix match/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: /monthly mortgage statement/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /annual mortgage tax form/i }));
+    fireEvent.click(screen.getByRole('button', { name: /save account mapping/i }));
 
     await waitFor(() => {
       expect(mocks.reviewCandidate).toHaveBeenCalledWith('candidate-1', {
-        outcome: 'suggested',
+        outcome: 'mapped',
         correspondent_id: 42,
+        expectation_ids: ['monthly-statement', 'annual-tax-form'],
       });
     });
+    expect(screen.getByRole('combobox', {
+      name: /paperless correspondent for credit account/i,
+    })).toHaveValue('');
     expect(screen.getByText(/do not establish cadence/i)).toBeInTheDocument();
   });
 
   it('synchronizes the latest Tyrion candidates from the review workspace', async () => {
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: /sync tyrion candidates/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /sync tyrion accounts/i }));
 
     await waitFor(() => {
       expect(mocks.syncCandidates).toHaveBeenCalledWith();
@@ -421,13 +449,18 @@ describe('Correspondent Review', () => {
       basis: ['active_recurring_obligation'],
       source_as_of: '2026-08-24T15:40:34Z',
       outcome: 'unreviewed',
+      expectation_ids: [],
+      identifier_match_expectation_ids: [],
       correspondent_id: null,
       likely_multiple_statement_series: false,
       recurrence_evidence: 'none',
     }]);
 
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /record not expected/i }));
+    fireEvent.change(await screen.findByRole('combobox', {
+      name: /paperless correspondent for recurring expense/i,
+    }), { target: { value: '42' } });
+    fireEvent.click(screen.getByRole('button', { name: /record no document expected/i }));
 
     await waitFor(() => {
       expect(mocks.reviewCandidate).toHaveBeenCalledWith('candidate-1', {

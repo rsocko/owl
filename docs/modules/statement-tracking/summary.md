@@ -200,15 +200,18 @@ reviewed policy locally and treats inferred Paperless or Tyrion facts as suggest
 Tyrion/Mission Control integration is pull-only and generation-addressed. OWL persists only
 the bounded V1 candidate fields (`kind`, active state, display hint, optional document timing,
 confidence, and basis) behind an opaque local candidate ID. It never stores balances, raw
-transactions, or raw account identifiers. Review can map the candidate to an existing
-expectation, associate it as a suggestion, leave it ambiguous, or mark it not applicable from
-the Correspondent Review workspace. The Tyrion connection is managed in the Settings UI by
-default, with deployment configuration retained as an advanced alternative.
+transactions, or full account identifiers. Review starts from each Tyrion signal once, maps it
+to zero or one Paperless correspondent, and may relate several expectations owned by that
+correspondent. This supports an account with monthly statements plus an annual tax form. A
+masked last-four match against stored Paperless metadata or scoped OCR analysis is only an
+advisory hint. The signal may instead remain unresolved or be marked not applicable. The Tyrion
+connection is managed in the Settings UI by default, with deployment configuration retained as
+an advanced alternative.
 The last action creates durable confirmed `not_expected` policy keyed through the candidate's
 opaque connector and series references; unchanged generations do not prompt again. Inactive or
 removed candidates create findings without deleting confirmed or negative policy. Multiple
-active account candidates explicitly associated with one correspondent remain distinct and are
-flagged as likely separate statement series; ambiguous mappings stay in review. These signals
+active account candidates explicitly associated with one correspondent remain distinct, while
+one account may relate to several distinct document series; ambiguous mappings stay in review. These signals
 do not establish document existence, cadence, importance, deadlines, or monitoring policy, and
 recurring income is not a bill.
 

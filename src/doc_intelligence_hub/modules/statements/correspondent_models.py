@@ -254,6 +254,8 @@ class ExternalDocumentCandidate(PolicyModel):
     source_as_of: str
     outcome: ExternalCandidateOutcome = "unreviewed"
     expectation_id: str | None = None
+    expectation_ids: list[str] = Field(default_factory=list)
+    identifier_match_expectation_ids: list[str] = Field(default_factory=list)
     correspondent_id: int | None = Field(default=None, gt=0)
     likely_multiple_statement_series: bool = False
     recurrence_evidence: Literal["high", "none"] = "none"
@@ -572,13 +574,17 @@ class DocumentExpectationUpdate(PolicyModel):
 class ExternalCandidateReview(PolicyModel):
     outcome: Literal["mapped", "suggested", "ambiguous", "not_applicable"]
     expectation_id: str | None = None
+    expectation_ids: list[str] = Field(default_factory=list, max_length=100)
     correspondent_id: int | None = Field(default=None, gt=0)
     expectation: DocumentExpectationCreate | None = None
 
     @model_validator(mode="after")
     def validate_review_action(self) -> ExternalCandidateReview:
-        if self.outcome == "mapped" and not self.expectation_id:
-            raise ValueError("mapped reviews require expectation_id")
+        if self.expectation_id and self.expectation_id not in self.expectation_ids:
+            self.expectation_ids.insert(0, self.expectation_id)
+        self.expectation_ids = list(dict.fromkeys(self.expectation_ids))
+        if self.outcome == "mapped" and self.correspondent_id is None and not self.expectation_ids:
+            raise ValueError("mapped reviews require correspondent_id or expectation_ids")
         if self.outcome == "suggested":
             if self.correspondent_id is None:
                 raise ValueError("suggested reviews require correspondent_id")
@@ -587,7 +593,7 @@ class ExternalCandidateReview(PolicyModel):
         if self.outcome == "not_applicable" and self.correspondent_id is None:
             raise ValueError("not_applicable reviews require correspondent_id")
         if self.outcome in {"ambiguous", "not_applicable"} and (
-            self.expectation_id is not None or self.expectation is not None
+            self.expectation_ids or self.expectation is not None
         ):
             raise ValueError(f"{self.outcome} reviews cannot bind an expectation")
         return self
