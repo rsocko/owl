@@ -239,14 +239,15 @@ function externalCandidateSource(candidate: ExternalCandidate): string {
 }
 
 function redactSensitiveNumbers(value: string): string {
-  return value.replace(/\b\d{3,}\b/g, (match) => {
-    const numeric = Number(match);
-    return match.length === 4 && numeric >= 1900 && numeric <= 2099 ? match : '[redacted]';
-  });
+  return value.replace(/\b\d{5,}\b/g, '[redacted]');
 }
 
 function formatMetadataList(values: string[]): string {
   return values.length > 0 ? values.join(', ') : 'None';
+}
+
+function scrollToSection(sectionId: string): void {
+  document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function profilePriority(
@@ -1179,12 +1180,20 @@ export default function CorrespondentReview() {
                 </Card>
 
                 <nav className="correspondent-section-nav" aria-label="Correspondent sections">
-                  <a href="#correspondent-expectations">Expectations <span>{selectedExpectations.length}</span></a>
-                  <a href="#correspondent-external-candidates">Linked external candidates <span>{selectedExternalCandidates.length}</span></a>
+                  <button type="button" onClick={() => scrollToSection('correspondent-expectations')}>
+                    Expectations <span>{selectedExpectations.length}</span>
+                  </button>
+                  <button type="button" onClick={() => scrollToSection('correspondent-external-candidates')}>
+                    Linked external candidates <span>{selectedExternalCandidates.length}</span>
+                  </button>
                   {analysis?.correspondent_id === selectedId ? (
-                    <a href="#correspondent-candidate-expectations">Candidate expectations <span>{analysis.suggestions.length}</span></a>
+                    <button type="button" onClick={() => scrollToSection('correspondent-candidate-expectations')}>
+                      Candidate expectations <span>{analysis.suggestions.length}</span>
+                    </button>
                   ) : null}
-                  <a href="#correspondent-acquisition">Acquisition</a>
+                  <button type="button" onClick={() => scrollToSection('correspondent-acquisition')}>
+                    Acquisition
+                  </button>
                 </nav>
 
                 <div id="correspondent-expectations" className="correspondent-section-anchor">
