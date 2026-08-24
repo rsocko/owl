@@ -539,9 +539,7 @@ def test_external_connection_test_sanitizes_upstream_errors(
         ).status_code
         == 200
     )
-    request = httpx.Request(
-        "GET", "https://tyrion.test/api/connector/v1/health"
-    )
+    request = httpx.Request("GET", "https://tyrion.test/api/connector/v1/health")
     upstream_response = httpx.Response(upstream_status, request=request)
     with patch(
         "doc_intelligence_hub.api.routers.statements.DocumentExpectationSignalsClient"
