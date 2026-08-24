@@ -4,212 +4,184 @@ sidebar_label: OCR Quality Design
 sidebar_position: 2
 ---
 
-# OCR Quality Assessment & Remediation — Design Document
+# OCR Quality Assessment and Review
 
-## Overview
+**Status:** Revised design
+**Revised:** 2026-08-24
 
-This document describes the design for a recurring process to assess the OCR quality of documents stored in Paperless-ngx and automatically remediate documents where quality is poor. It is a sub-system of the broader `paperless-action-queue` project and shares its infrastructure and Paperless API client.
+## Decision
 
-**Design Date:** 2026-06-10  
-**Status:** Design Complete — Ready for Phase 0 implementation  
-**Environment:** CPU-only homelab, Ollama available, Azure cloud access approved
+OWL owns OCR quality assessment, candidate comparison, and review. Paperless-ngx
+remains the document system of record.
 
----
+The first release will:
 
-## Problem Statement
+1. assess the existing corpus without changing documents;
+2. expose an OWL-native OCR Quality review queue;
+3. generate alternate OCR only for a user-selected document or small explicit
+   batch;
+4. require review before making a candidate current; and
+5. preserve the originally ingested file and a rollback path.
 
-Documents in Paperless-ngx fall into three categories by origin:
+The first release will not automatically re-OCR or replace documents based only
+on a score.
 
-| Origin | Text Layer Source | OCR Quality Risk |
-|--------|------------------|------------------|
-| Digital-native PDF (print-to-PDF, exported) | Embedded at file creation (vector text) | None — text is perfect by definition |
-| Physical scan via ScanSnap scanner | ABBYY FineReader (built into ScanSnap) | Low-to-medium — degrades on old/faded/thermal documents |
-| Physical scan re-processed by Paperless | Tesseract 4/5 via OCRmyPDF | Medium — depends heavily on scan quality and Tesseract config |
+## Paperless artifact model
 
-**Key insight:** Not all ScanSnap documents are high quality. ABBYY FineReader degrades on faded documents, colored backgrounds, thermal paper, handwritten annotations, and mixed-orientation pages. The pipeline does not exempt any document from scoring based on assumed source quality.
+The design distinguishes three artifacts:
 
-**Critical risk:** Paperless-ngx's built-in `OCR_MODE=redo` replaces existing text unconditionally. Running it without a quality comparison gate can downgrade documents that already have good ABBYY-sourced OCR text.
+| Artifact | Purpose | Policy |
+|---|---|---|
+| Original/source file | Exact file originally ingested by Paperless, including any OCR layer it already contained | Immutable |
+| Paperless archive/version | Derived searchable PDF used for normal viewing, copying, and download | May become the latest version after approval |
+| Extracted content | Text used by Paperless search and API consumers such as OWL, TYRION, and Mission Control | Must correspond to the accepted latest version |
 
----
+An original ScanSnap PDF with an ABBYY layer is still the original source. It is
+not rewritten merely because another engine produces a better candidate.
 
-## Design Goals
+Paperless document versions are the primary user-visible history. OWL retains
+run metadata, decisions, checksums, and candidate artifacts while a comparison
+or configured rollback window is active. Applying a candidate must explicitly
+preserve a prior usable version; the implementation must not assume that a
+generic reprocess call creates that history automatically.
 
-1. **Classify** every PDF as digital-native, scanned-OCR'd, or no-text — so downstream work targets only documents that can actually be improved
-2. **Score** the OCR quality of every non-exempt document using heuristics (fast, free, no model inference required)
-3. **Validate** borderline scores and before/after comparisons using Ollama (secondary signal, not primary gate)
-4. **Remediate** poor-quality documents in a tiered engine: Tesseract 5 (free) → Azure Document Intelligence (cloud, cost-controlled)
-5. **Gate** all re-OCR commits: never replace existing text unless the new text scores measurably better AND Ollama validates the improvement
-6. **Surface** scores and remediation status in Paperless via custom fields, searchable in the UI
-7. **Orchestrate** recurring runs via n8n with Home Assistant alerting
+## Quality model
 
----
+OCR quality is not represented by a single English-word ratio. OWL records:
 
-## Document Lifecycle in This System
+- **Overlay/readability quality**: whether text can be selected and copied from
+  the PDF, whether words align with the page image, page coverage, reading
+  order, and obvious text-layer collisions.
+- **Machine-extraction quality**: whether extracted text is coherent and useful
+  for search and downstream tasks, including dates, amounts, identifiers,
+  medical codes, tables, and structured fields.
+- **Assessment status**: `GOOD`, `UNCERTAIN`, `REVIEW_RECOMMENDED`, or `FAILED`.
+  Candidate readiness and accepted improvements belong to the separate candidate
+  lifecycle, not the scorer output.
 
-```
-Paperless-ngx Document
-         │
-         ▼
-   ┌─────────────┐
-   │ PDF Type    │
-   │ Classifier  │ ──── PyMuPDF (fitz)
-   └─────────────┘
-         │
-    ┌────┴────┬─────────────┐
-    │         │             │
-    ▼         ▼             ▼
-DIGITAL   SCANNED_OCR    NO_TEXT
-(exempt)  (has text)     (no text layer at all)
-    │         │             │
-    │         ▼             │
-    │   ┌──────────┐        │
-    │   │ Heuristic│        │
-    │   │  Scorer  │        │
-    │   └──────────┘        │
-    │         │             │
-    │    ┌────┴────┐        │
-    │    │ Grade?  │        │
-    │    └────┬────┘        │
-    │    A/B  │  C/F        │
-    │    ↓    │   ↓         │
-    │  log  Ollama      queue ────────────────────┐
-    │  only  confirm         │                    │
-    │         │              │                    │
-    │    ┌────┴────┐         │                    │
-    │    │confirmed│         │                    │
-    │    │  bad?   │         │                    │
-    │    └────┬────┘         │                    │
-    │    yes  │  no          │                    │
-    │     ↓   │  ↓           │                    │
-    │   queue log only       │                    │
-    │                        ▼                    ▼
-    │              ┌──────────────────────────────────┐
-    │              │    REMEDIATION ENGINE            │
-    │              │                                  │
-    │              │  Tier 1: OCRmyPDF + Tesseract 5  │
-    │              │    ↓ comparison gate             │
-    │              │  Tier 2: Azure Doc Intelligence  │
-    │              │    ↓ comparison gate             │
-    │              │  REJECTED: keep original         │
-    │              └──────────────────────────────────┘
-    │                        │
-    ▼                        ▼
-score_db             Paperless Consume
-(grade=EXEMPT)       (improved PDF dropped in)
-                             │
-                             ▼
-                     Custom fields updated
-                     ocr_score, ocr_grade,
-                     ocr_engine, ocr_reviewed
-```
+Scores are quality-risk estimates when no ground truth exists. They are not
+claims of character-level accuracy.
 
----
+Digital-native documents are normally exempt from image re-OCR, but not from
+text-quality assessment. Digital extraction can still have missing text, bad
+encoding, or incorrect reading order. Classification is page-aware so mixed
+image/text PDFs are not treated as wholly digital or wholly scanned.
 
-## Component Architecture
+## Candidate engines
 
-### Services
+The initial candidate providers are:
 
-| Service | Technology | Role |
-|---------|-----------|------|
-| `scorer-service` | FastAPI + PyMuPDF + wordfreq | Classifies PDF type, scores OCR quality, stores results |
-| `remediation-worker` | Python worker process | Pulls queue, runs OCR engines, applies comparison gate, commits |
-| `ollama` | Ollama (existing homelab) | Secondary scorer for borderline docs, before/after validator |
-| `n8n` | n8n (existing homelab) | Schedules scanner runs, writes Paperless custom fields, sends alerts |
-| `paperless-ngx` | Paperless (existing homelab) | Document store, source of truth, target for updates |
-| `azure-doc-intelligence` | Azure cloud API | Tier 2 OCR engine (cloud, cost-controlled) |
+| Provider | Role |
+|---|---|
+| OCRmyPDF + Tesseract 5 | Local, private, free searchable-PDF candidate |
+| Azure Document Intelligence `prebuilt-read` | Cloud candidate with searchable-PDF output, geometry, and word confidence |
 
-### Data Store
+Azure Layout may be evaluated separately for table- and structure-aware
+downstream extraction. It is not interchangeable with the canonical
+searchable-PDF candidate.
 
-Single SQLite database (upgradeable to Postgres) — `ocr_quality.db`.  
-See [OCR-QUALITY-SCORING.md](./ocr-quality-scoring.md) for schema.
+Multiple engines may produce independent candidates for the same document.
+OWL must never merge text layers, coordinates, or confidence values from
+different engines into one PDF. One engine and one configuration own each
+candidate version.
 
-### Shared Infrastructure with Action Queue Agent
+## OWL review experience
 
-This sub-system reuses the Paperless API client already designed for the action queue agent. Both services can share a single FastAPI app with separate routers:
+OWL is the primary UI. It provides:
 
-```
-/api/documents/{id}/score       ← OCR quality scorer
-/api/documents/{id}/remediate   ← trigger remediation
-/api/queue/actions              ← action queue agent (existing)
+- corpus distribution and quality-risk filters;
+- search by Paperless document metadata;
+- existing and candidate PDF views with synchronized pages;
+- existing/candidate text diff and changed-region highlighting;
+- overlay and machine-extraction score explanations;
+- candidate engine, version, settings, runtime, and estimated cost;
+- downstream extraction comparison where applicable;
+- explicit accept, reject, retry, and rollback actions; and
+- a normal deep link from OWL to the Paperless document.
+
+The design does not add an OWL URL custom field to Paperless. A Paperless-side
+trigger may be reconsidered only if a clean native extension point becomes
+available.
+
+Paperless custom fields are optional and minimal. If enabled, they may expose
+aggregate status such as last review date, current engine, and review status.
+OWL remains authoritative for detailed scores and candidate history.
+
+## Candidate lifecycle
+
+```mermaid
+flowchart LR
+    A[Paperless document] --> B[Non-mutating assessment]
+    B --> C[OWL quality review]
+    C -->|User selects| D[Generate candidate]
+    D --> E[Compare PDF overlay, text, and downstream extraction]
+    E -->|Reject| F[Keep current version]
+    E -->|Accept| G[Create or preserve Paperless version history]
+    G --> H[Make accepted candidate latest]
+    H --> I[Refresh Paperless content and OWL scores]
 ```
 
----
+Small explicit batches use the same lifecycle. Batch selection does not imply
+batch acceptance.
 
-## Paperless Custom Fields
+## Acceptance policy
 
-Add these custom fields in the Paperless-ngx admin UI before deploying the pipeline. These surface scores directly in Paperless search and list views.
+Initial acceptance is always user-confirmed. OWL must block acceptance when:
 
-| Field Name | Type | Values |
-|-----------|------|--------|
-| `OCR Score` | Integer | 0–100 |
-| `OCR Grade` | Select / Text | A, B, C, F, EXEMPT |
-| `OCR Reviewed` | Date | Date last scored |
-| `OCR Engine` | Text | tesseract, azure, abbyy, digital, none |
-| `OCR Remediation` | Select / Text | NONE, QUEUED, IMPROVED, FAILED, REJECTED |
+- pages are missing or reordered unexpectedly;
+- the candidate is not a valid searchable PDF;
+- selectable text is materially misaligned with the page image;
+- machine-extraction quality materially regresses;
+- required Paperless version preservation fails; or
+- the candidate or comparison run is stale relative to the current document.
 
----
+Numeric improvement alone is insufficient.
 
-## Technology Decisions
+## Integration boundaries
 
-### Why no Surya/docTR (local neural OCR)?
+- Paperless owns original files, current versions, metadata, and full-text
+  indexing.
+- OWL owns assessments, candidates, comparisons, review decisions, and
+  downstream-impact evidence.
+- TYRION, Mission Control, Action Queue, EOB matching, and OWL Insights consume
+  the accepted Paperless content. Accepting or rolling back a version durably
+  invalidates affected cached analysis so each module can reprocess against the
+  new version/checksum. Their extraction success and failure rates provide
+  quality evidence, not automatic replacement authority.
+- n8n may route notifications or invoke supported OWL entry points, but it does
+  not own OCR state or decision logic.
 
-Both require GPU for practical throughput (~1–3 seconds/page on GPU, 10–30 seconds/page on CPU). Without a dedicated GPU in the homelab, these are not viable for batch processing. Azure Document Intelligence provides better quality than either at ~$0.0015/page and is the right Tier 2 choice.
+## Privacy and audit
 
-### Why Ollama for validation but not OCR?
+Raw OCR text and document images stay inside the configured trusted processing
+boundary. GitHub work items, logs, notifications, and external dashboards use
+aggregate or redacted data only.
 
-Ollama vision models (LLaVA, MiniCPM-V) are inconsistent on document OCR tasks, produce no word-level confidence scores, and are too slow for bulk use on CPU. However, text-only models like `phi3:mini` are fast and capable at reading a 500-character text sample and assessing whether it is coherent English. That is a well-scoped task that adds genuine value at low cost.
+Every candidate and decision records:
 
-### Why the comparison gate?
+- Paperless document and version identifiers;
+- source and candidate checksums;
+- engine, model/version, and settings;
+- scorer version and component scores;
+- actor and timestamps;
+- accept/reject reason; and
+- rollback availability and expiration.
 
-Tesseract 5 (LSTM mode) performs well on clean black-and-white printed text but underperforms ABBYY FineReader on degraded originals. Without a gate, running Tesseract on a good ScanSnap document can degrade it. The gate ensures the pipeline is net-positive: new OCR is only committed when it demonstrably improves quality.
+## Related work
 
-### Why Azure Document Intelligence over AWS Textract?
-
-- Azure credits may already exist from other homelab use
-- Azure's Read API has the most consistent published accuracy benchmarks for mixed document types (invoices, letters, statements, forms) which is exactly the mix in a home document library
-- AWS Textract Forms/Tables charges $15/1000 pages (vs $1.50 for Azure Read API basic text)
-
----
-
-## Operational Considerations
-
-### Budget Control for Azure
-
-The remediation worker enforces a monthly page budget cap:
-
-```python
-AZURE_MONTHLY_PAGE_BUDGET = 500  # configurable, track in score_db
-
-def can_use_azure(pages_requested: int) -> bool:
-    used_this_month = db.count_azure_pages_this_month()
-    return (used_this_month + pages_requested) <= AZURE_MONTHLY_PAGE_BUDGET
-```
-
-When the budget is exhausted, documents are queued with `remediation_status=DEFERRED_BUDGET` and retried next month.
-
-### Idempotency
-
-Every document assessment is idempotent. Re-running the scanner on an already-assessed document:
-- Skips if `assessed_at` is within the re-assess window (default: 90 days)
-- Re-runs if document `modified` timestamp is newer than `assessed_at`
-- Re-runs unconditionally if triggered with `force=true`
-
-### Rate Limiting
-
-Paperless API calls and Azure API calls are both rate-limited:
-- Paperless: 1 request/second (conservative, no published limit)
-- Azure Document Intelligence: Analyze calls respect 429 responses with exponential backoff
-
----
-
-## Related Documents
-
-| Document | Content |
-|---------|---------|
-| [OCR-QUALITY-SCORING.md](./ocr-quality-scoring.md) | Scoring algorithm, code samples, data schema |
-| [OCR-REMEDIATION-ENGINE.md](./ocr-remediation-engine.md) | Tier engine design, comparison gate, OCRmyPDF and Azure integration |
-| [OCR-OLLAMA-INTEGRATION.md](./ocr-ollama-integration.md) | Prompt templates, Ollama roles, integration patterns |
-| [OCR-N8N-WORKFLOW.md](./ocr-n8n-workflow.md) | n8n workflow specification, node-by-node design |
-| [OCR-BASELINE-INVENTORY.md](./ocr-baseline-inventory.md) | Phase 0 one-shot inventory script specification |
-| [DESIGN.md](https://github.com/rsocko/mission-control) | Action Queue Agent overall system design |
-| [TECHNOLOGY-STACK.md](./technology-stack.md) | Full technology stack decisions |
+- [Baseline inventory](./ocr-baseline-inventory.md) — issue
+  [#25](https://github.com/rsocko/owl/issues/25)
+- [Quality scoring](./ocr-quality-scoring.md) — issue
+  [#29](https://github.com/rsocko/owl/issues/29)
+- [Secondary review](./ocr-ollama-integration.md) — issue
+  [#17](https://github.com/rsocko/owl/issues/17)
+- [Candidate generation and application](./ocr-remediation-engine.md) — issue
+  [#18](https://github.com/rsocko/owl/issues/18)
+- [Orchestration](./ocr-n8n-workflow.md) — issue
+  [#30](https://github.com/rsocko/owl/issues/30)
+- Integration and release — issue
+  [#23](https://github.com/rsocko/owl/issues/23)
+- OWL review and comparison UI — issue
+  [#115](https://github.com/rsocko/owl/issues/115)
+- Downstream analysis invalidation — issue
+  [#114](https://github.com/rsocko/owl/issues/114)

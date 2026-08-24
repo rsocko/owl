@@ -34,16 +34,18 @@ That review covers UI ownership (MC is the primary user surface; DI is a headles
 | # | Title | Status Label | Category |
 |---|-------|--------------|----------|
 | **#11** | Statement tracking (original) | idea | Core concept |
-| **#160** | Paperless-Enhanced OCR | idea | OCR |
 | **#732** | Action Queue - Core Pipeline | in-progress | Module |
 | **#733** | Action Queue - UI Dashboard | idea | UI |
 | **#734** | EOB Matching - Core Implementation | in-progress | Module |
 | **#735** | EOB Matching - UI Dashboard | idea | UI |
-| **#736** | OCR - Baseline Inventory Script (Phase 0) | idea | OCR |
-| **#737** | OCR - Quality Scoring Service | idea | OCR |
-| **#738** | OCR - Ollama Validation Integration | idea | OCR |
-| **#739** | OCR - Remediation Engine (Tesseract + Azure DI) | idea | OCR |
-| **#740** | OCR - n8n Workflow Orchestration | idea | OCR |
+| **#25** | Inventory baseline OCR quality | open | OCR |
+| **#29** | Score OCR quality consistently | open | OCR |
+| **#17** | Add secondary review for borderline OCR scores | open | OCR |
+| **#18** | Remediate low-quality OCR without regression | open | OCR |
+| **#30** | Orchestrate scheduled and event-driven OCR processing | open | OCR |
+| **#23** | Integrate and release the OCR quality pipeline | open | OCR |
+| **#114** | Reprocess downstream analysis after OCR version changes | open | OCR |
+| **#115** | Build the OWL OCR quality review and comparison UI | open | OCR |
 | **#741** | Statement Tracking - Phase 1 | in-progress | Module |
 | **#742** | ~~Hub - Unified Dashboard~~ | closed (not planned) | ~~UI~~ |
 
@@ -113,11 +115,12 @@ That review covers UI ownership (MC is the primary user surface; DI is a headles
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| Baseline inventory script | 📋 Designed | Score all existing docs |
-| Quality scoring heuristics | 📋 Designed | A–F grading on text quality metrics |
-| Remediation engine | 📋 Designed | Tiered: Tesseract 5 → Azure DI |
-| Ollama validation | 📋 Designed | Secondary validation for borderline scores |
-| n8n workflow orchestration | 📋 Designed | Weekly scans, webhooks, alerts |
+| Baseline inventory | 📋 Designed | Non-mutating 8,000+ document assessment and calibration |
+| Quality scoring | 📋 Designed | Separate overlay/readability and machine-extraction dimensions |
+| OWL quality review | 📋 Designed | Queue, current/candidate comparison, explicit decisions |
+| Candidate/version engine | 📋 Designed | Independent Tesseract and Azure candidates; Paperless versions and rollback |
+| Secondary review | 📋 Deferred | Optional advisory provider after calibration |
+| Orchestration | 📋 Designed | OWL-owned manual, capped batch, event, and scheduled assessment |
 | **Code** | ❌ None | Zero implementation |
 
 ### 🟡 Hub Unified Dashboard (Design Only)
@@ -248,21 +251,26 @@ Tests use FastAPI TestClient with mocked Paperless/LLM and in-memory SQLite. Run
 
 ---
 
-### Phase 5: OCR Quality Pipeline (Priority: LOW)
-*Estimated: 3–4 weeks*
+### Phase 5: OCR Quality Pipeline (Priority: HIGH for assessment)
 
-**Goal:** Assess and remediate OCR quality across document corpus.
+**Goal:** Measure OCR quality across the corpus, provide OWL-native review, and
+support explicitly approved Paperless version improvements without changing the
+original source.
 
 | Task | Issue | Effort |
 |------|-------|--------|
-| Build baseline inventory script | #736 | 8h |
-| Implement quality scoring service | #737 | 12h |
-| Build remediation engine (Tesseract tier) | #739 | 16h |
-| Add Ollama validation for borderline scores | #738 | 8h |
-| Build n8n orchestration workflows | #740 | 8h |
-| (Optional) Azure DI tier for remediation | #739 | 8h |
+| Build non-mutating baseline inventory and calibration workflow | #25 | M |
+| Implement overlay and machine-extraction scoring | #29 | L |
+| Build OWL quality review and candidate comparison UI | #115 | L |
+| Generate independent Tesseract and Azure searchable-PDF candidates | #18 | L |
+| Apply accepted candidates as Paperless versions with rollback | #18, #23 | L |
+| Invalidate and re-run downstream analysis after version changes | #114 | M |
+| Add shared orchestration for manual, small-batch, event, and scheduled assessment | #30 | M |
+| Evaluate advisory secondary review only after calibration | #17 | M |
 
-**Exit criteria:** OCR quality grades visible in Paperless custom fields; low-quality docs auto-remediated.
+**Exit criteria:** The corpus is measured; users can compare candidates in OWL;
+accepted candidates become the latest Paperless version with a tested rollback;
+and no automatic replacement path exists.
 
 ---
 
@@ -272,7 +280,7 @@ Tests use FastAPI TestClient with mocked Paperless/LLM and in-memory SQLite. Run
 | Task | Issue | Effort |
 |------|-------|--------|
 | Settings page (Paperless connection, notification prefs) | — | 4h |
-| n8n notification routing (email/push for alerts) | #740 | 4h |
+| n8n notification routing (email/push for alerts) | #30 | 4h |
 | Docker image optimization (multi-stage build) | — | 2h |
 | Align notification routing with MC (avoid double-notification via n8n AND MC) | — | 2h |
 | Consolidate extractors into shared `core/extractors/` | — | 8h |

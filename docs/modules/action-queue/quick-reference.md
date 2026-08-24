@@ -376,115 +376,50 @@ tar -xzf models_backup_20260214.tar.gz
 ## OCR Quality Assessment — Quick Reference
 
 ### Design Decision Summary
-- **No GPU in homelab** → Tier 1: Tesseract (free/local), Tier 2: Azure Document Intelligence (cloud)
-- **ScanSnap documents are NOT exempt from scoring** — ABBYY quality degrades on old/faded/thermal documents
-- **Never replace OCR without comparison gate** — always score before and after; only accept if +5 pts improvement
-- **Ollama (phi3:mini) as validator only**, not as OCR engine — invoked for borderline C-grade docs and before/after comparison
+- **Assess first** — run a non-mutating corpus inventory and human calibration.
+- **Use two dimensions** — overlay/readability and machine-extraction quality.
+- **Review in OWL** — Paperless remains the document system of record.
+- **Preserve the source** — never rewrite the exact file originally ingested.
+- **Stage candidates** — Tesseract and Azure produce separate searchable PDFs;
+  their outputs are never merged.
+- **Require explicit acceptance** — no fixed score delta, automatic replacement,
+  `accept all`, or scheduled remediation in the initial release.
+- **Use Paperless versions** — preserve the prior usable version before an
+  accepted candidate becomes latest.
+- **Keep n8n optional** — OWL owns run, candidate, comparison, and decision state.
+- **Defer LLM review** — any future secondary reviewer is advisory only.
 
-### Scoring Grades
+### Initial workflow
 
-| Grade | Score | Action |
-|-------|-------|--------|
-| A | 80–100 | No action — log only |
-| B | 65–79 | No action — log only |
-| C | 45–64 | Ollama secondary validation → may queue for remediation |
-| F | 0–44 | Direct queue for Tier 1 remediation |
-| EXEMPT | — | Digital-native PDF — skip entirely |
-
-### Phase 0 — Run Baseline Inventory First
-
-```bash
-# Install dependencies
-pip install requests pymupdf wordfreq
-
-# Run inventory (scores all docs, classifies 10% sample)
-python scripts/ocr_baseline_inventory.py \
-    --paperless-url http://your-paperless:8000 \
-    --paperless-token YOUR_TOKEN \
-    --output-dir ./baseline_output
-
-# Quick test (first 50 docs)
-python scripts/ocr_baseline_inventory.py \
-    --paperless-url http://your-paperless:8000 \
-    --paperless-token YOUR_TOKEN \
-    --output-dir ./baseline_test \
-    --limit 50
-```
-
-Outputs: `ocr_baseline.csv` + `ocr_baseline_summary.json`
-
-### Paperless Custom Fields to Create
-
-Add these in Paperless Admin → Custom Fields before deploying:
-
-| Field Name | Type |
-|-----------|------|
-| `OCR Score` | Integer |
-| `OCR Grade` | Text |
-| `OCR Reviewed` | Date |
-| `OCR Engine` | Text |
-| `OCR Remediation` | Text |
-
-### Key Environment Variables (OCR pipeline)
-
-```bash
-PAPERLESS_BASE_URL=http://paperless-ngx:8000
-PAPERLESS_API_TOKEN=your_token
-SCORER_SERVICE_URL=http://scorer-service:8001
-OLLAMA_BASE_URL=http://ollama:11434
-AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://<resource>.cognitiveservices.azure.com/
-AZURE_DOCUMENT_INTELLIGENCE_KEY=your_key
-AZURE_MONTHLY_PAGE_BUDGET=500
-PAPERLESS_CONSUME_DIR=/consume
-OCR_WEBHOOK_SECRET=random_secret_string
-```
-
-### OCR n8n Webhook — Manual Trigger
-
-```bash
-# Score a specific document (force re-assess)
-curl -X POST https://n8n.yourhomelab/webhook/ocr-manual \
-  -H "Content-Type: application/json" \
-  -d '{"document_id": 1234, "action": "score", "secret": "YOUR_SECRET"}'
-
-# Trigger remediation (auto-tier)
-curl -X POST https://n8n.yourhomelab/webhook/ocr-manual \
-  -H "Content-Type: application/json" \
-  -d '{"document_id": 1234, "action": "remediate", "secret": "YOUR_SECRET"}'
-
-# Force Azure Tier 2 directly
-curl -X POST https://n8n.yourhomelab/webhook/ocr-manual \
-  -H "Content-Type: application/json" \
-  -d '{"document_id": 1234, "action": "remediate_azure", "secret": "YOUR_SECRET"}'
-```
-
-### Ollama Model Setup
-
-```bash
-docker exec ollama ollama pull phi3:mini
-docker exec ollama ollama list   # verify
-```
+1. Verify deployed Paperless original/archive/version behavior.
+2. Inventory the 8,000+ document corpus without mutation.
+3. Calibrate separate quality dimensions against human review.
+4. Review current-document quality in OWL.
+5. Generate a candidate for one document or a capped explicit batch.
+6. Compare PDFs, text, geometry, and downstream extraction in OWL.
+7. Accept or reject each document explicitly.
+8. Apply accepted candidates as Paperless versions with rollback.
 
 ### OCR Design Documentation
 
 | Document | Purpose |
 |---------|---------|
-| [OCR Quality Design](./ocr-quality-design.md) | Full architecture, component map, design decisions |
-| [OCR Quality Scoring](./ocr-quality-scoring.md) | Scoring algorithm, code samples, SQLite schema |
-| [OCR Remediation Engine](./ocr-remediation-engine.md) | Tier 1/2 engines, comparison gate, worker design |
-| [OCR n8n Workflow](./ocr-n8n-workflow.md) | n8n workflow node-by-node specification |
-| [OCR Ollama Integration](./ocr-ollama-integration.md) | Prompt templates, decision logic, performance notes |
-| [OCR Baseline Inventory](./ocr-baseline-inventory.md) | Phase 0 script spec + calibration guidance |
+| [OCR Quality Design](../ocr-quality/ocr-quality-design.md) | OWL-first architecture, Paperless artifacts and versions, review policy |
+| [OCR Quality Scoring](../ocr-quality/ocr-quality-scoring.md) | Overlay/readability and machine-extraction score contract |
+| [OCR Candidate Engine](../ocr-quality/ocr-remediation-engine.md) | Independent providers, comparison, Paperless application, rollback |
+| [OCR Orchestration](../ocr-quality/ocr-n8n-workflow.md) | OWL-owned manual, batch, event, and schedule contract |
+| [OCR Secondary Review](../ocr-quality/ocr-ollama-integration.md) | Deferred provider-neutral advisory review |
+| [OCR Baseline Inventory](../ocr-quality/ocr-baseline-inventory.md) | Full-corpus assessment, human calibration, engine bake-off |
 
 ### Implementation Phases
 
-- [ ] **Phase 0** — Run baseline inventory script, calibrate thresholds
-- [ ] **Phase 1** — Build scorer-service (FastAPI + PyMuPDF + wordfreq)
-- [ ] **Phase 2** — Build n8n workflows (schedule + custom field sync + HA alerts)
-- [ ] **Phase 3** — Build Tier 1 remediation worker (OCRmyPDF + comparison gate)
-- [ ] **Phase 4** — Integrate Ollama (secondary scorer + comparator)
-- [ ] **Phase 5** — Build Tier 2 Azure worker (Azure SDK + gate + commit)
-- [ ] **Phase 6** — Add Paperless custom fields, validate end-to-end
+- [ ] **Phase 0** — Verify deployed Paperless version and artifact/version APIs
+- [ ] **Phase 1** — Run non-mutating corpus inventory and human calibration
+- [ ] **Phase 2** — Implement multidimensional scoring and OWL review UI
+- [ ] **Phase 3** — Generate staged Tesseract and Azure candidates
+- [ ] **Phase 4** — Apply explicitly accepted candidates as Paperless versions
+- [ ] **Phase 5** — Validate rollback, orchestration, and end-to-end failure isolation
+- [ ] **Phase 6** — Evaluate advisory secondary review only if calibration supports it
 
 ---
 
@@ -492,8 +427,8 @@ docker exec ollama ollama list   # verify
 
 ### Documentation
 - [Full Design Doc](./design.md)
-- [Technology Stack](./technology-stack.md)
-- [UI Design](./ui-design.md)
+- [Technology Stack](../../archive/action-queue-technology-stack.md)
+- [UI Design](../../archive/action-queue-ui-design.md)
 - [Paperless-NGX API](https://docs.paperless-ngx.com/api/)
 
 ### Community & Support
