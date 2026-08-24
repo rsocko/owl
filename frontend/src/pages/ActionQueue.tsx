@@ -665,6 +665,33 @@ export default function ActionQueue() {
     );
   };
 
+  const rerunDocument = (action: ActionItem) => {
+    const documentId = action.document_id;
+    if (!documentId) {
+      setToast({ message: 'This action is not linked to a Paperless document.', tone: 'error' });
+      return;
+    }
+
+    const key = `rerun-document-${documentId}`;
+    setBusyKey(key);
+    runPipelineStream(
+      endpoints.actionQueue.runStreamUrl,
+      () => {
+        setToast({ message: `Document #${documentId} analysis completed.`, tone: 'success' });
+        setBusyKey(null);
+        void loadData();
+      },
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...buildQueueRunBody(false, documentId),
+          document_id: documentId,
+        }),
+      },
+    );
+  };
+
   const runBackfill = async (dryRun: boolean) => {
     setBusyKey(dryRun ? 'backfill-dry' : 'backfill');
     try {
@@ -1892,20 +1919,35 @@ export default function ActionQueue() {
 
               <div className="aq-edit-header">
                 <div className="section-title">Document metadata</div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => void refreshAction(selectedAction.id)}
-                  disabled={busyKey !== null}
-                  aria-busy={busyKey === `refresh-action-${selectedAction.id}`}
-                >
-                  {busyKey === `refresh-action-${selectedAction.id}` && (
-                    <span className="aq-spinner" aria-hidden="true" />
+                <div className="btn-group">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void refreshAction(selectedAction.id)}
+                    disabled={busyKey !== null}
+                    aria-busy={busyKey === `refresh-action-${selectedAction.id}`}
+                  >
+                    {busyKey === `refresh-action-${selectedAction.id}` && (
+                      <span className="aq-spinner" aria-hidden="true" />
+                    )}
+                    {busyKey === `refresh-action-${selectedAction.id}`
+                      ? 'Refreshing…'
+                      : 'Refresh from Paperless'}
+                  </Button>
+                  {selectedAction.document_id && (
+                    <Button
+                      size="sm"
+                      onClick={() => rerunDocument(selectedAction)}
+                      disabled={busyKey !== null || pipelineState.running}
+                      aria-busy={busyKey === `rerun-document-${selectedAction.document_id}`}
+                      title="Force the Action Queue pipeline to analyze this document again"
+                    >
+                      {busyKey === `rerun-document-${selectedAction.document_id}`
+                        ? 'Re-running…'
+                        : 'Re-run analysis'}
+                    </Button>
                   )}
-                  {busyKey === `refresh-action-${selectedAction.id}`
-                    ? 'Refreshing…'
-                    : 'Refresh from Paperless'}
-                </Button>
+                </div>
               </div>
               <div className="aq-meta-list">
                 <div className="aq-meta-row"><span>Document</span><span>{selectedAction.document_title || `#${selectedAction.document_id ?? '—'}`}</span></div>

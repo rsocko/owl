@@ -5,17 +5,26 @@ import { customReminderUntil, reminderUntil } from './actionReminder';
 import { buildBackfillBody, buildQueueRunBody } from './actionQueueRunBody';
 import { TooltipProvider } from '../components/ui';
 
-const { statusMock, actionsMock, updateActionMock, refreshActionMock, feedbackMock, metadataTagsMock } = vi.hoisted(() => ({
+const {
+  statusMock,
+  actionsMock,
+  updateActionMock,
+  refreshActionMock,
+  feedbackMock,
+  metadataTagsMock,
+  runPipelineStreamMock,
+} = vi.hoisted(() => ({
   statusMock: vi.fn(),
   actionsMock: vi.fn(),
   updateActionMock: vi.fn(),
   refreshActionMock: vi.fn(),
   feedbackMock: vi.fn(),
   metadataTagsMock: vi.fn(),
+  runPipelineStreamMock: vi.fn(),
 }));
 
 vi.mock('../hooks/useStreamingAction', () => ({
-  useStreamingAction: () => [{ error: null }, vi.fn(), vi.fn()],
+  useStreamingAction: () => [{ error: null, running: false, progress: null }, runPipelineStreamMock, vi.fn()],
 }));
 
 vi.mock('../lib/api', () => ({
@@ -110,6 +119,7 @@ beforeEach(() => {
   refreshActionMock.mockReset();
   feedbackMock.mockReset();
   metadataTagsMock.mockReset();
+  runPipelineStreamMock.mockReset();
   metadataTagsMock.mockResolvedValue({
     tags: [
       { id: 9, name: 'Inbox', colour: '#1f6feb' },
@@ -268,6 +278,22 @@ describe('ActionQueue', () => {
       expect(screen.getAllByText('Updated Utility')).not.toHaveLength(0);
       expect(screen.getAllByText('Statement')).not.toHaveLength(0);
       expect(screen.getAllByText('Reviewed')).not.toHaveLength(0);
+    });
+  });
+
+  it('force re-runs analysis for the selected document', async () => {
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /pay electric bill/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Re-run analysis' }));
+
+    expect(runPipelineStreamMock).toHaveBeenCalledTimes(1);
+    const [url, , request] = runPipelineStreamMock.mock.calls[0];
+    expect(url).toBe('/api/queue/run/stream');
+    expect(request).toMatchObject({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: false, force: true, document_id: 1 }),
     });
   });
 
