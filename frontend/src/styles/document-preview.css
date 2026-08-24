@@ -18,7 +18,7 @@
   height: 156px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-secondary);
+  background: var(--muted-bg);
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -99,15 +99,15 @@
   font-weight: 600;
   text-decoration: none;
   border: 1px solid var(--border);
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  background: var(--card);
+  color: var(--text);
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 
 .doc-preview-actions a:hover,
 .doc-preview-actions button:hover {
-  background: var(--bg-secondary);
+  background: var(--surface-hover);
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -137,7 +137,7 @@
   height: 62px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-secondary);
+  background: var(--muted-bg);
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -212,7 +212,7 @@
 }
 
 .doc-viewer-container {
-  background: var(--bg-primary);
+  background: var(--card);
   border-radius: var(--radius);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
   display: flex;
@@ -260,15 +260,15 @@
   font-weight: 600;
   text-decoration: none;
   border: 1px solid var(--border);
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  background: var(--card);
+  color: var(--text);
   cursor: pointer;
   transition: background 0.12s ease;
 }
 
 .doc-viewer-header-actions a:hover,
 .doc-viewer-header-actions button:hover {
-  background: var(--bg-secondary);
+  background: var(--surface-hover);
 }
 
 .doc-viewer-close-btn {
@@ -287,8 +287,8 @@
 }
 
 .doc-viewer-close-btn:hover {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .doc-viewer-iframe {
@@ -334,7 +334,7 @@
 /* ── Side-by-Side Viewer Modal ── */
 
 .doc-sbs-container {
-  background: var(--bg-primary);
+  background: var(--card);
   border-radius: var(--radius);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
   display: flex;
@@ -379,7 +379,7 @@
   justify-content: space-between;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary);
+  background: var(--muted-bg);
 }
 
 .doc-sbs-pane-title {
@@ -410,7 +410,7 @@
 }
 
 .doc-sbs-pane-actions a:hover {
-  background: var(--bg-primary);
+  background: var(--card);
 }
 
 .doc-sbs-pane-iframe {
