@@ -84,9 +84,21 @@ def _raise_external_signal_error(exc: httpx.HTTPError | ValueError) -> None:
     if isinstance(exc, httpx.HTTPStatusError):
         status = exc.response.status_code
         details["upstream_status"] = status
+        upstream_code: str | None = None
+        try:
+            upstream_error = exc.response.json().get("error", {})
+            if isinstance(upstream_error, dict) and isinstance(upstream_error.get("code"), str):
+                upstream_code = upstream_error["code"]
+        except (ValueError, AttributeError):
+            pass
         if status in {401, 403}:
             message = (
                 "Tyrion rejected the saved credentials. Update the Tyrion API token in Settings."
+            )
+        elif status == 404 and upstream_code == "source_generation_not_found":
+            message = (
+                "Tyrion is connected, but it has not published candidate data yet. "
+                "Sync Tyrion's finance data, then try again."
             )
         elif status == 404:
             message = (
