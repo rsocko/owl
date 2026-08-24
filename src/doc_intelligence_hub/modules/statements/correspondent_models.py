@@ -93,9 +93,9 @@ class DocumentExpectationSignalV1(PolicyModel):
         validation_alias="institutionName",
         serialization_alias="institutionName",
     )
-    account_type: Literal[
-        "checking", "savings", "credit", "cash", "loan", "investment", "other"
-    ] | None = Field(
+    account_type: (
+        Literal["checking", "savings", "credit", "cash", "loan", "investment", "other"] | None
+    ) = Field(
         default=None,
         validation_alias="accountType",
         serialization_alias="accountType",
@@ -247,9 +247,9 @@ class ExternalDocumentCandidate(PolicyModel):
     basis: list[str]
     account_name: str | None = None
     institution_name: str | None = None
-    account_type: Literal[
-        "checking", "savings", "credit", "cash", "loan", "investment", "other"
-    ] | None = None
+    account_type: (
+        Literal["checking", "savings", "credit", "cash", "loan", "investment", "other"] | None
+    ) = None
     account_last_four: str | None = Field(default=None, pattern=r"^[0-9]{4}$")
     source_as_of: str
     outcome: ExternalCandidateOutcome = "unreviewed"
