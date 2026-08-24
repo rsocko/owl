@@ -429,9 +429,7 @@ class Database:
                 conn.execute(f"ALTER TABLE external_document_candidates ADD COLUMN {column} TEXT")
         candidate_expectation_columns = {
             row["name"]
-            for row in conn.execute(
-                "PRAGMA table_info(external_candidate_expectations)"
-            ).fetchall()
+            for row in conn.execute("PRAGMA table_info(external_candidate_expectations)").fetchall()
         }
         if "sort_order" not in candidate_expectation_columns:
             conn.execute(
@@ -2028,10 +2026,7 @@ class Database:
             ),
             None,
         )
-        if (
-            candidate["outcome"] == "not_applicable"
-            and linked_not_expected is not None
-        ):
+        if candidate["outcome"] == "not_applicable" and linked_not_expected is not None:
             if review.outcome == "not_applicable":
                 if review.correspondent_id != linked_not_expected.correspondent_id:
                     raise ValueError(

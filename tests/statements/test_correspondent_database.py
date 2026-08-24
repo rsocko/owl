@@ -418,18 +418,17 @@ def test_external_account_maps_to_correspondent_and_multiple_document_series(tmp
         assert mortgage.expectation_ids == [checking.id, tax_form.id]
         assert mortgage.identifier_match_expectation_ids == [checking.id]
         assert mortgage.likely_multiple_statement_series is True
-        assert next(
-            candidate for candidate in mapped if candidate.id != mortgage.id
-        ).expectation_ids == []
+        assert (
+            next(candidate for candidate in mapped if candidate.id != mortgage.id).expectation_ids
+            == []
+        )
 
         db.replace_external_candidate_snapshot(
             DEPLOYMENT_ID,
             _external_snapshot("generation-2", []),
         )
         inactive = db.list_external_candidates(DEPLOYMENT_ID, correspondent_id=42)
-        assert {
-            candidate.review_finding for candidate in inactive
-        } == {
+        assert {candidate.review_finding for candidate in inactive} == {
             "source_candidate_inactive_confirmed_policy_preserved",
             "source_candidate_inactive",
         }
