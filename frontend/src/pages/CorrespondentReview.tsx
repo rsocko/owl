@@ -590,185 +590,513 @@ function ExternalCandidateReconciliation({
   onReview: (
     candidate: ExternalCandidate,
     outcome: 'mapped' | 'ambiguous' | 'not_applicable',
-  ) => void;
+  ) => Promise<boolean>;
   onSync: () => void;
   onOpenCorrespondent: (correspondentId: number) => void;
 }) {
   const activeProfiles = profiles.filter((profile) => profile.lifecycle_status === 'active');
-  const orderedCandidates = [...candidates].sort((left, right) =>
-    Number(right.active) - Number(left.active)
-    || left.outcome.localeCompare(right.outcome)
-    || (left.account_name ?? left.display_hint).localeCompare(right.account_name ?? right.display_hint));
+  const [mode, setMode] = useState<'work' | 'audit'>('work');
+  const [search, setSearch] = useState('');
+  const [reasonFilter, setReasonFilter] = useState('');
+  const [sortBy, setSortBy] = useState<'priority' | 'name' | 'newest'>('priority');
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  const [manualReviewIds, setManualReviewIds] = useState<Set<string>>(new Set());
+
+  const candidateNeedsAction = useCallback((candidate: ExternalCandidate) => (
+    candidate.outcome === 'unreviewed'
+    || candidate.outcome === 'ambiguous'
+    || candidate.outcome === 'suggested'
+    || (candidate.outcome !== 'not_applicable' && Boolean(candidate.review_finding))
+  ), []);
+  const candidateReason = useCallback((candidate: ExternalCandidate) => {
+    if (candidate.review_finding || !candidate.active) {
+      return { key: 'changed', label: 'Existing mappings changed', rank: 0 };
+    }
+    if (candidate.outcome === 'ambiguous') {
+      return { key: 'ambiguous', label: 'Unresolved', rank: 1 };
+    }
+    if (candidate.correspondent_id == null) {
+      return { key: 'new', label: 'New and unassigned', rank: 2 };
+    }
+    if (candidate.expectation_ids.length === 0) {
+      return { key: 'missing_series', label: 'Missing document series', rank: 3 };
+    }
+    return { key: 'confirm', label: 'Ready to confirm', rank: 4 };
+  }, []);
+  const candidateLabel = (candidate: ExternalCandidate) =>
+    redactSensitiveNumbers(candidate.account_name ?? candidate.display_hint);
+  const candidateDetails = (candidate: ExternalCandidate) => (
+    candidate.kind === 'accountStatementCandidate'
+      ? [
+        candidate.institution_name,
+        candidate.account_type ? humanize(candidate.account_type) : null,
+        candidate.account_last_four ? `Account ending in ${candidate.account_last_four}` : null,
+      ].filter(Boolean).join(' · ') || 'Account inventory signal'
+      : 'Recurring transaction signal'
+  );
+  const workCandidates = useMemo(
+    () => candidates.filter((candidate) =>
+      candidateNeedsAction(candidate) || manualReviewIds.has(candidate.id)),
+    [candidateNeedsAction, candidates, manualReviewIds],
+  );
+  const reviewedCandidates = useMemo(
+    () => candidates.filter((candidate) => !candidateNeedsAction(candidate)),
+    [candidateNeedsAction, candidates],
+  );
+  const filteredCandidates = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    return workCandidates
+      .filter((candidate) => {
+        const searchable = [
+          candidate.account_name,
+          candidate.display_hint,
+          candidate.institution_name,
+          candidate.account_type,
+          candidate.account_last_four,
+        ].filter(Boolean).join(' ').toLowerCase();
+        const reason = candidateReason(candidate);
+        return (!normalizedSearch || searchable.includes(normalizedSearch))
+          && (!reasonFilter || reason.key === reasonFilter);
+      })
+      .sort((left, right) => {
+        if (sortBy === 'name') return candidateLabel(left).localeCompare(candidateLabel(right));
+        if (sortBy === 'newest') {
+          return new Date(right.source_as_of).getTime() - new Date(left.source_as_of).getTime();
+        }
+        return candidateReason(left).rank - candidateReason(right).rank
+          || candidateLabel(left).localeCompare(candidateLabel(right));
+      });
+  }, [candidateReason, reasonFilter, search, sortBy, workCandidates]);
+  const selectedCandidate = candidates.find((candidate) => candidate.id === selectedCandidateId)
+    ?? filteredCandidates[0]
+    ?? null;
+
+  useEffect(() => {
+    if (
+      mode === 'work'
+      && filteredCandidates.length > 0
+      && !filteredCandidates.some((candidate) => candidate.id === selectedCandidateId)
+    ) {
+      setSelectedCandidateId(filteredCandidates[0].id);
+    }
+  }, [filteredCandidates, mode, selectedCandidateId]);
+
+  const selectedCorrespondent = selectedCandidate
+    ? correspondentSelections[selectedCandidate.id]
+      ?? selectedCandidate.correspondent_id?.toString()
+      ?? ''
+    : '';
+  const correspondentId = selectedCorrespondent ? Number(selectedCorrespondent) : null;
+  const availableExpectations = correspondentId
+    ? (expectationsByProfile[correspondentId] ?? [])
+      .filter((expectation) => expectation.status !== 'retired')
+    : [];
+  const selectedExpectationIds = selectedCandidate
+    ? (expectationSelections[selectedCandidate.id]
+      ?? selectedCandidate.expectation_ids
+      ?? []).filter((expectationId) =>
+      availableExpectations.some((expectation) => expectation.id === expectationId))
+    : [];
+  const groupedCandidates = filteredCandidates.reduce<Array<{
+    key: string;
+    label: string;
+    candidates: ExternalCandidate[];
+  }>>((groups, candidate) => {
+    const reason = candidateReason(candidate);
+    const existing = groups.find((group) => group.key === reason.key);
+    if (existing) existing.candidates.push(candidate);
+    else groups.push({ key: reason.key, label: reason.label, candidates: [candidate] });
+    return groups;
+  }, []);
+  const profileName = (correspondentIdValue?: number | null) =>
+    profiles.find((profile) => profile.correspondent_id === correspondentIdValue)?.current_name
+    ?? 'Not mapped';
+  const expectationNames = (candidate: ExternalCandidate) => {
+    const profileExpectations = candidate.correspondent_id
+      ? expectationsByProfile[candidate.correspondent_id] ?? []
+      : [];
+    return candidate.expectation_ids.map((expectationId) => {
+      const expectation = profileExpectations.find((item) => item.id === expectationId);
+      return expectation
+        ? redactSensitiveNumbers(expectation.series_discriminator ?? humanize(expectation.kind))
+        : 'Unavailable expectation';
+    });
+  };
+
+  const reviewAndAdvance = async (
+    candidate: ExternalCandidate,
+    outcome: 'mapped' | 'ambiguous' | 'not_applicable',
+  ) => {
+    const currentIndex = filteredCandidates.findIndex((item) => item.id === candidate.id);
+    const nextCandidate = filteredCandidates[currentIndex + 1] ?? filteredCandidates[currentIndex - 1];
+    const succeeded = await onReview(candidate, outcome);
+    if (succeeded) {
+      setManualReviewIds((current) => {
+        const next = new Set(current);
+        next.delete(candidate.id);
+        return next;
+      });
+      setSelectedCandidateId(nextCandidate?.id ?? null);
+    }
+  };
 
   return (
-    <Card
-      title={`TYRION account reconciliation (${orderedCandidates.length})`}
-      actions={connection.configured ? (
-        <div className="correspondent-actions">
-          {connection.last_synced_at ? (
-            <span className="correspondent-muted">Last synced {formatDate(connection.last_synced_at)}</span>
-          ) : null}
-          <Button variant="primary" disabled={busy} onClick={onSync}>
-            {busy ? 'Syncing TYRION…' : 'Sync TYRION accounts'}
-          </Button>
+    <Card>
+      <div className="tyrion-reconciliation-header">
+        <div>
+          <h2>TYRION account reconciliation</h2>
+          <p>Resolve new or changed account signals. Reviewed mappings stay in the audit view.</p>
         </div>
-      ) : null}
-    >
+        {connection.configured ? (
+          <div className="correspondent-actions">
+            {connection.last_synced_at ? (
+              <span className="correspondent-muted">
+                Last synced {formatDate(connection.last_synced_at)}
+              </span>
+            ) : null}
+            <Button variant="primary" disabled={busy} onClick={onSync}>
+              {busy ? 'Syncing TYRION…' : 'Sync TYRION accounts'}
+            </Button>
+          </div>
+        ) : null}
+      </div>
       {!connection.configured ? (
         <div className="correspondent-callout">
           TYRION is not connected. Configure it in Settings before synchronizing accounts.
         </div>
       ) : null}
       {syncError ? <div className="correspondent-callout warning" role="alert">{syncError}</div> : null}
-      <div className="correspondent-callout">
-        Start with one TYRION account, assign its Paperless correspondent, then relate any number
-        of document series. For example, one mortgage account can link both monthly statements
-        and an annual tax form. Account-number suffix matches are hints only and always require
-        confirmation. These signals do not establish cadence or prove that a document exists;
-        recurring obligations do not create invoice or receipt requirements. OWL checks stored
-        Paperless Account Identifier metadata first; when it is missing, open the correspondent
-        and run Analyze with account OCR.
+
+      <div className="tyrion-view-tabs" role="tablist" aria-label="TYRION reconciliation views">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'work'}
+          className={mode === 'work' ? 'active' : ''}
+          onClick={() => setMode('work')}
+        >
+          Needs action <span>{workCandidates.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'audit'}
+          className={mode === 'audit' ? 'active' : ''}
+          onClick={() => setMode('audit')}
+        >
+          Mapping audit <span>{reviewedCandidates.length}</span>
+        </button>
       </div>
-      {orderedCandidates.length === 0 ? (
-        <div className="correspondent-muted">No TYRION accounts or recurring signals need review.</div>
-      ) : (
-        <div className="correspondent-reconciliation-list">
-          {orderedCandidates.map((candidate) => {
-            const selectedCorrespondent = correspondentSelections[candidate.id]
-              ?? candidate.correspondent_id?.toString()
-              ?? '';
-            const correspondentId = selectedCorrespondent ? Number(selectedCorrespondent) : null;
-            const availableExpectations = correspondentId
-              ? (expectationsByProfile[correspondentId] ?? [])
-                .filter((expectation) => expectation.status !== 'retired')
-              : [];
-            const selectedExpectationIds = (expectationSelections[candidate.id]
-              ?? candidate.expectation_ids
-              ?? []).filter((expectationId) =>
-              availableExpectations.some((expectation) => expectation.id === expectationId));
-            return (
-              <article className="correspondent-reconciliation-item" key={candidate.id}>
-                <div className="correspondent-reconciliation-header">
-                  <div>
-                    <strong>{redactSensitiveNumbers(candidate.account_name ?? candidate.display_hint)}</strong>
-                    <span>
-                      {candidate.kind === 'accountStatementCandidate'
-                        ? [
-                          candidate.institution_name,
-                          candidate.account_type ? humanize(candidate.account_type) : null,
-                          candidate.account_last_four
-                            ? `Account ending in ${candidate.account_last_four}`
-                            : null,
-                        ].filter(Boolean).join(' · ') || 'Account inventory signal'
-                        : 'Recurring transaction signal'}
+
+      {mode === 'work' ? (
+        <>
+          <div className="tyrion-toolbar">
+            <input
+              aria-label="Search TYRION work queue"
+              value={search}
+              placeholder="Search account, institution, or last four"
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            <select
+              aria-label="Filter TYRION work reason"
+              value={reasonFilter}
+              onChange={(event) => setReasonFilter(event.target.value)}
+            >
+              <option value="">All reasons</option>
+              <option value="changed">Source changed</option>
+              <option value="ambiguous">Unresolved</option>
+              <option value="new">New and unassigned</option>
+              <option value="missing_series">Missing document series</option>
+              <option value="confirm">Ready to confirm</option>
+            </select>
+            <select
+              aria-label="Sort TYRION work queue"
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value as typeof sortBy)}
+            >
+              <option value="priority">Priority</option>
+              <option value="name">Account name</option>
+              <option value="newest">Newest source data</option>
+            </select>
+          </div>
+
+          {workCandidates.length === 0 ? (
+            <div className="tyrion-empty">
+              <strong>All caught up</strong>
+              <span>No new, changed, or unresolved TYRION accounts need review.</span>
+            </div>
+          ) : filteredCandidates.length === 0 ? (
+            <div className="tyrion-empty">
+              <strong>No matching work</strong>
+              <span>Clear the search or reason filter to see the remaining accounts.</span>
+            </div>
+          ) : (
+            <div className="tyrion-workbench">
+              <aside className="tyrion-queue" aria-label="TYRION work queue">
+                <div className="tyrion-queue-summary">
+                  <strong>Work queue</strong>
+                  <span>{filteredCandidates.length} account{filteredCandidates.length === 1 ? '' : 's'}</span>
+                </div>
+                <div className="tyrion-queue-scroll">
+                  {groupedCandidates.map((group) => (
+                    <section key={group.key}>
+                      <div className="tyrion-group-heading">
+                        <span>{group.label}</span><span>{group.candidates.length}</span>
+                      </div>
+                      {group.candidates.map((candidate) => {
+                        const reason = candidateReason(candidate);
+                        return (
+                          <button
+                            type="button"
+                            key={candidate.id}
+                            className={`tyrion-queue-item ${selectedCandidate?.id === candidate.id ? 'active' : ''}`}
+                            aria-pressed={selectedCandidate?.id === candidate.id}
+                            onClick={() => setSelectedCandidateId(candidate.id)}
+                          >
+                            <span>
+                              <strong>{candidateLabel(candidate)}</strong>
+                              <small>{candidateDetails(candidate)}</small>
+                              <small>{reason.label}</small>
+                            </span>
+                            <span className="tyrion-queue-item-status">
+                              {candidate.identifier_match_expectation_ids.length > 0 ? (
+                                <Badge tone="info">Identifier hint</Badge>
+                              ) : null}
+                              <Badge tone={candidate.review_finding ? 'warning' : 'muted'}>
+                                {candidate.review_finding ? 'Changed' : humanize(candidate.outcome)}
+                              </Badge>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </section>
+                  ))}
+                </div>
+              </aside>
+
+              {selectedCandidate ? (
+                <section className="tyrion-editor" aria-label={`Review ${selectedCandidate.display_hint}`}>
+                  <div className="tyrion-editor-header">
+                    <div>
+                      <h3>{candidateLabel(selectedCandidate)}</h3>
+                      <span>{candidateDetails(selectedCandidate)}</span>
+                      <span>Source data as of {formatDate(selectedCandidate.source_as_of)}</span>
+                    </div>
+                    <div className="correspondent-badges">
+                      {!selectedCandidate.active ? <Badge tone="warning">Inactive source</Badge> : null}
+                      <Badge tone={selectedCandidate.outcome === 'mapped' ? 'ok' : 'warning'}>
+                        {humanize(selectedCandidate.outcome)}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="tyrion-review-progress" aria-label="Mapping progress">
+                    <span className="complete">1. Review account</span>
+                    <span className={selectedCorrespondent ? 'complete' : 'active'}>
+                      2. Map correspondent
                     </span>
-                    <span>Source data as of {formatDate(candidate.source_as_of)}</span>
+                    <span className={selectedCorrespondent ? 'active' : ''}>
+                      3. Link document series
+                    </span>
                   </div>
-                  <div className="correspondent-badges">
-                    {!candidate.active ? <Badge tone="warning">Inactive source</Badge> : null}
-                    <Badge tone={candidate.outcome === 'mapped' ? 'ok' : 'warning'}>
-                      {humanize(candidate.outcome)}
-                    </Badge>
+
+                  <div className="tyrion-editor-body">
+                    <div className="correspondent-reconciliation-step">
+                      <label>
+                        <span>Paperless correspondent</span>
+                        <select
+                          aria-label={`Paperless correspondent for ${selectedCandidate.display_hint}`}
+                          value={selectedCorrespondent}
+                          disabled={busy || selectedCandidate.outcome === 'not_applicable'}
+                          onChange={(event) =>
+                            onCorrespondentChange(selectedCandidate.id, event.target.value)}
+                        >
+                          <option value="">Not mapped</option>
+                          {activeProfiles.map((profile) => (
+                            <option key={profile.correspondent_id} value={profile.correspondent_id}>
+                              {redactSensitiveNumbers(profile.current_name)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {!selectedCorrespondent && paperlessUrl ? (
+                        <a href={`${paperlessUrl}/correspondents`} target="_blank" rel="noreferrer">
+                          Create correspondent in Paperless
+                        </a>
+                      ) : null}
+                    </div>
+
+                    {correspondentId ? (
+                      <div className="correspondent-reconciliation-step">
+                        <div className="correspondent-reconciliation-step-heading">
+                          <span>Related document series (select all that apply)</span>
+                          <Button size="sm" onClick={() => onOpenCorrespondent(correspondentId)}>
+                            Review / identify documents
+                          </Button>
+                        </div>
+                        {availableExpectations.length === 0 ? (
+                          <div className="tyrion-empty compact">
+                            <strong>No document series found</strong>
+                            <span>
+                              Analyze this correspondent’s Paperless history, create the required
+                              series, then return here to link them.
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="correspondent-series-options">
+                            {availableExpectations.map((expectation) => {
+                              const identifierMatch = selectedCandidate
+                                .identifier_match_expectation_ids.includes(expectation.id);
+                              return (
+                                <label key={expectation.id}>
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedExpectationIds.includes(expectation.id)}
+                                    disabled={busy || selectedCandidate.outcome === 'not_applicable'}
+                                    onChange={(event) => onExpectationChange(
+                                      selectedCandidate.id,
+                                      event.target.checked
+                                        ? [...selectedExpectationIds, expectation.id]
+                                        : selectedExpectationIds.filter((id) => id !== expectation.id),
+                                    )}
+                                  />
+                                  <span>
+                                    <strong>
+                                      {redactSensitiveNumbers(
+                                        expectation.series_discriminator ?? humanize(expectation.kind),
+                                      )}
+                                    </strong>
+                                    {' · '}{humanize(expectation.kind)}
+                                    {' · '}{humanize(expectation.expectation_mode)}
+                                  </span>
+                                  {identifierMatch ? (
+                                    <Badge tone="info">Account suffix match</Badge>
+                                  ) : null}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+
+                    <div className="correspondent-callout">
+                      Account suffix matches are advisory. TYRION does not establish document
+                      existence or cadence. Use stored Account Identifier metadata first, or run
+                      scoped account OCR from the correspondent review.
+                    </div>
                   </div>
-                </div>
 
-                <div className="correspondent-reconciliation-step">
-                  <label>
-                    <span>1. Paperless correspondent</span>
-                    <select
-                      aria-label={`Paperless correspondent for ${candidate.display_hint}`}
-                      value={selectedCorrespondent}
-                      disabled={busy || candidate.outcome === 'not_applicable'}
-                      onChange={(event) => onCorrespondentChange(candidate.id, event.target.value)}
-                    >
-                      <option value="">Not mapped</option>
-                      {activeProfiles.map((profile) => (
-                        <option key={profile.correspondent_id} value={profile.correspondent_id}>
-                          {redactSensitiveNumbers(profile.current_name)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {!selectedCorrespondent && paperlessUrl ? (
-                    <a href={`${paperlessUrl}/correspondents`} target="_blank" rel="noreferrer">
-                      Create correspondent in Paperless
-                    </a>
-                  ) : null}
-                </div>
-
-                {correspondentId ? (
-                  <div className="correspondent-reconciliation-step">
-                    <div className="correspondent-reconciliation-step-heading">
-                      <span>2. Related document series (optional, select all that apply)</span>
-                      <Button size="sm" onClick={() => onOpenCorrespondent(correspondentId)}>
-                        Review / identify documents
+                  <div className="tyrion-editor-footer">
+                    <div className="correspondent-actions">
+                      <Button
+                        disabled={busy || selectedCandidate.outcome === 'not_applicable'}
+                        onClick={() => void reviewAndAdvance(selectedCandidate, 'ambiguous')}
+                      >
+                        Leave unresolved
+                      </Button>
+                      <Button
+                        disabled={
+                          busy || !selectedCorrespondent
+                          || selectedCandidate.outcome === 'not_applicable'
+                        }
+                        onClick={() => void reviewAndAdvance(selectedCandidate, 'not_applicable')}
+                      >
+                        No documents expected
                       </Button>
                     </div>
-                    {availableExpectations.length === 0 ? (
-                      <div className="correspondent-muted">
-                        No expectations exist yet. Analyze this correspondent’s Paperless history,
-                        create the required series, then return here to link them.
-                      </div>
-                    ) : (
-                      <div className="correspondent-series-options">
-                        {availableExpectations.map((expectation) => {
-                          const identifierMatch = candidate.identifier_match_expectation_ids
-                            ?.includes(expectation.id);
-                          return (
-                            <label key={expectation.id}>
-                              <input
-                                type="checkbox"
-                                checked={selectedExpectationIds.includes(expectation.id)}
-                                disabled={busy || candidate.outcome === 'not_applicable'}
-                                onChange={(event) => onExpectationChange(
-                                  candidate.id,
-                                  event.target.checked
-                                    ? [...selectedExpectationIds, expectation.id]
-                                    : selectedExpectationIds.filter((id) => id !== expectation.id),
-                                )}
-                              />
-                              <span>
-                                <strong>
-                                  {redactSensitiveNumbers(
-                                    expectation.series_discriminator ?? humanize(expectation.kind),
-                                  )}
-                                </strong>
-                                {' · '}{humanize(expectation.kind)}
-                                {' · '}{humanize(expectation.expectation_mode)}
-                              </span>
-                              {identifierMatch ? <Badge tone="info">Account suffix match</Badge> : null}
-                            </label>
-                          );
-                        })}
-                      </div>
-                    )}
+                    <Button
+                      variant="primary"
+                      disabled={
+                        busy || !selectedCorrespondent
+                        || selectedCandidate.outcome === 'not_applicable'
+                      }
+                      onClick={() => void reviewAndAdvance(selectedCandidate, 'mapped')}
+                    >
+                      Save and next
+                    </Button>
                   </div>
-                ) : null}
-
-                <div className="correspondent-actions">
-                  <Button
-                    variant="primary"
-                    disabled={busy || !selectedCorrespondent || candidate.outcome === 'not_applicable'}
-                    onClick={() => onReview(candidate, 'mapped')}
-                  >
-                    Save account mapping
-                  </Button>
-                  <Button
-                    disabled={busy || candidate.outcome === 'not_applicable'}
-                    onClick={() => onReview(candidate, 'ambiguous')}
-                  >
-                    Leave unresolved
-                  </Button>
-                  <Button
-                    disabled={busy || !selectedCorrespondent || candidate.outcome === 'not_applicable'}
-                    onClick={() => onReview(candidate, 'not_applicable')}
-                  >
-                    Record no document expected
-                  </Button>
-                </div>
-              </article>
-            );
-          })}
+                </section>
+              ) : null}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="tyrion-audit">
+          <div className="tyrion-audit-summary">
+            <div>
+              <strong>Reviewed mappings</strong>
+              <span>Audit established correspondent and document-series relationships.</span>
+            </div>
+            <span>{reviewedCandidates.length} reviewed</span>
+          </div>
+          {reviewedCandidates.length === 0 ? (
+            <div className="tyrion-empty">
+              <strong>No reviewed mappings yet</strong>
+              <span>Completed mappings and no-document decisions will appear here.</span>
+            </div>
+          ) : (
+            <div className="tyrion-audit-table-wrap">
+              <table className="tyrion-audit-table">
+                <thead>
+                  <tr>
+                    <th>TYRION account</th>
+                    <th>Paperless correspondent</th>
+                    <th>Related document series</th>
+                    <th>Status</th>
+                    <th><span className="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reviewedCandidates.map((candidate) => {
+                    const names = expectationNames(candidate);
+                    return (
+                      <tr key={candidate.id}>
+                        <td>
+                          <strong>{candidateLabel(candidate)}</strong>
+                          <span>{candidateDetails(candidate)}</span>
+                        </td>
+                        <td>{redactSensitiveNumbers(profileName(candidate.correspondent_id))}</td>
+                        <td>
+                          {candidate.outcome === 'not_applicable' ? (
+                            <span className="tyrion-series-chip muted">No documents expected</span>
+                          ) : names.length > 0 ? names.map((name) => (
+                            <span className="tyrion-series-chip" key={name}>{name}</span>
+                          )) : <span className="correspondent-muted">No series linked</span>}
+                        </td>
+                        <td>
+                          <Badge tone={candidate.outcome === 'mapped' ? 'ok' : 'muted'}>
+                            {humanize(candidate.outcome)}
+                          </Badge>
+                        </td>
+                        <td>
+                          {candidate.outcome === 'not_applicable' ? (
+                            <span className="correspondent-muted">
+                              Retire policy to change
+                            </span>
+                          ) : (
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setManualReviewIds((current) =>
+                                  new Set([...current, candidate.id]));
+                                setSearch('');
+                                setReasonFilter('');
+                                setSelectedCandidateId(candidate.id);
+                                setMode('work');
+                              }}
+                            >
+                              Edit mapping
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </Card>
@@ -1049,6 +1377,7 @@ export default function CorrespondentReview() {
         return next;
       });
     }
+    return succeeded;
   }, [candidateCorrespondents, candidateExpectations, runAction]);
 
   const syncExternalCandidates = useCallback(async () => {
@@ -1238,7 +1567,7 @@ export default function CorrespondentReview() {
                 ...current,
                 [candidateId]: expectationIds,
               }))}
-            onReview={(candidate, outcome) => void reviewCandidate(candidate, outcome)}
+            onReview={reviewCandidate}
             onSync={() => void syncExternalCandidates()}
             onOpenCorrespondent={(correspondentId) => navigate(`/correspondents/${correspondentId}`)}
           />

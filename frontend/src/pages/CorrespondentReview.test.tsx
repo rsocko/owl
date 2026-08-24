@@ -265,9 +265,9 @@ describe('Correspondent Review', () => {
     expect((await screen.findAllByText('Unreviewed')).length).toBeGreaterThan(0);
     expect(container.querySelector('.correspondent-inventory-list')).toBeInTheDocument();
     expect(screen.getByText(/TYRION account reconciliation/)).toBeInTheDocument();
-    expect(screen.getAllByText('Travel Rewards (...1234)')).toHaveLength(1);
+    expect(screen.getAllByText('Travel Rewards (...1234)')).toHaveLength(2);
     expect(screen.queryByText(/Travel Rewards.*redacted/)).not.toBeInTheDocument();
-    expect(screen.getByText(/Example Bank · Credit · Account ending in 1234/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Example Bank · Credit · Account ending in 1234/)).toHaveLength(2);
     expect(screen.getByRole('combobox', { name: /paperless correspondent for credit account/i }))
       .toHaveValue('');
   });
@@ -410,10 +410,10 @@ describe('Correspondent Review', () => {
     fireEvent.change(await screen.findByRole('combobox', {
       name: /paperless correspondent for credit account/i,
     }), { target: { value: '42' } });
-    expect(screen.getByText(/account suffix match/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/account suffix match/i)).toHaveLength(2);
     fireEvent.click(screen.getByRole('checkbox', { name: /monthly mortgage statement/i }));
     fireEvent.click(screen.getByRole('checkbox', { name: /annual mortgage tax form/i }));
-    fireEvent.click(screen.getByRole('button', { name: /save account mapping/i }));
+    fireEvent.click(screen.getByRole('button', { name: /save and next/i }));
 
     await waitFor(() => {
       expect(mocks.reviewCandidate).toHaveBeenCalledWith('candidate-1', {
@@ -425,7 +425,6 @@ describe('Correspondent Review', () => {
     expect(screen.getByRole('combobox', {
       name: /paperless correspondent for credit account/i,
     })).toHaveValue('');
-    expect(screen.getByText(/do not establish cadence/i)).toBeInTheDocument();
   });
 
   it('synchronizes the latest Tyrion candidates from the review workspace', async () => {
@@ -460,7 +459,7 @@ describe('Correspondent Review', () => {
     fireEvent.change(await screen.findByRole('combobox', {
       name: /paperless correspondent for recurring expense/i,
     }), { target: { value: '42' } });
-    fireEvent.click(screen.getByRole('button', { name: /record no document expected/i }));
+    fireEvent.click(screen.getByRole('button', { name: /no documents expected/i }));
 
     await waitFor(() => {
       expect(mocks.reviewCandidate).toHaveBeenCalledWith('candidate-1', {
@@ -468,7 +467,105 @@ describe('Correspondent Review', () => {
         correspondent_id: 42,
       });
     });
-    expect(screen.getByText(/recurring obligations do not create invoice/i)).toBeInTheDocument();
+  });
+
+  it('filters the grouped TYRION work queue', async () => {
+    mocks.externalCandidates.mockResolvedValue([
+      {
+        id: 'candidate-new',
+        kind: 'accountStatementCandidate',
+        active: true,
+        display_hint: 'Travel account',
+        confidence: 0.6,
+        basis: ['active_non_cash_account'],
+        account_name: 'Travel Rewards',
+        institution_name: 'Example Bank',
+        account_last_four: '1234',
+        source_as_of: '2026-08-24T15:40:34Z',
+        outcome: 'unreviewed',
+        expectation_ids: [],
+        identifier_match_expectation_ids: [],
+        correspondent_id: null,
+        likely_multiple_statement_series: false,
+        recurrence_evidence: 'high',
+      },
+      {
+        id: 'candidate-ambiguous',
+        kind: 'recurringDocumentCandidate',
+        active: true,
+        display_hint: 'Utility payment',
+        confidence: 0.5,
+        basis: ['active_recurring_obligation'],
+        source_as_of: '2026-08-23T15:40:34Z',
+        outcome: 'ambiguous',
+        expectation_ids: [],
+        identifier_match_expectation_ids: [],
+        correspondent_id: null,
+        likely_multiple_statement_series: false,
+        recurrence_evidence: 'none',
+      },
+    ]);
+
+    renderPage();
+    expect((await screen.findAllByText('New and unassigned')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Unresolved').length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText('Search TYRION work queue'), {
+      target: { value: 'utility' },
+    });
+    expect(screen.queryByText('Travel Rewards')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Utility payment').length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText('Filter TYRION work reason'), {
+      target: { value: 'new' },
+    });
+    expect(screen.getByText('No matching work')).toBeInTheDocument();
+  });
+
+  it('shows reviewed mappings in the audit and reopens one for editing', async () => {
+    mocks.expectations.mockResolvedValue([{
+      id: 'monthly-statement',
+      correspondent_id: 42,
+      kind: 'statement',
+      series_discriminator: 'Monthly statement',
+      expectation_mode: 'recurring',
+      status: 'confirmed',
+    }]);
+    mocks.externalCandidates.mockResolvedValue([{
+      id: 'candidate-reviewed',
+      kind: 'accountStatementCandidate',
+      active: true,
+      display_hint: 'Credit account',
+      confidence: 0.8,
+      basis: ['active_non_cash_account'],
+      account_name: 'Travel Rewards',
+      institution_name: 'Example Bank',
+      account_last_four: '1234',
+      source_as_of: '2026-08-24T15:40:34Z',
+      outcome: 'mapped',
+      expectation_ids: ['monthly-statement'],
+      identifier_match_expectation_ids: [],
+      correspondent_id: 42,
+      likely_multiple_statement_series: false,
+      recurrence_evidence: 'high',
+    }]);
+
+    renderPage();
+    fireEvent.change(await screen.findByLabelText('Search TYRION work queue'), {
+      target: { value: 'does not match' },
+    });
+    fireEvent.click(await screen.findByRole('tab', { name: /mapping audit 1/i }));
+
+    expect(screen.getByRole('table')).toHaveTextContent('Monthly statement');
+    expect(screen.getByRole('table')).toHaveTextContent('Example Bank');
+    fireEvent.click(screen.getByRole('button', { name: /edit mapping/i }));
+
+    expect(screen.getByRole('tab', { name: /needs action 1/i })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('region', { name: /review credit account/i })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', {
+      name: /paperless correspondent for credit account/i,
+    })).toHaveValue('42');
+    expect(screen.getByLabelText('Search TYRION work queue')).toHaveValue('');
   });
 
   it('shows exact old and proposed metadata from a read-only policy preview', async () => {

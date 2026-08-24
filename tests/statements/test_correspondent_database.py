@@ -432,6 +432,22 @@ def test_external_account_maps_to_correspondent_and_multiple_document_series(tmp
             "source_candidate_inactive_confirmed_policy_preserved",
             "source_candidate_inactive",
         }
+        db.review_external_candidate(
+            DEPLOYMENT_ID,
+            mortgage.id,
+            ExternalCandidateReview(
+                outcome="mapped",
+                correspondent_id=42,
+                expectation_ids=[checking.id, tax_form.id],
+            ),
+        )
+        acknowledged = db.list_external_candidates(DEPLOYMENT_ID, correspondent_id=42)
+        assert (
+            next(
+                candidate for candidate in acknowledged if candidate.id == mortgage.id
+            ).review_finding
+            is None
+        )
         assert db.get_document_expectation(DEPLOYMENT_ID, checking.id).status == "confirmed"
         assert db.get_document_expectation(DEPLOYMENT_ID, tax_form.id).status == "suggested"
         db.replace_external_candidate_snapshot(
