@@ -44,6 +44,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     ExternalCandidateSnapshotResult,
     ExternalDocumentCandidate,
     ExternalSignalConnection,
+    ExternalSignalConnectionTest,
     ExternalSignalConnectionUpdate,
     ExternalSignalSyncRequest,
     LegacyOverrideReviewItem,
@@ -100,8 +101,31 @@ def _raise_external_signal_error(exc: httpx.HTTPError | ValueError) -> None:
     else:
         message = "Tyrion returned a candidate projection that OWL could not validate."
 
-    logger.warning("Tyrion candidate synchronization failed: %s", exc)
+    logger.warning("Tyrion candidate request failed: %s", message)
     raise_api_error(502, "external_signal_source_failed", message, details)
+
+
+def _get_effective_external_signal_credentials(
+    request: Request,
+    service: CorrespondentPolicyService,
+) -> dict[str, Any]:
+    connection = service.get_external_signal_credentials()
+    if connection is not None:
+        return connection
+
+    config = load_statement_config_from_request(request)
+    if not config.external_signals.base_url:
+        raise_api_error(
+            409,
+            "external_signal_source_not_configured",
+            "Configure the Tyrion connection in Settings before testing or synchronizing it.",
+        )
+    return {
+        "base_url": config.external_signals.base_url,
+        "api_token": resolve_external_signal_token(config),
+        "verify_ssl": config.external_signals.verify_ssl,
+        "timeout_seconds": config.external_signals.timeout_seconds,
+    }
 
 
 @router.get("/providers")
@@ -786,6 +810,38 @@ async def delete_external_candidate_connection(request: Request) -> Response:
 
 
 @router.post(
+    "/external-candidates/connection/test",
+    response_model=ExternalSignalConnectionTest,
+    summary="Test the effective Tyrion connection",
+)
+async def test_external_candidate_connection(
+    request: Request,
+) -> ExternalSignalConnectionTest:
+    service = _get_policy_service(request)
+    try:
+        connection = _get_effective_external_signal_credentials(request, service)
+    finally:
+        service.close()
+
+    client = DocumentExpectationSignalsClient(
+        connection["base_url"],
+        api_token=connection["api_token"],
+        verify_ssl=bool(connection["verify_ssl"]),
+        timeout_seconds=connection["timeout_seconds"],
+    )
+    try:
+        await client.fetch_latest()
+    except (httpx.HTTPError, ValueError) as exc:
+        _raise_external_signal_error(exc)
+    finally:
+        await client.close()
+    return ExternalSignalConnectionTest(
+        status="connected",
+        message="OWL successfully connected to Tyrion.",
+    )
+
+
+@router.post(
     "/external-candidates/sync",
     response_model=ExternalCandidateSnapshotResult,
     summary="Synchronize the latest Tyrion candidates using the saved connection",
@@ -796,21 +852,7 @@ async def sync_external_candidates(
 ) -> ExternalCandidateSnapshotResult:
     service = _get_policy_service(request)
     try:
-        connection = service.get_external_signal_credentials()
-        if connection is None:
-            config = load_statement_config_from_request(request)
-            if not config.external_signals.base_url:
-                raise_api_error(
-                    409,
-                    "external_signal_source_not_configured",
-                    "Configure the Tyrion connection in Settings before synchronizing candidates.",
-                )
-            connection = {
-                "base_url": config.external_signals.base_url,
-                "api_token": resolve_external_signal_token(config),
-                "verify_ssl": config.external_signals.verify_ssl,
-                "timeout_seconds": config.external_signals.timeout_seconds,
-            }
+        connection = _get_effective_external_signal_credentials(request, service)
         client = DocumentExpectationSignalsClient(
             connection["base_url"],
             api_token=connection["api_token"],

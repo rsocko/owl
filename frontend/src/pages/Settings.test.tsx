@@ -3,7 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { endpoints } from '../lib/api';
 import Settings from './Settings';
 
-const { updateSettingsMock, updateTyrionMock } = vi.hoisted(() => ({
+const {
+  getTyrionMock,
+  testTyrionMock,
+  updateSettingsMock,
+  updateTyrionMock,
+} = vi.hoisted(() => ({
+  getTyrionMock: vi.fn(),
+  testTyrionMock: vi.fn(),
   updateSettingsMock: vi.fn(),
   updateTyrionMock: vi.fn(),
 }));
@@ -37,13 +44,9 @@ vi.mock('../lib/api', () => ({
     },
     paperlessHealth: vi.fn().mockResolvedValue({ status: 'ok' }),
     statements: {
-      externalCandidateConnection: vi.fn().mockResolvedValue({
-        configured: false,
-        token_configured: false,
-        verify_ssl: true,
-        timeout_seconds: 30,
-      }),
+      externalCandidateConnection: getTyrionMock,
       updateExternalCandidateConnection: updateTyrionMock,
+      testExternalCandidateConnection: testTyrionMock,
       deleteExternalCandidateConnection: vi.fn(),
     },
     actionQueue: {
@@ -70,6 +73,16 @@ vi.mock('../lib/api', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getTyrionMock.mockResolvedValue({
+    configured: false,
+    token_configured: false,
+    verify_ssl: true,
+    timeout_seconds: 30,
+  });
+  testTyrionMock.mockResolvedValue({
+    status: 'connected',
+    message: 'OWL successfully connected to Tyrion.',
+  });
   updateSettingsMock.mockResolvedValue({ status: 'ok' });
   updateTyrionMock.mockResolvedValue({
     configured: true,
@@ -104,7 +117,28 @@ describe('Action Queue settings', () => {
   });
 
   describe('Tyrion settings', () => {
-    it('saves a user-managed Tyrion connection', async () => {
+    it('shows saved configuration as unverified until a test succeeds', async () => {
+      getTyrionMock.mockResolvedValueOnce({
+        configured: true,
+        source: 'saved',
+        base_url: 'https://tyrion.test',
+        token_configured: true,
+        verify_ssl: true,
+        timeout_seconds: 30,
+      });
+      render(<Settings />);
+
+      expect(await screen.findAllByText('Saved · not tested')).toHaveLength(2);
+      expect(screen.getAllByText('Connected')).toHaveLength(1);
+
+      fireEvent.click(screen.getAllByRole('button', { name: /test connection/i })[0]);
+
+      await waitFor(() => expect(screen.getAllByText('Connected')).toHaveLength(3));
+      expect(screen.getAllByText('The effective configuration reached Tyrion successfully.')).toHaveLength(2);
+      expect(testTyrionMock).toHaveBeenCalledWith();
+    });
+
+    it('saves a user-managed Tyrion connection and verifies it server-side', async () => {
       render(<Settings />);
 
       fireEvent.change(await screen.findByLabelText('Tyrion base URL'), {
@@ -113,7 +147,7 @@ describe('Action Queue settings', () => {
       fireEvent.change(screen.getByLabelText('API token'), {
         target: { value: 'secret-token' },
       });
-      fireEvent.click(screen.getByRole('button', { name: /save tyrion connection/i }));
+      fireEvent.click(screen.getByRole('button', { name: /save tyrion configuration/i }));
 
       await waitFor(() => {
         expect(endpoints.statements.updateExternalCandidateConnection).toHaveBeenCalledWith({
@@ -122,7 +156,27 @@ describe('Action Queue settings', () => {
           verify_ssl: true,
           timeout_seconds: 30,
         });
+        expect(testTyrionMock).toHaveBeenCalledWith();
       });
+      await waitFor(() => expect(screen.getAllByText('Connected')).toHaveLength(3));
+      expect(screen.getByText('Tyrion configuration saved and connection verified.')).toBeInTheDocument();
+      expect((screen.getByLabelText('API token') as HTMLInputElement).value).toBe('');
+    });
+
+    it('keeps a saved configuration distinct when automatic verification fails', async () => {
+      testTyrionMock.mockRejectedValueOnce(
+        new Error("Tyrion's candidate endpoint was not found. Check the Tyrion base URL and version."),
+      );
+      render(<Settings />);
+
+      fireEvent.change(await screen.findByLabelText('Tyrion base URL'), {
+        target: { value: 'https://tyrion.test' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /save tyrion configuration/i }));
+
+      expect(await screen.findAllByText('Connection failed')).toHaveLength(2);
+      expect(screen.getByText(/configuration was saved, but the connection test failed/i)).toBeInTheDocument();
+      expect(screen.getAllByText('Connected')).toHaveLength(1);
     });
   });
 

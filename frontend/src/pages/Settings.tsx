@@ -91,6 +91,11 @@ type TyrionDraft = {
   timeoutSeconds: number;
 };
 
+type TyrionVerification = {
+  status: 'unconfigured' | 'unverified' | 'testing' | 'connected' | 'failed';
+  message?: string;
+};
+
 type ScheduleDrafts = {
   statement_discovery: Required<ScheduleConfig>;
   statement_gap_check: Required<ScheduleConfig>;
@@ -177,6 +182,9 @@ export default function Settings() {
   const [llmSaving, setLlmSaving] = useState(false);
   const [llmTesting, setLlmTesting] = useState(false);
   const [tyrionSaving, setTyrionSaving] = useState(false);
+  const [tyrionVerification, setTyrionVerification] = useState<TyrionVerification>({
+    status: 'unconfigured',
+  });
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [retentionSaving, setRetentionSaving] = useState(false);
   const [cleanupRunning, setCleanupRunning] = useState(false);
@@ -268,6 +276,9 @@ export default function Settings() {
         model: settingsResponse.llm_model ?? settingsResponse.ollama_model ?? '',
       });
       setTyrionConnection(tyrionResponse);
+      setTyrionVerification({
+        status: tyrionResponse.configured ? 'unverified' : 'unconfigured',
+      });
       setTyrion({
         baseUrl: tyrionResponse.base_url ?? '',
         apiToken: '',
@@ -388,7 +399,10 @@ export default function Settings() {
       }) as TyrionConnection;
       setTyrionConnection(response);
       setTyrion((current) => ({ ...current, apiToken: '' }));
-      setToast({ message: 'Tyrion connection saved.', tone: 'success' });
+      setTyrionVerification({ status: 'unverified' });
+      setTyrionSaving(false);
+      setToast({ message: 'Tyrion configuration saved. Testing the connection…', tone: 'success' });
+      await handleTestTyrion(true);
     } catch (err) {
       setToast({ message: getErrorMessage(err), tone: 'error' });
     } finally {
@@ -412,11 +426,38 @@ export default function Settings() {
         verifySsl: true,
         timeoutSeconds: 30,
       });
+      setTyrionVerification({ status: 'unconfigured' });
       setToast({ message: 'Tyrion connection removed.', tone: 'success' });
     } catch (err) {
       setToast({ message: getErrorMessage(err), tone: 'error' });
     } finally {
       setTyrionSaving(false);
+    }
+  };
+
+  const handleTestTyrion = async (afterSave = false) => {
+    setTyrionVerification({ status: 'testing' });
+    try {
+      await endpoints.statements.testExternalCandidateConnection();
+      setTyrionVerification({
+        status: 'connected',
+        message: 'The effective configuration reached Tyrion successfully.',
+      });
+      setToast({
+        message: afterSave
+          ? 'Tyrion configuration saved and connection verified.'
+          : 'Tyrion connection verified.',
+        tone: 'success',
+      });
+    } catch (err) {
+      const message = getErrorMessage(err);
+      setTyrionVerification({ status: 'failed', message });
+      setToast({
+        message: afterSave
+          ? `Tyrion configuration was saved, but the connection test failed: ${message}`
+          : message,
+        tone: 'error',
+      });
     }
   };
 
@@ -528,6 +569,19 @@ export default function Settings() {
     [documentTypes],
   );
 
+  const tyrionStatus = {
+    unconfigured: { label: 'Setup required', tone: 'warning' as const },
+    unverified: {
+      label: tyrionConnection.source === 'configuration'
+        ? 'Configured · not tested'
+        : 'Saved · not tested',
+      tone: 'warning' as const,
+    },
+    testing: { label: 'Testing…', tone: 'warning' as const },
+    connected: { label: 'Connected', tone: 'success' as const },
+    failed: { label: 'Connection failed', tone: 'danger' as const },
+  }[tyrionVerification.status];
+
   return (
     <>
       <PageHeader
@@ -552,7 +606,7 @@ export default function Settings() {
             <StatCard title="Paperless" metric={paperlessHealth?.status ?? 'unknown'} desc={`${paperlessStats?.document_count ?? 0} docs · ${paperlessStats?.tag_count ?? 0} tags · ${paperlessStats?.correspondent_count ?? 0} correspondents`} status={{ label: paperlessHealth?.status === 'ok' ? 'Connected' : 'Degraded', tone: paperlessHealth?.status === 'ok' ? 'success' : 'warning' }} />
             <StatCard title="Writeback mode" metric={connection.writeToPaperless ? 'Enabled' : 'Read-only'} desc="Controls whether downstream automations can write metadata back to Paperless." status={{ label: connection.writeToPaperless ? 'Writable' : 'Safe mode', tone: connection.writeToPaperless ? 'success' : 'warning' }} />
             <StatCard title="Configured model" metric={llm.model || '—'} desc={llm.baseUrl || 'No LLM gateway URL configured.'} status={{ label: modelsInfo?.available === true ? 'Available' : modelsInfo?.available === false ? 'Missing' : 'Unchecked', tone: modelsInfo?.available === true ? 'success' : modelsInfo?.available === false ? 'danger' : 'warning' }} />
-            <StatCard title="Tyrion" metric={tyrionConnection.configured ? 'Configured' : 'Not configured'} desc={tyrionConnection.last_synced_at ? `Last synchronized ${new Date(tyrionConnection.last_synced_at).toLocaleString()}` : 'No candidate generation synchronized yet.'} status={{ label: tyrionConnection.configured ? 'Ready' : 'Setup required', tone: tyrionConnection.configured ? 'success' : 'warning' }} />
+            <StatCard title="Tyrion" metric={tyrionConnection.configured ? (tyrionConnection.source === 'configuration' ? 'Configured' : 'Saved') : 'Not configured'} desc={tyrionVerification.message ?? (tyrionConnection.last_synced_at ? `Last synchronized ${new Date(tyrionConnection.last_synced_at).toLocaleString()}` : 'Connection has not been verified in this session.')} status={tyrionStatus} />
             <StatCard title="Enabled schedules" metric={enabledSchedules} desc="Statement discovery, gap checks, EOB matching, and the action queue are all scheduled by the built-in scheduler." />
           </StatGrid>
 
@@ -619,8 +673,8 @@ export default function Settings() {
             <Card
               title="Tyrion insights connection"
               actions={
-                <Badge tone={tyrionConnection.configured ? 'success' : 'warning'}>
-                  {tyrionConnection.configured ? 'Configured' : 'Setup required'}
+                <Badge tone={tyrionStatus.tone}>
+                  {tyrionStatus.label}
                 </Badge>
               }
             >
@@ -682,12 +736,22 @@ export default function Settings() {
                   Enter the deployment-managed token to create a UI-managed connection.
                 </div>
               ) : null}
+              {tyrionVerification.message ? (
+                <div
+                  role={tyrionVerification.status === 'failed' ? 'alert' : 'status'}
+                  className="text-muted"
+                  style={{ fontSize: '0.82rem', marginBottom: 16 }}
+                >
+                  {tyrionVerification.message}
+                </div>
+              ) : null}
               <div className="btn-group">
                 <Button
                   variant="primary"
                   onClick={() => void handleSaveTyrion()}
                   disabled={
                     tyrionSaving
+                    || tyrionVerification.status === 'testing'
                     || !tyrion.baseUrl.trim()
                     || (
                       tyrionConnection.source === 'configuration'
@@ -696,10 +760,24 @@ export default function Settings() {
                     )
                   }
                 >
-                  {tyrionSaving ? 'Saving…' : 'Save Tyrion connection'}
+                  {tyrionSaving
+                    ? 'Saving configuration…'
+                    : tyrionVerification.status === 'testing'
+                      ? 'Saved; testing…'
+                      : 'Save Tyrion configuration'}
+                </Button>
+                <Button
+                  onClick={() => void handleTestTyrion()}
+                  disabled={
+                    !tyrionConnection.configured
+                    || tyrionSaving
+                    || tyrionVerification.status === 'testing'
+                  }
+                >
+                  {tyrionVerification.status === 'testing' ? 'Testing…' : 'Test connection'}
                 </Button>
                 {tyrionConnection.source === 'saved' ? (
-                  <Button variant="danger" onClick={() => void handleDisconnectTyrion()} disabled={tyrionSaving}>
+                  <Button variant="danger" onClick={() => void handleDisconnectTyrion()} disabled={tyrionSaving || tyrionVerification.status === 'testing'}>
                     Disconnect
                   </Button>
                 ) : null}
