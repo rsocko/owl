@@ -186,6 +186,8 @@ interface ExternalCandidate {
   source_as_of: string;
   outcome: 'unreviewed' | 'mapped' | 'suggested' | 'ambiguous' | 'not_applicable';
   expectation_id?: string | null;
+  expectation_ids: string[];
+  identifier_match_expectation_ids: string[];
   correspondent_id?: number | null;
   likely_multiple_statement_series: boolean;
   recurrence_evidence: 'high' | 'none';
@@ -230,12 +232,6 @@ function formatDate(value?: string | null): string {
 
 function humanize(value: string): string {
   return value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function externalCandidateSource(candidate: ExternalCandidate): string {
-  return candidate.kind === 'accountStatementCandidate'
-    ? 'Monarch account inventory via Tyrion'
-    : 'Monarch recurring transaction analysis via Tyrion';
 }
 
 function redactSensitiveNumbers(value: string): string {
@@ -564,6 +560,221 @@ function SuggestionCard({
   );
 }
 
+function ExternalCandidateReconciliation({
+  candidates,
+  profiles,
+  expectationsByProfile,
+  connection,
+  syncError,
+  paperlessUrl,
+  busy,
+  correspondentSelections,
+  expectationSelections,
+  onCorrespondentChange,
+  onExpectationChange,
+  onReview,
+  onSync,
+  onOpenCorrespondent,
+}: {
+  candidates: ExternalCandidate[];
+  profiles: CorrespondentProfile[];
+  expectationsByProfile: Record<number, DocumentExpectation[]>;
+  connection: ExternalSignalConnection;
+  syncError: string | null;
+  paperlessUrl: string;
+  busy: boolean;
+  correspondentSelections: Record<string, string>;
+  expectationSelections: Record<string, string[]>;
+  onCorrespondentChange: (candidateId: string, correspondentId: string) => void;
+  onExpectationChange: (candidateId: string, expectationIds: string[]) => void;
+  onReview: (
+    candidate: ExternalCandidate,
+    outcome: 'mapped' | 'ambiguous' | 'not_applicable',
+  ) => void;
+  onSync: () => void;
+  onOpenCorrespondent: (correspondentId: number) => void;
+}) {
+  const activeProfiles = profiles.filter((profile) => profile.lifecycle_status === 'active');
+  const orderedCandidates = [...candidates].sort((left, right) =>
+    Number(right.active) - Number(left.active)
+    || left.outcome.localeCompare(right.outcome)
+    || (left.account_name ?? left.display_hint).localeCompare(right.account_name ?? right.display_hint));
+
+  return (
+    <Card
+      title={`TYRION account reconciliation (${orderedCandidates.length})`}
+      actions={connection.configured ? (
+        <div className="correspondent-actions">
+          {connection.last_synced_at ? (
+            <span className="correspondent-muted">Last synced {formatDate(connection.last_synced_at)}</span>
+          ) : null}
+          <Button variant="primary" disabled={busy} onClick={onSync}>
+            {busy ? 'Syncing TYRION…' : 'Sync TYRION accounts'}
+          </Button>
+        </div>
+      ) : null}
+    >
+      {!connection.configured ? (
+        <div className="correspondent-callout">
+          TYRION is not connected. Configure it in Settings before synchronizing accounts.
+        </div>
+      ) : null}
+      {syncError ? <div className="correspondent-callout warning" role="alert">{syncError}</div> : null}
+      <div className="correspondent-callout">
+        Start with one TYRION account, assign its Paperless correspondent, then relate any number
+        of document series. For example, one mortgage account can link both monthly statements
+        and an annual tax form. Account-number suffix matches are hints only and always require
+        confirmation. These signals do not establish cadence or prove that a document exists;
+        recurring obligations do not create invoice or receipt requirements. OWL checks stored
+        Paperless Account Identifier metadata first; when it is missing, open the correspondent
+        and run Analyze with account OCR.
+      </div>
+      {orderedCandidates.length === 0 ? (
+        <div className="correspondent-muted">No TYRION accounts or recurring signals need review.</div>
+      ) : (
+        <div className="correspondent-reconciliation-list">
+          {orderedCandidates.map((candidate) => {
+            const selectedCorrespondent = correspondentSelections[candidate.id]
+              ?? candidate.correspondent_id?.toString()
+              ?? '';
+            const correspondentId = selectedCorrespondent ? Number(selectedCorrespondent) : null;
+            const availableExpectations = correspondentId
+              ? (expectationsByProfile[correspondentId] ?? [])
+                .filter((expectation) => expectation.status !== 'retired')
+              : [];
+            const selectedExpectationIds = (expectationSelections[candidate.id]
+              ?? candidate.expectation_ids
+              ?? []).filter((expectationId) =>
+              availableExpectations.some((expectation) => expectation.id === expectationId));
+            return (
+              <article className="correspondent-reconciliation-item" key={candidate.id}>
+                <div className="correspondent-reconciliation-header">
+                  <div>
+                    <strong>{redactSensitiveNumbers(candidate.account_name ?? candidate.display_hint)}</strong>
+                    <span>
+                      {candidate.kind === 'accountStatementCandidate'
+                        ? [
+                          candidate.institution_name,
+                          candidate.account_type ? humanize(candidate.account_type) : null,
+                          candidate.account_last_four
+                            ? `Account ending in ${candidate.account_last_four}`
+                            : null,
+                        ].filter(Boolean).join(' · ') || 'Account inventory signal'
+                        : 'Recurring transaction signal'}
+                    </span>
+                    <span>Source data as of {formatDate(candidate.source_as_of)}</span>
+                  </div>
+                  <div className="correspondent-badges">
+                    {!candidate.active ? <Badge tone="warning">Inactive source</Badge> : null}
+                    <Badge tone={candidate.outcome === 'mapped' ? 'ok' : 'warning'}>
+                      {humanize(candidate.outcome)}
+                    </Badge>
+                  </div>
+                </div>
+
+                <div className="correspondent-reconciliation-step">
+                  <label>
+                    <span>1. Paperless correspondent</span>
+                    <select
+                      aria-label={`Paperless correspondent for ${candidate.display_hint}`}
+                      value={selectedCorrespondent}
+                      disabled={busy || candidate.outcome === 'not_applicable'}
+                      onChange={(event) => onCorrespondentChange(candidate.id, event.target.value)}
+                    >
+                      <option value="">Not mapped</option>
+                      {activeProfiles.map((profile) => (
+                        <option key={profile.correspondent_id} value={profile.correspondent_id}>
+                          {redactSensitiveNumbers(profile.current_name)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {!selectedCorrespondent && paperlessUrl ? (
+                    <a href={`${paperlessUrl}/correspondents`} target="_blank" rel="noreferrer">
+                      Create correspondent in Paperless
+                    </a>
+                  ) : null}
+                </div>
+
+                {correspondentId ? (
+                  <div className="correspondent-reconciliation-step">
+                    <div className="correspondent-reconciliation-step-heading">
+                      <span>2. Related document series (optional, select all that apply)</span>
+                      <Button size="sm" onClick={() => onOpenCorrespondent(correspondentId)}>
+                        Review / identify documents
+                      </Button>
+                    </div>
+                    {availableExpectations.length === 0 ? (
+                      <div className="correspondent-muted">
+                        No expectations exist yet. Analyze this correspondent’s Paperless history,
+                        create the required series, then return here to link them.
+                      </div>
+                    ) : (
+                      <div className="correspondent-series-options">
+                        {availableExpectations.map((expectation) => {
+                          const identifierMatch = candidate.identifier_match_expectation_ids
+                            ?.includes(expectation.id);
+                          return (
+                            <label key={expectation.id}>
+                              <input
+                                type="checkbox"
+                                checked={selectedExpectationIds.includes(expectation.id)}
+                                disabled={busy || candidate.outcome === 'not_applicable'}
+                                onChange={(event) => onExpectationChange(
+                                  candidate.id,
+                                  event.target.checked
+                                    ? [...selectedExpectationIds, expectation.id]
+                                    : selectedExpectationIds.filter((id) => id !== expectation.id),
+                                )}
+                              />
+                              <span>
+                                <strong>
+                                  {redactSensitiveNumbers(
+                                    expectation.series_discriminator ?? humanize(expectation.kind),
+                                  )}
+                                </strong>
+                                {' · '}{humanize(expectation.kind)}
+                                {' · '}{humanize(expectation.expectation_mode)}
+                              </span>
+                              {identifierMatch ? <Badge tone="info">Account suffix match</Badge> : null}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                <div className="correspondent-actions">
+                  <Button
+                    variant="primary"
+                    disabled={busy || !selectedCorrespondent || candidate.outcome === 'not_applicable'}
+                    onClick={() => onReview(candidate, 'mapped')}
+                  >
+                    Save account mapping
+                  </Button>
+                  <Button
+                    disabled={busy || candidate.outcome === 'not_applicable'}
+                    onClick={() => onReview(candidate, 'ambiguous')}
+                  >
+                    Leave unresolved
+                  </Button>
+                  <Button
+                    disabled={busy || !selectedCorrespondent || candidate.outcome === 'not_applicable'}
+                    onClick={() => onReview(candidate, 'not_applicable')}
+                  >
+                    Record no document expected
+                  </Button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function CorrespondentReview() {
   const navigate = useNavigate();
   const { correspondentId } = useParams();
@@ -581,7 +792,8 @@ export default function CorrespondentReview() {
   const [acquisitionSources, setAcquisitionSources] = useState<AcquisitionSource[]>([]);
   const [externalCandidates, setExternalCandidates] = useState<ExternalCandidate[]>([]);
   const [externalConnection, setExternalConnection] = useState<ExternalSignalConnection>({ configured: false });
-  const [candidateExpectation, setCandidateExpectation] = useState<Record<string, string>>({});
+  const [candidateCorrespondents, setCandidateCorrespondents] = useState<Record<string, string>>({});
+  const [candidateExpectations, setCandidateExpectations] = useState<Record<string, string[]>>({});
   const [tags, setTags] = useState<MetadataOption[]>([]);
   const [documentTypes, setDocumentTypes] = useState<MetadataOption[]>([]);
   const [paperlessUrl, setPaperlessUrl] = useState('');
@@ -605,16 +817,6 @@ export default function CorrespondentReview() {
     () => selectedId ? expectationsByProfile[selectedId] ?? [] : [],
     [expectationsByProfile, selectedId],
   );
-  const selectedExternalCandidates = useMemo(
-    () => externalCandidates.filter((candidate) => candidate.correspondent_id === selectedId),
-    [externalCandidates, selectedId],
-  );
-  const unassignedExternalCandidates = useMemo(
-    () => externalCandidates.filter((candidate) =>
-      candidate.correspondent_id == null && candidate.active && candidate.outcome === 'unreviewed'),
-    [externalCandidates],
-  );
-
   const loadWorkspace = useCallback(async (showSkeleton = true) => {
     if (showSkeleton) setLoading(true);
     setError(null);
@@ -708,52 +910,16 @@ export default function CorrespondentReview() {
     }, []),
     [expectationsByProfile, sortedProfiles],
   );
-  const externalCandidateGroups = useMemo(
-    () => [
-      {
-        kind: 'accountStatementCandidate' as const,
-        scope: 'linked' as const,
-        label: 'Linked account statement candidates',
-        candidates: selectedExternalCandidates.filter(
-          (candidate) => candidate.kind === 'accountStatementCandidate',
-        ),
-      },
-      {
-        kind: 'recurringDocumentCandidate' as const,
-        scope: 'linked' as const,
-        label: 'Linked recurring document candidates',
-        candidates: selectedExternalCandidates.filter(
-          (candidate) => candidate.kind === 'recurringDocumentCandidate',
-        ),
-      },
-      {
-        kind: 'accountStatementCandidate' as const,
-        scope: 'unassigned' as const,
-        label: 'Unassigned account signals',
-        candidates: unassignedExternalCandidates.filter(
-          (candidate) => candidate.kind === 'accountStatementCandidate',
-        ),
-      },
-      {
-        kind: 'recurringDocumentCandidate' as const,
-        scope: 'unassigned' as const,
-        label: 'Unassigned recurring transaction signals',
-        candidates: unassignedExternalCandidates.filter(
-          (candidate) => candidate.kind === 'recurringDocumentCandidate',
-        ),
-      },
-    ].filter((group) => group.candidates.length > 0),
-    [selectedExternalCandidates, unassignedExternalCandidates],
-  );
-
   const runAction = useCallback(async (action: () => Promise<unknown>, successMessage: string) => {
     setBusy(true);
     try {
       await action();
       setToast({ message: successMessage, tone: 'success' });
       await loadWorkspace(false);
+      return true;
     } catch (requestError) {
       setToast({ message: getErrorMessage(requestError), tone: 'error' });
+      return false;
     } finally {
       setBusy(false);
     }
@@ -850,21 +1016,40 @@ export default function CorrespondentReview() {
 
   const reviewCandidate = useCallback(async (
     candidate: ExternalCandidate,
-    outcome: 'mapped' | 'suggested' | 'ambiguous' | 'not_applicable',
+    outcome: 'mapped' | 'ambiguous' | 'not_applicable',
   ) => {
-    if (!selectedId) return;
     const body: Record<string, unknown> = { outcome };
-    if (outcome === 'mapped') body.expectation_id = candidateExpectation[candidate.id];
-    if (outcome === 'suggested' || outcome === 'ambiguous' || outcome === 'not_applicable') {
-      body.correspondent_id = selectedId;
+    const correspondentId = Number(
+      candidateCorrespondents[candidate.id] ?? candidate.correspondent_id ?? 0,
+    );
+    if (outcome === 'mapped') {
+      body.correspondent_id = correspondentId;
+      body.expectation_ids = candidateExpectations[candidate.id] ?? candidate.expectation_ids ?? [];
     }
-    await runAction(
+    if (outcome === 'not_applicable') {
+      body.correspondent_id = correspondentId;
+    }
+    const succeeded = await runAction(
       () => endpoints.statements.reviewExternalCandidate(candidate.id, body),
       outcome === 'not_applicable'
         ? 'Not-expected policy recorded.'
-        : `Candidate marked ${humanize(outcome).toLowerCase()}.`,
+        : outcome === 'ambiguous'
+          ? 'Account left unresolved.'
+          : 'Account mapping saved.',
     );
-  }, [candidateExpectation, runAction, selectedId]);
+    if (succeeded) {
+      setCandidateCorrespondents((current) => {
+        const next = { ...current };
+        delete next[candidate.id];
+        return next;
+      });
+      setCandidateExpectations((current) => {
+        const next = { ...current };
+        delete next[candidate.id];
+        return next;
+      });
+    }
+  }, [candidateCorrespondents, candidateExpectations, runAction]);
 
   const syncExternalCandidates = useCallback(async () => {
     setBusy(true);
@@ -1029,6 +1214,35 @@ export default function CorrespondentReview() {
       ) : null}
 
       {!loading && !error && profiles.length > 0 ? (
+        <>
+        <div className="correspondent-reconciliation">
+          <ExternalCandidateReconciliation
+            candidates={externalCandidates}
+            profiles={profiles}
+            expectationsByProfile={expectationsByProfile}
+            connection={externalConnection}
+            syncError={externalSyncError}
+            paperlessUrl={paperlessUrl}
+            busy={busy}
+            correspondentSelections={candidateCorrespondents}
+            expectationSelections={candidateExpectations}
+            onCorrespondentChange={(candidateId, correspondentId) => {
+              setCandidateCorrespondents((current) => ({
+                ...current,
+                [candidateId]: correspondentId,
+              }));
+              setCandidateExpectations((current) => ({ ...current, [candidateId]: [] }));
+            }}
+            onExpectationChange={(candidateId, expectationIds) =>
+              setCandidateExpectations((current) => ({
+                ...current,
+                [candidateId]: expectationIds,
+              }))}
+            onReview={(candidate, outcome) => void reviewCandidate(candidate, outcome)}
+            onSync={() => void syncExternalCandidates()}
+            onOpenCorrespondent={(correspondentId) => navigate(`/correspondents/${correspondentId}`)}
+          />
+        </div>
         <div className="correspondent-workspace">
           <aside className="correspondent-inventory" aria-label="Correspondent inventory">
             <div className="correspondent-inventory-header">
@@ -1182,9 +1396,6 @@ export default function CorrespondentReview() {
                 <nav className="correspondent-section-nav" aria-label="Correspondent sections">
                   <button type="button" onClick={() => scrollToSection('correspondent-expectations')}>
                     Expectations <span>{selectedExpectations.length}</span>
-                  </button>
-                  <button type="button" onClick={() => scrollToSection('correspondent-external-candidates')}>
-                    Linked external candidates <span>{selectedExternalCandidates.length}</span>
                   </button>
                   {analysis?.correspondent_id === selectedId ? (
                     <button type="button" onClick={() => scrollToSection('correspondent-candidate-expectations')}>
@@ -1357,176 +1568,6 @@ export default function CorrespondentReview() {
                 </Card>
                 </div>
 
-                <div id="correspondent-external-candidates" className="correspondent-section-anchor">
-                <Card title={`External candidates for ${redactSensitiveNumbers(selectedProfile.current_name)} (${selectedExternalCandidates.length})`}>
-                  {externalConnection.configured ? (
-                    <div className="correspondent-actions" style={{ marginBottom: 12 }}>
-                      <Button
-                        variant="primary"
-                        disabled={busy}
-                        onClick={() => void syncExternalCandidates()}
-                      >
-                        {busy ? 'Syncing Tyrion…' : 'Sync Tyrion candidates'}
-                      </Button>
-                      {externalConnection.last_synced_at ? (
-                        <span className="correspondent-muted">
-                          Last synced {formatDate(externalConnection.last_synced_at)}
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <div className="correspondent-callout" style={{ marginBottom: 12 }}>
-                      Tyrion is not connected. Configure it in Settings before synchronizing candidates.
-                      {' '}
-                      <Button size="sm" onClick={() => navigate('/settings')}>Open Settings</Button>
-                    </div>
-                  )}
-                  {externalSyncError ? (
-                    <div className="correspondent-callout" role="alert" style={{ marginBottom: 12 }}>
-                      {externalSyncError}{' '}
-                      <Button size="sm" onClick={() => navigate('/settings')}>Open Settings</Button>
-                    </div>
-                  ) : null}
-                  <div className="correspondent-callout">
-                    Account candidates are recurrence evidence only. They do not establish cadence
-                    or prove that a statement exists. Recurring obligations do not create invoice
-                    or receipt requirements.
-                  </div>
-                  {unassignedExternalCandidates.length > 0 ? (
-                    <div className="correspondent-callout warning">
-                      {unassignedExternalCandidates.length} unassigned Tyrion candidates are shown
-                      separately below. They are household-wide signals and are not associated with
-                      {' '}{redactSensitiveNumbers(selectedProfile.current_name)} unless you explicitly
-                      assign one.
-                    </div>
-                  ) : null}
-                  {externalCandidateGroups.length === 0 ? (
-                    <div className="correspondent-muted">
-                      No linked or unassigned external candidates need review.
-                    </div>
-                  ) : (
-                    <div className="correspondent-candidate-groups">
-                      {externalCandidateGroups.map((group) => (
-                        <section
-                          className="correspondent-candidate-group"
-                          key={`${group.scope}-${group.kind}`}
-                        >
-                          <div className="correspondent-candidate-group-header">
-                            <strong>{group.label}</strong>
-                            <span>{group.candidates.length}</span>
-                          </div>
-                          {group.scope === 'unassigned' ? (
-                            <div className="correspondent-muted">
-                              Not yet linked to any Paperless correspondent.
-                            </div>
-                          ) : null}
-                          <div className="correspondent-expectation-list">
-                          {group.candidates.map((candidate) => (
-                        <div className="correspondent-expectation" key={candidate.id}>
-                          <div>
-                            <strong>
-                              {redactSensitiveNumbers(candidate.account_name ?? candidate.display_hint)}
-                            </strong>
-                            {candidate.kind === 'accountStatementCandidate' ? (
-                              <span>
-                                {[
-                                  candidate.institution_name,
-                                  candidate.account_type ? humanize(candidate.account_type) : null,
-                                  candidate.account_last_four
-                                    ? `Account ending in ${candidate.account_last_four}`
-                                    : null,
-                                ].filter(Boolean).join(' · ') || 'No additional account details supplied'}
-                              </span>
-                            ) : null}
-                            <span>
-                              Source: {externalCandidateSource(candidate)}
-                            </span>
-                            <span>
-                              Signal: {candidate.kind === 'accountStatementCandidate'
-                                ? 'Account inventory candidate'
-                                : 'Outgoing recurring transaction candidate'}
-                            </span>
-                            <span>
-                              Evidence: {candidate.basis.map(humanize).join(', ')}
-                              {' · '}{Math.round(candidate.confidence * 100)}% classification confidence
-                            </span>
-                            <span>
-                              Source data as of {formatDate(candidate.source_as_of)}
-                            </span>
-                            {candidate.review_finding ? (
-                              <span>{humanize(candidate.review_finding)}</span>
-                            ) : null}
-                          </div>
-                          <div className="correspondent-actions">
-                            {!candidate.active ? <Badge tone="warning">Inactive source</Badge> : null}
-                            {candidate.likely_multiple_statement_series ? (
-                              <Badge tone="info">Multiple statement series likely</Badge>
-                            ) : null}
-                            <Badge tone={candidate.outcome === 'mapped' ? 'ok' : 'warning'}>
-                              {humanize(candidate.outcome)}
-                            </Badge>
-                            <select
-                              aria-label={`Expectation for ${candidate.display_hint}`}
-                              value={candidateExpectation[candidate.id] ?? candidate.expectation_id ?? ''}
-                              onChange={(event) => setCandidateExpectation({
-                                ...candidateExpectation,
-                                [candidate.id]: event.target.value,
-                              })}
-                            >
-                              <option value="">Map to expectation</option>
-                              {selectedExpectations
-                                .filter((expectation) => expectation.status !== 'retired')
-                                .map((expectation) => (
-                                  <option key={expectation.id} value={expectation.id}>
-                                    {redactSensitiveNumbers(
-                                      expectation.series_discriminator ?? humanize(expectation.kind),
-                                    )}
-                                  </option>
-                                ))}
-                            </select>
-                            <Button
-                              size="sm"
-                              disabled={
-                                busy
-                                || selectedProfileTerminal
-                                || !(candidateExpectation[candidate.id] ?? candidate.expectation_id)
-                              }
-                              onClick={() => void reviewCandidate(candidate, 'mapped')}
-                            >
-                              Map
-                            </Button>
-                            <Button
-                              size="sm"
-                              disabled={busy || selectedProfileTerminal}
-                              onClick={() => void reviewCandidate(candidate, 'suggested')}
-                            >
-                              Create suggestion
-                            </Button>
-                            <Button
-                              size="sm"
-                              disabled={busy || selectedProfileTerminal}
-                              onClick={() => void reviewCandidate(candidate, 'ambiguous')}
-                            >
-                              Leave ambiguous
-                            </Button>
-                            <Button
-                              size="sm"
-                              disabled={busy || selectedProfileTerminal}
-                              onClick={() => void reviewCandidate(candidate, 'not_applicable')}
-                            >
-                              Record not expected
-                            </Button>
-                          </div>
-                        </div>
-                          ))}
-                          </div>
-                        </section>
-                      ))}
-                    </div>
-                  )}
-                </Card>
-                </div>
-
                 {detailLoading ? <SkeletonLoader variant="cards" /> : null}
                 {analysis?.correspondent_id === selectedId && !selectedProfileTerminal ? (
                   <div id="correspondent-candidate-expectations" className="correspondent-section-anchor">
@@ -1590,6 +1631,7 @@ export default function CorrespondentReview() {
             )}
           </section>
         </div>
+        </>
       ) : null}
 
       {toast ? <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} /> : null}

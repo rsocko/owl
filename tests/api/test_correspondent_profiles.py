@@ -398,6 +398,15 @@ def test_external_candidate_poll_and_review_contract(client, app, tmp_path) -> N
     assert "series_ref" not in candidate
     assert "connector_ref" not in candidate
 
+    mapped = client.put(
+        f"/api/statements/external-candidates/{candidate['id']}/review",
+        json={"outcome": "mapped", "correspondent_id": 42, "expectation_ids": []},
+    )
+    assert mapped.status_code == 200
+    assert mapped.json()["outcome"] == "mapped"
+    assert mapped.json()["correspondent_id"] == 42
+    assert mapped.json()["expectation_ids"] == []
+
     reviewed = client.put(
         f"/api/statements/external-candidates/{candidate['id']}/review",
         json={"outcome": "ambiguous"},

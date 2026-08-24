@@ -128,6 +128,7 @@ def test_correspondent_schema_migration_preserves_series_history(tmp_path) -> No
             "external_signal_sources",
             "external_signal_generations",
             "external_document_candidates",
+            "external_candidate_expectations",
         } <= tables
     finally:
         migrated.close()
@@ -299,16 +300,32 @@ def test_external_snapshot_replacement_is_generation_idempotent_and_bounded(tmp_
         db.close()
 
 
-def test_external_candidate_reviews_preserve_confirmed_policy_and_detect_series(tmp_path) -> None:
+def test_external_account_maps_to_correspondent_and_multiple_document_series(tmp_path) -> None:
     db = Database(str(tmp_path / "statements.db"))
     try:
         db.reconcile_correspondents(DEPLOYMENT_ID, [{"id": 42, "name": "Example Bank"}])
-        db.create_series("checking", "Checking", "Example Bank", correspondent_id=42)
+        db.create_series(
+            "checking",
+            "Mortgage statements",
+            "Example Bank",
+            correspondent_id=42,
+            account_identifier="ending 1234",
+        )
         db.create_series("savings", "Savings", "Example Bank", correspondent_id=42)
         checking = db.create_document_expectation(
             DEPLOYMENT_ID, 42, _confirmed_statement("checking")
         )
-        savings = db.create_document_expectation(DEPLOYMENT_ID, 42, _confirmed_statement("savings"))
+        tax_form = db.create_document_expectation(
+            DEPLOYMENT_ID,
+            42,
+            DocumentExpectationCreate(
+                kind="record",
+                series_discriminator="Annual mortgage tax form",
+                expectation_mode="irregular",
+                status="suggested",
+                evidence=ExpectationEvidence(source="user"),
+            ),
+        )
         db.replace_external_candidate_snapshot(
             DEPLOYMENT_ID,
             _external_snapshot(
@@ -323,6 +340,7 @@ def test_external_candidate_reviews_preserve_confirmed_policy_and_detect_series(
                         "nextExpectedDate": None,
                         "confidence": 0.6,
                         "basis": ["active_non_cash_account"],
+                        "accountLastFour": "1234",
                     },
                     {
                         "seriesRef": "opaque-two",
@@ -341,40 +359,82 @@ def test_external_candidate_reviews_preserve_confirmed_policy_and_detect_series(
         db.review_external_candidate(
             DEPLOYMENT_ID,
             candidates[0].id,
-            ExternalCandidateReview(outcome="mapped", expectation_id=checking.id),
+            ExternalCandidateReview(
+                outcome="mapped",
+                correspondent_id=42,
+                expectation_ids=[checking.id, tax_form.id],
+            ),
         )
         with pytest.raises(ValueError, match="already maps to this expectation"):
             db.review_external_candidate(
                 DEPLOYMENT_ID,
                 candidates[1].id,
-                ExternalCandidateReview(outcome="mapped", expectation_id=checking.id),
+                ExternalCandidateReview(
+                    outcome="mapped",
+                    correspondent_id=42,
+                    expectation_ids=[checking.id],
+                ),
             )
         db.review_external_candidate(
             DEPLOYMENT_ID,
             candidates[1].id,
-            ExternalCandidateReview(outcome="mapped", expectation_id=savings.id),
+            ExternalCandidateReview(outcome="mapped", correspondent_id=42),
         )
+        other_connector_snapshot = _external_snapshot(
+            "other-generation",
+            [
+                {
+                    "seriesRef": "other-account",
+                    "kind": "accountStatementCandidate",
+                    "active": True,
+                    "displayHint": "Other connector account",
+                    "cadence": None,
+                    "nextExpectedDate": None,
+                    "confidence": 0.6,
+                    "basis": ["active_non_cash_account"],
+                }
+            ],
+            completeness="partial",
+        ).model_copy(update={"connector_ref": "other-connector"})
+        db.replace_external_candidate_snapshot(DEPLOYMENT_ID, other_connector_snapshot)
+        other_candidate = next(
+            candidate
+            for candidate in db.list_external_candidates(DEPLOYMENT_ID)
+            if candidate.display_hint == "Other connector account"
+        )
+        with pytest.raises(ValueError, match="already maps to this expectation"):
+            db.review_external_candidate(
+                DEPLOYMENT_ID,
+                other_candidate.id,
+                ExternalCandidateReview(
+                    outcome="mapped",
+                    correspondent_id=42,
+                    expectation_ids=[checking.id],
+                ),
+            )
 
         mapped = db.list_external_candidates(DEPLOYMENT_ID, correspondent_id=42)
-        assert all(candidate.likely_multiple_statement_series for candidate in mapped)
+        mortgage = next(candidate for candidate in mapped if candidate.account_last_four == "1234")
+        assert mortgage.expectation_ids == [checking.id, tax_form.id]
+        assert mortgage.identifier_match_expectation_ids == [checking.id]
+        assert mortgage.likely_multiple_statement_series is True
+        assert next(
+            candidate for candidate in mapped if candidate.id != mortgage.id
+        ).expectation_ids == []
 
         db.replace_external_candidate_snapshot(
             DEPLOYMENT_ID,
             _external_snapshot("generation-2", []),
         )
         inactive = db.list_external_candidates(DEPLOYMENT_ID, correspondent_id=42)
-        assert all(
-            candidate.review_finding == "source_candidate_inactive_confirmed_policy_preserved"
-            for candidate in inactive
-        )
+        assert {
+            candidate.review_finding for candidate in inactive
+        } == {
+            "source_candidate_inactive_confirmed_policy_preserved",
+            "source_candidate_inactive",
+        }
         assert db.get_document_expectation(DEPLOYMENT_ID, checking.id).status == "confirmed"
-        assert db.get_document_expectation(DEPLOYMENT_ID, savings.id).status == "confirmed"
-
-        db.review_external_candidate(
-            DEPLOYMENT_ID,
-            inactive[1].id,
-            ExternalCandidateReview(outcome="mapped", expectation_id=checking.id),
-        )
+        assert db.get_document_expectation(DEPLOYMENT_ID, tax_form.id).status == "suggested"
         db.replace_external_candidate_snapshot(
             DEPLOYMENT_ID,
             _external_snapshot(
@@ -389,6 +449,7 @@ def test_external_candidate_reviews_preserve_confirmed_policy_and_detect_series(
                         "nextExpectedDate": None,
                         "confidence": 0.6,
                         "basis": ["active_non_cash_account"],
+                        "accountLastFour": "1234",
                     },
                     {
                         "seriesRef": "opaque-two",
@@ -404,9 +465,12 @@ def test_external_candidate_reviews_preserve_confirmed_policy_and_detect_series(
             ),
         )
         reactivated = db.list_external_candidates(DEPLOYMENT_ID, correspondent_id=42)
-        assert {candidate.outcome for candidate in reactivated} == {"ambiguous", "mapped"}
+        assert {candidate.outcome for candidate in reactivated} == {"mapped"}
+        assert next(
+            candidate for candidate in reactivated if candidate.account_last_four == "1234"
+        ).expectation_ids == [checking.id, tax_form.id]
         assert db.get_document_expectation(DEPLOYMENT_ID, checking.id).status == "confirmed"
-        assert db.get_document_expectation(DEPLOYMENT_ID, savings.id).status == "confirmed"
+        assert db.get_document_expectation(DEPLOYMENT_ID, tax_form.id).status == "suggested"
     finally:
         db.close()
 

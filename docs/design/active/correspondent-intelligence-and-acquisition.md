@@ -321,6 +321,35 @@ These candidates do **not** prove:
 A recurring expense may be documentless, and recurring income is not a bill. A transaction
 may help reconcile an existing invoice or receipt but must not create an expected receipt.
 
+Reconciliation is account-first rather than correspondent-first. Each Tyrion signal appears once
+in a deployment-wide inbox. The user may assign it to zero or one Paperless correspondent, then
+relate zero or more document expectations owned by that correspondent. One mortgage account can
+therefore relate to a monthly statement expectation and a separate annual tax-form expectation
+without duplicating either the Tyrion account or the Paperless correspondent.
+
+```mermaid
+flowchart TD
+    T[Tyrion account signal] --> C{Paperless correspondent exists?}
+    C -->|No| P[Create correspondent in Paperless]
+    P --> S[Sync Paperless correspondents]
+    S --> M
+    C -->|Yes| M[Assign one correspondent]
+    C -->|Unclear| U[Leave globally unresolved]
+    M --> E{Related document series}
+    E -->|None yet| A[Analyze Paperless history]
+    E -->|One| O[Link one expectation]
+    E -->|Several| X[Link monthly, annual, or other expectations]
+    M -->|No document produced| N[Record durable not-expected policy]
+```
+
+When Tyrion supplies `accountLastFour`, OWL may compare that suffix with an existing masked
+Paperless `Account Identifier` or statement-series identifier. A suffix match is an advisory
+ranking hint only; it never creates a mapping automatically. OWL reads already stored Paperless
+custom-field values first. If those values are absent, the user may run correspondent-scoped OCR
+extraction. OCR-derived identifiers remain analysis-only unless the user separately confirms a
+Paperless metadata writeback. Full account numbers are neither required nor accepted by the V1
+Tyrion projection.
+
 ## Tyrion integration contract
 
 Introduce a private, pull-only, versioned `DocumentExpectationSignalsV1` projection
@@ -362,7 +391,8 @@ classification confidence only, and `cadence` / `nextExpectedDate` remain requir
 An unseen generation older than the connector's current `sourceAsOf` is recorded as processed
 but cannot overwrite newer candidate state. Two active account signals remain distinct even
 when they share an institution; OWL rejects mapping both to one expectation and leaves the
-second mapping in review.
+second mapping in review. One account signal may link several expectations, but every linked
+expectation must belong to that signal's selected correspondent.
 
 The Tyrion V1 pull endpoints use Tyrion's authenticated connector gateway:
 
@@ -410,8 +440,9 @@ expectation, and reject ambiguous resolution. Existing statement-series history 
    statement-like history, stale analysis, and unmatched external candidates.
 2. **Inspect:** show representative Paperless documents, observed title/tag/type patterns,
    candidate series, cadence evidence, and known acquisition sources.
-3. **Reconcile:** map a Tyrion candidate to an expectation, create a suggestion, leave it
-   ambiguous, or mark it documentless/not applicable.
+3. **Reconcile:** select a Tyrion signal once, assign zero or one Paperless correspondent, link
+   zero or more expectations under that correspondent, leave it unresolved, or mark it
+   documentless/not applicable.
 4. **Configure:** confirm expectation mode, cadence, title convention, metadata policy, and
    acquisition source.
 5. **Preview:** identify existing violations and display exact title/tag/type changes,
@@ -541,8 +572,10 @@ shared connector contract and at least two real providers require browser automa
 ### Phase 3: Tyrion reconciliation
 
 - Add the versioned candidate-signal projection.
-- Reconcile account and recurring candidates.
-- Detect likely multiple statement series per correspondent.
+- Reconcile account and recurring candidates from one account-first inbox.
+- Map each signal to zero or one Paperless correspondent and zero or more document expectations.
+- Use masked account-identifier suffixes as advisory matching evidence.
+- Support multiple document series per account, such as monthly statements and annual tax forms.
 - Keep ambiguous mappings in review.
 
 ### Phase 4: Acquisition
