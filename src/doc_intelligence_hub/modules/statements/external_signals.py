@@ -49,5 +49,9 @@ class DocumentExpectationSignalsClient:
         response.raise_for_status()
         return DocumentExpectationSignalsV1.model_validate(response.json())
 
+    async def check_health(self) -> None:
+        response = await self._client.get("/api/connector/v1/health")
+        response.raise_for_status()
+
     async def close(self) -> None:
         await self._client.aclose()

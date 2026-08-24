@@ -830,7 +830,7 @@ async def test_external_candidate_connection(
         timeout_seconds=connection["timeout_seconds"],
     )
     try:
-        await client.fetch_latest()
+        await client.check_health()
     except (httpx.HTTPError, ValueError) as exc:
         _raise_external_signal_error(exc)
     finally:
