@@ -240,6 +240,8 @@ describe('Correspondent Review', () => {
   });
 
   it('groups the review queue and provides candidate section navigation', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
     mocks.externalCandidates.mockResolvedValue([{
       id: 'candidate-1',
       kind: 'accountStatementCandidate',
@@ -247,7 +249,7 @@ describe('Correspondent Review', () => {
       display_hint: 'Credit account',
       confidence: 0.6,
       basis: ['active_non_cash_account'],
-      account_name: 'Travel Rewards',
+      account_name: 'Travel Rewards (...1234)',
       institution_name: 'Example Bank',
       account_type: 'credit',
       account_last_four: '1234',
@@ -262,14 +264,13 @@ describe('Correspondent Review', () => {
 
     expect((await screen.findAllByText('Unreviewed')).length).toBeGreaterThan(0);
     expect(container.querySelector('.correspondent-inventory-list')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /linked external candidates 0/i })).toHaveAttribute(
-      'href',
-      '#correspondent-external-candidates',
-    );
+    fireEvent.click(screen.getByRole('button', { name: /linked external candidates 0/i }));
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
     expect(screen.getByText('Unassigned account signals')).toBeInTheDocument();
     expect(screen.getByText(/household-wide signals and are not associated with example bank/i)).toBeInTheDocument();
     expect(screen.getByText('Source: Monarch account inventory via Tyrion')).toBeInTheDocument();
-    expect(screen.getByText('Travel Rewards')).toBeInTheDocument();
+    expect(screen.getByText('Travel Rewards (...1234)')).toBeInTheDocument();
+    expect(screen.queryByText(/Travel Rewards.*redacted/)).not.toBeInTheDocument();
     expect(screen.getByText(/Example Bank · Credit · Account ending in 1234/)).toBeInTheDocument();
     expect(screen.getByText(/Evidence: Active Non Cash Account/i)).toBeInTheDocument();
   });
