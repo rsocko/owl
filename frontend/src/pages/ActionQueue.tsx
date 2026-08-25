@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
+import type { SortingState } from '@tanstack/react-table';
+import { SortableTable, type SortableColumnDef } from '../components/SortableTable';
 import {
   Badge,
   Button,
@@ -79,6 +81,7 @@ interface ActionItem {
   preview_url?: string | null;
   version?: number | null;
   created_at?: string | null;
+  updated_at?: string | null;
   completed_at?: string | null;
   acknowledged_at?: string | null;
   snoozed_until?: string | null;
@@ -116,6 +119,7 @@ type ActionEditDraft = {
 };
 type ToastState = { message: string; tone?: 'success' | 'error' } | null;
 type QuickTypeFilter = 'all' | 'pay' | 'respond' | 'sign' | 'schedule' | 'file_archive';
+type QueueView = 'grouped' | 'table';
 export type DeadlineBucket = 'overdue' | 'today' | 'next7' | 'later' | 'no_due_date';
 
 const ACTION_TYPE_OPTIONS = ['ARCHIVE', 'FILE', 'PAY', 'RESPOND', 'REVIEW', 'SCHEDULE', 'SHARE', 'SIGN', 'TASK'] as const;
@@ -139,6 +143,10 @@ const DEADLINE_BUCKETS: Array<{ key: DeadlineBucket; label: string }> = [
   { key: 'later', label: 'Later' },
   { key: 'no_due_date', label: 'No due date' },
 ];
+const ACTIVE_STATUSES = new Set(['pending', 'acknowledged', 'snoozed']);
+const TERMINAL_STATUSES = new Set(['completed', 'dismissed', 'not_an_action']);
+const GROUPABLE_FILTERS = new Set<ActionFilter>(['pending', 'acknowledged', 'snoozed']);
+const ACTION_QUEUE_VIEW_KEY = 'owl.actionQueue.view';
 
 function localDay(value: string): Date | null {
   const match = value.slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -182,6 +190,16 @@ export function groupAndSortActions(
   };
   for (const group of Object.values(groups)) group.sort(compare);
   return groups;
+}
+
+export function actionResolutionTimestamp(action: ActionItem): string {
+  return action.completed_at || action.updated_at || action.created_at || '';
+}
+
+function initialTableSorting(filter: ActionFilter): SortingState {
+  return GROUPABLE_FILTERS.has(filter)
+    ? [{ id: 'due', desc: false }]
+    : [{ id: 'resolution', desc: true }];
 }
 
 function ReminderMenu({
@@ -431,6 +449,10 @@ export default function ActionQueue() {
       ? stored as QuickTypeFilter
       : 'all';
   });
+  const [viewPreference, setViewPreference] = useState<QueueView>(() => (
+    window.localStorage.getItem(ACTION_QUEUE_VIEW_KEY) === 'table' ? 'table' : 'grouped'
+  ));
+  const [tableSorting, setTableSorting] = useState<SortingState>(() => initialTableSorting('pending'));
   const [collapsedGroups, setCollapsedGroups] = useState<Set<DeadlineBucket>>(new Set());
   const [visibleByGroup, setVisibleByGroup] = useState<Record<DeadlineBucket, number>>({
     overdue: ACTION_GROUP_BATCH_SIZE,
@@ -503,7 +525,7 @@ export default function ActionQueue() {
     setError(null);
     try {
       const params = filter === 'all'
-        ? 'limit=200'
+        ? 'limit=200&include_resolved_no_action=true'
         : `status=${filter}&limit=200${filter === 'not_an_action' ? '&include_not_ready=true' : ''}`;
       const [statusResponse, actionsResponse, tagsResponse] = await Promise.all([
         endpoints.actionQueue.status() as Promise<QueueStatus>,
@@ -571,13 +593,33 @@ export default function ActionQueue() {
     window.localStorage.setItem('owl.actionQueue.typeFilter', quickTypeFilter);
   }, [quickTypeFilter]);
 
+  useEffect(() => {
+    window.localStorage.setItem(ACTION_QUEUE_VIEW_KEY, viewPreference);
+  }, [viewPreference]);
+
+  useEffect(() => {
+    setTableSorting(initialTableSorting(filter));
+    setCheckedIds(new Set());
+  }, [filter]);
+
   const groupedActions = useMemo(() => groupAndSortActions(filteredActions), [filteredActions]);
-  const checkedIncludesFilingAction = useMemo(
-    () => displayActions.some(
-      (action) => checkedIds.has(action.id)
-        && ['FILE', 'ARCHIVE'].includes(normalizeType(action.action_type)),
-    ),
+  const canGroup = GROUPABLE_FILTERS.has(filter);
+  const effectiveView: QueueView = canGroup ? viewPreference : 'table';
+  const checkedActions = useMemo(
+    () => displayActions.filter((action) => checkedIds.has(action.id)),
     [checkedIds, displayActions],
+  );
+  const checkedAreActive = checkedIds.size > 0
+    && checkedActions.length === checkedIds.size
+    && checkedActions.every((action) => ACTIVE_STATUSES.has(normalizeStatus(action.status)));
+  const checkedAreTerminal = checkedIds.size > 0
+    && checkedActions.length === checkedIds.size
+    && checkedActions.every((action) => TERMINAL_STATUSES.has(normalizeStatus(action.status)));
+  const checkedIncludesFilingAction = useMemo(
+    () => checkedActions.some(
+      (action) => ['FILE', 'ARCHIVE'].includes(normalizeType(action.action_type)),
+    ),
+    [checkedActions],
   );
 
   // [UX-07] Preserve selection across filter changes — cache the selected action
@@ -926,6 +968,43 @@ export default function ActionQueue() {
     }
   };
 
+  const contextualAction = (action: ActionItem) => {
+    const currentStatus = normalizeStatus(action.status);
+    if (ACTIVE_STATUSES.has(currentStatus)) {
+      if (['FILE', 'ARCHIVE'].includes(normalizeType(action.action_type))) {
+        return (
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={busyKey !== null || status?.read_only}
+            onClick={() => void fileDocument(action.id)}
+          >
+            {status?.read_only ? 'Filing unavailable' : 'File in Paperless'}
+          </Button>
+        );
+      }
+      return (
+        <Button
+          size="sm"
+          variant="success"
+          disabled={busyKey !== null}
+          onClick={() => void updateAction(action.id, 'completed')}
+        >
+          Done
+        </Button>
+      );
+    }
+    return (
+      <Button
+        size="sm"
+        disabled={busyKey !== null}
+        onClick={() => void updateAction(action.id, 'pending')}
+      >
+        Re-open
+      </Button>
+    );
+  };
+
   const handleClosePanel = useCallback(() => {
     setSelectedActionId(null);
     setCachedAction(null);
@@ -935,6 +1014,105 @@ export default function ActionQueue() {
   const counts = status?.database ?? {};
   const totalActions = counts.total ?? 0;
   const pendingCount = (counts.pending ?? 0) + (counts.acknowledged ?? 0) + (counts.snoozed ?? 0);
+  const tableColumns: SortableColumnDef<ActionItem>[] = [
+    {
+      id: 'selection',
+      header: 'Select',
+      enableSorting: false,
+      width: '48px',
+      cell: (action) => (
+        <input
+          type="checkbox"
+          aria-label={`Select ${action.title || action.document_title || `action ${action.id}`}`}
+          checked={checkedIds.has(action.id)}
+          onClick={(event) => event.stopPropagation()}
+          onChange={() => setCheckedIds((current) => {
+            const next = new Set(current);
+            if (next.has(action.id)) next.delete(action.id); else next.add(action.id);
+            return next;
+          })}
+        />
+      ),
+    },
+    {
+      id: 'action',
+      header: 'Action',
+      accessorFn: (action) => (action.title || action.document_title || '').toLowerCase(),
+      cell: (action) => (
+        <button
+          className="aq-link-button"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setSelectedActionId(action.id);
+          }}
+          aria-label={`Open ${action.title || action.document_title || `action ${action.id}`}`}
+        >
+          <div className="aq-row-title">{action.title || action.document_title || `Action #${action.id}`}</div>
+          <div className="aq-inline-note muted">{action.correspondent || 'Unknown correspondent'}</div>
+        </button>
+      ),
+    },
+    {
+      id: 'type',
+      header: 'Type',
+      accessorFn: (action) => normalizeType(action.action_type),
+      cell: (action) => (
+        <Badge tone={actionTypeTone(normalizeType(action.action_type))}>
+          {normalizeType(action.action_type)}
+        </Badge>
+      ),
+    },
+    {
+      id: 'due',
+      header: 'Due',
+      accessorFn: (action) => action.due_date || '9999-12-31',
+      cell: (action) => formatDate(action.due_date),
+    },
+    {
+      id: 'amount',
+      header: 'Amount',
+      accessorFn: (action) => action.amount,
+      cell: (action) => formatCurrency(action.amount),
+    },
+    {
+      id: 'document',
+      header: 'Document',
+      accessorFn: (action) => action.document_date || '',
+      cell: (action) => (
+        <>
+          <div>{formatDate(action.document_date)}</div>
+          <div className="aq-inline-note muted">{action.document_type || 'Unknown type'}</div>
+        </>
+      ),
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      accessorFn: (action) => normalizeStatus(action.status),
+      cell: (action) => (
+        <Badge tone={statusTone(normalizeStatus(action.status))}>
+          {statusDisplayLabel(normalizeStatus(action.status))}
+        </Badge>
+      ),
+    },
+    {
+      id: 'resolution',
+      header: 'Updated',
+      accessorFn: actionResolutionTimestamp,
+      cell: (action) => formatDateTime(actionResolutionTimestamp(action)),
+    },
+    {
+      id: 'contextual-action',
+      header: 'Next step',
+      enableSorting: false,
+      cell: (action) => (
+        <div className="aq-table-action" onClick={(event) => event.stopPropagation()}>
+          {contextualAction(action)}
+        </div>
+      ),
+    },
+  ];
 
   return (
     <>
@@ -999,6 +1177,28 @@ export default function ActionQueue() {
             onChange={(event) => setSearch(event.target.value)}
           />
         </div>
+        <div className="aq-view-toggle" role="group" aria-label="Action Queue view">
+          <Button
+            size="sm"
+            variant={effectiveView === 'grouped' ? 'primary' : 'default'}
+            onClick={() => setViewPreference('grouped')}
+            disabled={!canGroup}
+            aria-pressed={effectiveView === 'grouped'}
+            title={canGroup ? 'Group active work by deadline' : 'Grouping is available for active work only'}
+          >
+            Grouped
+          </Button>
+          <Button
+            size="sm"
+            variant={effectiveView === 'table' ? 'primary' : 'default'}
+            onClick={() => {
+              if (canGroup) setViewPreference('table');
+            }}
+            aria-pressed={effectiveView === 'table'}
+          >
+            Table
+          </Button>
+        </div>
       </div>
 
       {/* [UX-10] Bulk progress counter */}
@@ -1027,31 +1227,37 @@ export default function ActionQueue() {
                   })()}
                 </span>
                 <div className="btn-group">
-                  <ReminderMenu
-                    size="sm"
-                    disabled={busyKey !== null}
-                    onSelect={(until) => void executeBulkAction('snooze', Array.from(checkedIds), until)}
-                  />
-                  <Tooltip label={checkedIncludesFilingAction ? 'File / Archive items must be filed in Paperless' : 'Mark as done — actions have been resolved'}>
-                  <Button variant="success" size="sm" onClick={() => void handleBulkAction('complete')} disabled={busyKey !== null || checkedIncludesFilingAction}>
-                    Done
-                  </Button>
-                  </Tooltip>
-                  <Tooltip label="These are real tasks you are choosing not to do">
-                  <Button variant="ghost" size="sm" onClick={() => void handleBulkAction('dismiss')} disabled={busyKey !== null}>
-                    Won't do
-                  </Button>
-                  </Tooltip>
-                  <Tooltip label="OWL incorrectly identified these documents as requiring action">
-                  <Button variant="ghost" size="sm" onClick={() => void handleBulkAction('not_an_action')} disabled={busyKey !== null}>
-                    No action needed
-                  </Button>
-                  </Tooltip>
-                  <Tooltip label="Move back to pending for review">
-                  <Button size="sm" onClick={() => void handleBulkAction('reopen')} disabled={busyKey !== null}>
-                    Re-open
-                  </Button>
-                  </Tooltip>
+                  {checkedAreActive && (
+                    <>
+                      <ReminderMenu
+                        size="sm"
+                        disabled={busyKey !== null}
+                        onSelect={(until) => void executeBulkAction('snooze', Array.from(checkedIds), until)}
+                      />
+                      <Tooltip label={checkedIncludesFilingAction ? 'File / Archive items must be filed in Paperless' : 'Mark as done — actions have been resolved'}>
+                      <Button variant="success" size="sm" onClick={() => void handleBulkAction('complete')} disabled={busyKey !== null || checkedIncludesFilingAction}>
+                        Done
+                      </Button>
+                      </Tooltip>
+                      <Tooltip label="These are real tasks you are choosing not to do">
+                      <Button variant="ghost" size="sm" onClick={() => void handleBulkAction('dismiss')} disabled={busyKey !== null}>
+                        Won't do
+                      </Button>
+                      </Tooltip>
+                      <Tooltip label="OWL incorrectly identified these documents as requiring action">
+                      <Button variant="ghost" size="sm" onClick={() => void handleBulkAction('not_an_action')} disabled={busyKey !== null}>
+                        No action needed
+                      </Button>
+                      </Tooltip>
+                    </>
+                  )}
+                  {checkedAreTerminal && (
+                    <Tooltip label="Move back to pending for review">
+                    <Button size="sm" onClick={() => void handleBulkAction('reopen')} disabled={busyKey !== null}>
+                      Re-open
+                    </Button>
+                    </Tooltip>
+                  )}
                   <Button size="sm" onClick={() => setCheckedIds(new Set())} disabled={busyKey !== null}>
                     Clear
                   </Button>
@@ -1087,6 +1293,18 @@ export default function ActionQueue() {
                   desc="Try a different status filter or rerun the pipeline to discover new actions."
                 />
               )
+            ) : effectiveView === 'table' ? (
+              <div className="aq-table-wrapper">
+                <SortableTable
+                  data={filteredActions}
+                  columns={tableColumns}
+                  rowKey={(action) => String(action.id)}
+                  sorting={tableSorting}
+                  onSortingChange={setTableSorting}
+                  onRowActivate={(action) => setSelectedActionId(action.id)}
+                  emptyLabel="No actions match this view"
+                />
+              </div>
             ) : DEADLINE_BUCKETS.map(({ key, label }) => {
               const group = groupedActions[key];
               if (!group.length) return null;
@@ -1133,25 +1351,7 @@ export default function ActionQueue() {
                               </div>
                             </button>
                             <div className="aq-action-card-actions">
-                              {['FILE', 'ARCHIVE'].includes(normalizeType(action.action_type)) ? (
-                                <Button
-                                  size="sm"
-                                  variant="primary"
-                                  disabled={busyKey !== null || status?.read_only}
-                                  onClick={() => void fileDocument(action.id)}
-                                >
-                                  {status?.read_only ? 'Filing unavailable' : 'File in Paperless'}
-                                </Button>
-                              ) : (
-                                <Button
-                                  size="sm"
-                                  variant="success"
-                                  disabled={busyKey !== null}
-                                  onClick={() => void updateAction(action.id, 'completed')}
-                                >
-                                  Done
-                                </Button>
-                              )}
+                              {contextualAction(action)}
                             </div>
                           </article>
                         ))}
@@ -1582,7 +1782,7 @@ export default function ActionQueue() {
                         </Button>
                         </Tooltip>
                       )}
-                      {currentStatus !== 'pending' && (
+                      {TERMINAL_STATUSES.has(currentStatus) && (
                         <Tooltip label="Move back to pending for review">
                         <Button
                           variant="ghost"

@@ -71,6 +71,7 @@ describe('SortableTable', () => {
     render(<SortableTable data={testData} columns={columns} rowKey={(r) => String(r.id)} />);
     const sortBtn = screen.getByLabelText('Sort by Name');
     fireEvent.click(sortBtn);
+    expect(sortBtn.closest('th')).toHaveAttribute('aria-sort', 'ascending');
 
     const cells = screen.getAllByRole('cell');
     const nameCells = cells.filter((c) => ['Alpha', 'Beta', 'Delta', 'Gamma'].includes(c.textContent ?? ''));
@@ -149,5 +150,29 @@ describe('SortableTable', () => {
     expect(row).toHaveClass('interactive-row');
     fireEvent.keyDown(row!, { key: 'Enter' });
     expect(onRowActivate).toHaveBeenCalledWith(testData[0]);
+  });
+
+  it('does not activate a row from keyboard events on nested controls', () => {
+    const onRowActivate = vi.fn();
+    const interactiveColumns: SortableColumnDef<TestRow>[] = [
+      ...columns,
+      {
+        id: 'action',
+        header: 'Action',
+        enableSorting: false,
+        cell: (row) => <button type="button">Update {row.name}</button>,
+      },
+    ];
+    render(
+      <SortableTable
+        data={testData}
+        columns={interactiveColumns}
+        rowKey={(row) => String(row.id)}
+        onRowActivate={onRowActivate}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Update Alpha' }), { key: 'Enter' });
+    expect(onRowActivate).not.toHaveBeenCalled();
   });
 });

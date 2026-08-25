@@ -47,9 +47,9 @@ specific review item.
 ## Daily Action Queue
 
 The primary viewport contains a compact last-run/pipeline status, Refresh, Run
-now, persistent quick type filters, search, and grouped action cards. It does
-not contain KPI cards, historical-resolution progress, health checks, backfill,
-dry-run, custom-run, or custom-field controls.
+now, persistent quick type filters, search, and a persistent **Grouped | Table**
+view toggle. It does not contain KPI cards, historical-resolution progress,
+health checks, backfill, dry-run, custom-run, or custom-field controls.
 
 Pending actions are grouped in this fixed order: **Overdue**, **Today**,
 **Next 7 days**, **Later**, **No due date**. Each group initially displays 15
@@ -63,6 +63,19 @@ order is:
 The deadline bucket and exact date always outrank action type. Quick filters are
 Pay, Respond, Sign, Schedule, and File / Archive; their selection persists
 locally between visits.
+
+Grouped is the default for active Pending, Acknowledged, and Remind later work
+unless the user has saved a Table preference. The compact table restores
+sortable columns for selection, action and correspondent, type, due date,
+amount, document metadata, status, lifecycle chronology, and one valid
+contextual action. Grouping is unavailable for terminal history and the mixed
+All view because a current deadline does not describe resolution history.
+
+Done, Won't do, and No action needed views always use the table without
+overwriting the saved active-work preference. Their deterministic initial sort
+is newest lifecycle change first. The chronology timestamp is `completed_at`
+for completed work, then `updated_at` for other lifecycle transitions, with
+`created_at` only as the legacy fallback.
 
 ## Contextual action and completion
 
@@ -88,6 +101,12 @@ it removes only configured intake/monitor tags, writes the resolved Action
 Status, completes the OWL action, and refreshes the UI. Paperless mutation
 happens before local completion; a Paperless failure is shown and leaves the
 local action open rather than reporting false success.
+
+Lifecycle actions are status-aware in cards, rows, bulk controls, and the
+drawer. Active work may be completed, reminded, or declined; FILE and ARCHIVE
+must use the atomic Paperless filing action. Resolved history offers Re-open
+instead of Done. Bulk controls appear only when the operation is valid for the
+entire selected set.
 
 ## Paperless metadata policy
 

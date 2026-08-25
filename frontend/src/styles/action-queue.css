@@ -104,6 +104,20 @@
   flex-wrap: wrap;
 }
 
+.aq-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+}
+
+.aq-view-toggle .btn {
+  min-width: 76px;
+}
+
 .aq-search {
   min-width: 280px;
   flex: 1;
@@ -126,6 +140,21 @@
 
 .aq-table-card .card-body {
   padding: 0;
+}
+
+.aq-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.aq-table-wrapper .sortable-table {
+  min-width: 980px;
+}
+
+.aq-table-action {
+  white-space: nowrap;
 }
 
 .aq-side-column {
@@ -511,6 +540,32 @@ a.aq-pdf-preview .aq-pdf-hint {
 
   .aq-drawer.expanded {
     width: 100vw;
+  }
+
+  .aq-view-toggle {
+    order: 3;
+  }
+}
+
+@media (max-width: 640px) {
+  .aq-toolbar,
+  .aq-search,
+  .aq-view-toggle {
+    width: 100%;
+  }
+
+  .aq-view-toggle .btn {
+    flex: 1;
+  }
+
+  .aq-action-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .aq-action-card-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 }
 
