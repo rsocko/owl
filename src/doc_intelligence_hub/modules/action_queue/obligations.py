@@ -442,7 +442,9 @@ def linked_documents(db: Session, action: Action) -> list[dict[str, Any]]:
                 "document_type": action.document_type,
                 "correspondent": action.correspondent,
                 "document_date": action.document_date.isoformat() if action.document_date else None,
-                "amount": action.document_amount if action.document_amount is not None else action.amount,
+                "amount": action.document_amount
+                if action.document_amount is not None
+                else action.amount,
                 "reference_number": _action_reference(action) or None,
                 "confidence": 1.0,
                 "source": "action_queue",
