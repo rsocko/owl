@@ -16,12 +16,13 @@ from doc_intelligence_hub.core.extractors.account_numbers import (
 )
 from doc_intelligence_hub.core.paperless import PaperlessClient
 
-from .analyzer import OllamaAnalyzer, urgency_to_severity
+from .analyzer import OllamaAnalyzer, is_non_actionable_receipt, urgency_to_severity
 from .config import settings
 from .database import Action, ProcessingHistory, get_session, init_db
 from .enricher import PaperlessEnricher
 from .fallback_analyzer import RuleBasedAnalyzer
 from .lifecycle import action_has_critical_details, mark_action_ready, route_action_to_review
+from .obligations import associate_pay_action, associate_receipt
 from .risk_scoring import compute_risk_score
 
 logger = logging.getLogger(__name__)
@@ -488,6 +489,16 @@ class Pipeline:
                     logger.info(
                         "doc_id=%s: no action needed (confidence=%s%%)", doc_id, overall_confidence
                     )
+                    if is_non_actionable_receipt(doc):
+                        receipt_match = associate_receipt(db, doc, content)
+                        if receipt_match:
+                            matched_action, match_confidence = receipt_match
+                            logger.info(
+                                "doc_id=%s: linked receipt to action %s at %.1f%% confidence",
+                                doc_id,
+                                matched_action.id,
+                                match_confidence * 100,
+                            )
                     sync_error: Exception | None = None
                     if settings.write_to_paperless:
                         if self._enrichment_available:
@@ -631,6 +642,7 @@ class Pipeline:
                     continue
                 for stored_action in stored_actions:
                     mark_action_ready(stored_action)
+                    associate_pay_action(db, stored_action, doc)
 
                 # Emit alerts inline for high-risk actions (best-effort)
                 # Flush to ensure action IDs are assigned before emitting

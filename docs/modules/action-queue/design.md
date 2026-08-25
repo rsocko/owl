@@ -77,6 +77,31 @@ is newest lifecycle change first. The chronology timestamp is `completed_at`
 for completed work, then `updated_at` for other lifecycle transitions, with
 `created_at` only as the legacy fallback.
 
+## Obligation-backed linked documents
+
+An actionable invoice represents a real-world obligation, not merely one
+Paperless document. One primary PAY action may therefore own a chronological
+document set containing the original invoice, duplicates, reminders, revisions,
+and payment receipts. Follow-up invoice actions are suppressed from the daily
+queue when invoice reference, correspondent, and amount evidence clears the
+matching threshold. A recurring account identifier alone is insufficient:
+account-based grouping requires explicit reminder/revision language and a close
+amount so ordinary monthly bills remain separate obligations.
+
+Grouped Action Queue cards expose an inline **View N docs** control. The expanded
+timeline labels each document's role, date, and amount. Hover or keyboard focus
+shows a first-page thumbnail and key metadata; activation opens the full document
+viewer. The timeline is evidence for one action, not a second task list.
+
+Receipts are still non-actionable documents themselves. A uniquely strongest
+receipt match attaches to the obligation when invoice/account identity,
+correspondent, and amount—including a small convenience-fee tolerance—provide
+sufficient confidence. OWL then displays **Payment evidence found** with a
+one-click completion suggestion. It does not close the action automatically.
+Completion clears the suggestion and settles the obligation; reopening restores
+the suggestion while preserving the receipt and the normal Action Queue undo
+path. Ambiguous receipt candidates remain unmatched rather than guessing.
+
 ## Contextual action and completion
 
 The document flyout keeps the PDF preview and exposes the normalized

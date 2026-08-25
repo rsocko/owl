@@ -56,6 +56,7 @@
 .aq-action-card {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 10px 12px;
   border: 1px solid var(--border);
@@ -88,6 +89,163 @@
   margin-top: 5px;
   color: var(--text-muted);
   font-size: 0.78rem;
+}
+
+.aq-linked-documents {
+  width: 100%;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.aq-linked-documents-heading,
+.aq-payment-suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.aq-linked-documents-heading > div,
+.aq-payment-suggestion > div {
+  display: grid;
+  gap: 3px;
+}
+
+.aq-linked-documents-heading span,
+.aq-payment-suggestion span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.aq-document-timeline {
+  display: flex;
+  gap: 0;
+  margin: 16px 0 12px;
+  overflow-x: auto;
+  padding: 0 6px 8px;
+}
+
+.aq-timeline-entry {
+  position: relative;
+  min-width: 190px;
+  flex: 1;
+  padding-top: 15px;
+}
+
+.aq-timeline-entry::before {
+  position: absolute;
+  top: 5px;
+  right: 50%;
+  left: -50%;
+  height: 2px;
+  background: var(--border);
+  content: "";
+}
+
+.aq-timeline-entry:first-child::before {
+  left: 50%;
+}
+
+.aq-timeline-dot {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: calc(50% - 6px);
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.aq-timeline-entry.role-receipt .aq-timeline-dot {
+  background: var(--success);
+}
+
+.aq-timeline-entry.role-reminder .aq-timeline-dot,
+.aq-timeline-entry.role-revision .aq-timeline-dot {
+  background: var(--warning);
+}
+
+.aq-timeline-document {
+  position: relative;
+  display: grid;
+  width: calc(100% - 12px);
+  margin: 0 6px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.aq-timeline-document:hover,
+.aq-timeline-document:focus-visible {
+  border-color: var(--accent);
+}
+
+.aq-timeline-role {
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.aq-timeline-meta {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.aq-document-hover-preview {
+  position: absolute;
+  z-index: 30;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  display: none;
+  width: 300px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+  transform: translateX(-50%);
+}
+
+.aq-timeline-document:hover .aq-document-hover-preview,
+.aq-timeline-document:focus-visible .aq-document-hover-preview {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  gap: 10px;
+}
+
+.aq-document-hover-preview img {
+  width: 112px;
+  height: 145px;
+  border-radius: 4px;
+  background: var(--bg);
+  object-fit: cover;
+}
+
+.aq-document-hover-preview > span {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.aq-document-hover-preview small {
+  color: var(--text-muted);
+}
+
+.aq-payment-suggestion {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--success) 40%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--success) 8%, var(--bg));
 }
 
 .aq-exception-outcome {
@@ -628,6 +786,15 @@ a.aq-pdf-preview .aq-pdf-hint {
   .aq-action-card-actions {
     width: 100%;
     justify-content: flex-end;
+  }
+
+  .aq-document-hover-preview {
+    display: none !important;
+  }
+
+  .aq-payment-suggestion {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

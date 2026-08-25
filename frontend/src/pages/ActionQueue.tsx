@@ -102,6 +102,32 @@ interface ActionItem {
   is_primary?: boolean;
   parent_action_id?: number | null;
   superseded_by_action_id?: number | null;
+  obligation_id?: string | null;
+  linked_document_count?: number;
+  linked_documents?: LinkedDocument[];
+  completion_suggestion?: CompletionSuggestion | null;
+}
+
+interface LinkedDocument {
+  document_id: number;
+  role: 'invoice' | 'duplicate' | 'reminder' | 'revision' | 'receipt' | 'supporting';
+  title?: string | null;
+  document_type?: string | null;
+  correspondent?: string | null;
+  document_date?: string | null;
+  amount?: number | null;
+  reference_number?: string | null;
+  confidence: number;
+  source: string;
+  thumbnail_url: string;
+  preview_url?: string | null;
+}
+
+interface CompletionSuggestion {
+  type: 'payment_receipt';
+  reason?: string | null;
+  receipt_document_id?: number | null;
+  confidence?: number | null;
 }
 
 interface ActionListResponse {
@@ -450,6 +476,18 @@ function dueMeta(action: ActionItem) {
   return { label: `Due in ${days}d`, tone: 'success' as const };
 }
 
+function linkedDocumentRoleLabel(role: LinkedDocument['role']): string {
+  const labels: Record<LinkedDocument['role'], string> = {
+    invoice: 'Invoice',
+    duplicate: 'Duplicate',
+    reminder: 'Reminder',
+    revision: 'Revision',
+    receipt: 'Receipt',
+    supporting: 'Supporting',
+  };
+  return labels[role];
+}
+
 export default function ActionQueue() {
   const [status, setStatus] = useState<QueueStatus | null>(null);
   const [actions, setActions] = useState<ActionItem[]>([]);
@@ -477,6 +515,8 @@ export default function ActionQueue() {
   const [selectedActionId, setSelectedActionId] = useState<number | null>(null);
   const [drawerExpanded, setDrawerExpanded] = useState(false);
   const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
+  const [timelineViewer, setTimelineViewer] = useState<LinkedDocument | null>(null);
+  const [expandedTimelines, setExpandedTimelines] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -1455,8 +1495,83 @@ export default function ActionQueue() {
                               </div>
                             </button>
                             <div className="aq-action-card-actions">
+                              {(action.linked_document_count ?? 1) > 1 && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setExpandedTimelines((current) => {
+                                    const next = new Set(current);
+                                    if (next.has(action.id)) next.delete(action.id); else next.add(action.id);
+                                    return next;
+                                  })}
+                                >
+                                  {expandedTimelines.has(action.id) ? 'Hide' : 'View'}{' '}
+                                  {action.linked_document_count} docs
+                                </Button>
+                              )}
                               {contextualAction(action)}
                             </div>
+                            {expandedTimelines.has(action.id) && action.linked_documents && (
+                              <div className="aq-linked-documents">
+                                <div className="aq-linked-documents-heading">
+                                  <div>
+                                    <strong>Obligation timeline</strong>
+                                    <span>Invoices, notices, revisions, and payment evidence</span>
+                                  </div>
+                                  <Badge tone="info">{action.linked_documents.length} linked</Badge>
+                                </div>
+                                <div className="aq-document-timeline">
+                                  {action.linked_documents.map((document) => (
+                                    <div className={`aq-timeline-entry role-${document.role}`} key={document.document_id}>
+                                      <span className="aq-timeline-dot" aria-hidden="true" />
+                                      <button
+                                        type="button"
+                                        className="aq-timeline-document"
+                                        onClick={() => setTimelineViewer(document)}
+                                      >
+                                        <span className="aq-timeline-role">{linkedDocumentRoleLabel(document.role)}</span>
+                                        <strong>{document.title || `Document #${document.document_id}`}</strong>
+                                        <span className="aq-timeline-meta">
+                                          {document.document_date ? formatDate(document.document_date) : 'Date unavailable'}
+                                          {document.amount != null ? ` · ${formatCurrency(document.amount)}` : ''}
+                                        </span>
+                                        <span className="aq-document-hover-preview">
+                                          <img
+                                            src={document.thumbnail_url}
+                                            alt=""
+                                            loading="lazy"
+                                          />
+                                          <span>
+                                            <strong>{document.title || `Document #${document.document_id}`}</strong>
+                                            <small>
+                                              {linkedDocumentRoleLabel(document.role)}
+                                              {document.correspondent ? ` · ${document.correspondent}` : ''}
+                                            </small>
+                                            <small>Click to open the full document</small>
+                                          </span>
+                                        </span>
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                                {action.completion_suggestion && (
+                                  <div className="aq-payment-suggestion">
+                                    <div>
+                                      <strong>Payment evidence found</strong>
+                                      <span>{action.completion_suggestion.reason}</span>
+                                    </div>
+                                    <Button
+                                      size="sm"
+                                      variant="primary"
+                                      disabled={busyKey !== null}
+                                      onClick={() => void updateAction(action.id, 'completed')}
+                                    >
+                                      Mark completed
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </article>
                         ))}
                       </div>
@@ -2125,6 +2240,15 @@ export default function ActionQueue() {
             </div>
           </div>
         </div>
+      )}
+
+      {timelineViewer && (
+        <DocumentViewerModal
+          documentId={timelineViewer.document_id}
+          title={timelineViewer.title || `Document #${timelineViewer.document_id}`}
+          paperlessUrl={timelineViewer.preview_url}
+          onClose={() => setTimelineViewer(null)}
+        />
       )}
 
       {toast && <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />}
