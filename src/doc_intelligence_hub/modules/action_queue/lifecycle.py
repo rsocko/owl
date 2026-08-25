@@ -145,6 +145,34 @@ def mark_action_ready(action: Action) -> None:
     action.review_item_id = None
 
 
+def document_action_status(db: Session, document_id: int) -> str:
+    """Derive one Paperless document status from all non-superseded OWL actions."""
+    actions = (
+        db.query(Action)
+        .filter(
+            Action.document_id == document_id,
+            Action.superseded_by_action_id.is_(None),
+        )
+        .all()
+    )
+    statuses = {
+        normalize_action_status(action.status)
+        for action in actions
+        if normalize_action_status(action.status) != "not_an_action"
+    }
+    if not statuses:
+        return "not_an_action"
+    if "pending" in statuses:
+        return "pending"
+    if "acknowledged" in statuses:
+        return "acknowledged"
+    if "snoozed" in statuses:
+        return "snoozed"
+    if "completed" in statuses:
+        return "completed"
+    return "dismissed"
+
+
 async def project_action_metadata(
     action: Action,
     *,
@@ -251,8 +279,11 @@ async def sync_action_status(
     try:
         from .enricher import PaperlessEnricher
 
-        await PaperlessEnricher().sync_status(action.document_id, status)
-        action.last_synced_status = status
+        aggregate_status = document_action_status(db, action.document_id)
+        await PaperlessEnricher().sync_status(action.document_id, aggregate_status)
+        siblings = db.query(Action).filter_by(document_id=action.document_id).all()
+        for sibling in siblings:
+            sibling.last_synced_status = aggregate_status
         db.commit()
         return True
     except Exception as exc:
@@ -273,6 +304,7 @@ def record_action_feedback(
     corrected_action_type: str | None = None,
     corrected_urgency: str | None = None,
     corrected_amount: float | None = None,
+    corrected_amount_supplied: bool = False,
     reason: str | None = None,
 ) -> tuple[ActionFeedback, bool]:
     """Record classifier feedback and apply validated corrections to the action."""
@@ -314,8 +346,10 @@ def record_action_feedback(
         action.urgency = normalized_urgency
         action_changed = True
         recalculate_action_risk(action)
-    elif feedback_type == "wrong_amount" and corrected_amount is not None:
+    elif feedback_type == "wrong_amount" and corrected_amount_supplied:
         action.amount = corrected_amount
+        action.document_amount = corrected_amount
+        action.document_amount_overridden = True
         action_changed = True
         recalculate_action_risk(action)
 

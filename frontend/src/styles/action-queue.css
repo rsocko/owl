@@ -309,6 +309,68 @@
   gap: 12px;
 }
 
+.aq-edit-group-label {
+  grid-column: 1 / -1;
+  padding-top: 4px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.aq-sibling-panel,
+.aq-operation-dialog {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.aq-sibling-list {
+  display: grid;
+  gap: 6px;
+}
+
+.aq-sibling-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.aq-sibling-item.active {
+  border-color: var(--accent);
+}
+
+.aq-sibling-item .text-muted {
+  margin-left: auto;
+}
+
+.aq-action-management {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.aq-operation-dialog .aq-edit-grid {
+  margin-top: 4px;
+}
+
+.aq-merge-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .aq-edit-field {
   display: grid;
   gap: 6px;

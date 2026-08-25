@@ -61,6 +61,8 @@ interface ActionItem {
   summary?: string | null;
   due_date?: string | null;
   amount?: number | null;
+  document_amount?: number | null;
+  document_due_date?: string | null;
   urgency?: string | null;
   confidence?: number | null;
   risk_score?: number | null;
@@ -93,6 +95,13 @@ interface ActionItem {
     phone?: string | null;
     metadata?: Record<string, unknown>;
   } | null;
+  action_index?: number | null;
+  action_position?: number | null;
+  sibling_count?: number;
+  sibling_action_ids?: number[];
+  is_primary?: boolean;
+  parent_action_id?: number | null;
+  superseded_by_action_id?: number | null;
 }
 
 interface ActionListResponse {
@@ -114,6 +123,7 @@ type ActionEditDraft = {
   summary: string;
   due_date: string;
   amount: string;
+  document_due_date: string;
   urgency: string;
   correspondent: string;
 };
@@ -378,7 +388,10 @@ function buildEditDraft(action: ActionItem): ActionEditDraft {
     title: action.title ?? '',
     summary: action.summary ?? '',
     due_date: dateInputValue(action.due_date),
-    amount: action.amount == null ? '' : String(action.amount),
+    amount: (action.document_amount ?? action.amount) == null
+      ? ''
+      : String(action.document_amount ?? action.amount),
+    document_due_date: dateInputValue(action.document_due_date),
     urgency: action.urgency ?? 'LOW',
     correspondent: action.correspondent ?? '',
   };
@@ -483,6 +496,10 @@ export default function ActionQueue() {
   const [cachedAction, setCachedAction] = useState<ActionItem | null>(null);
   const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [editDraft, setEditDraft] = useState<ActionEditDraft | null>(null);
+  const [siblings, setSiblings] = useState<ActionItem[]>([]);
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeSelection, setMergeSelection] = useState<number[]>([]);
 
   const [correspondents, setCorrespondents] = useState<Array<{
     id: number;
@@ -643,6 +660,16 @@ export default function ActionQueue() {
     // Prefer live data from current view, fall back to cache
     return filteredActions.find((a) => a.id === selectedActionId) ?? cachedAction;
   }, [filteredActions, selectedActionId, cachedAction]);
+  const activeSiblings = useMemo(
+    () => siblings.filter((action) => action.superseded_by_action_id == null),
+    [siblings],
+  );
+  const mergeSources = useMemo(
+    () => activeSiblings.filter(
+      (action) => action.id === selectedActionId || mergeSelection.includes(action.id),
+    ),
+    [activeSiblings, mergeSelection, selectedActionId],
+  );
 
   // [UX-15] Reset PDF viewer state on action selection change
   useEffect(() => {
@@ -651,7 +678,26 @@ export default function ActionQueue() {
 
   useEffect(() => {
     setIsEditingDetails(false);
+    setSplitOpen(false);
+    setMergeOpen(false);
+    setMergeSelection([]);
   }, [selectedActionId]);
+
+  useEffect(() => {
+    if (selectedActionId === null) {
+      setSiblings([]);
+      return;
+    }
+    void endpoints.actionQueue.actionSiblings(String(selectedActionId))
+      .then((response) => {
+        const payload = response as { actions?: ActionItem[] };
+        setSiblings(payload.actions ?? []);
+      })
+      .catch((err) => setToast({
+        message: err instanceof Error ? err.message : 'Could not load related actions.',
+        tone: 'error',
+      }));
+  }, [selectedActionId, actions]);
 
   // Lock body scroll when drawer is open
   useEffect(() => {
@@ -865,8 +911,12 @@ export default function ActionQueue() {
     if (dateInputValue(selectedAction.due_date) !== editDraft.due_date) {
       payload.due_date = editDraft.due_date || null;
     }
-    if ((selectedAction.amount == null ? '' : String(selectedAction.amount)) !== editDraft.amount.trim()) {
+    const currentDocumentAmount = selectedAction.document_amount ?? selectedAction.amount;
+    if ((currentDocumentAmount == null ? '' : String(currentDocumentAmount)) !== editDraft.amount.trim()) {
       payload.amount = editDraft.amount.trim() ? Number(editDraft.amount) : null;
+    }
+    if (dateInputValue(selectedAction.document_due_date) !== editDraft.document_due_date) {
+      payload.document_due_date = editDraft.document_due_date || null;
     }
     if ((selectedAction.urgency ?? 'LOW') !== editDraft.urgency) {
       payload.urgency = editDraft.urgency;
@@ -884,6 +934,57 @@ export default function ActionQueue() {
     await patchAction(selectedAction.id, payload, 'Action details updated.', () => {
       setIsEditingDetails(false);
     });
+  };
+
+  const createSiblingAction = async (form: HTMLFormElement) => {
+    if (!selectedAction) return;
+    const values = new FormData(form);
+    setBusyKey(`split-${selectedAction.id}`);
+    try {
+      const created = await endpoints.actionQueue.splitAction(String(selectedAction.id), {
+        action_type: values.get('action_type'),
+        title: values.get('title'),
+        summary: values.get('summary') || null,
+        due_date: values.get('due_date') || null,
+        urgency: values.get('urgency'),
+      }) as ActionItem;
+      setSplitOpen(false);
+      await loadData();
+      setCachedAction(created);
+      setSelectedActionId(created.id);
+      setToast({ message: 'Created a separate action for this document.' });
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Could not split action.', tone: 'error' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const mergeSelectedActions = async (form: HTMLFormElement) => {
+    if (!selectedAction || mergeSelection.length === 0) return;
+    const values = new FormData(form);
+    const selectedValue = (fieldName: string) => JSON.parse(String(values.get(fieldName)));
+    setBusyKey(`merge-${selectedAction.id}`);
+    try {
+      const merged = await endpoints.actionQueue.mergeActions(String(selectedAction.id), {
+        absorbed_action_ids: mergeSelection,
+        action_type: selectedValue('action_type'),
+        title: selectedValue('title'),
+        summary: selectedValue('summary'),
+        due_date: selectedValue('due_date'),
+        amount: selectedValue('amount'),
+        urgency: selectedValue('urgency'),
+      }) as ActionItem;
+      setMergeOpen(false);
+      setMergeSelection([]);
+      setCachedAction(merged);
+      await loadData();
+      setToast({ message: 'Actions merged. Mission Control will cancel the absorbed task.' });
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Could not merge actions.', tone: 'error' });
+    } finally {
+      setBusyKey(null);
+    }
   };
 
   // [ARCH-01] Bulk action handler
@@ -1343,6 +1444,9 @@ export default function ActionQueue() {
                                   {normalizeType(action.action_type)}
                                 </Badge>
                                 <strong>{action.title || action.document_title || `Action #${action.id}`}</strong>
+                                {(action.sibling_count ?? 1) > 1 && (
+                                  <Badge tone="info">{action.sibling_count} actions from this document</Badge>
+                                )}
                               </div>
                               <div className="aq-action-card-meta">
                                 <span>{action.due_date ? `Due ${formatDate(action.due_date)}` : 'No due date'}</span>
@@ -1424,6 +1528,153 @@ export default function ActionQueue() {
                 <div className="aq-out-of-view-banner" role="status">
                   ⚠ This item is not in the current view. Change filters to see it in the list.
                 </div>
+              )}
+
+              {(selectedAction.sibling_count ?? activeSiblings.length) > 1 && (
+                <div className="aq-sibling-panel" aria-label="Actions from this document">
+                  <div className="aq-edit-header">
+                    <div>
+                      <div className="section-title">
+                        Action {selectedAction.action_position ?? 1} of {selectedAction.sibling_count ?? activeSiblings.length}
+                        {selectedAction.is_primary ? ' (primary)' : ''}
+                      </div>
+                      <div className="text-muted">Each item is a separate task. Changes below affect only this action unless labeled as a document fact.</div>
+                    </div>
+                    <div className="btn-group">
+                      <Button size="sm" variant="ghost" onClick={() => setSplitOpen(true)}>Add action</Button>
+                      {activeSiblings.length > 1 && (
+                        <Button size="sm" variant="ghost" onClick={() => setMergeOpen(true)}>Merge actions</Button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="aq-sibling-list">
+                    {siblings.map((sibling) => (
+                      <button
+                        type="button"
+                        key={sibling.id}
+                        className={`aq-sibling-item${sibling.id === selectedAction.id ? ' active' : ''}`}
+                        onClick={() => {
+                          setCachedAction(sibling);
+                          setSelectedActionId(sibling.id);
+                        }}
+                      >
+                        <Badge tone={actionTypeTone(normalizeType(sibling.action_type))}>
+                          {normalizeType(sibling.action_type)}
+                        </Badge>
+                        <span>{sibling.title}</span>
+                        {sibling.superseded_by_action_id && <span className="text-muted">Merged</span>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(selectedAction.sibling_count ?? 1) <= 1 && (
+                <div className="aq-action-management">
+                  <Button size="sm" variant="ghost" onClick={() => setSplitOpen(true)}>
+                    Add another action from this document
+                  </Button>
+                </div>
+              )}
+
+              {splitOpen && (
+                <form
+                  className="aq-operation-dialog"
+                  aria-label="Add action"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void createSiblingAction(event.currentTarget);
+                  }}
+                >
+                  <div className="section-title">Add a separate action</div>
+                  <label className="aq-edit-field">
+                    <span>Action type</span>
+                    <select name="action_type" defaultValue="TASK">
+                      {ACTION_TYPE_OPTIONS.map((option) => <option key={option}>{option}</option>)}
+                    </select>
+                  </label>
+                  <label className="aq-edit-field">
+                    <span>Task name</span>
+                    <input name="title" required />
+                  </label>
+                  <label className="aq-edit-field aq-edit-field-full">
+                    <span>Summary</span>
+                    <textarea name="summary" rows={2} />
+                  </label>
+                  <label className="aq-edit-field">
+                    <span>Action deadline</span>
+                    <input name="due_date" type="date" />
+                  </label>
+                  <label className="aq-edit-field">
+                    <span>Urgency</span>
+                    <select name="urgency" defaultValue="LOW">
+                      {URGENCY_OPTIONS.map((option) => <option key={option}>{option}</option>)}
+                    </select>
+                  </label>
+                  <div className="btn-group">
+                    <Button size="sm" type="submit" variant="success" disabled={busyKey !== null}>Create action</Button>
+                    <Button size="sm" type="button" variant="ghost" onClick={() => setSplitOpen(false)}>Cancel</Button>
+                  </div>
+                </form>
+              )}
+
+              {mergeOpen && (
+                <form
+                  className="aq-operation-dialog"
+                  aria-label="Merge actions"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void mergeSelectedActions(event.currentTarget);
+                  }}
+                >
+                  <div className="section-title">Merge into this action</div>
+                  <div className="text-muted">Choose actions to absorb, then explicitly choose every surviving value. The absorbed Mission Control task will be cancelled.</div>
+                  {activeSiblings.filter((sibling) => sibling.id !== selectedAction.id).map((sibling) => (
+                    <label className="aq-merge-choice" key={sibling.id}>
+                      <input
+                        type="checkbox"
+                        checked={mergeSelection.includes(sibling.id)}
+                        onChange={(event) => setMergeSelection((current) => (
+                          event.target.checked
+                            ? [...current, sibling.id]
+                            : current.filter((id) => id !== sibling.id)
+                        ))}
+                      />
+                      <span>{sibling.title} ({normalizeType(sibling.action_type)})</span>
+                    </label>
+                  ))}
+                  {mergeSelection.length > 0 && (
+                    <div className="aq-edit-grid">
+                      {([
+                        ['action_type', 'Action type'],
+                        ['title', 'Task name'],
+                        ['summary', 'Summary'],
+                        ['due_date', 'Action deadline'],
+                        ['amount', 'Document amount'],
+                        ['urgency', 'Urgency'],
+                      ] as const).map(([fieldName, label]) => (
+                        <label className="aq-edit-field" key={fieldName}>
+                          <span>{label}</span>
+                          <select name={fieldName} required defaultValue="">
+                            <option value="" disabled>Choose surviving value</option>
+                            {Array.from(new Set(mergeSources.map(
+                              (source) => JSON.stringify(source[fieldName] ?? null),
+                            )))
+                              .map((encodedValue) => (
+                                <option key={encodedValue} value={encodedValue}>
+                                  {String(JSON.parse(encodedValue) ?? '(empty)')}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <div className="btn-group">
+                    <Button size="sm" type="submit" variant="success" disabled={busyKey !== null || mergeSelection.length === 0}>Merge selected</Button>
+                    <Button size="sm" type="button" variant="ghost" onClick={() => setMergeOpen(false)}>Cancel</Button>
+                  </div>
+                </form>
               )}
 
               <div>
@@ -1521,6 +1772,7 @@ export default function ActionQueue() {
 
                 {isEditingDetails && editDraft && (
                   <div className="aq-edit-grid">
+                    <div className="aq-edit-group-label">This action</div>
                     <label className="aq-edit-field">
                       <span>Action type</span>
                       <select
@@ -1553,22 +1805,12 @@ export default function ActionQueue() {
                       />
                     </label>
                     <label className="aq-edit-field">
-                      <span>Due date</span>
+                      <span>Action deadline</span>
                       <input
                         aria-label="Due date"
                         type="date"
                         value={editDraft.due_date}
                         onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, due_date: e.target.value } : prev))}
-                      />
-                    </label>
-                    <label className="aq-edit-field">
-                      <span>Amount</span>
-                      <input
-                        aria-label="Amount"
-                        type="number"
-                        step="0.01"
-                        value={editDraft.amount}
-                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, amount: e.target.value } : prev))}
                       />
                     </label>
                     <label className="aq-edit-field">
@@ -1584,6 +1826,29 @@ export default function ActionQueue() {
                           </option>
                         ))}
                       </select>
+                    </label>
+                    <div className="aq-edit-group-label">
+                      Document facts
+                      {(selectedAction.sibling_count ?? 1) > 1 && ' (changes every sibling)'}
+                    </div>
+                    <label className="aq-edit-field">
+                      <span>Document amount</span>
+                      <input
+                        aria-label="Document amount"
+                        type="number"
+                        step="0.01"
+                        value={editDraft.amount}
+                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, amount: e.target.value } : prev))}
+                      />
+                    </label>
+                    <label className="aq-edit-field">
+                      <span>Document due date</span>
+                      <input
+                        aria-label="Document due date"
+                        type="date"
+                        value={editDraft.document_due_date}
+                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, document_due_date: e.target.value } : prev))}
+                      />
                     </label>
                     <label className="aq-edit-field">
                       <span>Correspondent</span>
@@ -1708,8 +1973,9 @@ export default function ActionQueue() {
                       : '—'}
                   </span>
                 </div>
-                <div className="aq-meta-row"><span>Amount</span><span>{formatCurrency(selectedAction.amount)}</span></div>
-                <div className="aq-meta-row"><span>Due date</span><span>{formatDate(selectedAction.due_date)}</span></div>
+                <div className="aq-meta-row"><span>Document amount</span><span>{formatCurrency(selectedAction.document_amount ?? selectedAction.amount)}</span></div>
+                <div className="aq-meta-row"><span>Document due date</span><span>{formatDate(selectedAction.document_due_date)}</span></div>
+                <div className="aq-meta-row"><span>Action deadline</span><span>{formatDate(selectedAction.due_date)}</span></div>
                 {selectedAction.extracted_data?.account_identifier && <div className="aq-meta-row"><span>Account</span><span>{selectedAction.extracted_data.account_identifier}</span></div>}
                 {selectedAction.extracted_data?.reference_number && <div className="aq-meta-row"><span>Reference</span><span>{selectedAction.extracted_data.reference_number}</span></div>}
                 {selectedAction.extracted_data?.phone && <div className="aq-meta-row"><span>Phone</span><span><a href={`tel:${selectedAction.extracted_data.phone}`}>{selectedAction.extracted_data.phone}</a></span></div>}
@@ -1814,6 +2080,9 @@ export default function ActionQueue() {
           >
             <div id="no-action-confirm-title" className="aq-modal-title">Mark as no action needed?</div>
             <p className="aq-modal-desc">
+              {(selectedAction?.sibling_count ?? 1) > 1 && (
+                <>Only this action will be removed. The other actions from this document remain separate tasks, and Paperless stays pending while any of them is open. </>
+              )}
               OWL will preserve the rejected guess in feedback history, not as current metadata. Paperless
               keeps durable facts such as Document Amount and masked Account Identifier, while action-specific
               and legacy inferred fields are cleared.

@@ -171,6 +171,9 @@ export const endpoints = {
     status: () => api.get('/api/queue/status'),
     actions: (params?: string) => api.get(`/api/queue/actions${params ? `?${params}` : ''}`),
     updateAction: (id: string, body: unknown) => api.patch(`/api/queue/actions/${id}`, body),
+    actionSiblings: (id: string) => api.get(`/api/queue/actions/${id}/siblings`),
+    splitAction: (id: string, body: unknown) => api.post(`/api/queue/actions/${id}/split`, body),
+    mergeActions: (id: string, body: unknown) => api.post(`/api/queue/actions/${id}/merge`, body),
     refreshAction: (id: string) => api.get(`/api/queue/actions/${id}/refresh`),
     bulk: (body: { action: string; action_ids: number[]; snoozed_until?: string }) =>
       api.post<{ affected: number; action: string }>('/api/queue/actions/bulk', body),

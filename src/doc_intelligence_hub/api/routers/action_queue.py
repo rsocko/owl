@@ -14,6 +14,12 @@ from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
+from doc_intelligence_hub.core.paperless import (
+    MetadataFieldKey,
+    ResolvedMetadataSchema,
+    resolve_metadata_schema,
+    resolve_metadata_value,
+)
 from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer
 from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
 from doc_intelligence_hub.modules.action_queue.database import (
@@ -26,6 +32,7 @@ from doc_intelligence_hub.modules.action_queue.database import (
 )
 from doc_intelligence_hub.modules.action_queue.lifecycle import (
     action_has_critical_details,
+    document_action_status,
     file_action_in_paperless,
     mark_action_ready,
     project_action_metadata,
@@ -99,6 +106,9 @@ class ActionUpdateRequest(BaseModel):
     summary: str | None = Field(default=None, description="Editable action summary")
     due_date: date | None = Field(default=None, description="Editable due date")
     amount: float | None = Field(default=None, description="Editable amount")
+    document_due_date: date | None = Field(
+        default=None, description="Editable Paperless document due date"
+    )
     urgency: str | None = Field(
         default=None,
         pattern=r"^(CRITICAL|HIGH|MEDIUM|LOW)$",
@@ -148,6 +158,7 @@ class ActionUpdateRequest(BaseModel):
             "summary",
             "due_date",
             "amount",
+            "document_due_date",
             "urgency",
             "correspondent",
         }
@@ -166,6 +177,42 @@ class ActionUpdateRequest(BaseModel):
                 )
 
         return self
+
+
+class ActionCreateRequest(BaseModel):
+    action_type: str
+    title: str = Field(min_length=1)
+    summary: str | None = None
+    due_date: date | None = None
+    urgency: str = Field(default="LOW", pattern=r"^(CRITICAL|HIGH|MEDIUM|LOW)$")
+
+    @field_validator("action_type")
+    @classmethod
+    def _normalize_action_type(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized not in VALID_ACTION_TYPES:
+            raise ValueError(f"action_type must be one of: {', '.join(sorted(VALID_ACTION_TYPES))}")
+        return normalized
+
+
+class ActionMergeRequest(BaseModel):
+    absorbed_action_ids: list[int] = Field(min_length=1)
+    action_type: str | None = None
+    title: str | None = None
+    summary: str | None = None
+    due_date: date | None = None
+    amount: float | None = None
+    urgency: str | None = Field(default=None, pattern=r"^(CRITICAL|HIGH|MEDIUM|LOW)$")
+
+    @field_validator("action_type")
+    @classmethod
+    def _normalize_merge_action_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().upper()
+        if normalized not in VALID_ACTION_TYPES:
+            raise ValueError(f"action_type must be one of: {', '.join(sorted(VALID_ACTION_TYPES))}")
+        return normalized
 
 
 class BulkActionRequest(BaseModel):
@@ -267,6 +314,8 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         "summary": a.summary,
         "due_date": a.due_date.isoformat() if a.due_date else None,
         "amount": a.amount,
+        "document_amount": a.document_amount,
+        "document_due_date": a.document_due_date.isoformat() if a.document_due_date else None,
         "urgency": a.urgency,
         "severity": _urgency_to_severity(a.urgency),
         "confidence": a.confidence,
@@ -287,6 +336,10 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         "extracted_data": extracted_data,
         "ai_reasoning": a.ai_reasoning,
         "version": a.version or 1,
+        "action_index": a.action_index,
+        "is_primary": bool(a.is_primary),
+        "parent_action_id": a.parent_action_id,
+        "superseded_by_action_id": a.superseded_by_action_id,
         "preview_url": _build_preview_url(a.document_id),
         "created_at": a.created_at.isoformat() if a.created_at else None,
         "updated_at": a.updated_at.isoformat() if a.updated_at else None,
@@ -294,6 +347,26 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         "acknowledged_at": a.acknowledged_at.isoformat() if a.acknowledged_at else None,
         "snoozed_until": a.snoozed_until.isoformat() if a.snoozed_until else None,
     }
+
+
+def _serialize_action_with_siblings(db: Session, action: Action) -> dict[str, Any]:
+    serialized = _serialize_action(action)
+    siblings = (
+        db.query(Action)
+        .filter(
+            Action.document_id == action.document_id,
+            Action.superseded_by_action_id.is_(None),
+        )
+        .order_by(Action.action_index.asc(), Action.id.asc())
+        .all()
+    )
+    serialized["sibling_count"] = len(siblings)
+    serialized["sibling_action_ids"] = [sibling.id for sibling in siblings]
+    serialized["action_position"] = next(
+        (index for index, sibling in enumerate(siblings, start=1) if sibling.id == action.id),
+        None,
+    )
+    return serialized
 
 
 def _urgency_to_severity(urgency: str | None) -> str:
@@ -679,7 +752,7 @@ async def list_actions(
         actions = query.offset(offset).limit(limit).all()
 
         return {
-            "actions": [_serialize_action(a) for a in actions],
+            "actions": [_serialize_action_with_siblings(db, a) for a in actions],
             "total": total,
             "limit": limit,
             "offset": offset,
@@ -768,6 +841,22 @@ async def update_action(
         paperless_correspondent_id: int | None = None
         paperless_client = None
 
+        if supplied_fields.intersection({"amount", "document_due_date"}):
+            if not action_queue_settings.write_to_paperless:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=409,
+                    detail="Paperless writes are disabled; document facts were not changed.",
+                )
+            if action.document_id is None:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=409,
+                    detail="This action has no Paperless document to update.",
+                )
+
         if "correspondent" in supplied_fields:
             if not action_queue_settings.write_to_paperless:
                 from fastapi import HTTPException
@@ -826,13 +915,24 @@ async def update_action(
             action.due_date = body.due_date
             risk_inputs_changed = True
         if "amount" in supplied_fields:
-            action.amount = body.amount
+            siblings = db.query(Action).filter_by(document_id=action.document_id).all()
+            for sibling in siblings:
+                sibling.document_amount = body.amount
+                sibling.amount = body.amount
+                sibling.document_amount_overridden = True
             risk_inputs_changed = True
+        if "document_due_date" in supplied_fields:
+            siblings = db.query(Action).filter_by(document_id=action.document_id).all()
+            for sibling in siblings:
+                sibling.document_due_date = body.document_due_date
+                sibling.document_due_date_overridden = True
         if "urgency" in supplied_fields:
             action.urgency = body.urgency
             risk_inputs_changed = True
         if "correspondent" in supplied_fields:
-            action.correspondent = body.correspondent
+            siblings = db.query(Action).filter_by(document_id=action.document_id).all()
+            for sibling in siblings:
+                sibling.correspondent = body.correspondent
 
         if "status" in supplied_fields or "snoozed_until" in supplied_fields:
             effective_status = body.status or action.status
@@ -911,6 +1011,24 @@ async def update_action(
                     status_code=502,
                     detail=f"Paperless rejected the correspondent change: {exc}",
                 ) from exc
+        if supplied_fields.intersection({"amount", "document_due_date"}):
+            try:
+                from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
+
+                enricher = PaperlessEnricher()
+                if "amount" in supplied_fields:
+                    await enricher.sync_document_amount(action.document_id, body.amount)
+                if "document_due_date" in supplied_fields:
+                    await enricher.sync_document_due_date(
+                        action.document_id, body.document_due_date
+                    )
+            except Exception as exc:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Paperless rejected the document metadata change: {exc}",
+                ) from exc
 
         if not feedback_changed:
             action.version = (action.version or 1) + 1
@@ -942,7 +1060,201 @@ async def update_action(
                 logger=logging.getLogger(__name__),
             )
 
-        return _serialize_action(action)
+        return _serialize_action_with_siblings(db, action)
+    finally:
+        db.close()
+
+
+@router.get("/actions/{action_id}/siblings")
+async def list_action_siblings(request: Request, action_id: int) -> dict[str, Any]:
+    """Return every action inferred from the same Paperless document."""
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        action = db.query(Action).filter_by(id=action_id).first()
+        if not action:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        siblings = (
+            db.query(Action)
+            .filter_by(document_id=action.document_id)
+            .order_by(Action.action_index.asc(), Action.id.asc())
+            .all()
+        )
+        return {
+            "document_id": action.document_id,
+            "actions": [_serialize_action_with_siblings(db, sibling) for sibling in siblings],
+        }
+    finally:
+        db.close()
+
+
+@router.post("/actions/{action_id}/split")
+async def split_action(
+    request: Request, action_id: int, body: ActionCreateRequest
+) -> dict[str, Any]:
+    """Create a new independently managed action for the same document."""
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        source = db.query(Action).filter_by(id=action_id).first()
+        if not source:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        max_index = max(
+            (
+                sibling.action_index
+                for sibling in db.query(Action).filter_by(document_id=source.document_id).all()
+                if sibling.action_index is not None
+            ),
+            default=-1,
+        )
+        new_action = Action(
+            document_id=source.document_id,
+            document_title=source.document_title,
+            correspondent=source.correspondent,
+            document_date=source.document_date,
+            document_type=source.document_type,
+            tags=source.tags,
+            action_type=body.action_type,
+            title=body.title.strip(),
+            summary=body.summary,
+            due_date=body.due_date,
+            amount=source.amount,
+            document_amount=source.document_amount,
+            document_due_date=source.document_due_date,
+            document_amount_overridden=source.document_amount_overridden,
+            document_due_date_overridden=source.document_due_date_overridden,
+            urgency=body.urgency,
+            confidence=source.confidence,
+            status="pending",
+            action_ready=True,
+            review_state="ready",
+            action_index=max(max_index + 1, 1000),
+            is_primary=False,
+            parent_action_id=source.id,
+            version=1,
+        )
+        refresh_recommended_cta(new_action)
+        recalculate_action_risk(new_action)
+        db.add(new_action)
+        db.commit()
+        db.refresh(new_action)
+        import logging
+
+        await sync_action_status(
+            db,
+            new_action,
+            "pending",
+            logger=logging.getLogger(__name__),
+        )
+        return _serialize_action_with_siblings(db, new_action)
+    finally:
+        db.close()
+
+
+@router.post("/actions/{action_id}/merge")
+async def merge_actions(
+    request: Request, action_id: int, body: ActionMergeRequest
+) -> dict[str, Any]:
+    """Merge sibling actions while preserving the selected survivor's identity."""
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        from fastapi import HTTPException
+
+        survivor = db.query(Action).filter_by(id=action_id).first()
+        if not survivor:
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        if action_id in body.absorbed_action_ids:
+            raise HTTPException(status_code=422, detail="A survivor cannot absorb itself")
+        absorbed = db.query(Action).filter(Action.id.in_(body.absorbed_action_ids)).all()
+        if len(absorbed) != len(set(body.absorbed_action_ids)):
+            raise HTTPException(status_code=404, detail="One or more absorbed actions were not found")
+        if any(action.document_id != survivor.document_id for action in absorbed):
+            raise HTTPException(status_code=422, detail="Only sibling actions can be merged")
+        if any(action.superseded_by_action_id is not None for action in absorbed):
+            raise HTTPException(status_code=409, detail="An absorbed action was already merged")
+
+        selected = [survivor, *absorbed]
+        merge_fields = ("action_type", "title", "summary", "due_date", "amount", "urgency")
+        conflicts = {
+            field_name
+            for field_name in merge_fields
+            if len({getattr(action, field_name) for action in selected}) > 1
+        }
+        unresolved = conflicts - body.model_fields_set
+        if unresolved:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "merge_conflicts",
+                    "fields": sorted(unresolved),
+                    "message": "Choose the surviving value for every conflicting field.",
+                },
+            )
+        current_document_amount = (
+            survivor.document_amount
+            if survivor.document_amount is not None
+            else survivor.amount
+        )
+        amount_changed = (
+            "amount" in body.model_fields_set and body.amount != current_document_amount
+        )
+        if amount_changed:
+            if not action_queue_settings.write_to_paperless:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Paperless writes are disabled; the document amount was not changed.",
+                )
+            from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
+
+            try:
+                await PaperlessEnricher().sync_document_amount(
+                    survivor.document_id,
+                    body.amount,
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Paperless rejected the document amount change: {exc}",
+                ) from exc
+        for field_name in merge_fields:
+            if field_name == "amount":
+                continue
+            if field_name in body.model_fields_set:
+                setattr(survivor, field_name, getattr(body, field_name))
+        if "amount" in body.model_fields_set:
+            for sibling in db.query(Action).filter_by(document_id=survivor.document_id).all():
+                sibling.amount = body.amount
+                sibling.document_amount = body.amount
+                sibling.document_amount_overridden = True
+        if any(action.is_primary for action in absorbed):
+            survivor.is_primary = True
+        for action in absorbed:
+            action.superseded_by_action_id = survivor.id
+            action.status = "dismissed"
+            action.action_ready = False
+            action.review_state = "resolved_no_action"
+            action.version = (action.version or 1) + 1
+        survivor.version = (survivor.version or 1) + 1
+        refresh_recommended_cta(survivor)
+        recalculate_action_risk(survivor)
+        db.commit()
+        import logging
+
+        await sync_action_status(
+            db,
+            survivor,
+            survivor.status,
+            logger=logging.getLogger(__name__),
+        )
+        return _serialize_action_with_siblings(db, survivor)
     finally:
         db.close()
 
@@ -1154,6 +1466,7 @@ def _replace_action_metadata(
     correspondents: dict[int, str],
     tags: dict[int, str],
     document_types: dict[int, str],
+    metadata_schema: ResolvedMetadataSchema | None = None,
 ) -> None:
     """Replace an action's Paperless snapshot with current document metadata."""
     document_title = document.get("title")
@@ -1163,6 +1476,27 @@ def _replace_action_metadata(
     action.document_date = _parse_date_safe(document.get("created"))
     action.document_type = _resolve_metadata_name(document.get("document_type"), document_types)
     action.tags = _resolve_document_tags(document, tags)
+    if metadata_schema is not None:
+        document_custom_fields = document.get("custom_fields") or []
+        if metadata_schema.field(MetadataFieldKey.DOCUMENT_AMOUNT).canonical_id is not None:
+            amount = resolve_metadata_value(
+                MetadataFieldKey.DOCUMENT_AMOUNT,
+                document_custom_fields,
+                metadata_schema,
+            ).value
+            action.document_amount = float(amount) if amount is not None else None
+            action.amount = action.document_amount
+            action.document_amount_overridden = True
+        if metadata_schema.field(MetadataFieldKey.DOCUMENT_DUE_DATE).canonical_id is not None:
+            due_date = resolve_metadata_value(
+                MetadataFieldKey.DOCUMENT_DUE_DATE,
+                document_custom_fields,
+                metadata_schema,
+            ).value
+            action.document_due_date = (
+                _parse_date_safe(due_date) if isinstance(due_date, str) else due_date
+            )
+            action.document_due_date_overridden = True
     action.updated_at = datetime.utcnow()
     action.version = (action.version or 1) + 1
 
@@ -1188,6 +1522,7 @@ async def refresh_action_from_paperless(request: Request, action_id: int) -> dic
         )
         try:
             correspondents, tags, document_types = await client.fetch_all_metadata()
+            custom_fields = await client.list_custom_fields()
             document = await client.get_document(action.document_id)
         except Exception as exc:
             raise HTTPException(
@@ -1198,16 +1533,23 @@ async def refresh_action_from_paperless(request: Request, action_id: int) -> dic
                 ),
             ) from exc
 
-        _replace_action_metadata(
-            action,
-            document,
-            correspondents,
-            tags,
-            document_types,
+        metadata_schema = resolve_metadata_schema(
+            custom_fields,
+            (MetadataFieldKey.DOCUMENT_AMOUNT, MetadataFieldKey.DOCUMENT_DUE_DATE),
         )
+        siblings = db.query(Action).filter_by(document_id=action.document_id).all()
+        for sibling in siblings:
+            _replace_action_metadata(
+                sibling,
+                document,
+                correspondents,
+                tags,
+                document_types,
+                metadata_schema,
+            )
         db.commit()
         db.refresh(action)
-        return _serialize_action(action)
+        return _serialize_action_with_siblings(db, action)
     finally:
         db.close()
 
@@ -1414,20 +1756,17 @@ async def backfill_paperless(request: Request, body: BackfillRequest) -> dict[st
         if body.status_filter:
             query = query.filter_by(status=body.status_filter)
 
-        if not body.force:
-            # Retry actions that were never synced or whose status has changed.
-            query = query.filter(
-                (Action.last_synced_status == None)  # noqa: E711
-                | (Action.last_synced_status == "")
-                | (Action.last_synced_status != Action.status)
-            )
-
         query = query.order_by(Action.created_at.asc())
-
-        if body.limit:
-            query = query.limit(body.limit)
-
         actions_to_sync = query.all()
+        if not body.force:
+            actions_to_sync = [
+                action
+                for action in actions_to_sync
+                if action.last_synced_status
+                != document_action_status(db, action.document_id)
+            ]
+        if body.limit:
+            actions_to_sync = actions_to_sync[: body.limit]
 
         if body.dry_run:
             return {
@@ -1454,31 +1793,49 @@ async def backfill_paperless(request: Request, body: BackfillRequest) -> dict[st
         failed = 0
         errors: list[dict[str, Any]] = []
 
+        actions_by_document: dict[int, list[Action]] = {}
         for action in actions_to_sync:
+            actions_by_document.setdefault(action.document_id, []).append(action)
+
+        for document_id, document_actions in actions_by_document.items():
+            action = next(
+                (candidate for candidate in document_actions if candidate.is_primary),
+                document_actions[0],
+            )
             try:
                 # Reconstruct enrichment payload from stored action fields
                 enrichment_data = {
                     "action_type": action.action_type,
                     "urgency": action.urgency or "LOW",
                     "due_date": action.due_date.isoformat() if action.due_date else None,
-                    "amount": action.amount,
+                    "amount": (
+                        action.document_amount
+                        if action.document_amount is not None
+                        else action.amount
+                    ),
+                    "document_due_date": (
+                        action.document_due_date.isoformat()
+                        if action.document_due_date
+                        else None
+                    ),
                     "summary": action.summary or "",
                     "overall_confidence": action.confidence or 0,
                 }
 
                 await enricher.enrich_document(action.document_id, enrichment_data)
 
-                # Also sync the current status (not just "pending")
-                if action.status != "pending":
-                    await enricher.sync_status(action.document_id, action.status)
+                aggregate_status = document_action_status(db, document_id)
+                await enricher.sync_status(document_id, aggregate_status)
 
-                action.last_synced_status = action.status
-                synced += 1
+                siblings = db.query(Action).filter_by(document_id=document_id).all()
+                for sibling in siblings:
+                    sibling.last_synced_status = aggregate_status
+                synced += len(document_actions)
                 log.info(
                     "Backfill: doc_id=%s action_id=%s synced to Paperless (status=%s)",
-                    action.document_id,
+                    document_id,
                     action.id,
-                    action.status,
+                    aggregate_status,
                 )
             except Exception as exc:
                 failed += 1
@@ -1563,6 +1920,30 @@ async def submit_feedback(
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
 
         try:
+            corrected_amount_supplied = "corrected_amount" in body.model_fields_set
+            if body.feedback_type == "wrong_amount":
+                if not corrected_amount_supplied:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="corrected_amount is required for wrong_amount feedback",
+                    )
+                if not action_queue_settings.write_to_paperless:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Paperless writes are disabled; the document amount was not changed.",
+                    )
+                from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
+
+                try:
+                    await PaperlessEnricher().sync_document_amount(
+                        action.document_id,
+                        body.corrected_amount,
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Paperless rejected the document amount change: {exc}",
+                    ) from exc
             feedback, _ = record_action_feedback(
                 db,
                 action,
@@ -1570,8 +1951,14 @@ async def submit_feedback(
                 corrected_action_type=body.corrected_action_type,
                 corrected_urgency=body.corrected_urgency,
                 corrected_amount=body.corrected_amount,
+                corrected_amount_supplied=corrected_amount_supplied,
                 reason=body.reason,
             )
+            if body.feedback_type == "wrong_amount":
+                for sibling in db.query(Action).filter_by(document_id=action.document_id).all():
+                    sibling.amount = body.corrected_amount
+                    sibling.document_amount = body.corrected_amount
+                    sibling.document_amount_overridden = True
         except ValueError as exc:
             from fastapi import HTTPException
 

@@ -22,6 +22,7 @@ class MetadataFieldKey(str, Enum):
     NORMALIZED_DOCUMENT_TYPE = "normalized_document_type"
     SERIES_NAME = "series_name"
     DOCUMENT_AMOUNT = "document_amount"
+    DOCUMENT_DUE_DATE = "document_due_date"
     ACTION_STATUS = "action_status"
     ACTION_ANALYZED = "action_analyzed"
     LEGACY_ACTION_TYPE = "legacy_action_type"
@@ -265,6 +266,15 @@ _REGISTRY_ENTRIES = (
         sensitivity=MetadataSensitivity.FINANCIAL,
         create_policy=MetadataCreatePolicy.RENAME_FIRST_ALIAS,
         create_type=PaperlessFieldType.FLOAT,
+    ),
+    _spec(
+        MetadataFieldKey.DOCUMENT_DUE_DATE,
+        "Document Due Date",
+        PaperlessFieldType.DATE,
+        MetadataNormalization.DATE,
+        projection_policy=_DURABLE,
+        create_policy=_CREATE,
+        create_type=PaperlessFieldType.DATE,
     ),
     _spec(
         MetadataFieldKey.ACTION_STATUS,
