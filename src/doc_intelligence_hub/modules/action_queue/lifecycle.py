@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 
@@ -18,6 +19,7 @@ VALID_FEEDBACK_TYPES = {
     "wrong_amount",
 }
 VALID_URGENCIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
+VALID_REVIEW_STATES = {"ready", "needs_review", "resolved_no_action"}
 STATUS_ALIASES = {"done": "completed", "reopen": "pending"}
 
 
@@ -63,6 +65,122 @@ def recalculate_action_risk(action: Action) -> None:
         confidence=action.confidence or 0,
         action_type=action.action_type or "REVIEW",
     )
+
+
+def action_has_critical_details(action: Action) -> bool:
+    """Return whether a corrected classification is safe to keep action-ready."""
+    if not (action.title or "").strip():
+        return False
+    if (action.action_type or "").upper() == "PAY" and action.amount is None:
+        return False
+    return True
+
+
+def refresh_recommended_cta(action: Action) -> None:
+    """Recompute the contextual CTA after a type or detail correction."""
+    from .analyzer import _normalize_cta
+
+    previous = action.recommended_cta
+    if isinstance(previous, str):
+        try:
+            previous = json.loads(previous)
+        except (json.JSONDecodeError, TypeError):
+            previous = None
+    # A corrected action type must replace the previous authoritative CTA.
+    # Keep only additive metadata that may still be useful to consumers.
+    raw = (
+        {"metadata": previous["metadata"]}
+        if isinstance(previous, dict) and isinstance(previous.get("metadata"), dict)
+        else None
+    )
+    normalized = _normalize_cta(
+        raw,
+        {
+            "action_type": action.action_type,
+            "title": action.title,
+            "amount": action.amount,
+        },
+        {"extracted_data": action.extracted_data or {}},
+    )
+    action.recommended_cta = json.dumps(normalized)
+
+
+def route_action_to_review(db: Session, action: Action, *, reason: str) -> str:
+    """Mark an action untrusted and create its deep-linkable Needs Review item."""
+    from doc_intelligence_hub.modules.triage.database import (
+        create_action_classification_review,
+    )
+    from doc_intelligence_hub.modules.triage.database import (
+        init_db as init_triage_db,
+    )
+
+    db.flush()
+    init_triage_db()
+    item = create_action_classification_review(
+        action_id=action.id,
+        document_id=action.document_id,
+        confidence=action.confidence or 0,
+        reason=reason,
+        metadata={
+            "document_title": action.document_title,
+            "title": action.title,
+            "summary": action.summary,
+            "action_type": action.action_type,
+            "due_date": action.due_date.isoformat() if action.due_date else None,
+            "amount": action.amount,
+            "recommended_cta": json.loads(action.recommended_cta)
+            if isinstance(action.recommended_cta, str) and action.recommended_cta.startswith("{")
+            else None,
+        },
+    )
+    action.action_ready = False
+    action.review_state = "needs_review"
+    action.review_item_id = item["id"]
+    return item["id"]
+
+
+def mark_action_ready(action: Action) -> None:
+    action.action_ready = True
+    action.review_state = "ready"
+    action.review_item_id = None
+
+
+async def project_action_metadata(
+    action: Action,
+    *,
+    action_status: str | None,
+) -> None:
+    """Project current durable facts while replacing stale action inference."""
+    if not settings.write_to_paperless or not action.document_id:
+        return
+    from .enricher import PaperlessEnricher
+
+    await PaperlessEnricher().enrich_document(
+        action.document_id,
+        {
+            "amount": action.amount,
+            "extracted_data": action.extracted_data or {},
+        },
+        action_status=action_status,
+        clear_action_inference=True,
+    )
+
+
+async def file_action_in_paperless(db: Session, action: Action) -> None:
+    """Perform the source filing action before committing local completion."""
+    if (action.action_type or "").upper() not in {"FILE", "ARCHIVE"}:
+        raise ValueError("Only FILE or ARCHIVE actions can be filed")
+    if not settings.write_to_paperless:
+        raise PermissionError("Paperless writes are disabled")
+    if not action.document_id:
+        raise ValueError("Action is not linked to a Paperless document")
+    from .enricher import PaperlessEnricher
+
+    await PaperlessEnricher().sync_status(action.document_id, "completed")
+    action.last_synced_status = "completed"
+    transition_action_status(action, "completed")
+    action.version = (action.version or 1) + 1
+    db.commit()
 
 
 def transition_action_status(
@@ -184,10 +302,14 @@ def record_action_feedback(
     action_changed = False
     if feedback_type == "not_an_action":
         action_changed = transition_action_status(action, "not_an_action")
+        action.action_ready = False
+        action.review_state = "resolved_no_action"
+        action.review_item_id = None
     elif feedback_type == "misclassified" and normalized_action_type:
         action.action_type = normalized_action_type
         action_changed = True
         recalculate_action_risk(action)
+        refresh_recommended_cta(action)
     elif feedback_type == "wrong_urgency" and normalized_urgency:
         action.urgency = normalized_urgency
         action_changed = True

@@ -6,6 +6,9 @@ import asyncio
 import logging
 from datetime import date
 
+from doc_intelligence_hub.core.extractors.account_numbers import (
+    normalize_masked_account_identifier,
+)
 from doc_intelligence_hub.core.paperless import (
     MetadataDiagnosticCode,
     MetadataFieldKey,
@@ -27,6 +30,8 @@ def _make_paperless_client() -> PaperlessClient:
 
 
 _ACTION_FIELDS = (
+    MetadataFieldKey.ACCOUNT_IDENTIFIER,
+    MetadataFieldKey.INVOICE_NUMBER,
     MetadataFieldKey.DOCUMENT_AMOUNT,
     MetadataFieldKey.ACTION_STATUS,
     MetadataFieldKey.ACTION_ANALYZED,
@@ -82,13 +87,43 @@ class PaperlessEnricher:
         await self.get_schema()
         return dict(self._field_id_cache)
 
-    async def enrich_document(self, document_id: int, extraction: dict) -> None:
+    async def enrich_document(
+        self,
+        document_id: int,
+        extraction: dict,
+        *,
+        action_status: str | None = "pending",
+        clear_action_inference: bool = False,
+    ) -> None:
         """Write neutral document extraction results to Paperless."""
         if not settings.write_to_paperless:
             return
 
         schema = await self.get_schema()
         updates: list[dict] = []
+        extracted_data = extraction.get("extracted_data")
+        if not isinstance(extracted_data, dict):
+            extracted_data = {}
+        account_identifier = normalize_masked_account_identifier(
+            extracted_data.get("account_identifier")
+        )
+        if account_identifier:
+            updates.append(
+                build_metadata_update(
+                    MetadataFieldKey.ACCOUNT_IDENTIFIER,
+                    account_identifier,
+                    schema,
+                )
+            )
+        reference_number = extracted_data.get("reference_number")
+        if isinstance(reference_number, str) and reference_number.strip():
+            updates.append(
+                build_metadata_update(
+                    MetadataFieldKey.INVOICE_NUMBER,
+                    reference_number.strip(),
+                    schema,
+                )
+            )
         if extraction.get("amount") is not None:
             updates.append(
                 build_metadata_update(
@@ -97,7 +132,17 @@ class PaperlessEnricher:
                     schema,
                 )
             )
-        updates.append(build_metadata_update(MetadataFieldKey.ACTION_STATUS, "pending", schema))
+        if action_status is not None:
+            updates.append(build_metadata_update(MetadataFieldKey.ACTION_STATUS, action_status, schema))
+        elif clear_action_inference:
+            action_status_id = self._field_id_cache.get(MetadataFieldKey.ACTION_STATUS)
+            if action_status_id is not None:
+                updates.append({"field": action_status_id, "value": None})
+        if clear_action_inference:
+            for key in _LEGACY_CLEANUP_FIELDS:
+                field_id = self._field_id_cache.get(key)
+                if field_id is not None:
+                    updates.append({"field": field_id, "value": None})
         updates.append(
             build_metadata_update(
                 MetadataFieldKey.ACTION_ANALYZED,

@@ -199,6 +199,8 @@ A dedicated `mc_connector` router exposes the endpoints that Mission Control's D
 - `/api/action-queue/actions/{id}` — Paperless-aware completion, dismissal, and reopen
 - `/api/action-queue/actions/{id}/snooze` — source-side snooze
 - `/api/action-queue/actions/{id}/feedback` — classifier feedback and corrections
+- `/api/action-queue/actions/{id}/review` — route a trusted action to Needs Review
+- `/api/action-queue/actions/{id}/file` — atomically file FILE/ARCHIVE work at the source
 - `/api/statements/missing` — missing statement alerts
 - `/api/eob/unmatched` — unmatched EOB records
 
@@ -206,6 +208,8 @@ The Action Queue and connector routers share lifecycle and feedback helpers so
 timestamps, Paperless status write-back, sync tracking, and configured intake-tag
 removal stay consistent. See the
 [Mission Control integration contract](../guide/mission-control-integration.md).
+Mission Control must ingest only items whose additive `action_ready` field is
+`true`; uncertain classifications remain owned by OWL Needs Review.
 
 ### Module Routers
 

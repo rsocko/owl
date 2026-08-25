@@ -282,6 +282,56 @@ def get_queue_item(item_id: str) -> dict[str, Any] | None:
         session.close()
 
 
+def create_action_classification_review(
+    *,
+    action_id: int,
+    document_id: int,
+    confidence: int,
+    reason: str,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Create or refresh the one open Needs Review item for an action guess."""
+    session = get_session()
+    try:
+        item = (
+            session.query(TriageQueueItem)
+            .filter(
+                TriageQueueItem.item_type == "action_classification",
+                TriageQueueItem.target_type == "action",
+                TriageQueueItem.target_id == str(action_id),
+                TriageQueueItem.status.in_(("pending", "deferred")),
+            )
+            .first()
+        )
+        payload = {
+            **metadata,
+            "action_id": action_id,
+            "document_id": document_id,
+            "confidence": confidence,
+        }
+        if item is None:
+            item = TriageQueueItem(
+                item_type="action_classification",
+                priority=max(40, min(90, 100 - confidence)),
+                status="pending",
+                source="action_analysis",
+                target_type="action",
+                target_id=str(action_id),
+                reason=reason,
+                metadata_json=json.dumps(payload),
+            )
+            session.add(item)
+        else:
+            item.status = "pending"
+            item.deferred_until = None
+            item.reason = reason
+            item.metadata_json = json.dumps(payload)
+        session.commit()
+        return _item_to_dict(item)
+    finally:
+        session.close()
+
+
 def resolve_queue_item(
     item_id: str, action: str, payload: dict | None = None
 ) -> dict[str, Any] | None:

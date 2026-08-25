@@ -24,8 +24,14 @@ from doc_intelligence_hub.modules.action_queue.database import (
     init_db,
 )
 from doc_intelligence_hub.modules.action_queue.lifecycle import (
+    action_has_critical_details,
+    file_action_in_paperless,
+    mark_action_ready,
+    project_action_metadata,
     recalculate_action_risk,
     record_action_feedback,
+    refresh_recommended_cta,
+    route_action_to_review,
     sync_action_status,
     transition_action_status,
 )
@@ -228,6 +234,10 @@ def _serialize_action(a: Action) -> dict[str, Any]:
     """Serialize an Action row to a JSON-safe dict with preview_url."""
     import json
 
+    from doc_intelligence_hub.core.extractors.account_numbers import (
+        normalize_masked_account_identifier,
+    )
+
     # Deserialize recommended_cta from JSON string if stored as such
     cta = a.recommended_cta
     if isinstance(cta, str):
@@ -235,6 +245,17 @@ def _serialize_action(a: Action) -> dict[str, Any]:
             cta = json.loads(cta)
         except (json.JSONDecodeError, TypeError):
             pass  # Keep as string if not valid JSON
+
+    extracted_data = dict(a.extracted_data) if isinstance(a.extracted_data, dict) else None
+    if extracted_data is not None:
+        extracted_data.pop("account_number", None)
+        masked_identifier = normalize_masked_account_identifier(
+            extracted_data.get("account_identifier")
+        )
+        if masked_identifier:
+            extracted_data["account_identifier"] = masked_identifier
+        else:
+            extracted_data.pop("account_identifier", None)
 
     return {
         "id": a.id,
@@ -251,11 +272,18 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         "risk_score": a.risk_score,
         "status": a.status,
         "recommended_cta": cta,
+        "action_ready": bool(a.action_ready),
+        "review_state": a.review_state or ("ready" if a.action_ready else "needs_review"),
+        "needs_review_url": (
+            f"#/triage?type=action_classification&item={a.review_item_id}"
+            if a.review_item_id
+            else None
+        ),
         "correspondent": a.correspondent,
         "document_date": a.document_date.isoformat() if a.document_date else None,
         "document_type": a.document_type,
         "tags": a.tags if isinstance(a.tags, list) else None,
-        "extracted_data": a.extracted_data if isinstance(a.extracted_data, dict) else None,
+        "extracted_data": extracted_data,
         "ai_reasoning": a.ai_reasoning,
         "version": a.version or 1,
         "preview_url": _build_preview_url(a.document_id),
@@ -306,11 +334,14 @@ async def _database_counts() -> dict[str, int]:
     db = get_session()
     try:
         await _resurface_expired_snoozes(db)
-        pending = db.query(Action).filter_by(status="pending").count()
-        acknowledged = db.query(Action).filter_by(status="acknowledged").count()
-        completed = db.query(Action).filter_by(status="completed").count()
-        dismissed = db.query(Action).filter_by(status="dismissed").count()
-        snoozed = db.query(Action).filter_by(status="snoozed").count()
+        trusted = Action.action_ready.is_(True)
+        pending = db.query(Action).filter(Action.status == "pending", trusted).count()
+        acknowledged = db.query(Action).filter(
+            Action.status == "acknowledged", trusted
+        ).count()
+        completed = db.query(Action).filter(Action.status == "completed", trusted).count()
+        dismissed = db.query(Action).filter(Action.status == "dismissed", trusted).count()
+        snoozed = db.query(Action).filter(Action.status == "snoozed", trusted).count()
         not_an_action = db.query(Action).filter_by(status="not_an_action").count()
         return {
             "pending": pending,
@@ -610,6 +641,7 @@ async def list_actions(
     tag: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    include_not_ready: bool = False,
 ) -> dict[str, Any]:
     """List action items from the database with optional status/document_type/tag filters."""
     _sync_action_queue_settings(request)
@@ -618,6 +650,8 @@ async def list_actions(
     try:
         await _resurface_expired_snoozes(db)
         query = db.query(Action)
+        if not include_not_ready:
+            query = query.filter(Action.action_ready.is_(True))
         if status:
             query = query.filter_by(status=status)
         if document_type:
@@ -722,8 +756,16 @@ async def update_action(
         risk_inputs_changed = False
         status_changed = False
 
-        if "action_type" in supplied_fields:
-            action.action_type = body.action_type
+        feedback_changed = False
+        routed_to_review = False
+        if "action_type" in supplied_fields and body.action_type != action.action_type:
+            _, feedback_changed = record_action_feedback(
+                db,
+                action,
+                feedback_type="misclassified",
+                corrected_action_type=body.action_type,
+                reason="Corrected from Action Queue",
+            )
             risk_inputs_changed = True
         if "title" in supplied_fields:
             action.title = body.title
@@ -743,6 +785,16 @@ async def update_action(
 
         if "status" in supplied_fields or "snoozed_until" in supplied_fields:
             effective_status = body.status or action.status
+            if (
+                effective_status == "completed"
+                and (action.action_type or "").upper() in {"FILE", "ARCHIVE"}
+            ):
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=409,
+                    detail="Use the file action to complete FILE or ARCHIVE work",
+                )
             snoozed_until = None
             if effective_status == "snoozed":
                 if not body.snoozed_until:
@@ -777,8 +829,37 @@ async def update_action(
         if risk_inputs_changed:
             recalculate_action_risk(action)
 
-        action.version = (action.version or 1) + 1
+        readiness_inputs_changed = bool(
+            supplied_fields.intersection({"action_type", "title", "amount"})
+        )
+        if "action_type" in supplied_fields:
+            refresh_recommended_cta(action)
+        if readiness_inputs_changed and not action_has_critical_details(action):
+            route_action_to_review(
+                db,
+                action,
+                reason=f"{action.action_type} is missing critical action details after correction",
+            )
+            routed_to_review = True
+        elif readiness_inputs_changed and action.review_state != "needs_review":
+            mark_action_ready(action)
+
+        if not feedback_changed:
+            action.version = (action.version or 1) + 1
         db.commit()
+        if routed_to_review:
+            try:
+                await project_action_metadata(action, action_status=None)
+            except Exception as exc:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "Action moved to Needs Review, but stale Paperless action "
+                        f"metadata could not be cleared: {exc}"
+                    ),
+                ) from exc
 
         # Sync status to Paperless (best-effort — don't fail the user action)
         if "status" in supplied_fields and (
@@ -793,6 +874,73 @@ async def update_action(
                 logger=logging.getLogger(__name__),
             )
 
+        return _serialize_action(action)
+    finally:
+        db.close()
+
+
+@router.post("/actions/{action_id}/review")
+async def send_action_to_review(request: Request, action_id: int) -> dict[str, Any]:
+    """Route a trusted action back to Needs Review without changing lifecycle."""
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        action = db.query(Action).filter_by(id=action_id).first()
+        if not action:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        route_action_to_review(db, action, reason="User requested action-classification review")
+        action.version = (action.version or 1) + 1
+        db.commit()
+        try:
+            await project_action_metadata(action, action_status=None)
+        except Exception as exc:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Action moved to Needs Review, but stale Paperless action "
+                    f"metadata could not be cleared: {exc}"
+                ),
+            ) from exc
+        return _serialize_action(action)
+    finally:
+        db.close()
+
+
+@router.post("/actions/{action_id}/file")
+async def file_action(request: Request, action_id: int) -> dict[str, Any]:
+    """File a FILE/ARCHIVE item in Paperless and complete it at the source."""
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        action = db.query(Action).filter_by(id=action_id).first()
+        if not action:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        try:
+            await file_action_in_paperless(db, action)
+        except PermissionError as exc:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            from fastapi import HTTPException
+
+            db.rollback()
+            raise HTTPException(
+                status_code=502,
+                detail=f"Paperless filing failed; OWL action remains open: {exc}",
+            ) from exc
         return _serialize_action(action)
     finally:
         db.close()
@@ -833,6 +981,14 @@ async def bulk_action(request: Request, body: BulkActionRequest) -> dict[str, An
         actions = db.query(Action).filter(Action.id.in_(body.action_ids)).all()
         if not actions:
             raise HTTPException(status_code=404, detail="No matching actions found")
+        if body.action == "complete" and any(
+            (action.action_type or "").upper() in {"FILE", "ARCHIVE"}
+            for action in actions
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="FILE and ARCHIVE work must use the source filing action",
+            )
 
         affected = 0
         sync_actions: list[Action] = []

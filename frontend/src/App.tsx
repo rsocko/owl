@@ -9,6 +9,7 @@ import StatementSeriesDetail from './pages/StatementSeriesDetail';
 import CorrespondentReview from './pages/CorrespondentReview';
 import EobWorkspace from './pages/EobWorkspace';
 import ActionQueue from './pages/ActionQueue';
+import ActionQueueOperations from './pages/ActionQueueOperations';
 import TriageQueue from './pages/TriageQueue';
 import MetadataCorrection from './pages/MetadataCorrection';
 import ManualMatchSearch from './pages/ManualMatchSearch';
@@ -50,6 +51,7 @@ function App() {
             <Route path="/eob/benchmarks" element={<BenchmarkHistory />} />
             <Route path="/eob/manual-search" element={<ManualMatchSearch />} />
             <Route path="/action-queue" element={<ActionQueue />} />
+            <Route path="/action-queue/operations" element={<ActionQueueOperations />} />
             <Route path="/triage" element={<TriageQueue />} />
             <Route path="/triage/manual-search" element={<ManualMatchSearch />} />
             <Route path="/metadata/:docId" element={<MetadataCorrection />} />

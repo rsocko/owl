@@ -5,24 +5,134 @@ sidebar_position: 1
 status: active
 ---
 
-:::warning Implementation Divergence
-This design document describes the **original architecture vision**. The actual implementation differs significantly:
+# Current Product Contract
 
-**Implemented (current):**
-- FastAPI REST API (`/api/queue/` endpoints)
-- Ollama LLM via Bifrost gateway for document analysis (single-prompt JSON extraction)
-- SQLite via SQLAlchemy (Actions + ProcessingHistory tables)
-- Rule-based fallback analyzer
-- Paperless-NGX integration with tag-based enrichment
-- CLI interface for pipeline execution
+## North star and ownership
 
-**Not implemented (still planned in this doc):**
-- spaCy NER / DistilBERT classification (replaced by Ollama)
-- Separate classifier → extractor → intent pipeline stages (unified into single LLM call)
-- Streamlit/Vue.js dashboard (API-only currently)
-- Home Assistant integration
-- n8n orchestration
-- Feedback/retraining loop
+OWL should help a person act on documents without asking them to interpret an
+uncertain classifier guess first. Product surfaces have distinct ownership:
+
+| Surface | Owns |
+|---------|------|
+| **Needs Review** | What OWL should believe. It receives uncertain or critically incomplete action classifications and supports confirm, correct, no action, and re-evaluate. |
+| **Action Queue** | Trusted, actionable real-world work. It is optimized for daily completion rather than pipeline diagnosis or historical reporting. |
+| **Admin / Action Queue Operations** | Pipeline health, custom-field checks, custom and dry runs, backfills, metadata refresh, and troubleshooting. |
+| **Mission Control** | Cross-system prioritization of trusted OWL actions. It does not become the source of truth for document analysis, Paperless metadata, OWL lifecycle, or classifier corrections. |
+
+## Readiness routing
+
+`action_ready` is the trust boundary. `review_state` explains the state:
+
+```mermaid
+stateDiagram-v2
+    [*] --> ready: confident + actionable + critical details present
+    [*] --> needs_review: low confidence or critical details missing
+    needs_review --> ready: confirm/correct with sufficient details
+    needs_review --> needs_review: correction remains incomplete
+    needs_review --> resolved_no_action: false positive
+    needs_review --> needs_review: re-evaluate remains uncertain
+    ready --> needs_review: send to review
+    ready --> resolved_no_action: false positive
+```
+
+The configured Action Queue confidence threshold remains the confidence policy;
+readiness does not introduce a second magic threshold. A title is critical for
+all action types. PAY also requires an amount. Confident actionable items bypass
+review, confident no-action assessments file automatically, and uncertain
+interpretations remain absent from the default Action Queue and Mission Control
+feeds until resolved. Needs Review URLs use
+`#/triage?type=action_classification&item={review_item_id}` and must select the
+specific review item.
+
+## Daily Action Queue
+
+The primary viewport contains a compact last-run/pipeline status, Refresh, Run
+now, persistent quick type filters, search, and grouped action cards. It does
+not contain KPI cards, historical-resolution progress, health checks, backfill,
+dry-run, custom-run, or custom-field controls.
+
+Pending actions are grouped in this fixed order: **Overdue**, **Today**,
+**Next 7 days**, **Later**, **No due date**. Each group initially displays 15
+items and supports collapse and Show more. Within a group the deterministic
+order is:
+
+1. Exact due date, earliest first.
+2. Action type: PAY, RESPOND, SIGN, SCHEDULE, TASK, REVIEW, SHARE, FILE, ARCHIVE.
+3. Newest discovery first, then descending action ID.
+
+The deadline bucket and exact date always outrank action type. Quick filters are
+Pay, Respond, Sign, Schedule, and File / Archive; their selection persists
+locally between visits.
+
+## Contextual action and completion
+
+The document flyout keeps the PDF preview and exposes the normalized
+`recommended_cta` plus safe extracted links or phone details. Opening an
+external CTA never completes an action. After returning, the user can Mark
+done or Remind later. **Something's wrong** is the exceptional path:
+
+- Wrong action type records `misclassified` feedback, updates the current type
+  and CTA, and continues in place when critical details remain sufficient.
+- Relevant title, summary, deadline, amount, urgency, and correspondent details
+  can be corrected in place.
+- A correction that remains critically incomplete routes to Needs Review.
+- **No action needed** means false positive only. It records `not_an_action`,
+  resolves the item, and removes it from actionable feeds.
+
+Original and rejected guesses remain in OWL feedback/audit history. They are
+never rendered as current authoritative metadata.
+
+FILE and ARCHIVE mean filing the document, not deleting it and not invoking a
+separate Paperless archival feature. **File in Paperless** is a source action:
+it removes only configured intake/monitor tags, writes the resolved Action
+Status, completes the OWL action, and refreshes the UI. Paperless mutation
+happens before local completion; a Paperless failure is shown and leaves the
+local action open rather than reporting false success.
+
+## Paperless metadata policy
+
+OWL projects canonical metadata through the shared metadata registry. Durable
+facts that remain true regardless of action disposition may remain, including
+Document Amount, canonical invoice/reference/provider facts, and a safely
+masked Account Identifier. Raw account numbers are removed before persistence;
+only a short masked value such as `ending 6789` may be projected.
+
+Rejected or corrected action-specific and legacy inferred fields are cleared or
+replaced. `not_an_action` clears action-specific inference while retaining
+neutral durable facts. OWL does not create ad-hoc Paperless custom fields for
+URLs, phone numbers, or email addresses.
+
+## Mission Control compatibility
+
+The connector contract is additive and documented in
+[Mission Control Integration](../../guide/mission-control-integration.md).
+Existing flat-array, lifecycle, snooze, and feedback behavior remains. The
+default list excludes not-ready actions; diagnostic consumers may explicitly
+request them. Corrected fields and `recommended_cta` are serialized from the
+current action immediately.
+
+SQLite startup migration adds readiness fields to existing databases. Existing
+actions default to ready so legacy trusted tasks do not disappear. New pipeline
+results are gated before they enter trusted feeds.
+
+## Non-goals
+
+- Mission Control does not own OWL classification, Paperless metadata, or
+  correction history.
+- Opening a URL or phone CTA does not imply completion.
+- Action Queue is not a pipeline operations dashboard or historical analytics
+  dashboard.
+- No-action is not a synonym for a different action type or "won't do."
+- Filing does not delete a document or remove unrelated Paperless tags.
+- OWL does not persist full sensitive account numbers or create contact/link
+  custom fields.
+
+:::warning Historical architecture
+The sections below preserve the original architecture vision for context. Where
+they conflict with the current product contract above, the current contract is
+authoritative. The implementation now uses FastAPI, React, SQLAlchemy/SQLite,
+an LLM through Bifrost with a rule-based fallback, and shared Paperless
+integration rather than the originally proposed multi-model pipeline.
 :::
 
 # Design Document: Paperless-NGX Action Queue Agent
@@ -301,7 +411,7 @@ graph TD
   "document_id": 12345,
   "document_url": "http://paperless/documents/12345",
   "action_type": "PAY",
-  "title": "Pay Electric Bill - Account #123456",
+  "title": "Pay Electric Bill",
   "description": "Electric utility bill from PowerCo",
   "due_date": "2026-03-01",
   "amount": "$142.35",
@@ -310,7 +420,7 @@ graph TD
   "risk_score": 25,
   "priority_score": 85,
   "extracted_data": {
-    "account_number": "123456",
+    "account_identifier": "ending 3456",
     "payment_url": "https://powerco.com/pay",
     "due_date_original": "March 1, 2026",
     "statement_date": "February 1, 2026"
@@ -381,7 +491,7 @@ flowchart TD
 ```
 ┌─────────────────────────────────────────┐
 │ 🔴 HIGH PRIORITY                        │
-│ Pay Electric Bill - Account #123456    │
+│ Pay Electric Bill                      │
 │ PowerCo Electric                        │
 │ Due: March 1, 2026 (15 days)          │
 │ Amount: $142.35                         │

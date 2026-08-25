@@ -1,6 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import ActionQueue from './ActionQueue';
+import ActionQueue, {
+  ACTION_GROUP_BATCH_SIZE,
+  deadlineBucket,
+  groupAndSortActions,
+} from './ActionQueue';
 import { customReminderUntil, reminderUntil } from './actionReminder';
 import { buildBackfillBody, buildQueueRunBody } from './actionQueueRunBody';
 import { TooltipProvider } from '../components/ui';
@@ -158,22 +162,24 @@ beforeEach(() => {
 });
 
 describe('ActionQueue', () => {
-  it('shows Paperless tag names in their configured colors', async () => {
+  it('preserves Paperless metadata in the document flyout', async () => {
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
 
+    fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
     const inbox = await screen.findByText('Inbox');
     expect(inbox).toHaveStyle({ backgroundColor: '#1f6feb', color: '#ffffff' });
     expect(screen.getByText('Utilities')).toBeTruthy();
     expect(screen.getByText('Bills')).toBeTruthy();
+    expect(screen.getByText('Household')).toBeTruthy();
     expect(screen.queryByText('343')).toBeNull();
-    expect(screen.getByText('+1')).toBeTruthy();
   });
 
   it('shows outcome-oriented actions instead of acknowledge and dismiss', async () => {
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
 
+    fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Done' })).toBeTruthy();
+      expect(screen.getAllByRole('button', { name: 'Done' }).length).toBeGreaterThan(0);
     });
 
     expect(screen.getByRole('button', { name: 'Remind me later…' })).toBeTruthy();
@@ -183,13 +189,37 @@ describe('ActionQueue', () => {
     expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
   });
 
-  it('labels the action list for the selected status', async () => {
+  it('requires source filing for FILE work instead of generic completion', async () => {
+    const fileAction = {
+      ...initialAction,
+      action_type: 'FILE',
+      title: 'File statement',
+      recommended_cta: null,
+    };
+    actionsMock.mockReset();
+    actionsMock.mockResolvedValue({ actions: [fileAction], total: 1 });
+
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
 
-    await screen.findByText('Pending actions (1)');
-    fireEvent.click(screen.getByRole('radio', { name: 'Remind later (0)' }));
+    fireEvent.click(await screen.findByRole('button', { name: /open file statement/i }));
+    expect((await screen.findAllByRole('button', { name: 'File in Paperless' })).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Remind me later…' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
 
-    expect(await screen.findByText('Remind later actions (1)')).toBeTruthy();
+    fireEvent.click(screen.getByRole('checkbox', { name: /select visible/i }));
+    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
+  });
+
+  it('groups pending work by deadline instead of historical progress', async () => {
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    expect(await screen.findByRole('button', { name: /overdue/i })).toBeTruthy();
+    expect(screen.queryByText(/of 1 resolved/i)).toBeNull();
+    expect(screen.queryByText('Check services')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Operations' })).toHaveAttribute(
+      'href',
+      '#/action-queue/operations',
+    );
   });
 
   it('shows safe extracted links and useful action details', async () => {
@@ -221,7 +251,7 @@ describe('ActionQueue', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /pay electric bill/i }));
-    fireEvent.click(screen.getByRole('button', { name: /edit details/i }));
+    fireEvent.click(screen.getByRole('button', { name: /correct details/i }));
 
     fireEvent.change(screen.getByLabelText('Action type'), { target: { value: 'TASK' } });
     fireEvent.change(screen.getByLabelText('Task name'), { target: { value: 'Call utility company' } });
@@ -252,13 +282,11 @@ describe('ActionQueue', () => {
   it('explains Paperless metadata changes before marking no action needed', async () => {
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'No action needed' })).toBeTruthy();
-    });
+    fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
     fireEvent.click(screen.getByRole('button', { name: 'No action needed' }));
 
     expect(screen.getByRole('dialog', { name: 'Mark as no action needed?' })).toHaveTextContent(
-      'Document Amount is kept; Action Type, Due Date, Urgency, Summary, and Action Count are cleared.',
+      'keeps durable facts such as Document Amount and masked Account Identifier',
     );
     expect(feedbackMock).not.toHaveBeenCalled();
   });
@@ -297,22 +325,47 @@ describe('ActionQueue', () => {
     });
   });
 
-  it('keeps table sorting and column filters after taking action on an item', async () => {
+  it('persists quick type filters and combines them with search', async () => {
+    window.localStorage.removeItem('owl.actionQueue.typeFilter');
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
 
-    const amountSort = await screen.findByRole('button', { name: 'Sort by Amount' });
-    fireEvent.click(amountSort);
-    fireEvent.click(screen.getByRole('button', { name: 'Filter by Type' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'PAY' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Respond' }));
+    expect(window.localStorage.getItem('owl.actionQueue.typeFilter')).toBe('respond');
+    expect(screen.queryByRole('button', { name: /open pay electric bill/i })).toBeNull();
 
-    await waitFor(() => {
-      expect(updateActionMock).toHaveBeenCalled();
-      expect(screen.getByText('No results match the current filters')).toBeTruthy();
-    });
+    fireEvent.click(screen.getByRole('radio', { name: 'Pay' }));
+    fireEvent.change(screen.getByLabelText('Search actions'), { target: { value: 'missing' } });
+    expect(screen.queryByRole('button', { name: /open pay electric bill/i })).toBeNull();
+  });
+});
 
-    expect(screen.getByRole('button', { name: 'Sort by Amount' })).toHaveTextContent('▼');
-    expect(screen.queryByText('Call utility company')).toBeNull();
+describe('action deadline grouping', () => {
+  const base = {
+    document_title: 'Document',
+    title: 'Action',
+    status: 'pending',
+  };
+
+  it('uses exact deadline buckets and deadline-first deterministic ordering', () => {
+    const now = new Date(2026, 7, 24, 12);
+    const actions = [
+      { ...base, id: 1, action_type: 'FILE', due_date: '2026-08-24', created_at: '2026-08-24T12:00:00Z' },
+      { ...base, id: 2, action_type: 'PAY', due_date: '2026-08-24', created_at: '2026-08-20T12:00:00Z' },
+      { ...base, id: 3, action_type: 'SIGN', due_date: '2026-08-26', created_at: '2026-08-23T12:00:00Z' },
+      { ...base, id: 4, action_type: 'PAY', due_date: '2026-08-25', created_at: '2026-08-01T12:00:00Z' },
+      { ...base, id: 5, action_type: 'RESPOND', due_date: null, created_at: '2026-08-24T13:00:00Z' },
+    ];
+
+    const grouped = groupAndSortActions(actions, now);
+    expect(grouped.today.map((item) => item.id)).toEqual([2, 1]);
+    expect(grouped.next7.map((item) => item.id)).toEqual([4, 3]);
+    expect(grouped.no_due_date.map((item) => item.id)).toEqual([5]);
+    expect(deadlineBucket({ ...base, id: 6, due_date: '2026-08-23' }, now)).toBe('overdue');
+  });
+
+  it('keeps the initial group batch manageable', () => {
+    expect(ACTION_GROUP_BATCH_SIZE).toBeGreaterThanOrEqual(10);
+    expect(ACTION_GROUP_BATCH_SIZE).toBeLessThanOrEqual(20);
   });
 });
 
