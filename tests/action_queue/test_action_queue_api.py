@@ -253,9 +253,7 @@ class TestListActions:
         finally:
             db.close()
 
-        data = seeded_client.get(
-            "/api/queue/actions?include_resolved_no_action=true"
-        ).json()
+        data = seeded_client.get("/api/queue/actions?include_resolved_no_action=true").json()
 
         assert data["total"] == 2
         assert {action["id"] for action in data["actions"]} == {1, 2}
