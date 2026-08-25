@@ -17,6 +17,8 @@ from doc_intelligence_hub.modules.action_queue.obligations import (
     backfill_obligations,
     completion_suggestion,
     linked_documents,
+    manually_link_actions,
+    suggest_related_actions,
     sync_obligation_status,
 )
 
@@ -96,6 +98,43 @@ def test_backfill_groups_legacy_invoice_actions(db):
     assert original.obligation_id is not None
     assert reminder.obligation_id == original.obligation_id
     assert reminder.superseded_by_action_id == original.id
+
+
+def test_suggestions_use_account_and_dates_without_auto_linking(db):
+    original = _pay_action(1, "July water billing", amount=1382.38)
+    original.extracted_data = {"account_identifier": "0513"}
+    copy = _pay_action(2, "READ CODE Total Current Billing", amount=229.0)
+    copy.extracted_data = {"account_identifier": "0513"}
+    db.add_all([original, copy])
+    db.flush()
+
+    suggestions = suggest_related_actions(db, copy)
+
+    assert suggestions[0]["action"].id == original.id
+    assert "same account" in suggestions[0]["reasons"]
+    assert "same correspondent" in suggestions[0]["reasons"]
+    assert "same amount" not in suggestions[0]["reasons"]
+    assert "similar amount" not in suggestions[0]["reasons"]
+    assert suggestions[0]["score"] >= 0.5
+
+
+def test_manual_link_merges_obligations_and_suppresses_related_action(db):
+    primary = _pay_action(1, "July water billing", amount=1382.38)
+    related = _pay_action(2, "READ CODE Total Current Billing", amount=229.0)
+    primary.extracted_data = {"account_identifier": "0513"}
+    related.extracted_data = {"account_identifier": "0513"}
+    db.add_all([primary, related])
+    db.flush()
+    associate_pay_action(db, primary, {"id": 1, "title": primary.document_title})
+    associate_pay_action(db, related, {"id": 2, "title": related.document_title})
+
+    obligation = manually_link_actions(db, primary, related)
+
+    assert primary.obligation_id == obligation.id
+    assert related.obligation_id == obligation.id
+    assert related.superseded_by_action_id == primary.id
+    assert related.action_ready is False
+    assert {document["document_id"] for document in linked_documents(db, primary)} == {1, 2}
 
 
 def test_receipt_suggests_completion_without_closing_action(db):

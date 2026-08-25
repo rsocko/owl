@@ -157,6 +157,54 @@ class TestListActions:
         assert data["total"] == 0
         assert data["actions"] == []
 
+    def test_suggests_and_manually_links_related_pay_action(self, seeded_client):
+        from unittest.mock import AsyncMock, patch
+
+        db = get_session()
+        try:
+            db.add(
+                Action(
+                    id=3,
+                    document_id=43,
+                    document_title="Second water billing copy",
+                    action_type="PAY",
+                    title="Pay electric bill",
+                    amount=125.50,
+                    urgency="HIGH",
+                    confidence=85,
+                    status="pending",
+                    correspondent="Power Co",
+                    extracted_data={"account_identifier": "0513"},
+                )
+            )
+            original = db.query(Action).filter_by(id=1).one()
+            original.extracted_data = {
+                **(original.extracted_data or {}),
+                "account_identifier": "0513",
+            }
+            db.commit()
+        finally:
+            db.close()
+
+        candidates = seeded_client.get("/api/queue/actions/1/link-candidates").json()
+        assert candidates["candidates"][0]["action"]["id"] == 3
+
+        sync_status = AsyncMock()
+        with patch(
+            "doc_intelligence_hub.api.routers.action_queue.sync_action_status",
+            sync_status,
+        ):
+            linked = seeded_client.post(
+                "/api/queue/actions/1/link",
+                json={"related_action_id": 3},
+            )
+        assert linked.status_code == 200
+        assert linked.json()["linked_document_count"] == 2
+        assert sync_status.await_args.args[1].id == 3
+        assert sync_status.await_args.args[2] == "pending"
+        ready = seeded_client.get("/api/queue/actions?status=pending").json()
+        assert [action["id"] for action in ready["actions"]] == [1]
+
     def test_list_actions_resurfaces_expired_snoozes(self, seeded_client):
         seeded_client.post(
             "/api/queue/actions/1/snooze",

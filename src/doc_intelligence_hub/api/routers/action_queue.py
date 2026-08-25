@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import date, datetime
 from typing import Any
 
@@ -47,6 +48,8 @@ from doc_intelligence_hub.modules.action_queue.obligations import (
     backfill_obligations,
     completion_suggestion,
     linked_documents,
+    manually_link_actions,
+    suggest_related_actions,
     sync_obligation_status,
 )
 from doc_intelligence_hub.modules.action_queue.pipeline import get_pipeline_progress, run_pipeline
@@ -183,6 +186,10 @@ class ActionUpdateRequest(BaseModel):
                 )
 
         return self
+
+
+class ActionLinkRequest(BaseModel):
+    related_action_id: int = Field(..., gt=0)
 
 
 class ActionCreateRequest(BaseModel):
@@ -1083,6 +1090,80 @@ async def update_action(
             )
 
         return _serialize_action_with_siblings(db, action)
+    finally:
+        db.close()
+
+
+@router.get("/actions/{action_id}/link-candidates")
+async def list_action_link_candidates(
+    request: Request,
+    action_id: int,
+    q: str | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Suggest related PAY actions for explicit user-reviewed linking."""
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        action = db.query(Action).filter_by(id=action_id).first()
+        if not action:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        suggestions = suggest_related_actions(
+            db,
+            action,
+            query=q,
+            limit=max(1, min(limit, 25)),
+        )
+        return {
+            "action_id": action_id,
+            "candidates": [
+                {
+                    "action": _serialize_action_with_siblings(db, candidate["action"]),
+                    "score": candidate["score"],
+                    "reasons": candidate["reasons"],
+                }
+                for candidate in suggestions
+            ],
+        }
+    finally:
+        db.close()
+
+
+@router.post("/actions/{action_id}/link")
+async def link_action_document(
+    request: Request,
+    action_id: int,
+    body: ActionLinkRequest,
+) -> dict[str, Any]:
+    """Explicitly link another PAY action's document to this obligation."""
+    from fastapi import HTTPException
+
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        primary = db.query(Action).filter_by(id=action_id).first()
+        related = db.query(Action).filter_by(id=body.related_action_id).first()
+        if not primary or not related:
+            raise HTTPException(status_code=404, detail="One or both actions were not found")
+        try:
+            manually_link_actions(db, primary, related)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        primary.version = (primary.version or 1) + 1
+        related.version = (related.version or 1) + 1
+        db.commit()
+        db.refresh(primary)
+        await sync_action_status(
+            db,
+            related,
+            related.status,
+            logger=logging.getLogger(__name__),
+        )
+        return _serialize_action_with_siblings(db, primary)
     finally:
         db.close()
 

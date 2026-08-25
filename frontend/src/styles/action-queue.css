@@ -478,6 +478,7 @@
 }
 
 .aq-sibling-panel,
+.aq-related-panel,
 .aq-operation-dialog {
   display: grid;
   gap: 12px;
@@ -485,6 +486,45 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-raised);
+}
+
+.aq-related-search {
+  display: flex;
+  gap: 8px;
+}
+
+.aq-related-search input {
+  min-width: 0;
+  flex: 1;
+}
+
+.aq-related-candidates {
+  display: grid;
+  gap: 8px;
+}
+
+.aq-related-candidate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.aq-related-candidate-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.aq-related-reasons {
+  margin-top: 4px;
+  color: var(--accent);
+  font-size: 0.72rem;
 }
 
 .aq-sibling-list {
