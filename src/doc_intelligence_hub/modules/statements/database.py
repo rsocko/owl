@@ -319,6 +319,7 @@ CREATE TABLE IF NOT EXISTS external_document_candidates (
     expectation_id TEXT,
     correspondent_id INTEGER,
     reviewed_at TEXT,
+    reviewed_source_generation TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (deployment_id, connector_ref, series_ref),
@@ -424,6 +425,7 @@ class Database:
             "institution_name",
             "account_type",
             "account_last_four",
+            "reviewed_source_generation",
         ):
             if column not in candidate_columns:
                 conn.execute(f"ALTER TABLE external_document_candidates ADD COLUMN {column} TEXT")
@@ -1958,9 +1960,16 @@ class Database:
                 ),
                 review_finding=(
                     "source_candidate_inactive_confirmed_policy_preserved"
-                    if not row["active"] and row["has_confirmed_expectation"]
+                    if (
+                        not row["active"]
+                        and row["reviewed_source_generation"] != row["source_generation"]
+                        and row["has_confirmed_expectation"]
+                    )
                     else "source_candidate_inactive"
-                    if not row["active"]
+                    if (
+                        not row["active"]
+                        and row["reviewed_source_generation"] != row["source_generation"]
+                    )
                     else None
                 ),
                 reviewed_at=row["reviewed_at"],
@@ -2165,7 +2174,8 @@ class Database:
         conn.execute(
             """UPDATE external_document_candidates
                SET outcome = ?, expectation_id = ?, correspondent_id = ?,
-                   reviewed_at = datetime('now'), updated_at = datetime('now')
+                   reviewed_at = datetime('now'), reviewed_source_generation = source_generation,
+                   updated_at = datetime('now')
                WHERE deployment_id = ? AND id = ?""",
             (
                 review.outcome,
