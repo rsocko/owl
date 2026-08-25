@@ -629,7 +629,6 @@ describe('ActionQueue', () => {
       expect.objectContaining({ status: 'completed' }),
     ));
   });
-
   it('suggests and manually links a related PAY action', async () => {
     const relatedAction = {
       ...initialAction,
