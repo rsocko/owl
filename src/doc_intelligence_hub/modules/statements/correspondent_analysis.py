@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import statistics
 from collections import Counter, defaultdict
@@ -25,7 +26,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     TitleRenderExample,
 )
 from doc_intelligence_hub.modules.statements.models import DocumentRecord
-from doc_intelligence_hub.modules.statements.utils import normalize_title, slugify
+from doc_intelligence_hub.modules.statements.utils import normalize_title
 
 _KIND_KEYWORDS: tuple[tuple[DocumentKind, tuple[str, ...]], ...] = (
     ("statement", ("statement",)),
@@ -75,13 +76,18 @@ def analyze_correspondent_policy(
         series = series_by_document.get(str(document.id))
         kind: DocumentKind = "statement" if series else classify_document_kind(document)
         normalized = _normalized_document_title(document) or kind
-        account_key = document.account_identifier or _account_group_key(
-            document.title, identifier_counts
-        )
+        account_key = normalize_masked_account_identifier(
+            document.account_identifier
+        ) or _account_group_key(document.title, identifier_counts)
+        metadata_key = _metadata_group_key(document)
         group_key = (
             f"series:{series['id']}"
             if series
-            else f"title:{normalized}:account:{account_key or 'none'}"
+            else (
+                f"account:{account_key}"
+                if account_key
+                else metadata_key or f"title:{normalized}"
+            )
         )
         key = (kind, group_key)
         groups[key].append(document)
@@ -115,6 +121,7 @@ def analyze_correspondent_policy(
                 correspondent_id,
                 correspondent_name,
                 kind,
+                group_key,
                 normalized_title,
                 grouped_documents,
                 matching_series,
@@ -166,6 +173,7 @@ def _build_suggestion(
     correspondent_id: int,
     correspondent_name: str,
     kind: DocumentKind,
+    group_key: str,
     normalized_title: str,
     documents: list[DocumentRecord],
     statement_series: list[dict],
@@ -195,10 +203,7 @@ def _build_suggestion(
         reason_codes.append("existing_statement_series")
 
     return ExpectationPolicySuggestion(
-        suggestion_key=slugify(
-            f"{correspondent_id}-{kind}-{bound_series_id or normalized_title}"
-            f"-{candidate_number or ''}"
-        ),
+        suggestion_key=_suggestion_key(correspondent_id, kind, group_key),
         kind=kind,
         series_discriminator=discriminator,
         statement_series_id=bound_series_id if kind == "statement" else None,
@@ -223,6 +228,22 @@ def _build_suggestion(
         document_ids=[document.id for document in ordered],
         sample_document_ids=[document.id for document in ordered[-3:]],
     )
+
+
+def _suggestion_key(correspondent_id: int, kind: DocumentKind, group_key: str) -> str:
+    identity = f"{correspondent_id}:{kind}:{group_key}".encode()
+    return f"{correspondent_id}-{kind}-{hashlib.sha256(identity).hexdigest()[:16]}"
+
+
+def _metadata_group_key(document: DocumentRecord) -> str | None:
+    if document.document_type_id is not None:
+        return f"document-type-id:{document.document_type_id}"
+    document_type = normalize_title(document.document_type or "")
+    if document_type:
+        return f"document-type:{document_type}"
+    if document.tag_ids:
+        return "tags:" + ",".join(str(tag_id) for tag_id in sorted(set(document.tag_ids)))
+    return None
 
 
 def _dominant_title_pattern(documents: list[DocumentRecord]) -> str:
@@ -280,16 +301,11 @@ def _redact_account_identifiers(
 
 
 def classify_document_kind(document: DocumentRecord) -> DocumentKind:
-    evidence = " ".join(
-        [
-            document.document_type or "",
-            document.title,
-            *document.tags,
-        ]
-    ).casefold()
-    for kind, keywords in _KIND_KEYWORDS:
-        if any(keyword in evidence for keyword in keywords):
-            return kind
+    for evidence in (document.document_type or "", " ".join(document.tags), document.title):
+        normalized_evidence = evidence.casefold()
+        for kind, keywords in _KIND_KEYWORDS:
+            if any(keyword in normalized_evidence for keyword in keywords):
+                return kind
     return "other"
 
 
