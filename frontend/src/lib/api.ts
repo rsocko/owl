@@ -178,6 +178,8 @@ export const endpoints = {
     refreshMetadata: (body?: unknown) => api.post('/api/queue/actions/refresh-metadata', body),
     feedback: (id: string, body: { feedback_type: string; corrected_action_type?: string; reason?: string }) =>
       api.post(`/api/queue/actions/${id}/feedback`, body),
+    file: (id: string) => api.post(`/api/queue/actions/${id}/file`),
+    sendToReview: (id: string) => api.post(`/api/queue/actions/${id}/review`),
     settings: () => api.get('/api/queue/settings'),
     updateSettings: (body: unknown) => api.put('/api/queue/settings', body),
     metadataTags: () => api.get('/api/queue/metadata/tags'),

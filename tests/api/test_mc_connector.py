@@ -113,7 +113,11 @@ class TestMCUpdateAction:
 
     def test_mark_done(self, client, seed_actions):
         actions = client.get("/api/action-queue/actions?status=pending").json()
-        action_id = actions[0]["id"]
+        action_id = next(
+            action["id"]
+            for action in actions
+            if action["action_type"].upper() not in {"FILE", "ARCHIVE"}
+        )
 
         resp = client.patch(
             f"/api/action-queue/actions/{action_id}",
@@ -124,13 +128,22 @@ class TestMCUpdateAction:
         assert data["new_status"] == "completed"
 
     def test_bodyless_patch_keeps_legacy_done_default(self, client, seed_actions):
-        action_id = client.get("/api/action-queue/actions?status=pending").json()[0]["id"]
+        actions = client.get("/api/action-queue/actions?status=pending").json()
+        action_id = next(
+            action["id"]
+            for action in actions
+            if action["action_type"].upper() not in {"FILE", "ARCHIVE"}
+        )
         resp = client.patch(f"/api/action-queue/actions/{action_id}")
         assert resp.status_code == 200
         assert resp.json()["new_status"] == "completed"
 
     def test_completion_syncs_to_paperless_and_tracks_status(self, client, seed_actions):
-        action_data = client.get("/api/action-queue/actions?status=pending").json()[0]
+        action_data = next(
+            action
+            for action in client.get("/api/action-queue/actions?status=pending").json()
+            if action["action_type"].upper() not in {"FILE", "ARCHIVE"}
+        )
         action_id = action_data["id"]
         enricher_patch, enricher = _paperless_enricher()
 
@@ -200,6 +213,24 @@ class TestMCUpdateAction:
             assert action.snoozed_until is None
         finally:
             db.close()
+
+    def test_file_action_requires_file_document_source_action(self, client, seed_actions):
+        action_id = int(client.get("/api/action-queue/actions").json()[0]["id"])
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=action_id).one()
+            action.action_type = "FILE"
+            db.commit()
+        finally:
+            db.close()
+
+        resp = client.patch(
+            f"/api/action-queue/actions/{action_id}",
+            json={"status": "done"},
+        )
+
+        assert resp.status_code == 409
+        assert "file_document" in resp.json()["error"]["message"]
 
     def test_rejects_unsupported_status(self, client, seed_actions):
         action_id = client.get("/api/action-queue/actions").json()[0]["id"]

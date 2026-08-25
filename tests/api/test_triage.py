@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from doc_intelligence_hub.modules.triage.database import (
+    create_action_classification_review,
     create_queue_item,
 )
 
@@ -45,6 +46,42 @@ def seed_triage():
         ),
     ]
     return items
+
+
+@pytest.fixture()
+def action_review(client):
+    from doc_intelligence_hub.modules.action_queue.database import (
+        Action,
+    )
+    from doc_intelligence_hub.modules.action_queue.database import (
+        get_session as get_action_session,
+    )
+
+    session = get_action_session()
+    try:
+        action = Action(
+            document_id=779,
+            document_title="Uncertain notice",
+            action_type="RESPOND",
+            title="Respond to notice",
+            confidence=55,
+            action_ready=False,
+            review_state="needs_review",
+        )
+        session.add(action)
+        session.commit()
+        item = create_action_classification_review(
+            action_id=action.id,
+            document_id=action.document_id,
+            confidence=55,
+            reason="Below configured threshold",
+            metadata={"title": action.title, "action_type": action.action_type},
+        )
+        action.review_item_id = item["id"]
+        session.commit()
+        return {"action_id": action.id, "item_id": item["id"]}
+    finally:
+        session.close()
 
 
 class TestTriageQueueList:
@@ -151,6 +188,254 @@ class TestTriageResolve:
             json={},
         )
         assert resp.status_code == 422
+
+    def test_action_classification_confirm_makes_source_ready(self, client):
+        from unittest.mock import AsyncMock, patch
+
+        from doc_intelligence_hub.modules.action_queue.database import (
+            Action,
+        )
+        from doc_intelligence_hub.modules.action_queue.database import (
+            get_session as get_action_session,
+        )
+
+        session = get_action_session()
+        try:
+            action = Action(
+                document_id=777,
+                document_title="Uncertain bill",
+                action_type="PAY",
+                title="Pay bill",
+                amount=25.0,
+                confidence=55,
+                action_ready=False,
+                review_state="needs_review",
+            )
+            session.add(action)
+            session.commit()
+            item = create_action_classification_review(
+                action_id=action.id,
+                document_id=777,
+                confidence=55,
+                reason="Below configured threshold",
+                metadata={"title": action.title, "action_type": "PAY"},
+            )
+            action.review_item_id = item["id"]
+            session.commit()
+            action_id = action.id
+        finally:
+            session.close()
+
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.lifecycle.project_action_metadata",
+            new=AsyncMock(),
+        ):
+            resp = client.post(
+                f"/api/triage/queue/{item['id']}/resolve",
+                json={"action": "confirm"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["action_ready"] is True
+        session = get_action_session()
+        try:
+            action = session.query(Action).filter_by(id=action_id).one()
+            assert action.review_state == "ready"
+            assert action.review_item_id is None
+        finally:
+            session.close()
+
+    def test_action_classification_confirm_keeps_incomplete_source_in_review(self, client):
+        from doc_intelligence_hub.modules.action_queue.database import (
+            Action,
+        )
+        from doc_intelligence_hub.modules.action_queue.database import (
+            get_session as get_action_session,
+        )
+
+        session = get_action_session()
+        try:
+            action = Action(
+                document_id=778,
+                document_title="Uncertain bill",
+                action_type="PAY",
+                title="Pay bill",
+                amount=None,
+                confidence=55,
+                action_ready=False,
+                review_state="needs_review",
+            )
+            session.add(action)
+            session.commit()
+            item = create_action_classification_review(
+                action_id=action.id,
+                document_id=778,
+                confidence=55,
+                reason="Missing critical amount",
+                metadata={"title": action.title, "action_type": "PAY"},
+            )
+            action.review_item_id = item["id"]
+            session.commit()
+            action_id = action.id
+        finally:
+            session.close()
+
+        response = client.post(
+            f"/api/triage/queue/{item['id']}/resolve",
+            json={"action": "confirm"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["action_ready"] is False
+        assert response.json()["review_state"] == "needs_review"
+        session = get_action_session()
+        try:
+            action = session.get(Action, action_id)
+            assert action is not None
+            assert action.action_ready is False
+            assert action.review_state == "needs_review"
+        finally:
+            session.close()
+
+    def test_incomplete_correction_refreshes_existing_review_metadata(self, client):
+        from unittest.mock import AsyncMock, patch
+
+        from doc_intelligence_hub.modules.action_queue.database import Action
+        from doc_intelligence_hub.modules.action_queue.database import (
+            get_session as get_action_session,
+        )
+
+        session = get_action_session()
+        try:
+            action = Action(
+                document_id=779,
+                document_title="Uncertain bill",
+                action_type="PAY",
+                title="Original guess",
+                amount=None,
+                confidence=55,
+                action_ready=False,
+                review_state="needs_review",
+            )
+            session.add(action)
+            session.commit()
+            item = create_action_classification_review(
+                action_id=action.id,
+                document_id=779,
+                confidence=55,
+                reason="Missing critical amount",
+                metadata={},
+            )
+            action.review_item_id = item["id"]
+            session.commit()
+        finally:
+            session.close()
+
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.lifecycle.project_action_metadata",
+            new=AsyncMock(),
+        ):
+            response = client.post(
+                f"/api/triage/queue/{item['id']}/resolve",
+                json={
+                    "action": "correct",
+                    "payload": {"title": "Corrected payment"},
+                },
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["action_ready"] is False
+        assert payload["status"] == "pending"
+        assert payload["metadata"]["title"] == "Corrected payment"
+        assert "critical details" in payload["reason"]
+        refreshed = client.get(f"/api/triage/queue/{item['id']}").json()
+        assert refreshed["metadata"]["title"] == "Corrected payment"
+        assert "critical details" in refreshed["reason"]
+
+    def test_resolved_action_classification_cannot_be_resolved_again(self, client, action_review):
+        from unittest.mock import AsyncMock, patch
+
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.lifecycle.project_action_metadata",
+            new=AsyncMock(),
+        ):
+            first = client.post(
+                f"/api/triage/queue/{action_review['item_id']}/resolve",
+                json={"action": "confirm"},
+            )
+        assert first.status_code == 200
+
+        second = client.post(
+            f"/api/triage/queue/{action_review['item_id']}/resolve",
+            json={"action": "no_action"},
+        )
+        assert second.status_code == 409
+        assert "already resolved" in second.json()["error"]["message"]
+
+    def test_action_classification_re_evaluate_stays_open_when_still_uncertain(
+        self, client, action_review
+    ):
+        from unittest.mock import AsyncMock, patch
+
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.pipeline.run_pipeline",
+            new=AsyncMock(return_value={"processed": 0, "no_action": 1}),
+        ):
+            response = client.post(
+                f"/api/triage/queue/{action_review['item_id']}/resolve",
+                json={"action": "re_evaluate"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["action_ready"] is False
+        assert response.json()["review_state"] == "needs_review"
+        item = client.get(f"/api/triage/queue/{action_review['item_id']}").json()
+        assert item["status"] == "pending"
+
+    def test_action_classification_rejects_generic_bulk_and_dismiss(self, client, action_review):
+        bulk_response = client.post(
+            "/api/triage/queue/bulk",
+            json={"action": "confirm", "item_ids": [action_review["item_id"]]},
+        )
+        dismiss_response = client.post(f"/api/triage/queue/{action_review['item_id']}/dismiss")
+
+        assert bulk_response.status_code == 422
+        assert dismiss_response.status_code == 422
+        item = client.get(f"/api/triage/queue/{action_review['item_id']}").json()
+        assert item["status"] == "pending"
+
+    def test_action_classification_undo_is_rejected(self, client, action_review):
+        from unittest.mock import AsyncMock, patch
+
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.lifecycle.project_action_metadata",
+            new=AsyncMock(),
+        ):
+            confirm_response = client.post(
+                f"/api/triage/queue/{action_review['item_id']}/resolve",
+                json={"action": "confirm"},
+            )
+        undo_response = client.post(f"/api/triage/queue/{action_review['item_id']}/undo")
+
+        assert confirm_response.status_code == 200
+        assert undo_response.status_code == 422
+
+    def test_action_classification_confirm_projects_pending_metadata(self, client, action_review):
+        from unittest.mock import AsyncMock, patch
+
+        projection = AsyncMock()
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.lifecycle.project_action_metadata",
+            new=projection,
+        ):
+            response = client.post(
+                f"/api/triage/queue/{action_review['item_id']}/resolve",
+                json={"action": "confirm"},
+            )
+
+        assert response.status_code == 200
+        projection.assert_awaited_once()
+        assert projection.await_args.kwargs["action_status"] == "pending"
 
 
 class TestTriageDefer:

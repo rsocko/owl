@@ -57,12 +57,22 @@ interface StatsResponse {
   pending: number;
 }
 
-type ItemTypeFilter = 'all' | 'eob_match_review' | 'grouping_anomaly' | 'orphan_document' | 'duplicate_document';
+type ItemTypeFilter = 'all' | 'action_classification' | 'eob_match_review' | 'grouping_anomaly' | 'orphan_document' | 'duplicate_document';
 type StatusFilter = 'pending' | 'deferred' | 'resolved';
 type ToastState = { message: string; tone?: 'success' | 'error'; undoId?: string } | null;
+type ActionCorrectionDraft = {
+  action_type: string;
+  title: string;
+  summary: string;
+  due_date: string;
+  amount: string;
+};
+
+const ACTION_TYPES = ['PAY', 'RESPOND', 'SIGN', 'SCHEDULE', 'TASK', 'REVIEW', 'SHARE', 'FILE', 'ARCHIVE'];
 
 const ITEM_TYPE_FILTERS: ReadonlySet<ItemTypeFilter> = new Set([
   'all',
+  'action_classification',
   'eob_match_review',
   'grouping_anomaly',
   'orphan_document',
@@ -95,6 +105,7 @@ function timeAgo(value?: string | null) {
 
 function typeLabel(itemType: string): string {
   switch (itemType) {
+    case 'action_classification': return 'ACTION';
     case 'eob_match_review': return 'EOB';
     case 'grouping_anomaly': return 'GROUPING';
     case 'orphan_document': return 'ORPHAN';
@@ -105,6 +116,7 @@ function typeLabel(itemType: string): string {
 
 function typeBadgeTone(itemType: string) {
   switch (itemType) {
+    case 'action_classification': return 'warning' as const;
     case 'eob_match_review': return 'info' as const;
     case 'grouping_anomaly': return 'warning' as const;
     case 'orphan_document': return 'danger' as const;
@@ -127,6 +139,9 @@ function priorityBadgeTone(priority: number) {
 
 function itemTitle(item: TriageItem): string {
   const meta = item.metadata || {};
+  if (item.item_type === 'action_classification') {
+    return String(meta.title || meta.document_title || `Action #${meta.action_id ?? item.target_id}`);
+  }
   if (item.item_type === 'eob_match_review') {
     const eobId = meta.eob_document_id ?? '?';
     const billId = meta.bill_document_id ?? '?';
@@ -155,6 +170,7 @@ function TriageDetailBreadcrumb({ item }: { item: TriageItem }) {
     grouping_anomaly: '📊',
     orphan_document: '📎',
     duplicate_document: '📋',
+    action_classification: '⚡',
   };
   const icon = typeIcons[item.item_type] ?? '📄';
 
@@ -220,6 +236,7 @@ function reviewActionLabel(action: string): string {
 export default function TriageQueue() {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryTypeFilter = itemTypeFilterFromQuery(searchParams.get('type'));
+  const queryItemId = searchParams.get('item');
 
   // Data state
   const [items, setItems] = useState<TriageItem[]>([]);
@@ -235,6 +252,7 @@ export default function TriageQueue() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const lastCheckedRef = useRef<string | null>(null);
+  const [actionCorrection, setActionCorrection] = useState<ActionCorrectionDraft | null>(null);
 
   // UI state
   const [collapsed, setCollapsed] = useState(false);
@@ -307,6 +325,27 @@ export default function TriageQueue() {
     () => items.find((item) => item.id === selectedId) ?? null,
     [items, selectedId],
   );
+  const bulkEligibleItems = useMemo(
+    () => items.filter((item) => item.item_type !== 'action_classification'),
+    [items],
+  );
+  const selectedReviewCanResolve = selectedItem?.item_type !== 'action_classification'
+    || ['pending', 'deferred'].includes(selectedItem.status);
+
+  useEffect(() => {
+    if (selectedItem?.item_type !== 'action_classification') {
+      setActionCorrection(null);
+      return;
+    }
+    const metadata = selectedItem.metadata ?? {};
+    setActionCorrection({
+      action_type: String(metadata.action_type ?? 'REVIEW').toUpperCase(),
+      title: String(metadata.title ?? metadata.document_title ?? ''),
+      summary: String(metadata.summary ?? ''),
+      due_date: metadata.due_date ? String(metadata.due_date).slice(0, 10) : '',
+      amount: metadata.amount == null ? '' : String(metadata.amount),
+    });
+  }, [selectedItem]);
 
   // Keep selectedId valid when items change
   useEffect(() => {
@@ -314,10 +353,14 @@ export default function TriageQueue() {
       setSelectedId(null);
       return;
     }
+    if (queryItemId && items.some((item) => item.id === queryItemId)) {
+      setSelectedId(queryItemId);
+      return;
+    }
     if (!items.some((item) => item.id === selectedId)) {
       setSelectedId(items[0]?.id ?? null);
     }
-  }, [items, selectedId]);
+  }, [items, queryItemId, selectedId]);
 
   const toggleCheck = (itemId: string, shiftKey = false) => {
     setCheckedIds((prev) => {
@@ -329,7 +372,7 @@ export default function TriageQueue() {
         if (startIdx >= 0 && endIdx >= 0) {
           const [lo, hi] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
           for (let i = lo; i <= hi; i++) {
-            next.add(items[i].id);
+            if (items[i].item_type !== 'action_classification') next.add(items[i].id);
           }
           lastCheckedRef.current = itemId;
           return next;
@@ -347,11 +390,12 @@ export default function TriageQueue() {
   };
 
   const selectAllVisible = () => {
-    const allChecked = items.length > 0 && items.every((i) => checkedIds.has(i.id));
+    const allChecked = bulkEligibleItems.length > 0
+      && bulkEligibleItems.every((item) => checkedIds.has(item.id));
     if (allChecked) {
       setCheckedIds(new Set());
     } else {
-      setCheckedIds(new Set(items.map((i) => i.id)));
+      setCheckedIds(new Set(bulkEligibleItems.map((item) => item.id)));
     }
   };
 
@@ -369,15 +413,57 @@ export default function TriageQueue() {
   const handleResolve = async (itemId: string, action: string) => {
     setBusyAction(`${itemId}-${action}`);
     try {
-      await endpoints.triage.resolve(itemId, { action });
+      const result = await endpoints.triage.resolve(itemId, { action }) as {
+        action_ready?: boolean;
+        review_state?: string;
+        reason?: string;
+      };
+      const isActionClassification = selectedItem?.item_type === 'action_classification';
+      const remainsInReview = isActionClassification && result.action_ready === false;
       setToast({
-        message: action === 'confirm' ? 'Suggestion accepted.' : 'Suggestion rejected.',
-        tone: 'success',
-        undoId: itemId,
+        message: remainsInReview
+          ? result.reason || 'This action still needs review.'
+          : action === 'confirm'
+            ? 'Suggestion accepted.'
+            : action === 'no_action'
+              ? 'False positive recorded.'
+              : action === 're_evaluate'
+                ? 'Re-evaluation completed.'
+                : 'Suggestion rejected.',
+        tone: remainsInReview ? undefined : 'success',
+        undoId: isActionClassification || remainsInReview ? undefined : itemId,
       });
       await loadData();
     } catch (err) {
       setToast({ message: err instanceof Error ? err.message : 'Action failed.', tone: 'error' });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const correctActionClassification = async (itemId: string) => {
+    if (!actionCorrection) return;
+    setBusyAction(`${itemId}-correct`);
+    try {
+      const result = await endpoints.triage.resolve(itemId, {
+        action: 'correct',
+        payload: {
+          action_type: actionCorrection.action_type,
+          title: actionCorrection.title,
+          summary: actionCorrection.summary,
+          due_date: actionCorrection.due_date || null,
+          amount: actionCorrection.amount === '' ? null : Number(actionCorrection.amount),
+        },
+      }) as { action_ready?: boolean; reason?: string };
+      setToast({
+        message: result.action_ready
+          ? 'Correction saved and action added to Action Queue.'
+          : result.reason || 'Correction saved; this item still needs review.',
+        tone: result.action_ready ? 'success' : undefined,
+      });
+      await loadData();
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Correction failed.', tone: 'error' });
     } finally {
       setBusyAction(null);
     }
@@ -598,6 +684,7 @@ export default function TriageQueue() {
                   onChange={handleTypeFilterChange}
                   tabs={[
                     { key: 'all', label: `All (${stats?.total ?? 0})` },
+                    { key: 'action_classification', label: `Actions (${typeCounts.action_classification ?? 0})` },
                     { key: 'eob_match_review', label: `EOB (${typeCounts.eob_match_review ?? 0})` },
                     { key: 'grouping_anomaly', label: `Groups (${typeCounts.grouping_anomaly ?? 0})` },
                     { key: 'orphan_document', label: `Orphans (${typeCounts.orphan_document ?? 0})` },
@@ -619,7 +706,7 @@ export default function TriageQueue() {
                 </div>
 
                 {/* Auto-accept threshold */}
-                {statusFilter === 'pending' && (
+                {statusFilter === 'pending' && typeFilter !== 'action_classification' && (
                   <div className="triage-threshold-bar">
                     <button
                       className="triage-auto-confirm-btn"
@@ -684,11 +771,11 @@ export default function TriageQueue() {
 
                 {/* Select-all + populate */}
                 <div className="triage-list-toolbar">
-                  {statusFilter === 'pending' ? (
+                  {statusFilter === 'pending' && bulkEligibleItems.length > 0 ? (
                     <label className="triage-select-all">
                       <input
                         type="checkbox"
-                        checked={items.length > 0 && items.every((i) => checkedIds.has(i.id))}
+                        checked={bulkEligibleItems.every((item) => checkedIds.has(item.id))}
                         onChange={selectAllVisible}
                       />
                       <span>Select visible</span>
@@ -724,7 +811,7 @@ export default function TriageQueue() {
                         onClick={() => setSelectedId(item.id)}
                       >
                         <div className="triage-item-top">
-                          {statusFilter === 'pending' && (
+                          {statusFilter === 'pending' && item.item_type !== 'action_classification' && (
                             <input
                               type="checkbox"
                               checked={checkedIds.has(item.id)}
@@ -754,7 +841,134 @@ export default function TriageQueue() {
           {/* ── Detail panel (right) ── */}
           <section className="triage-detail-panel">
             {selectedItem ? (
-              selectedItem.item_type === 'eob_match_review' ? (
+              selectedItem.item_type === 'action_classification' ? (
+                <>
+                  <TriageDetailBreadcrumb item={selectedItem} />
+                  <div className="triage-detail-header">
+                    <div>
+                      <div className="triage-detail-title">{itemTitle(selectedItem)}</div>
+                      <div className="text-muted">
+                        Decide what OWL should believe before this becomes actionable work.
+                      </div>
+                    </div>
+                  </div>
+                  <Card title="Action classification">
+                    <div className="triage-detail-info">
+                      <div className="triage-detail-row">
+                        <span>Suggested type</span>
+                        <strong>{String(selectedItem.metadata?.action_type ?? 'REVIEW')}</strong>
+                      </div>
+                      <div className="triage-detail-row">
+                        <span>Confidence</span>
+                        <strong>{String(selectedItem.metadata?.confidence ?? '—')}%</strong>
+                      </div>
+                      <div className="triage-detail-row">
+                        <span>Due date</span>
+                        <strong>{String(selectedItem.metadata?.due_date ?? 'No due date')}</strong>
+                      </div>
+                      <div className="triage-detail-row">
+                        <span>Amount</span>
+                        <strong>{String(selectedItem.metadata?.amount ?? '—')}</strong>
+                      </div>
+                    </div>
+                    {actionCorrection && (
+                      <div className="triage-action-correction">
+                        <label>
+                          <span>Action type</span>
+                          <select
+                            aria-label="Corrected action type"
+                            value={actionCorrection.action_type}
+                            onChange={(event) => setActionCorrection((current) => (
+                              current ? { ...current, action_type: event.target.value } : current
+                            ))}
+                          >
+                            {ACTION_TYPES.map((type) => <option value={type} key={type}>{type}</option>)}
+                          </select>
+                        </label>
+                        <label>
+                          <span>Task name</span>
+                          <input
+                            aria-label="Corrected task name"
+                            value={actionCorrection.title}
+                            onChange={(event) => setActionCorrection((current) => (
+                              current ? { ...current, title: event.target.value } : current
+                            ))}
+                          />
+                        </label>
+                        <label className="triage-action-correction-wide">
+                          <span>Summary</span>
+                          <textarea
+                            aria-label="Corrected summary"
+                            rows={3}
+                            value={actionCorrection.summary}
+                            onChange={(event) => setActionCorrection((current) => (
+                              current ? { ...current, summary: event.target.value } : current
+                            ))}
+                          />
+                        </label>
+                        <label>
+                          <span>Due date</span>
+                          <input
+                            aria-label="Corrected due date"
+                            type="date"
+                            value={actionCorrection.due_date}
+                            onChange={(event) => setActionCorrection((current) => (
+                              current ? { ...current, due_date: event.target.value } : current
+                            ))}
+                          />
+                        </label>
+                        <label>
+                          <span>Amount</span>
+                          <input
+                            aria-label="Corrected amount"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={actionCorrection.amount}
+                            onChange={(event) => setActionCorrection((current) => (
+                              current ? { ...current, amount: event.target.value } : current
+                            ))}
+                          />
+                        </label>
+                      </div>
+                    )}
+                    <div className="btn-group">
+                      <Button
+                        variant="success"
+                        disabled={busyAction !== null || !selectedReviewCanResolve}
+                        onClick={() => void handleResolve(selectedItem.id, 'confirm')}
+                      >
+                        Confirm action
+                      </Button>
+                      <Button
+                        disabled={busyAction !== null || !selectedReviewCanResolve}
+                        onClick={() => void correctActionClassification(selectedItem.id)}
+                      >
+                        Correct and continue
+                      </Button>
+                      <Button
+                        variant="danger"
+                        disabled={busyAction !== null || !selectedReviewCanResolve}
+                        onClick={() => void handleResolve(selectedItem.id, 'no_action')}
+                      >
+                        No action needed
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        disabled={busyAction !== null || !selectedReviewCanResolve}
+                        onClick={() => void handleResolve(selectedItem.id, 're_evaluate')}
+                      >
+                        Re-evaluate
+                      </Button>
+                    </div>
+                  </Card>
+                  {selectedItem.metadata?.document_id && (
+                    <Card title="Document preview">
+                      <DocumentPreview documentId={Number(selectedItem.metadata.document_id)} />
+                    </Card>
+                  )}
+                </>
+              ) : selectedItem.item_type === 'eob_match_review' ? (
                 /* EOB Match Review — rich detail component (#834) */
                 <>
                   <TriageDetailBreadcrumb item={selectedItem} />

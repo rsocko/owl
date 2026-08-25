@@ -8,7 +8,12 @@ from fastapi.testclient import TestClient
 
 from doc_intelligence_hub.api.app import HubSettings, create_app
 from doc_intelligence_hub.modules.action_queue.config import settings as aq_settings
-from doc_intelligence_hub.modules.action_queue.database import Action, get_session, init_db
+from doc_intelligence_hub.modules.action_queue.database import (
+    Action,
+    ActionFeedback,
+    get_session,
+    init_db,
+)
 
 
 @pytest.fixture()
@@ -160,6 +165,9 @@ class TestListActions:
             "risk_score",
             "status",
             "recommended_cta",
+            "action_ready",
+            "review_state",
+            "needs_review_url",
             "correspondent",
             "document_date",
             "document_type",
@@ -176,6 +184,24 @@ class TestListActions:
         assert set(action.keys()) == expected_fields
         assert action["recommended_cta"]["url"] == "https://billing.example/pay"
         assert action["extracted_data"]["reference_number"] == "INV-42"
+
+    def test_daily_list_excludes_not_ready_actions(self, seeded_client):
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=1).one()
+            action.action_ready = False
+            action.review_state = "needs_review"
+            db.commit()
+        finally:
+            db.close()
+
+        ready = seeded_client.get("/api/queue/actions?status=pending").json()
+        review = seeded_client.get(
+            "/api/queue/actions?status=pending&include_not_ready=true"
+        ).json()
+        assert ready["total"] == 0
+        assert review["total"] == 1
+        assert review["actions"][0]["review_state"] == "needs_review"
 
 
 class TestUpdateAction:
@@ -246,6 +272,171 @@ class TestUpdateAction:
         assert resp.status_code == 200
         data = resp.json()
         assert data["version"] == current_version + 1
+
+    def test_type_correction_records_feedback_and_refreshes_cta(self, seeded_client):
+        resp = seeded_client.patch(
+            "/api/queue/actions/1",
+            json={"action_type": "FILE", "version": 1},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["action_type"] == "FILE"
+        assert resp.json()["recommended_cta"]["id"] == "archive"
+
+        db = get_session()
+        try:
+            feedback = db.query(ActionFeedback).one()
+            assert feedback.feedback_type == "misclassified"
+            assert feedback.original_action_type == "PAY"
+            assert feedback.corrected_action_type == "FILE"
+        finally:
+            db.close()
+
+    def test_file_action_completes_only_after_paperless_filing(self, seeded_client):
+        from unittest.mock import AsyncMock, patch
+
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=1).one()
+            action.action_type = "FILE"
+            db.commit()
+        finally:
+            db.close()
+
+        enricher = AsyncMock()
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
+            return_value=enricher,
+        ):
+            resp = seeded_client.post("/api/queue/actions/1/file")
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "completed"
+        enricher.sync_status.assert_awaited_once_with(42, "completed")
+
+    def test_file_action_surfaces_partial_failure_and_keeps_action_open(self, seeded_client):
+        from unittest.mock import AsyncMock, patch
+
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=1).one()
+            action.action_type = "ARCHIVE"
+            db.commit()
+        finally:
+            db.close()
+
+        enricher = AsyncMock()
+        enricher.sync_status.side_effect = RuntimeError("tag update failed")
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
+            return_value=enricher,
+        ):
+            resp = seeded_client.post("/api/queue/actions/1/file")
+
+        assert resp.status_code == 502
+        db = get_session()
+        try:
+            assert db.query(Action).filter_by(id=1).one().status == "pending"
+        finally:
+            db.close()
+
+    def test_file_action_rejects_read_only_mode_and_keeps_action_open(
+        self, seeded_client, monkeypatch
+    ):
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=1).one()
+            action.action_type = "FILE"
+            db.commit()
+        finally:
+            db.close()
+        monkeypatch.setattr(seeded_client.app.state.hub_settings, "write_to_paperless", False)
+
+        response = seeded_client.post("/api/queue/actions/1/file")
+
+        assert response.status_code == 409
+        assert "disabled" in response.json()["error"]["message"].lower()
+        db = get_session()
+        try:
+            assert db.query(Action).filter_by(id=1).one().status == "pending"
+        finally:
+            db.close()
+
+    def test_status_only_patch_does_not_publish_action_waiting_for_review(self, seeded_client):
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=1).one()
+            action.action_ready = False
+            action.review_state = "needs_review"
+            action.review_item_id = "review-1"
+            db.commit()
+        finally:
+            db.close()
+
+        response = seeded_client.patch("/api/queue/actions/1", json={"status": "pending"})
+
+        assert response.status_code == 200
+        assert response.json()["action_ready"] is False
+        assert response.json()["review_state"] == "needs_review"
+        assert response.json()["needs_review_url"].endswith("item=review-1")
+
+    def test_file_action_cannot_use_generic_completion(self, seeded_client):
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=1).one()
+            action.action_type = "FILE"
+            db.commit()
+        finally:
+            db.close()
+
+        response = seeded_client.patch(
+            "/api/queue/actions/1",
+            json={"status": "completed"},
+        )
+
+        assert response.status_code == 409
+        assert "file action" in response.json()["error"]["message"]
+
+    def test_incomplete_correction_clears_paperless_inference_and_routes_to_review(
+        self, seeded_client
+    ):
+        from unittest.mock import AsyncMock, patch
+
+        projection = AsyncMock()
+        with patch(
+            "doc_intelligence_hub.api.routers.action_queue.project_action_metadata",
+            new=projection,
+        ):
+            response = seeded_client.patch(
+                "/api/queue/actions/1",
+                json={"amount": None, "version": 1},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["action_ready"] is False
+        assert response.json()["review_state"] == "needs_review"
+        projection.assert_awaited_once()
+        assert projection.await_args.kwargs["action_status"] is None
+
+    def test_status_counts_exclude_uncertain_pending_actions(self, seeded_client):
+        db = get_session()
+        try:
+            db.add(
+                Action(
+                    document_id=101,
+                    document_title="Uncertain document",
+                    action_type="REVIEW",
+                    title="Review uncertain document",
+                    status="pending",
+                    action_ready=False,
+                    review_state="needs_review",
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        counts = seeded_client.get("/api/queue/status").json()["database"]
+        assert counts["pending"] == 1
 
 
 class TestPreviewUrlEdgeCases:

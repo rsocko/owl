@@ -17,8 +17,10 @@ from pydantic import BaseModel, Field
 from doc_intelligence_hub.api.routers import get_loaded_statement_config
 from doc_intelligence_hub.api.routers.action_queue import (
     _resurface_expired_snoozes,
+    _serialize_action,
     _sync_action_queue_settings,
 )
+from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
 from doc_intelligence_hub.modules.action_queue.database import (
     Action,
 )
@@ -30,9 +32,12 @@ from doc_intelligence_hub.modules.action_queue.database import (
 )
 from doc_intelligence_hub.modules.action_queue.lifecycle import (
     VALID_FEEDBACK_TYPES,
+    action_has_critical_details,
     normalize_action_status,
     normalize_utc_datetime,
+    project_action_metadata,
     record_action_feedback,
+    route_action_to_review,
     serialize_utc_datetime,
     stored_status_values,
     sync_action_status,
@@ -96,6 +101,7 @@ async def mc_list_actions(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     updated_since: datetime | None = None,
+    include_not_ready: bool = False,
 ) -> list[dict[str, Any]]:
     """List actions as a deterministic flat array for Mission Control reconciliation."""
     _sync_action_queue_settings(request)
@@ -104,6 +110,8 @@ async def mc_list_actions(
     try:
         await _resurface_expired_snoozes(db)
         query = db.query(Action)
+        if not include_not_ready:
+            query = query.filter(Action.action_ready.is_(True))
         if status and status != "all":
             try:
                 normalized_filter = normalize_action_status(status)
@@ -133,6 +141,28 @@ async def mc_list_actions(
                     action.status,
                 )
                 normalized_status = "pending"
+            serialized = _serialize_action(action)
+            source_actions = []
+            if action.action_ready:
+                source_actions.append(
+                    {
+                        "id": "send_to_review",
+                        "label": "Send to Needs Review",
+                        "method": "POST",
+                        "url": f"/api/action-queue/actions/{action.id}/review",
+                    }
+                )
+                if action_queue_settings.write_to_paperless and (
+                    action.action_type or ""
+                ).upper() in {"FILE", "ARCHIVE"}:
+                    source_actions.append(
+                        {
+                            "id": "file_document",
+                            "label": "File in Paperless",
+                            "method": "POST",
+                            "url": f"/api/action-queue/actions/{action.id}/file",
+                        }
+                    )
             results.append(
                 {
                     "id": str(action.id),
@@ -151,9 +181,11 @@ async def mc_list_actions(
                     "correspondent": action.correspondent,
                     "summary": action.summary or "",
                     "recommended_cta": _deserialize_recommended_cta(action.recommended_cta),
-                    "extracted_data": action.extracted_data
-                    if isinstance(action.extracted_data, dict)
-                    else None,
+                    "action_ready": serialized["action_ready"],
+                    "review_state": serialized["review_state"],
+                    "needs_review_url": serialized["needs_review_url"],
+                    "source_actions": source_actions,
+                    "extracted_data": serialized["extracted_data"],
                     "status": normalized_status,
                     "created_at": serialize_utc_datetime(action.created_at),
                     "updated_at": serialize_utc_datetime(action.updated_at),
@@ -167,6 +199,20 @@ async def mc_list_actions(
         return results
     finally:
         db.close()
+
+
+@router.post("/api/action-queue/actions/{action_id}/review")
+async def mc_send_action_to_review(request: Request, action_id: int) -> dict[str, Any]:
+    from doc_intelligence_hub.api.routers.action_queue import send_action_to_review
+
+    return await send_action_to_review(request, action_id)
+
+
+@router.post("/api/action-queue/actions/{action_id}/file")
+async def mc_file_action(request: Request, action_id: int) -> dict[str, Any]:
+    from doc_intelligence_hub.api.routers.action_queue import file_action
+
+    return await file_action(request, action_id)
 
 
 @router.patch("/api/action-queue/actions/{action_id}")
@@ -184,6 +230,14 @@ async def mc_update_action(
         action = db.query(Action).filter_by(id=action_id).first()
         if not action:
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        if internal_status == "completed" and (action.action_type or "").upper() in {
+            "FILE",
+            "ARCHIVE",
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail="Use the file_document source action for FILE or ARCHIVE work",
+            )
 
         changed = transition_action_status(action, internal_status)
         if changed:
@@ -259,11 +313,33 @@ async def mc_submit_feedback(
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        routed_to_review = body.feedback_type in {
+            "misclassified",
+            "wrong_amount",
+        } and not action_has_critical_details(action)
+        if routed_to_review:
+            route_action_to_review(
+                db,
+                action,
+                reason=f"{action.action_type} is missing critical details after correction",
+            )
         db.commit()
 
         if body.feedback_type == "not_an_action":
             await sync_action_status(db, action, "not_an_action", logger=logger)
+        elif routed_to_review:
+            try:
+                await project_action_metadata(action, action_status=None)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "Correction was saved and routed to Needs Review, but stale "
+                        f"Paperless metadata could not be cleared: {exc}"
+                    ),
+                ) from exc
 
+        serialized = _serialize_action(action)
         return {
             "status": "ok",
             "id": str(action_id),
@@ -273,6 +349,10 @@ async def mc_submit_feedback(
             "action_type": action.action_type,
             "urgency": action.urgency,
             "amount": action.amount,
+            "recommended_cta": serialized["recommended_cta"],
+            "action_ready": serialized["action_ready"],
+            "review_state": serialized["review_state"],
+            "needs_review_url": serialized["needs_review_url"],
         }
     finally:
         db.close()

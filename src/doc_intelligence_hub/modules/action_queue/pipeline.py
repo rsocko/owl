@@ -10,6 +10,10 @@ from typing import Any
 import httpx
 from rich.console import Console
 
+from doc_intelligence_hub.core.extractors.account_numbers import (
+    extract_account_numbers,
+    pick_masked_account_identifier,
+)
 from doc_intelligence_hub.core.paperless import PaperlessClient
 
 from .analyzer import OllamaAnalyzer, urgency_to_severity
@@ -17,6 +21,7 @@ from .config import settings
 from .database import Action, ProcessingHistory, get_session, init_db
 from .enricher import PaperlessEnricher
 from .fallback_analyzer import RuleBasedAnalyzer
+from .lifecycle import action_has_critical_details, mark_action_ready, route_action_to_review
 from .risk_scoring import compute_risk_score
 
 logger = logging.getLogger(__name__)
@@ -450,6 +455,16 @@ class Pipeline:
                 actions = extraction.get("actions", [])
                 overall_confidence = assessment.get("overall_confidence", 0)
                 text_quality = assessment.get("text_quality", "fair")
+                extracted_data = assessment.get("extracted_data")
+                if not isinstance(extracted_data, dict):
+                    extracted_data = {}
+                account_identifier = pick_masked_account_identifier(
+                    extract_account_numbers(content)
+                )
+                if account_identifier:
+                    extracted_data["account_identifier"] = account_identifier
+                extracted_data.pop("account_number", None)
+                assessment["extracted_data"] = extracted_data
 
                 # Handle unreadable text
                 if text_quality == "unreadable":
@@ -504,28 +519,6 @@ class Pipeline:
                     stats["no_action"] += 1
                     continue
 
-                # Check confidence threshold
-                if overall_confidence < settings.confidence_threshold:
-                    console.print(
-                        f"  [yellow]⚠[/yellow] Low confidence ({overall_confidence}%) — recording but not enriching"
-                    )
-                    logger.info(
-                        "doc_id=%s: confidence %s%% below threshold %s%% — recording but not enriching",
-                        doc_id,
-                        overall_confidence,
-                        settings.confidence_threshold,
-                    )
-                    self._record_history(
-                        db,
-                        doc_id,
-                        success=True,
-                        disposition="low_confidence",
-                        error=f"Below threshold: {overall_confidence}%",
-                        text_metrics=text_metrics,
-                    )
-                    stats["no_action"] += 1
-                    continue
-
                 # Store ALL actions in internal DB
                 primary_idx = assessment.get("primary_action_index", 0)
                 stored_actions = []
@@ -538,6 +531,45 @@ class Pipeline:
                         is_primary=(i == primary_idx),
                     )
                     stored_actions.append(action)
+                db.flush()
+
+                review_reasons: list[str] = []
+                if overall_confidence < settings.confidence_threshold:
+                    review_reasons.append(
+                        f"Confidence {overall_confidence}% is below the configured "
+                        f"{settings.confidence_threshold}% threshold"
+                    )
+                for stored_action in stored_actions:
+                    if not action_has_critical_details(stored_action):
+                        review_reasons.append(
+                            f"{stored_action.action_type} is missing critical action details"
+                        )
+                if review_reasons:
+                    reason = "; ".join(dict.fromkeys(review_reasons))
+                    for stored_action in stored_actions:
+                        route_action_to_review(db, stored_action, reason=reason)
+                    if settings.write_to_paperless and self._enrichment_available:
+                        primary_action = (
+                            actions[primary_idx] if primary_idx < len(actions) else actions[0]
+                        )
+                        await self.enricher.enrich_document(
+                            doc_id,
+                            {**primary_action, **assessment},
+                            action_status=None,
+                            clear_action_inference=True,
+                        )
+                    self._record_history(
+                        db,
+                        doc_id,
+                        success=True,
+                        disposition="low_confidence",
+                        error=reason,
+                        text_metrics=text_metrics,
+                    )
+                    stats["no_action"] += 1
+                    continue
+                for stored_action in stored_actions:
+                    mark_action_ready(stored_action)
 
                 # Emit alerts inline for high-risk actions (best-effort)
                 # Flush to ensure action IDs are assigned before emitting
@@ -744,6 +776,17 @@ class Pipeline:
                 .first()
             )
 
+        # Re-evaluation may legitimately change both title and type. Reuse a
+        # single pending review action so its deep link and audit trail survive.
+        if not existing:
+            review_candidates = (
+                db.query(Action)
+                .filter_by(document_id=doc_id, status="pending", review_state="needs_review")
+                .all()
+            )
+            if len(review_candidates) == 1:
+                existing = review_candidates[0]
+
         # Compute composite risk score
         risk = compute_risk_score(
             urgency=action_data["urgency"],
@@ -792,6 +835,8 @@ class Pipeline:
                 extracted_data=assessment.get("extracted_data"),
                 ai_reasoning=assessment.get("reasoning"),
                 recommended_cta=_serialize_cta(action_data.get("recommended_cta")),
+                action_ready=True,
+                review_state="ready",
             )
             db.add(action)
             return action

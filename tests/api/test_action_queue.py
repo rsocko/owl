@@ -115,7 +115,11 @@ class TestUpdateAction:
 
     def test_complete_action(self, client, seed_actions):
         actions = client.get("/api/queue/actions?status=pending").json()
-        action_id = actions["actions"][0]["id"]
+        action_id = next(
+            action["id"]
+            for action in actions["actions"]
+            if action["action_type"] not in {"FILE", "ARCHIVE"}
+        )
 
         resp = client.patch(
             f"/api/queue/actions/{action_id}",
@@ -259,8 +263,12 @@ class TestBulkAction:
 
     def test_bulk_complete(self, client, seed_actions):
         actions = client.get("/api/queue/actions?status=pending").json()
-        ids = [a["id"] for a in actions["actions"]]
-        assert len(ids) == 2
+        ids = [
+            action["id"]
+            for action in actions["actions"]
+            if action["action_type"] not in {"FILE", "ARCHIVE"}
+        ]
+        assert len(ids) == 1
 
         resp = client.post(
             "/api/queue/actions/bulk",
@@ -268,12 +276,33 @@ class TestBulkAction:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["affected"] == 2
+        assert data["affected"] == 1
         assert data["action"] == "complete"
 
         # Verify all are now completed
         check = client.get("/api/queue/actions?status=pending").json()
-        assert check["total"] == 0
+        assert check["total"] == 1
+
+    def test_bulk_complete_rejects_source_filing_action(self, client, seed_actions):
+        from doc_intelligence_hub.modules.action_queue.database import Action, get_session
+
+        actions = client.get("/api/queue/actions?status=pending").json()["actions"]
+        action_id = actions[0]["id"]
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=action_id).one()
+            action.action_type = "ARCHIVE"
+            db.commit()
+        finally:
+            db.close()
+
+        resp = client.post(
+            "/api/queue/actions/bulk",
+            json={"action": "complete", "action_ids": [action_id]},
+        )
+
+        assert resp.status_code == 409
+        assert "source filing action" in resp.json()["error"]["message"]
 
     def test_bulk_dismiss(self, client, seed_actions):
         actions = client.get("/api/queue/actions?status=pending").json()
@@ -323,7 +352,9 @@ class TestBulkAction:
         assert resp.status_code == 200
         assert resp.json()["affected"] == 2
 
-        no_action = client.get("/api/queue/actions?status=not_an_action").json()
+        no_action = client.get(
+            "/api/queue/actions?status=not_an_action&include_not_ready=true"
+        ).json()
         assert no_action["total"] == 2
         for action_id in ids:
             feedback = client.get(f"/api/queue/actions/{action_id}/feedback").json()

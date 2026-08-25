@@ -65,7 +65,7 @@ def seeded_client(client):
                     }
                 ),
                 extracted_data={
-                    "account_number": "1234",
+                    "account_identifier": "ending 1234",
                     "reference_number": "INV-42",
                     "email": "billing@example.com",
                     "links": [
@@ -122,7 +122,7 @@ class TestMcListActions:
             "label": "Pay online",
             "url": "https://billing.example/pay",
         }
-        assert action["extracted_data"]["account_number"] == "1234"
+        assert action["extracted_data"]["account_identifier"] == "ending 1234"
         assert action["extracted_data"]["reference_number"] == "INV-42"
         assert action["extracted_data"]["links"][0]["purpose"] == "payment"
 
@@ -147,3 +147,131 @@ class TestMcListActions:
         action = client.get("/api/action-queue/actions").json()[0]
         assert action["recommended_cta"] is None
         assert action["extracted_data"] is None
+
+    def test_default_list_excludes_not_ready_actions_and_opt_in_exposes_review(self, seeded_client):
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=1).one()
+            action.action_ready = False
+            action.review_state = "needs_review"
+            action.review_item_id = "review-123"
+            db.commit()
+        finally:
+            db.close()
+
+        assert seeded_client.get("/api/action-queue/actions").json() == []
+        action = seeded_client.get("/api/action-queue/actions?include_not_ready=true").json()[0]
+        assert action["action_ready"] is False
+        assert action["review_state"] == "needs_review"
+        assert action["needs_review_url"].endswith("item=review-123")
+        assert action["source_actions"] == []
+
+    def test_connector_preserves_additive_cta_shape_and_file_source_action(self, seeded_client):
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=1).one()
+            action.action_type = "FILE"
+            action.recommended_cta = json.dumps(
+                {
+                    "id": "call-provider",
+                    "label": "Call records",
+                    "phone": "555-0100",
+                    "metadata": {"department": "records"},
+                }
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        action = seeded_client.get("/api/action-queue/actions").json()[0]
+        assert action["recommended_cta"]["phone"] == "555-0100"
+        assert action["recommended_cta"]["metadata"] == {"department": "records"}
+        assert {source["id"] for source in action["source_actions"]} == {
+            "send_to_review",
+            "file_document",
+        }
+
+    def test_read_only_connector_omits_file_source_action(self, tmp_path):
+        db_path = tmp_path / "readonly_mc_actions.db"
+        app = create_app(
+            HubSettings(
+                paperless_url="http://paperless.test",
+                paperless_token="test-token",
+                write_to_paperless=False,
+            )
+        )
+        original_db_url = aq_settings.database_url
+        aq_settings.database_url = f"sqlite:///{db_path}"
+        try:
+            init_db()
+            db = get_session()
+            try:
+                db.add(
+                    Action(
+                        document_id=42,
+                        document_title="Annual statement",
+                        action_type="FILE",
+                        title="File statement",
+                        status="pending",
+                        action_ready=True,
+                    )
+                )
+                db.commit()
+            finally:
+                db.close()
+
+            action = TestClient(app).get("/api/action-queue/actions").json()[0]
+            assert {source["id"] for source in action["source_actions"]} == {"send_to_review"}
+        finally:
+            aq_settings.database_url = original_db_url
+
+    def test_connector_never_exposes_legacy_raw_account_number(self, seeded_client):
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=1).one()
+            action.extracted_data = {
+                "account_number": "123456789",
+                "account_identifier": "ending 6789",
+            }
+            db.commit()
+        finally:
+            db.close()
+
+        extracted = seeded_client.get("/api/action-queue/actions").json()[0]["extracted_data"]
+        assert "account_number" not in extracted
+        assert extracted["account_identifier"] == "ending 6789"
+
+    def test_incomplete_mc_type_correction_routes_to_review_and_returns_current_cta(
+        self, seeded_client
+    ):
+        from unittest.mock import AsyncMock, patch
+
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=1).one()
+            action.action_type = "FILE"
+            action.amount = None
+            action.recommended_cta = json.dumps({"id": "archive", "label": "File document"})
+            db.commit()
+        finally:
+            db.close()
+
+        with patch(
+            "doc_intelligence_hub.api.routers.mc_connector.project_action_metadata",
+            new=AsyncMock(),
+        ):
+            response = seeded_client.post(
+                "/api/action-queue/actions/1/feedback",
+                json={
+                    "feedback_type": "misclassified",
+                    "corrected_action_type": "PAY",
+                },
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["action_type"] == "PAY"
+        assert body["recommended_cta"]["id"] == "pay-online"
+        assert body["action_ready"] is False
+        assert body["review_state"] == "needs_review"
+        assert body["needs_review_url"]

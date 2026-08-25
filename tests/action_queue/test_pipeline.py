@@ -49,10 +49,15 @@ def _make_docs(n: int) -> list[dict]:
 def db(tmp_path):
     """Isolated SQLite database for pipeline runs."""
     original = aq_settings.database_url
+    from doc_intelligence_hub.modules.triage import database as triage_database
+
     aq_settings.database_url = f"sqlite:///{tmp_path / 'test_pipeline.db'}"
+    triage_database.configure(f"sqlite:///{tmp_path / 'test_triage.db'}")
     init_db()
+    triage_database.init_db()
     yield
     aq_settings.database_url = original
+    triage_database.configure("sqlite:///data/triage.db")
 
 
 class TestAnalyzerTimeout:
@@ -222,6 +227,51 @@ class TestPipelineErrorIsolation:
             assert action.tags == ["Inbox", "Utilities"]
         finally:
             session.close()
+
+    @pytest.mark.asyncio
+    async def test_low_confidence_action_routes_to_needs_review(self, db, monkeypatch):
+        pipeline = Pipeline()
+        extraction = {
+            **VALID_EXTRACTION,
+            "actions": [{**VALID_EXTRACTION["actions"][0], "confidence": 55}],
+            "document_assessment": {
+                **VALID_EXTRACTION["document_assessment"],
+                "overall_confidence": 55,
+            },
+        }
+        monkeypatch.setattr(aq_settings, "write_to_paperless", False)
+        monkeypatch.setattr(aq_settings, "confidence_threshold", 70)
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", AsyncMock(return_value=[]))
+        monkeypatch.setattr(
+            pipeline.paperless, "fetch_all_metadata", AsyncMock(return_value=({}, {}, {}))
+        )
+        monkeypatch.setattr(
+            pipeline.paperless, "list_documents", AsyncMock(return_value=_make_docs(1))
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "get_document_content",
+            AsyncMock(return_value="Account number 123456789. Payment of $50 is due."),
+        )
+        monkeypatch.setattr(pipeline.analyzer, "health_check", AsyncMock(return_value=False))
+        monkeypatch.setattr(
+            pipeline.fallback_analyzer, "analyze_document", lambda document: extraction
+        )
+
+        stats = await pipeline.run(force=True, dry_run=False)
+
+        session = get_session()
+        try:
+            action = session.query(Action).one()
+            assert action.action_ready is False
+            assert action.review_state == "needs_review"
+            assert action.review_item_id
+            assert action.extracted_data["account_identifier"] == "ending 6789"
+            assert "account_number" not in action.extracted_data
+        finally:
+            session.close()
+        assert stats["processed"] == 0
+        assert stats["no_action"] == 1
 
     @pytest.mark.asyncio
     async def test_no_action_classification_updates_paperless(self, db, monkeypatch):

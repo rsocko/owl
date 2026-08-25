@@ -48,6 +48,7 @@ router = APIRouter(prefix="/api/triage", tags=["triage"])
 
 # Valid enum values for input validation
 _VALID_ITEM_TYPES = {
+    "action_classification",
     "duplicate_document",
     "eob_match_review",
     "grouping_anomaly",
@@ -152,6 +153,20 @@ async def bulk_action(body: BulkActionRequest) -> dict[str, Any]:
     """Apply an action to multiple triage queue items at once."""
     if not body.item_ids:
         raise HTTPException(status_code=400, detail="item_ids must not be empty")
+    if body.action in {"confirm", "reject", "dismiss"}:
+        classification_ids = [
+            item_id
+            for item_id in body.item_ids
+            if (get_queue_item(item_id) or {}).get("item_type") == "action_classification"
+        ]
+        if classification_ids:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Action classifications require an explicit confirm, correct, "
+                    "no_action, or re_evaluate resolution"
+                ),
+            )
     if body.action in ("confirm", "reject"):
         affected = bulk_resolve_items(body.item_ids, body.action, body.payload)
     elif body.action == "defer":
@@ -190,10 +205,168 @@ async def get_item(item_id: str) -> dict[str, Any]:
 @router.post("/queue/{item_id}/resolve")
 async def resolve_item(item_id: str, body: ResolveRequest) -> dict[str, Any]:
     """Resolve a triage queue item with the given action."""
+    current = get_queue_item(item_id)
+    if not current:
+        raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
+    if current["item_type"] == "action_classification":
+        if current["status"] not in {"pending", "deferred"}:
+            raise HTTPException(
+                status_code=409,
+                detail="This action-classification review is already resolved",
+            )
+        return await _resolve_action_classification(current, body)
     item = resolve_queue_item(item_id, body.action, body.payload)
     if not item:
         raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
     return item
+
+
+async def _resolve_action_classification(
+    item: dict[str, Any], body: ResolveRequest
+) -> dict[str, Any]:
+    """Apply action review outcomes through Action Queue lifecycle helpers."""
+    from doc_intelligence_hub.modules.action_queue.database import (
+        Action,
+    )
+    from doc_intelligence_hub.modules.action_queue.database import (
+        get_session as get_action_session,
+    )
+    from doc_intelligence_hub.modules.action_queue.database import (
+        init_db as init_action_db,
+    )
+    from doc_intelligence_hub.modules.action_queue.lifecycle import (
+        action_has_critical_details,
+        mark_action_ready,
+        project_action_metadata,
+        recalculate_action_risk,
+        record_action_feedback,
+        refresh_recommended_cta,
+        route_action_to_review,
+        sync_action_status,
+    )
+    from doc_intelligence_hub.modules.action_queue.pipeline import run_pipeline
+
+    allowed = {"confirm", "correct", "no_action", "re_evaluate"}
+    if body.action not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Action classification resolution must be one of: {', '.join(sorted(allowed))}",
+        )
+    init_action_db()
+    db = get_action_session()
+    try:
+        action = db.query(Action).filter_by(id=int(item["target_id"])).first()
+        if not action:
+            raise HTTPException(status_code=404, detail="Source action not found")
+        payload = body.payload or {}
+        original_version = action.version or 1
+        if body.action == "confirm":
+            if not action_has_critical_details(action):
+                return {
+                    **item,
+                    "action": "confirm",
+                    "action_ready": False,
+                    "review_state": "needs_review",
+                    "reason": "Critical details are still missing.",
+                }
+            mark_action_ready(action)
+        elif body.action == "correct":
+            corrected_type = payload.get("action_type")
+            if corrected_type and corrected_type.upper() != action.action_type:
+                record_action_feedback(
+                    db,
+                    action,
+                    feedback_type="misclassified",
+                    corrected_action_type=corrected_type,
+                    reason=payload.get("reason") or "Corrected in Needs Review",
+                )
+            for field in ("title", "summary", "amount", "due_date"):
+                if field not in payload:
+                    continue
+                value = payload[field]
+                if field == "due_date" and value:
+                    from datetime import date
+
+                    value = date.fromisoformat(value)
+                setattr(action, field, value)
+            recalculate_action_risk(action)
+            refresh_recommended_cta(action)
+            if not action_has_critical_details(action):
+                reason = "Correction saved, but critical details are still missing."
+                action.version = original_version + 1
+                db.commit()
+                route_action_to_review(db, action, reason=reason)
+                db.commit()
+                try:
+                    await project_action_metadata(action, action_status=None)
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=(
+                            f"Correction was saved, but Paperless metadata cleanup failed: {exc}"
+                        ),
+                    ) from exc
+                refreshed_item = get_queue_item(action.review_item_id) or item
+                return {
+                    **refreshed_item,
+                    "action": "correct",
+                    "action_ready": False,
+                    "review_state": "needs_review",
+                    "reason": reason,
+                }
+            mark_action_ready(action)
+        elif body.action == "no_action":
+            record_action_feedback(
+                db,
+                action,
+                feedback_type="not_an_action",
+                reason=payload.get("reason") or "False positive confirmed in Needs Review",
+            )
+        else:
+            await run_pipeline(document_id=action.document_id, force=True, dry_run=False)
+            db.expire_all()
+            action = db.query(Action).filter_by(id=int(item["target_id"])).first()
+            if not action:
+                raise HTTPException(status_code=404, detail="Re-evaluated action not found")
+            if action.review_state == "needs_review" or not action.action_ready:
+                refreshed_item = get_queue_item(item["id"]) or item
+                return {
+                    **refreshed_item,
+                    "action": "re_evaluate",
+                    "action_ready": False,
+                    "review_state": "needs_review",
+                    "reason": "Re-evaluation still requires review.",
+                }
+
+        if body.action in {"confirm", "correct"}:
+            try:
+                await project_action_metadata(
+                    action,
+                    action_status=action.status or "pending",
+                )
+            except Exception as exc:
+                db.rollback()
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Paperless metadata update failed; review remains open: {exc}",
+                ) from exc
+
+        action.version = original_version + 1
+        db.commit()
+        if body.action == "no_action":
+            import logging
+
+            await sync_action_status(
+                db, action, "not_an_action", logger=logging.getLogger(__name__)
+            )
+        resolved = resolve_queue_item(item["id"], body.action, payload)
+        return {
+            **(resolved or item),
+            "action_ready": bool(action.action_ready),
+            "review_state": action.review_state,
+        }
+    finally:
+        db.close()
 
 
 @router.post("/queue/{item_id}/defer")
@@ -209,6 +382,12 @@ async def defer_item(item_id: str, body: DeferRequest | None = None) -> dict[str
 @router.post("/queue/{item_id}/dismiss")
 async def dismiss_item(item_id: str) -> dict[str, Any]:
     """Dismiss a triage queue item."""
+    current = get_queue_item(item_id)
+    if current and current["item_type"] == "action_classification":
+        raise HTTPException(
+            status_code=422,
+            detail="Use no_action to resolve an action classification as a false positive",
+        )
     item = dismiss_queue_item(item_id)
     if not item:
         raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
@@ -218,6 +397,12 @@ async def dismiss_item(item_id: str) -> dict[str, Any]:
 @router.post("/queue/{item_id}/undo")
 async def undo_item(item_id: str) -> dict[str, Any]:
     """Undo a resolution — reset item back to pending."""
+    current = get_queue_item(item_id)
+    if current and current["item_type"] == "action_classification":
+        raise HTTPException(
+            status_code=422,
+            detail="Action classification lifecycle changes cannot be undone from triage",
+        )
     item = undo_resolution(item_id)
     if not item:
         raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")

@@ -1,40 +1,27 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
-import type { ColumnFiltersState, SortingState } from '@tanstack/react-table';
 import {
   Badge,
   Button,
-  Card,
   ConfidenceBar,
   EmptyState,
   ErrorState,
   FilterPills,
   PageHeader,
-  ProgressBanner,
   RiskScoreBar,
   SkeletonLoader,
-  StatCard,
-  StatGrid,
   Toast,
   Tooltip,
 } from '../components/ui';
-import { SortableTable, type SortableColumnDef } from '../components/SortableTable';
 import DocumentViewerModal from '../components/DocumentViewerModal';
-import { MetadataMultiTypeahead, MetadataTypeahead } from '../components/MetadataTypeahead';
+import { MetadataTypeahead } from '../components/MetadataTypeahead';
 import { useStreamingAction } from '../hooks/useStreamingAction';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import '../styles/action-queue.css';
 import '../styles/sortable-table.css';
-import { buildBackfillBody, buildQueueRunBody } from './actionQueueRunBody';
+import { buildQueueRunBody } from './actionQueueRunBody';
 import { customReminderUntil, minimumReminderDate, reminderUntil } from './actionReminder';
-
-interface ActionQueueCheck {
-  status?: string;
-  read_only?: boolean;
-  paperless?: { status?: string };
-  ollama?: { status?: string; model?: string; base_url?: string };
-}
 
 interface QueueDatabaseCounts {
   pending?: number;
@@ -81,7 +68,7 @@ interface ActionItem {
   document_type?: string | null;
   tags?: string[] | null;
   extracted_data?: {
-    account_number?: string | null;
+    account_identifier?: string | null;
     payment_url?: string | null;
     phone?: string | null;
     email?: string | null;
@@ -96,7 +83,13 @@ interface ActionItem {
   acknowledged_at?: string | null;
   snoozed_until?: string | null;
   severity?: string | null;
-  recommended_cta?: { id: string; label: string; url?: string | null; phone?: string | null } | null;
+  recommended_cta?: {
+    id: string;
+    label: string;
+    url?: string | null;
+    phone?: string | null;
+    metadata?: Record<string, unknown>;
+  } | null;
 }
 
 interface ActionListResponse {
@@ -122,9 +115,74 @@ type ActionEditDraft = {
   correspondent: string;
 };
 type ToastState = { message: string; tone?: 'success' | 'error' } | null;
+type QuickTypeFilter = 'all' | 'pay' | 'respond' | 'sign' | 'schedule' | 'file_archive';
+export type DeadlineBucket = 'overdue' | 'today' | 'next7' | 'later' | 'no_due_date';
 
 const ACTION_TYPE_OPTIONS = ['ARCHIVE', 'FILE', 'PAY', 'RESPOND', 'REVIEW', 'SCHEDULE', 'SHARE', 'SIGN', 'TASK'] as const;
 const URGENCY_OPTIONS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
+export const ACTION_GROUP_BATCH_SIZE = 15;
+const ACTION_TYPE_PRIORITY: Record<string, number> = {
+  PAY: 0,
+  RESPOND: 1,
+  SIGN: 2,
+  SCHEDULE: 3,
+  TASK: 4,
+  REVIEW: 5,
+  SHARE: 6,
+  FILE: 7,
+  ARCHIVE: 8,
+};
+const DEADLINE_BUCKETS: Array<{ key: DeadlineBucket; label: string }> = [
+  { key: 'overdue', label: 'Overdue' },
+  { key: 'today', label: 'Today' },
+  { key: 'next7', label: 'Next 7 days' },
+  { key: 'later', label: 'Later' },
+  { key: 'no_due_date', label: 'No due date' },
+];
+
+function localDay(value: string): Date | null {
+  const match = value.slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+export function deadlineBucket(action: ActionItem, now = new Date()): DeadlineBucket {
+  if (!action.due_date) return 'no_due_date';
+  const due = localDay(action.due_date);
+  if (!due || Number.isNaN(due.getTime())) return 'no_due_date';
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const delta = Math.round((due.getTime() - today.getTime()) / 86400000);
+  if (delta < 0) return 'overdue';
+  if (delta === 0) return 'today';
+  if (delta <= 7) return 'next7';
+  return 'later';
+}
+
+export function groupAndSortActions(
+  items: ActionItem[],
+  now = new Date(),
+): Record<DeadlineBucket, ActionItem[]> {
+  const groups: Record<DeadlineBucket, ActionItem[]> = {
+    overdue: [],
+    today: [],
+    next7: [],
+    later: [],
+    no_due_date: [],
+  };
+  for (const item of items) groups[deadlineBucket(item, now)].push(item);
+  const compare = (left: ActionItem, right: ActionItem) => {
+    const leftDue = left.due_date || '9999-12-31';
+    const rightDue = right.due_date || '9999-12-31';
+    if (leftDue !== rightDue) return leftDue.localeCompare(rightDue);
+    const typeOrder =
+      (ACTION_TYPE_PRIORITY[normalizeType(left.action_type)] ?? 99)
+      - (ACTION_TYPE_PRIORITY[normalizeType(right.action_type)] ?? 99);
+    if (typeOrder !== 0) return typeOrder;
+    return (right.created_at || '').localeCompare(left.created_at || '') || right.id - left.id;
+  };
+  for (const group of Object.values(groups)) group.sort(compare);
+  return groups;
+}
 
 function ReminderMenu({
   onSelect,
@@ -348,13 +406,6 @@ function statusTone(status: string) {
   }
 }
 
-function healthTone(status?: string) {
-  const normalized = (status ?? '').toLowerCase();
-  if (normalized === 'ok' || normalized === 'healthy') return 'success' as const;
-  if (normalized === 'degraded' || normalized === 'warning') return 'warning' as const;
-  return 'danger' as const;
-}
-
 function dueMeta(action: ActionItem) {
   const due = action.due_date ? new Date(action.due_date) : null;
   if (!due || Number.isNaN(due.getTime())) {
@@ -370,13 +421,24 @@ function dueMeta(action: ActionItem) {
 
 export default function ActionQueue() {
   const [status, setStatus] = useState<QueueStatus | null>(null);
-  const [health, setHealth] = useState<ActionQueueCheck | null>(null);
   const [actions, setActions] = useState<ActionItem[]>([]);
   const [tagMetadata, setTagMetadata] = useState<PaperlessTag[]>([]);
   const [filter, setFilter] = useState<ActionFilter>('pending');
   const [search, setSearch] = useState('');
-  const [tableSorting, setTableSorting] = useState<SortingState>([]);
-  const [tableColumnFilters, setTableColumnFilters] = useState<ColumnFiltersState>([]);
+  const [quickTypeFilter, setQuickTypeFilter] = useState<QuickTypeFilter>(() => {
+    const stored = window.localStorage.getItem('owl.actionQueue.typeFilter');
+    return ['all', 'pay', 'respond', 'sign', 'schedule', 'file_archive'].includes(stored || '')
+      ? stored as QuickTypeFilter
+      : 'all';
+  });
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<DeadlineBucket>>(new Set());
+  const [visibleByGroup, setVisibleByGroup] = useState<Record<DeadlineBucket, number>>({
+    overdue: ACTION_GROUP_BATCH_SIZE,
+    today: ACTION_GROUP_BATCH_SIZE,
+    next7: ACTION_GROUP_BATCH_SIZE,
+    later: ACTION_GROUP_BATCH_SIZE,
+    no_due_date: ACTION_GROUP_BATCH_SIZE,
+  });
   const [selectedActionId, setSelectedActionId] = useState<number | null>(null);
   const [drawerExpanded, setDrawerExpanded] = useState(false);
   const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
@@ -386,16 +448,13 @@ export default function ActionQueue() {
   const [toast, setToast] = useState<ToastState>(null);
 
   // [UX-STREAM] Pipeline streaming progress
-  const [pipelineState, runPipelineStream, cancelPipeline] = useStreamingAction();
+  const [pipelineState, runPipelineStream] = useStreamingAction();
 
   // [ARCH-01] Bulk selection state
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
-  const lastCheckedRef = useRef<number | null>(null);
   const [pendingBulkAction, setPendingBulkAction] = useState<{ action: string; ids: number[] } | null>(null);
   const [pendingNoActionId, setPendingNoActionId] = useState<number | null>(null);
 
-  // [UX-10] Per-item loading state for bulk ops
-  const [processingIds, setProcessingIds] = useState<Set<number>>(new Set());
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
 
   // [UX-07] Cache selected action so filter changes don't lose it
@@ -403,46 +462,15 @@ export default function ActionQueue() {
   const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [editDraft, setEditDraft] = useState<ActionEditDraft | null>(null);
 
-  // Custom run panel state
-  const [customRunOpen, setCustomRunOpen] = useState(false);
-  const [customRunMode, setCustomRunMode] = useState<'defaults' | 'custom'>('defaults');
-  const [customRunFilters, setCustomRunFilters] = useState<{
-    tag_override: string;
-    saved_view_id: string;
-    correspondent: string;
-    document_type: string;
-    created_after: string;
-    created_before: string;
-    added_after: string;
-    added_before: string;
-    document_id: string;
-    limit: string;
-  }>({
-    tag_override: '',
-    saved_view_id: '',
-    correspondent: '',
-    document_type: '',
-    created_after: '',
-    created_before: '',
-    added_after: '',
-    added_before: '',
-    document_id: '',
-    limit: '',
-  });
-  const [customRunMetadata, setCustomRunMetadata] = useState<{
-    tags: Array<{ id: number; name: string }>;
-    saved_views: Array<{ id: number; name: string }>;
-    correspondents: Array<{ id: number; name: string }>;
-    document_types: Array<{ id: number; name: string }>;
-    loaded: boolean;
-  }>({ tags: [], saved_views: [], correspondents: [], document_types: [], loaded: false });
+  const [correspondents, setCorrespondents] = useState<Array<{ id: number; name: string }>>([]);
+  const [correspondentsLoaded, setCorrespondentsLoaded] = useState(false);
   const correspondentOptions = useMemo(() => {
-    const names = new Set(customRunMetadata.correspondents.map((correspondent) => correspondent.name));
+    const names = new Set(correspondents.map((correspondent) => correspondent.name));
     if (editDraft?.correspondent) names.add(editDraft.correspondent);
     return [...names]
       .sort((left, right) => left.localeCompare(right))
       .map((name) => ({ value: name, label: name }));
-  }, [customRunMetadata.correspondents, editDraft?.correspondent]);
+  }, [correspondents, editDraft?.correspondent]);
   const tagsByValue = useMemo(() => {
     const lookup = new Map<string, PaperlessTag>();
     for (const tag of tagMetadata) {
@@ -460,7 +488,9 @@ export default function ActionQueue() {
     setLoading(true);
     setError(null);
     try {
-      const params = filter === 'all' ? 'limit=200' : `status=${filter}&limit=200`;
+      const params = filter === 'all'
+        ? 'limit=200'
+        : `status=${filter}&limit=200${filter === 'not_an_action' ? '&include_not_ready=true' : ''}`;
       const [statusResponse, actionsResponse, tagsResponse] = await Promise.all([
         endpoints.actionQueue.status() as Promise<QueueStatus>,
         endpoints.actionQueue.actions(params) as Promise<ActionListResponse>,
@@ -499,8 +529,13 @@ export default function ActionQueue() {
 
   const filteredActions = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    if (!needle) return displayActions;
     return displayActions.filter((action) => {
+      const type = normalizeType(action.action_type);
+      const matchesType = quickTypeFilter === 'all'
+        || type === quickTypeFilter.toUpperCase()
+        || (quickTypeFilter === 'file_archive' && ['FILE', 'ARCHIVE'].includes(type));
+      if (!matchesType) return false;
+      if (!needle) return true;
       const haystack = [
         action.title,
         action.document_title,
@@ -516,7 +551,20 @@ export default function ActionQueue() {
         .toLowerCase();
       return haystack.includes(needle);
     });
-  }, [displayActions, search]);
+  }, [displayActions, quickTypeFilter, search]);
+
+  useEffect(() => {
+    window.localStorage.setItem('owl.actionQueue.typeFilter', quickTypeFilter);
+  }, [quickTypeFilter]);
+
+  const groupedActions = useMemo(() => groupAndSortActions(filteredActions), [filteredActions]);
+  const checkedIncludesFilingAction = useMemo(
+    () => displayActions.some(
+      (action) => checkedIds.has(action.id)
+        && ['FILE', 'ARCHIVE'].includes(normalizeType(action.action_type)),
+    ),
+    [checkedIds, displayActions],
+  );
 
   // [UX-07] Preserve selection across filter changes — cache the selected action
   // When the selected item leaves the filtered set, show it from cache with a banner
@@ -587,33 +635,6 @@ export default function ActionQueue() {
   // Selection helpers (ARCH-01)
   // ------------------------------------------------------------------
 
-  const toggleCheck = (actionId: number, shiftKey = false) => {
-    setCheckedIds((prev) => {
-      const next = new Set(prev);
-
-      if (shiftKey && lastCheckedRef.current !== null) {
-        const startIdx = filteredActions.findIndex((a) => a.id === lastCheckedRef.current);
-        const endIdx = filteredActions.findIndex((a) => a.id === actionId);
-        if (startIdx >= 0 && endIdx >= 0) {
-          const [lo, hi] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
-          for (let i = lo; i <= hi; i++) {
-            next.add(filteredActions[i].id);
-          }
-          lastCheckedRef.current = actionId;
-          return next;
-        }
-      }
-
-      if (next.has(actionId)) {
-        next.delete(actionId);
-      } else {
-        next.add(actionId);
-      }
-      lastCheckedRef.current = actionId;
-      return next;
-    });
-  };
-
   const selectAllVisible = () => {
     const allChecked = filteredActions.length > 0 && filteredActions.every((a) => checkedIds.has(a.id));
     if (allChecked) {
@@ -626,27 +647,6 @@ export default function ActionQueue() {
   // ------------------------------------------------------------------
   // Actions
   // ------------------------------------------------------------------
-
-  const runCheck = async (mode: 'health' | 'custom-fields') => {
-    setBusyKey(mode);
-    try {
-      if (mode === 'health') {
-        const response = (await endpoints.actionQueue.check()) as ActionQueueCheck;
-        setHealth(response);
-        setToast({ message: 'Pipeline dependency check completed.' });
-      } else {
-        await endpoints.actionQueue.checkCustomFields();
-        setToast({ message: 'Custom field check completed.' });
-      }
-    } catch (err) {
-      setToast({
-        message: err instanceof Error ? err.message : 'Queue check failed.',
-        tone: 'error',
-      });
-    } finally {
-      setBusyKey(null);
-    }
-  };
 
   const runPipeline = (dryRun: boolean) => {
     setBusyKey(dryRun ? 'dry-run' : 'run');
@@ -692,53 +692,6 @@ export default function ActionQueue() {
     );
   };
 
-  const runBackfill = async (dryRun: boolean) => {
-    setBusyKey(dryRun ? 'backfill-dry' : 'backfill');
-    try {
-      const result = await endpoints.actionQueue.backfill(buildBackfillBody(dryRun)) as Record<string, unknown>;
-      await loadData();
-      if (dryRun) {
-        const count = (result as { would_sync?: number }).would_sync ?? 0;
-        setToast({ message: `Backfill preview: ${count} action(s) would be synced to Paperless.` });
-      } else {
-        const synced = (result as { synced?: number }).synced ?? 0;
-        const failed = (result as { failed?: number }).failed ?? 0;
-        const msg = failed > 0
-          ? `Backfill complete: ${synced} synced, ${failed} failed.`
-          : `Backfill complete: ${synced} action(s) synced to Paperless.`;
-        setToast({ message: msg, tone: failed > 0 ? 'error' : 'success' });
-      }
-    } catch (err) {
-      setToast({
-        message: err instanceof Error ? err.message : 'Backfill failed.',
-        tone: 'error',
-      });
-    } finally {
-      setBusyKey(null);
-    }
-  };
-
-  const refreshMetadata = async () => {
-    setBusyKey('refresh-metadata');
-    try {
-      const result = await endpoints.actionQueue.refreshMetadata({ force: false }) as Record<string, unknown>;
-      await loadData();
-      const updated = (result as { updated?: number }).updated ?? 0;
-      const failed = (result as { failed?: number }).failed ?? 0;
-      const msg = failed > 0
-        ? `Metadata refreshed: ${updated} updated, ${failed} failed.`
-        : `Metadata refreshed: ${updated} action(s) updated from Paperless.`;
-      setToast({ message: msg, tone: failed > 0 ? 'error' : undefined });
-    } catch (err) {
-      setToast({
-        message: err instanceof Error ? err.message : 'Metadata refresh failed.',
-        tone: 'error',
-      });
-    } finally {
-      setBusyKey(null);
-    }
-  };
-
   const refreshAction = async (actionId: number) => {
     const key = `refresh-action-${actionId}`;
     setBusyKey(key);
@@ -761,56 +714,19 @@ export default function ActionQueue() {
     }
   };
 
-  const loadCustomRunMetadata = async () => {
-    if (customRunMetadata.loaded) return;
+  const loadCorrectionMetadata = async () => {
+    if (correspondentsLoaded) return;
     try {
-      const [tags, views, correspondents, docTypes] = await Promise.all([
-        endpoints.actionQueue.metadataTags() as Promise<{ tags: Array<{ id: number; name: string }> }>,
-        endpoints.actionQueue.metadataSavedViews() as Promise<{ saved_views: Array<{ id: number; name: string }> }>,
-        endpoints.actionQueue.metadataCorrespondents() as Promise<{ correspondents: Array<{ id: number; name: string }> }>,
-        endpoints.actionQueue.metadataDocumentTypes() as Promise<{ document_types: Array<{ id: number; name: string }> }>,
-      ]);
-      setCustomRunMetadata({
-        tags: tags.tags ?? [],
-        saved_views: views.saved_views ?? [],
-        correspondents: correspondents.correspondents ?? [],
-        document_types: docTypes.document_types ?? [],
-        loaded: true,
-      });
-    } catch {
-      // Metadata load failure is non-blocking
-    }
-  };
-
-  const runCustomPipeline = async (dryRun: boolean) => {
-    setBusyKey(dryRun ? 'custom-dry-run' : 'custom-run');
-    try {
-      const body: Record<string, unknown> = buildQueueRunBody(
-        dryRun,
-        customRunFilters.document_id,
-      );
-      if (customRunMode === 'custom') {
-        if (customRunFilters.tag_override) body.tag_override = customRunFilters.tag_override;
-        if (customRunFilters.saved_view_id) body.saved_view_id = Number(customRunFilters.saved_view_id);
-        if (customRunFilters.document_id) body.document_id = Number(customRunFilters.document_id);
-        if (customRunFilters.created_after) body.created_after = customRunFilters.created_after;
-        if (customRunFilters.created_before) body.created_before = customRunFilters.created_before;
-        if (customRunFilters.added_after) body.added_after = customRunFilters.added_after;
-        if (customRunFilters.added_before) body.added_before = customRunFilters.added_before;
-        if (customRunFilters.correspondent) body.correspondent = customRunFilters.correspondent;
-        if (customRunFilters.document_type) body.document_type = customRunFilters.document_type;
-      }
-      if (customRunFilters.limit) body.limit = Number(customRunFilters.limit);
-      await endpoints.actionQueue.run(body);
-      await loadData();
-      setToast({ message: dryRun ? 'Custom dry run completed.' : 'Custom pipeline run completed.' });
+      const response = await endpoints.actionQueue.metadataCorrespondents() as {
+        correspondents: Array<{ id: number; name: string }>;
+      };
+      setCorrespondents(response.correspondents ?? []);
+      setCorrespondentsLoaded(true);
     } catch (err) {
       setToast({
-        message: err instanceof Error ? err.message : 'Custom pipeline run failed.',
+        message: err instanceof Error ? err.message : 'Could not load Paperless correspondents.',
         tone: 'error',
       });
-    } finally {
-      setBusyKey(null);
     }
   };
 
@@ -821,7 +737,6 @@ export default function ActionQueue() {
     onSuccess?: () => void,
   ) => {
     setBusyKey(`action-${actionId}`);
-    setProcessingIds(new Set([actionId]));
     try {
       const updatedAction = await endpoints.actionQueue.updateAction(String(actionId), payload) as ActionItem;
       if (selectedActionId === actionId) {
@@ -842,7 +757,6 @@ export default function ActionQueue() {
       }
     } finally {
       setBusyKey(null);
-      setProcessingIds(new Set());
     }
   };
 
@@ -929,8 +843,6 @@ export default function ActionQueue() {
 
   const executeBulkAction = async (action: string, ids: number[], snoozedUntil?: string) => {
     setBusyKey(`bulk-${action}`);
-    // [UX-10] Mark all affected items as processing
-    setProcessingIds(new Set(ids));
     setBulkProgress({ done: 0, total: ids.length });
     try {
       const result = await endpoints.actionQueue.bulk({
@@ -948,7 +860,6 @@ export default function ActionQueue() {
       setToast({ message: err instanceof Error ? err.message : `Bulk ${action} failed.`, tone: 'error' });
     } finally {
       setBusyKey(null);
-      setProcessingIds(new Set());
       setBulkProgress(null);
     }
   };
@@ -981,6 +892,23 @@ export default function ActionQueue() {
     await submitFeedback(actionId, 'not_an_action');
   };
 
+  const fileDocument = async (actionId: number) => {
+    setBusyKey(`file-${actionId}`);
+    try {
+      await endpoints.actionQueue.file(String(actionId));
+      await loadData();
+      handleClosePanel();
+      setToast({ message: 'Filed in Paperless and marked done.', tone: 'success' });
+    } catch (err) {
+      setToast({
+        message: err instanceof Error ? err.message : 'Paperless filing failed.',
+        tone: 'error',
+      });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const handleClosePanel = useCallback(() => {
     setSelectedActionId(null);
     setCachedAction(null);
@@ -988,506 +916,51 @@ export default function ActionQueue() {
   }, []);
 
   const counts = status?.database ?? {};
-  const progress = status?.progress;
-
-  // [UX-06] Progress tracking: resolved today = completed + dismissed + not_an_action
-  const resolvedToday = (counts.completed ?? 0) + (counts.dismissed ?? 0) + (counts.not_an_action ?? 0);
   const totalActions = counts.total ?? 0;
   const pendingCount = (counts.pending ?? 0) + (counts.acknowledged ?? 0) + (counts.snoozed ?? 0);
-  const progressPct = totalActions > 0 ? Math.round((resolvedToday / totalActions) * 100) : 0;
-
-  // Derive unique action type options for filtering
-  const actionTypeOptions = useMemo(() => {
-    const types = new Set(actions.map((a) => normalizeType(a.action_type)));
-    return Array.from(types).sort().map((t) => ({ value: t, label: t }));
-  }, [actions]);
-
-  const statusOptions = useMemo(() => {
-    const statuses = new Set(actions.map((a) => normalizeStatus(a.status)));
-    return Array.from(statuses).sort().map((s) => ({ value: s, label: statusDisplayLabel(s) }));
-  }, [actions]);
-
-  const urgencyOptions = useMemo(() => {
-    const tones = new Set(actions.map((a) => dueMeta(a).tone));
-    const labelMap: Record<string, string> = { danger: 'Overdue / Due soon', warning: 'Due this week', success: 'Not urgent', muted: 'No due date' };
-    return Array.from(tones).map((t) => ({ value: t, label: labelMap[t] ?? t }));
-  }, [actions]);
-
-  const documentTypeOptions = useMemo(() => {
-    const types = new Set(actions.map((a) => a.document_type).filter(Boolean) as string[]);
-    return Array.from(types).sort().map((t) => ({ value: t, label: t }));
-  }, [actions]);
-
-  const tagOptions = useMemo(() => {
-    const allTags = new Set(displayActions.flatMap((a) => a.tags || []));
-    return Array.from(allTags).sort().map((t) => ({ value: t, label: t }));
-  }, [displayActions]);
-
-  // Column definitions for sortable table
-  const actionTableColumns: SortableColumnDef<ActionItem>[] = useMemo(
-    () => [
-      {
-        id: 'select',
-        header: '',
-        cell: (row) => (
-          <input
-            type="checkbox"
-            checked={checkedIds.has(row.id)}
-            onChange={(e) => toggleCheck(row.id, e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey)}
-            onClick={(e) => e.stopPropagation()}
-            aria-label={`Select action ${row.id}`}
-          />
-        ),
-        enableSorting: false,
-        width: '40px',
-      },
-      {
-        id: 'item',
-        header: 'Action item',
-        accessorFn: (row) => (row.title || row.document_title || '').toLowerCase(),
-        cell: (row) => {
-          const { tone } = dueMeta(row);
-          const isProcessing = processingIds.has(row.id);
-          return (
-            <button className="aq-link-button" onClick={() => setSelectedActionId(row.id)}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {isProcessing ? (
-                  <span className="aq-spinner" aria-label="Processing" />
-                ) : (
-                  <span className={`aq-urgency-dot ${tone}`} />
-                )}
-                <div className={selectedActionId === row.id ? 'aq-row-title selected' : 'aq-row-title'}>
-                  {row.title || row.document_title || `Action #${row.id}`}
-                </div>
-              </div>
-              <div className="text-muted">{row.correspondent || row.document_title || 'No document metadata'}</div>
-            </button>
-          );
-        },
-      },
-      {
-        id: 'type',
-        header: 'Type',
-        accessorFn: (row) => normalizeType(row.action_type),
-        cell: (row) => {
-          const type = normalizeType(row.action_type);
-          return <Badge tone={actionTypeTone(type)}>{type}</Badge>;
-        },
-        filterOptions: actionTypeOptions,
-        width: '110px',
-      },
-      {
-        id: 'due',
-        header: 'Due',
-        accessorFn: (row) => row.due_date ?? '',
-        cell: (row) => {
-          const meta = dueMeta(row);
-          return (
-            <div>
-              <div>{formatDate(row.due_date)}</div>
-              <div className={`aq-inline-note ${meta.tone}`}>{meta.label}</div>
-            </div>
-          );
-        },
-        filterOptions: urgencyOptions,
-        filterFn: (rowValue, filterValue) => {
-          // Filter by urgency tone derived from due_date
-          const dueStr = rowValue as string;
-          const due = dueStr ? new Date(dueStr) : null;
-          if (!due || Number.isNaN(due.getTime())) return filterValue === 'muted';
-          const days = Math.ceil((due.getTime() - Date.now()) / 86400000);
-          const tone = days < 0 ? 'danger' : days <= 3 ? 'danger' : days <= 7 ? 'warning' : 'success';
-          return tone === filterValue;
-        },
-        width: '140px',
-      },
-      {
-        id: 'amount',
-        header: 'Amount',
-        accessorFn: (row) => row.amount ?? 0,
-        cell: (row) => formatCurrency(row.amount),
-        width: '110px',
-      },
-      {
-        id: 'document_date',
-        header: 'Doc Date',
-        accessorFn: (row) => row.document_date ?? '',
-        cell: (row) => formatDate(row.document_date),
-        width: '110px',
-      },
-      {
-        id: 'document_type',
-        header: 'Doc Type',
-        accessorFn: (row) => row.document_type ?? '',
-        cell: (row) => row.document_type ? <Badge tone="muted">{row.document_type}</Badge> : <span className="text-muted">—</span>,
-        filterOptions: documentTypeOptions,
-        width: '120px',
-      },
-      {
-        id: 'tags',
-        header: 'Tags',
-        enableSorting: false,
-        accessorFn: (row) => (row.tags || []).join(','),
-        cell: (row) => {
-          const tags = row.tags || [];
-          if (!tags.length) return <span className="text-muted">—</span>;
-          return (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-              {tags.slice(0, 3).map((tag) => (
-                <PaperlessTagBadge key={tag} label={tag} tag={tagsByValue.get(tag)} />
-              ))}
-              {tags.length > 3 && <span className="text-muted">+{tags.length - 3}</span>}
-            </div>
-          );
-        },
-        filterOptions: tagOptions,
-        filterFn: (rowValue, filterValue) => {
-          const tagsStr = String(rowValue ?? '');
-          return tagsStr.split(',').includes(filterValue);
-        },
-        width: '160px',
-      },
-      {
-        id: 'status',
-        header: 'Status',
-        accessorFn: (row) => normalizeStatus(row.status),
-        cell: (row) => {
-          const normalized = normalizeStatus(row.status);
-          return <Badge tone={statusTone(normalized)}>{statusDisplayLabel(normalized)}</Badge>;
-        },
-        filterOptions: statusOptions,
-        width: '110px',
-      },
-      {
-        id: 'actions',
-        header: 'Actions',
-        enableSorting: false,
-        cell: (row) => {
-          const normalized = normalizeStatus(row.status);
-          return (
-            <div className="btn-group">
-              {['pending', 'acknowledged', 'snoozed'].includes(normalized) && (
-                <ReminderMenu
-                  size="sm"
-                  disabled={busyKey !== null}
-                  onSelect={(until) => void updateAction(row.id, 'snoozed', until)}
-                />
-              )}
-              {['pending', 'acknowledged', 'snoozed'].includes(normalized) && (
-                <Tooltip label="Mark as done — action has been resolved">
-                <Button
-                  size="sm"
-                  variant="success"
-                  onClick={() => void updateAction(row.id, 'completed')}
-                  disabled={busyKey !== null}
-                >
-                  Done
-                </Button>
-                </Tooltip>
-              )}
-              {['pending', 'acknowledged', 'snoozed'].includes(normalized) && (
-                <Tooltip label="This was a real task, but you are choosing not to do it">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => void updateAction(row.id, 'dismissed')}
-                  disabled={busyKey !== null}
-                >
-                  Won't do
-                </Button>
-                </Tooltip>
-              )}
-              {['pending', 'acknowledged', 'snoozed'].includes(normalized) && (
-                <Tooltip label="OWL incorrectly identified this document as requiring action">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setPendingNoActionId(row.id)}
-                    disabled={busyKey !== null}
-                  >
-                    No action needed
-                  </Button>
-                </Tooltip>
-              )}
-              {normalized !== 'pending' && (
-                <Tooltip label="Move back to pending for review">
-                <Button
-                  size="sm"
-                  onClick={() => void updateAction(row.id, 'pending')}
-                  disabled={busyKey !== null}
-                >
-                  Re-open
-                </Button>
-                </Tooltip>
-              )}
-            </div>
-          );
-        },
-        width: '460px',
-      },
-    ],
-    [checkedIds, selectedActionId, processingIds, busyKey, actionTypeOptions, statusOptions, urgencyOptions, tagOptions, tagsByValue, documentTypeOptions],
-  );
 
   return (
     <>
       <PageHeader
         title="Action Queue"
-        desc="Review pending action items, run the pipeline, and resolve follow-up work from Document Intelligence processing."
+        desc="Trusted, actionable work from your documents."
         actions={
           <div className="btn-group">
-            <Button onClick={() => void runCheck('health')} disabled={busyKey !== null}>
-              Check services
-            </Button>
-            <Button onClick={() => void runCheck('custom-fields')} disabled={busyKey !== null}>
-              Check custom fields
-            </Button>
-            <Button variant="ghost" onClick={() => runPipeline(true)} disabled={busyKey !== null || pipelineState.running}>
-              {busyKey === 'dry-run' ? 'Running…' : 'Dry run'}
-            </Button>
+            <Button onClick={() => void loadData()} disabled={loading || busyKey !== null}>Refresh</Button>
             <Button variant="primary" onClick={() => runPipeline(false)} disabled={busyKey !== null || pipelineState.running}>
-              {busyKey === 'run' ? 'Running…' : 'Run pipeline'}
-            </Button>
-            <Button variant="ghost" onClick={() => void runBackfill(true)} disabled={busyKey !== null} title="Preview all actions that would be re-synced to Paperless">
-              Backfill preview
-            </Button>
-            <Button onClick={() => void runBackfill(false)} disabled={busyKey !== null} title="Force re-write action metadata and resolved tag cleanup to Paperless">
-              Backfill Paperless
-            </Button>
-            <Button variant="ghost" onClick={() => void refreshMetadata()} disabled={busyKey !== null} title="Fetch latest document date, type, tags, and correspondent from Paperless for existing actions">
-              {busyKey === 'refresh-metadata' ? 'Refreshing…' : 'Refresh metadata'}
+              {busyKey === 'run' ? 'Running…' : 'Run now'}
             </Button>
           </div>
         }
       />
 
-      <StatGrid>
-        <StatCard title="Pending" metric={counts.pending ?? 0} desc="Awaiting review or downstream completion." />
-        <StatCard title="Acknowledged (legacy)" metric={counts.acknowledged ?? 0} desc="Previously saved without a return date." />
-        <StatCard title="Remind later" metric={counts.snoozed ?? 0} desc="Hidden until the selected reminder date." />
-        <StatCard title="Done" metric={counts.completed ?? 0} desc="Finished and written back." />
-        <StatCard title="Won't do" metric={counts.dismissed ?? 0} desc="Real tasks intentionally closed without acting." />
-        <StatCard
-          title="Pipeline status"
-          metric={pipelineState.running ? 'RUNNING' : (status?.status ?? 'idle').toUpperCase()}
-          desc={
-            pipelineState.running && pipelineState.progress
-              ? `${pipelineState.progress.stage}${pipelineState.progress.message ? ` · ${pipelineState.progress.message}` : ''}`
-              : progress?.stage ? `${progress.stage}${progress.current_document ? ` · ${progress.current_document}` : ''}` : 'No active run'
-          }
-          status={{
-            label: status?.read_only ? 'Read only' : 'Write enabled',
-            tone: status?.read_only ? 'warning' : 'success',
-          }}
-        />
-      </StatGrid>
-
-      {pipelineState.running && pipelineState.progress && (
-        <ProgressBanner
-          stage={pipelineState.progress.stage}
-          message={pipelineState.progress.message}
-          current={pipelineState.progress.current}
-          total={pipelineState.progress.total}
-          onCancel={() => { cancelPipeline(); setBusyKey(null); setToast({ message: 'Disconnected from pipeline stream. The run continues in the background.' }); }}
-        />
-      )}
-
-      {/* Custom Run Panel */}
-      <div style={{ margin: '16px 0' }}>
-        <details
-          open={customRunOpen}
-          onToggle={(e) => {
-            const open = (e.target as HTMLDetailsElement).open;
-            setCustomRunOpen(open);
-            if (open) void loadCustomRunMetadata();
-          }}
-        >
-          <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', padding: '8px 0' }}>
-            ▸ Custom Run (one-off with filters)
-          </summary>
-          <Card title="Run with custom filters">
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <input
-                    type="radio"
-                    name="custom-run-mode"
-                    value="defaults"
-                    checked={customRunMode === 'defaults'}
-                    onChange={() => setCustomRunMode('defaults')}
-                    style={{ width: 'auto' }}
-                  />
-                  Use configured defaults
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <input
-                    type="radio"
-                    name="custom-run-mode"
-                    value="custom"
-                    checked={customRunMode === 'custom'}
-                    onChange={() => setCustomRunMode('custom')}
-                    style={{ width: 'auto' }}
-                  />
-                  Custom filters
-                </label>
-              </div>
-
-              {customRunMode === 'custom' && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
-                  <div className="form-group">
-                    <label>Tags override</label>
-                    <MetadataMultiTypeahead
-                      ariaLabel="Tags override"
-                      options={customRunMetadata.tags.map((tag) => ({ value: tag.name, label: tag.name }))}
-                      values={customRunFilters.tag_override
-                        .split(',')
-                        .map((tag) => tag.trim())
-                        .filter(Boolean)}
-                      onChange={(tags) => setCustomRunFilters((prev) => ({
-                        ...prev,
-                        tag_override: tags.join(','),
-                      }))}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="cr-saved-view">Saved view</label>
-                    <select
-                      id="cr-saved-view"
-                      value={customRunFilters.saved_view_id}
-                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, saved_view_id: e.target.value }))}
-                    >
-                      <option value="">None</option>
-                      {customRunMetadata.saved_views.map((v) => (
-                        <option key={v.id} value={v.id}>{v.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label>Correspondent</label>
-                    <MetadataTypeahead
-                      ariaLabel="Custom run correspondent"
-                      options={customRunMetadata.correspondents.map((correspondent) => ({
-                        value: correspondent.name,
-                        label: correspondent.name,
-                      }))}
-                      value={customRunFilters.correspondent}
-                      placeholder="Any correspondent"
-                      onChange={(correspondent) => setCustomRunFilters((prev) => ({ ...prev, correspondent }))}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Document type</label>
-                    <MetadataTypeahead
-                      ariaLabel="Custom run document type"
-                      options={customRunMetadata.document_types.map((documentType) => ({
-                        value: documentType.name,
-                        label: documentType.name,
-                      }))}
-                      value={customRunFilters.document_type}
-                      placeholder="Any document type"
-                      onChange={(documentType) => setCustomRunFilters((prev) => ({
-                        ...prev,
-                        document_type: documentType,
-                      }))}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="cr-created-after">Created after</label>
-                    <input
-                      id="cr-created-after"
-                      type="date"
-                      value={customRunFilters.created_after}
-                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, created_after: e.target.value }))}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="cr-created-before">Created before</label>
-                    <input
-                      id="cr-created-before"
-                      type="date"
-                      value={customRunFilters.created_before}
-                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, created_before: e.target.value }))}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="cr-added-after">Added after</label>
-                    <input
-                      id="cr-added-after"
-                      type="date"
-                      value={customRunFilters.added_after}
-                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, added_after: e.target.value }))}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="cr-added-before">Added before</label>
-                    <input
-                      id="cr-added-before"
-                      type="date"
-                      value={customRunFilters.added_before}
-                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, added_before: e.target.value }))}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="cr-doc-id">Document ID (specific)</label>
-                    <input
-                      id="cr-doc-id"
-                      type="number"
-                      placeholder="e.g. 1234"
-                      value={customRunFilters.document_id}
-                      onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, document_id: e.target.value }))}
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <div className="form-group" style={{ margin: 0, width: 120 }}>
-                  <label htmlFor="cr-limit" style={{ fontSize: '0.78rem' }}>Limit</label>
-                  <input
-                    id="cr-limit"
-                    type="number"
-                    min={1}
-                    max={500}
-                    placeholder="No limit"
-                    value={customRunFilters.limit}
-                    onChange={(e) => setCustomRunFilters((prev) => ({ ...prev, limit: e.target.value }))}
-                  />
-                </div>
-                <div className="btn-group" style={{ marginTop: 16 }}>
-                  <Button variant="ghost" onClick={() => void runCustomPipeline(true)} disabled={busyKey !== null}>
-                    Dry run
-                  </Button>
-                  <Button variant="primary" onClick={() => void runCustomPipeline(false)} disabled={busyKey !== null}>
-                    Run now
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </Card>
-        </details>
+      <div className="aq-compact-status" role="status">
+        <span>
+          <strong>{pipelineState.running ? 'Pipeline running' : `Pipeline ${status?.status ?? 'idle'}`}</strong>
+          {' · '}
+          {status?.finished_at
+            ? `Last run ${formatDateTime(status.finished_at)}`
+            : status?.started_at
+              ? `Started ${formatDateTime(status.started_at)}`
+              : 'No recorded run'}
+        </span>
+        <span>{status?.read_only ? 'Read only' : 'Paperless writeback enabled'}</span>
+        <a href="#/action-queue/operations">Operations</a>
       </div>
 
-      {/* [UX-06] Progress indicator */}
-      {totalActions > 0 && (
-        <div className="aq-progress-section">
-          <div className="aq-progress-header">
-            <span className="aq-progress-label">
-              {pendingCount === 0
-                ? '🎉 Inbox zero — all actions resolved!'
-                : `${resolvedToday} of ${totalActions} resolved`}
-            </span>
-            <span className="aq-progress-pct">{progressPct}%</span>
-          </div>
-          <div className="aq-progress-track">
-            <div
-              className={`aq-progress-fill${pendingCount === 0 ? ' complete' : ''}`}
-              style={{ width: `${progressPct}%` }}
-            />
-          </div>
-        </div>
-      )}
-
       <div className="aq-toolbar">
+        <FilterPills
+          active={quickTypeFilter}
+          onChange={(value) => setQuickTypeFilter(value as QuickTypeFilter)}
+          options={[
+            { key: 'all', label: 'All types' },
+            { key: 'pay', label: 'Pay' },
+            { key: 'respond', label: 'Respond' },
+            { key: 'sign', label: 'Sign' },
+            { key: 'schedule', label: 'Schedule' },
+            { key: 'file_archive', label: 'File / Archive' },
+          ]}
+        />
         <FilterPills
           active={filter}
           onChange={(value) => setFilter(value as ActionFilter)}
@@ -1524,10 +997,7 @@ export default function ActionQueue() {
         <ErrorState message={error} onRetry={() => void loadData()} />
       ) : (
         <div className="action-queue-layout">
-          <Card
-            title={`${filter === 'all' ? 'All' : statusDisplayLabel(filter)} actions (${filteredActions.length})`}
-            className="aq-table-card"
-          >
+          <div className="aq-deadline-groups">
             {/* [ARCH-01] Bulk action bar */}
             {checkedIds.size > 0 && (
               <div className="aq-bulk-bar">
@@ -1545,8 +1015,8 @@ export default function ActionQueue() {
                     disabled={busyKey !== null}
                     onSelect={(until) => void executeBulkAction('snooze', Array.from(checkedIds), until)}
                   />
-                  <Tooltip label="Mark as done — actions have been resolved">
-                  <Button variant="success" size="sm" onClick={() => void handleBulkAction('complete')} disabled={busyKey !== null}>
+                  <Tooltip label={checkedIncludesFilingAction ? 'File / Archive items must be filed in Paperless' : 'Mark as done — actions have been resolved'}>
+                  <Button variant="success" size="sm" onClick={() => void handleBulkAction('complete')} disabled={busyKey !== null || checkedIncludesFilingAction}>
                     Done
                   </Button>
                   </Tooltip>
@@ -1600,47 +1070,91 @@ export default function ActionQueue() {
                   desc="Try a different status filter or rerun the pipeline to discover new actions."
                 />
               )
-            ) : (
-              <SortableTable<ActionItem>
-                data={filteredActions}
-                rowKey={(row) => String(row.id)}
-                emptyLabel="No actions found"
-                columns={actionTableColumns}
-                sorting={tableSorting}
-                onSortingChange={setTableSorting}
-                columnFilters={tableColumnFilters}
-                onColumnFiltersChange={setTableColumnFilters}
-              />
-            )}
-          </Card>
-
-          <div className="aq-side-column">
-            <Card title="Run health">
-                {health ? (
-                  <div className="aq-meta-list">
-                    <div className="aq-meta-row">
-                      <span>Queue</span>
-                      <Badge tone={healthTone(health.status)}>{health.status ?? 'unknown'}</Badge>
-                    </div>
-                    <div className="aq-meta-row">
-                      <span>Paperless</span>
-                      <Badge tone={healthTone(health.paperless?.status)}>{health.paperless?.status ?? 'unknown'}</Badge>
-                    </div>
-                    <div className="aq-meta-row">
-                      <span>Ollama</span>
-                      <Badge tone={healthTone(health.ollama?.status)}>{health.ollama?.status ?? 'unknown'}</Badge>
-                    </div>
-                    <div className="aq-meta-row"><span>Model</span><span>{health.ollama?.model ?? '—'}</span></div>
-                    <div className="aq-meta-row"><span>Mode</span><span>{health.read_only ? 'Read only' : 'Write enabled'}</span></div>
-                  </div>
-                ) : (
-                  <EmptyState
-                    icon="🩺"
-                    title="No health check yet"
-                    desc="Run Check services to verify Paperless and Ollama connectivity before starting the pipeline."
-                  />
-                )}
-            </Card>
+            ) : DEADLINE_BUCKETS.map(({ key, label }) => {
+              const group = groupedActions[key];
+              if (!group.length) return null;
+              const collapsed = collapsedGroups.has(key);
+              const visible = group.slice(0, visibleByGroup[key]);
+              return (
+                <section className={`aq-deadline-group aq-deadline-${key}`} key={key}>
+                  <button
+                    className="aq-group-heading"
+                    type="button"
+                    onClick={() => setCollapsedGroups((current) => {
+                      const next = new Set(current);
+                      if (next.has(key)) next.delete(key); else next.add(key);
+                      return next;
+                    })}
+                    aria-expanded={!collapsed}
+                  >
+                    <span>{collapsed ? '▸' : '▾'} {label}</span>
+                    <Badge tone={key === 'overdue' ? 'danger' : key === 'today' ? 'warning' : 'muted'}>
+                      {group.length}
+                    </Badge>
+                  </button>
+                  {!collapsed && (
+                    <>
+                      <div className="aq-action-list">
+                        {visible.map((action) => (
+                          <article className="aq-action-card" key={action.id}>
+                            <button
+                              className="aq-action-card-main"
+                              type="button"
+                              onClick={() => setSelectedActionId(action.id)}
+                              aria-label={`Open ${action.title || action.document_title}`}
+                            >
+                              <div className="aq-action-card-title">
+                                <Badge tone={actionTypeTone(normalizeType(action.action_type))}>
+                                  {normalizeType(action.action_type)}
+                                </Badge>
+                                <strong>{action.title || action.document_title || `Action #${action.id}`}</strong>
+                              </div>
+                              <div className="aq-action-card-meta">
+                                <span>{action.due_date ? `Due ${formatDate(action.due_date)}` : 'No due date'}</span>
+                                {action.amount != null && <span>{formatCurrency(action.amount)}</span>}
+                                {action.correspondent && <span>{action.correspondent}</span>}
+                              </div>
+                            </button>
+                            <div className="aq-action-card-actions">
+                              {['FILE', 'ARCHIVE'].includes(normalizeType(action.action_type)) ? (
+                                <Button
+                                  size="sm"
+                                  variant="primary"
+                                  disabled={busyKey !== null || status?.read_only}
+                                  onClick={() => void fileDocument(action.id)}
+                                >
+                                  {status?.read_only ? 'Filing unavailable' : 'File in Paperless'}
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="success"
+                                  disabled={busyKey !== null}
+                                  onClick={() => void updateAction(action.id, 'completed')}
+                                >
+                                  Done
+                                </Button>
+                              )}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                      {visible.length < group.length && (
+                        <Button
+                          size="sm"
+                          onClick={() => setVisibleByGroup((current) => ({
+                            ...current,
+                            [key]: current[key] + ACTION_GROUP_BATCH_SIZE,
+                          }))}
+                        >
+                          Show more {label.toLowerCase()}
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </section>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1768,7 +1282,7 @@ export default function ActionQueue() {
 
               <div className="aq-edit-section">
                 <div className="aq-edit-header">
-                  <div className="section-title">Correct extracted details</div>
+                  <div className="section-title">Something's wrong</div>
                   <Button
                     size="sm"
                     variant="ghost"
@@ -1779,12 +1293,12 @@ export default function ActionQueue() {
                       } else {
                         setEditDraft(buildEditDraft(selectedAction));
                         setIsEditingDetails(true);
-                        void loadCustomRunMetadata();
+                        void loadCorrectionMetadata();
                       }
                     }}
                     disabled={busyKey !== null}
                   >
-                    {isEditingDetails ? 'Cancel' : 'Edit details'}
+                    {isEditingDetails ? 'Cancel' : 'Correct details'}
                   </Button>
                 </div>
 
@@ -1871,6 +1385,19 @@ export default function ActionQueue() {
                         Save details
                       </Button>
                     </div>
+                  </div>
+                )}
+                {!isEditingDetails && (
+                  <div className="aq-exception-outcome">
+                    <span className="text-muted">False positive, not merely the wrong action type?</span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setPendingNoActionId(selectedAction.id)}
+                      disabled={busyKey !== null}
+                    >
+                      No action needed
+                    </Button>
                   </div>
                 )}
               </div>
@@ -1966,7 +1493,7 @@ export default function ActionQueue() {
                 </div>
                 <div className="aq-meta-row"><span>Amount</span><span>{formatCurrency(selectedAction.amount)}</span></div>
                 <div className="aq-meta-row"><span>Due date</span><span>{formatDate(selectedAction.due_date)}</span></div>
-                {selectedAction.extracted_data?.account_number && <div className="aq-meta-row"><span>Account</span><span>{selectedAction.extracted_data.account_number}</span></div>}
+                {selectedAction.extracted_data?.account_identifier && <div className="aq-meta-row"><span>Account</span><span>{selectedAction.extracted_data.account_identifier}</span></div>}
                 {selectedAction.extracted_data?.reference_number && <div className="aq-meta-row"><span>Reference</span><span>{selectedAction.extracted_data.reference_number}</span></div>}
                 {selectedAction.extracted_data?.phone && <div className="aq-meta-row"><span>Phone</span><span><a href={`tel:${selectedAction.extracted_data.phone}`}>{selectedAction.extracted_data.phone}</a></span></div>}
                 {selectedAction.extracted_data?.email && <div className="aq-meta-row"><span>Email</span><span><a href={`mailto:${selectedAction.extracted_data.email}`}>{selectedAction.extracted_data.email}</a></span></div>}
@@ -1998,13 +1525,25 @@ export default function ActionQueue() {
                   <div className="aq-detail-actions">
                     {/* Lifecycle transition buttons */}
                     <div className="btn-group">
+                      {['pending', 'acknowledged', 'snoozed'].includes(currentStatus)
+                        && ['FILE', 'ARCHIVE'].includes(normalizeType(selectedAction.action_type)) && (
+                        <Button
+                          variant="primary"
+                          onClick={() => void fileDocument(selectedAction.id)}
+                          disabled={busyKey !== null || status?.read_only}
+                          title={status?.read_only ? 'Paperless writes are disabled' : undefined}
+                        >
+                          {status?.read_only ? 'Filing unavailable (read only)' : 'File in Paperless'}
+                        </Button>
+                      )}
                       {['pending', 'acknowledged', 'snoozed'].includes(currentStatus) && (
                         <ReminderMenu
                           disabled={busyKey !== null}
                           onSelect={(until) => void updateAction(selectedAction.id, 'snoozed', until)}
                         />
                       )}
-                      {['pending', 'acknowledged', 'snoozed'].includes(currentStatus) && (
+                      {['pending', 'acknowledged', 'snoozed'].includes(currentStatus)
+                        && !['FILE', 'ARCHIVE'].includes(normalizeType(selectedAction.action_type)) && (
                         <Tooltip label="Mark as done — action has been resolved">
                         <Button
                           variant="success"
@@ -2023,17 +1562,6 @@ export default function ActionQueue() {
                           disabled={busyKey !== null}
                         >
                           Won't do
-                        </Button>
-                        </Tooltip>
-                      )}
-                      {['pending', 'acknowledged', 'snoozed'].includes(currentStatus) && (
-                        <Tooltip label="OWL incorrectly identified this document as requiring action">
-                        <Button
-                          variant="ghost"
-                          onClick={() => setPendingNoActionId(selectedAction.id)}
-                          disabled={busyKey !== null}
-                        >
-                          No action needed
                         </Button>
                         </Tooltip>
                       )}
@@ -2069,8 +1597,9 @@ export default function ActionQueue() {
           >
             <div id="no-action-confirm-title" className="aq-modal-title">Mark as no action needed?</div>
             <p className="aq-modal-desc">
-              OWL will retain the extracted details for audit and model improvement. In Paperless,
-              Document Amount is kept; Action Type, Due Date, Urgency, Summary, and Action Count are cleared.
+              OWL will preserve the rejected guess in feedback history, not as current metadata. Paperless
+              keeps durable facts such as Document Amount and masked Account Identifier, while action-specific
+              and legacy inferred fields are cleared.
             </p>
             <div className="aq-modal-actions">
               <Button size="sm" onClick={() => setPendingNoActionId(null)}>Cancel</Button>

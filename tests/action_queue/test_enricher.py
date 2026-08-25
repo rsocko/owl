@@ -15,6 +15,8 @@ from doc_intelligence_hub.modules.action_queue.enricher import (
 )
 
 _ACTION_KEYS = (
+    MetadataFieldKey.ACCOUNT_IDENTIFIER,
+    MetadataFieldKey.INVOICE_NUMBER,
     MetadataFieldKey.DOCUMENT_AMOUNT,
     MetadataFieldKey.ACTION_STATUS,
     MetadataFieldKey.ACTION_ANALYZED,
@@ -28,6 +30,8 @@ _ACTION_KEYS = (
 
 def _prime_schema(enricher: PaperlessEnricher, *, include_legacy: bool = False) -> None:
     definitions = [
+        {"id": 10, "name": "Account Identifier", "data_type": "string"},
+        {"id": 11, "name": "Invoice Number", "data_type": "string"},
         {"id": 1, "name": "Document Amount", "data_type": "float"},
         {
             "id": 2,
@@ -201,6 +205,30 @@ async def test_enrich_document_writes_only_neutral_metadata(enricher):
 
 
 @pytest.mark.asyncio
+async def test_enrich_document_projects_only_masked_identifier_and_canonical_reference(enricher):
+    _prime_schema(enricher)
+
+    await enricher.enrich_document(
+        42,
+        {
+            "amount": 50.0,
+            "extracted_data": {
+                "account_identifier": "ending 4321",
+                "reference_number": "INV-42",
+                "payment_url": "https://example.test/pay",
+                "email": "billing@example.test",
+            },
+        },
+    )
+
+    fields = enricher.client.update_custom_fields.await_args.args[1]
+    values = {field["field"]: field["value"] for field in fields}
+    assert values[10] == "ending 4321"
+    assert values[11] == "INV-42"
+    assert all("example.test" not in str(value) for value in values.values())
+
+
+@pytest.mark.asyncio
 async def test_not_an_action_clears_legacy_inferred_fields_but_keeps_amount(enricher):
     _prime_schema(enricher, include_legacy=True)
 
@@ -217,6 +245,34 @@ async def test_not_an_action_clears_legacy_inferred_fields_but_keeps_amount(enri
         9: None,
     }
     assert 1 not in values
+
+
+@pytest.mark.asyncio
+async def test_uncertain_action_clears_current_and_legacy_inference_but_keeps_durable_facts(
+    enricher,
+):
+    _prime_schema(enricher, include_legacy=True)
+
+    await enricher.enrich_document(
+        42,
+        {
+            "amount": 50.0,
+            "extracted_data": {
+                "account_identifier": "ending 4321",
+                "reference_number": "INV-42",
+            },
+        },
+        action_status=None,
+        clear_action_inference=True,
+    )
+
+    fields = enricher.client.update_custom_fields.await_args.args[1]
+    values = {field["field"]: field["value"] for field in fields}
+    assert values[1] == 50.0
+    assert values[10] == "ending 4321"
+    assert values[11] == "INV-42"
+    assert values[2] is None
+    assert all(values[field_id] is None for field_id in (5, 6, 7, 8, 9))
 
 
 @pytest.mark.asyncio

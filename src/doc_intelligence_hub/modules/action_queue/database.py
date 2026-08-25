@@ -72,6 +72,9 @@ class Action(Base):
     recommended_cta = Column(
         String, nullable=True
     )  # AI-recommended call-to-action (e.g., "pay-online", "open-document")
+    action_ready = Column(Boolean, nullable=False, default=True, index=True)
+    review_state = Column(String, nullable=False, default="ready", index=True)
+    review_item_id = Column(String, nullable=True, index=True)
     version = Column(Integer, default=1, nullable=False)  # Optimistic locking
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -179,6 +182,9 @@ def _migrate_missing_columns(engine):
             ("version", "INTEGER DEFAULT 1 NOT NULL"),
             ("severity", "TEXT DEFAULT 'safe'"),
             ("recommended_cta", "TEXT"),
+            ("action_ready", "BOOLEAN DEFAULT 1 NOT NULL"),
+            ("review_state", "TEXT DEFAULT 'ready' NOT NULL"),
+            ("review_item_id", "TEXT"),
             ("acknowledged_at", "TIMESTAMP"),
             ("snoozed_until", "TIMESTAMP"),
             ("document_date", "DATE"),

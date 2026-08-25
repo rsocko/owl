@@ -46,6 +46,7 @@ const NAV_ENTRIES: NavEntry[] = [
   {
     label: 'Admin',
     items: [
+      { to: '/action-queue/operations', label: 'Action Queue Operations' },
       { to: '/rules', label: 'Rules Config' },
       { to: '/settings', label: 'Settings' },
     ],
