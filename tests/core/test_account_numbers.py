@@ -121,8 +121,11 @@ class TestPickBestAccountIdentifier:
 
 def test_normalizes_only_masked_account_identifiers() -> None:
     assert normalize_masked_account_identifier(" xxxx-4321 ") == "ending 4321"
+    assert normalize_masked_account_identifier("XXX") == "ending XX"
+    assert normalize_masked_account_identifier("*\u2003XX") == "ending XX"
     assert normalize_masked_account_identifier("Member Ending ab12") == "member ending AB12"
     assert normalize_masked_account_identifier("ABC123456") is None
+    assert normalize_masked_account_identifier("X" * 1_000_000 + "!") is None
 
 
 def test_masks_full_extracted_identifier_to_short_suffix() -> None:

@@ -10,6 +10,8 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Sequence
 
+from doc_intelligence_hub.core.masked_identifiers import masked_identifier_suffix
+
 
 class MetadataFieldKey(str, Enum):
     ACCOUNT_IDENTIFIER = "account_identifier"
@@ -914,7 +916,7 @@ def _validate_write_value(spec: MetadataFieldSpec, value: Any) -> None:
     masked_value = str(value)
     if re.fullmatch(r"(?:member\s+)?ending\s+[A-Za-z0-9]{2,8}", masked_value):
         return
-    if re.fullmatch(r"[*Xx.\s-]+[A-Za-z0-9]{2,8}", masked_value):
+    if masked_identifier_suffix(masked_value) is not None:
         return
     raise MetadataValueError("Account Identifier must contain only an approved masked value")
 
