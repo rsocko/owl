@@ -75,7 +75,7 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 | **#834** EOB Match Review UI (design) | **#882, #878, #871, #874, #873** (doc-hub-ui) | #834 is the epic; the 5 issues are specific feature gaps | Keep all — #834 is the parent epic. Add "Part of #834" to each sub-issue. |
 | **#832** Unified Triage Queue UI | **#868** Bulk actions in Triage Queue | #868 is a specific feature within #832 | Keep both — #868 is a sub-task of #832. |
 | **#831** Orphan Management UI | **#826** Triage view of docs with nothing to do | #826 is a vague idea that #831 fully encompasses | ✅ #826 closed |
-| **#160** Paperless-Enhanced OCR (umbrella) | **#736-#740** OCR sub-issues | #160 is the original idea; #736-740 are the decomposed tasks | Keep all — #160 is the umbrella. Already cross-referenced. |
+| **#23** OCR integration and release | **#17, #18, #25, #29, #30** OCR components | #23 owns cross-component UI/release work; component behavior remains in the five scoped issues | Keep all and enforce component completion gates in #23. |
 
 ### 🟢 NOT DUPLICATES (appear similar but distinct)
 
@@ -165,15 +165,17 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 | 816 | Evaluate Copilot SDK as AI provider |
 | 865 | DocType/Tag review for DocIntel |
 
-### OCR Pipeline (Phase 5 — consider deferring)
+### OCR Quality Pipeline
 | # | Title |
 |---|-------|
-| 160 | Paperless-Enhanced OCR (umbrella) |
-| 736 | OCR Baseline Inventory Script |
-| 737 | OCR Quality Scoring Service |
-| 738 | OCR Ollama Validation |
-| 739 | OCR Remediation Engine |
-| 740 | OCR n8n Workflow Orchestration |
+| 25 | Inventory baseline OCR quality |
+| 29 | Score OCR quality consistently |
+| 17 | Add optional secondary review |
+| 18 | Generate, compare, and safely apply OCR candidates |
+| 115 | Build the OWL OCR quality review and comparison UI |
+| 114 | Reprocess downstream analysis after OCR version changes |
+| 30 | Orchestrate OCR processing |
+| 23 | Integrate and release the OCR quality pipeline |
 
 ### Mission Control Integration (Phase 5-6)
 | # | Title |
@@ -293,20 +295,25 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 
 ---
 
-### Phase 6: OCR Pipeline (Weeks 12-16+) — OPTIONAL 🔬
-**Goal:** Improve OCR quality across the document corpus.
-**Decision Gate:** Only proceed if OCR quality is actively blocking Phases 1-4.
+### Phase 6: OCR Quality Assessment and Review
+**Goal:** Measure OCR quality across the corpus and enable deliberate,
+version-safe improvements through OWL.
+**Decision Gate:** Read-only inventory proceeds first. Candidate generation
+depends on calibrated evidence; candidate application depends on verified
+Paperless version and rollback behavior.
 
 | Priority | Issue | Description |
 |----------|-------|-------------|
-| P6 | #736 | OCR Baseline Inventory Script |
-| P6 | #737 | OCR Quality Scoring Service |
-| P6 | #738 | OCR Ollama Validation |
-| P6 | #739 | OCR Remediation Engine |
-| P6 | #740 | OCR n8n Workflow Orchestration |
-| P6 | #160 | Paperless-Enhanced OCR (umbrella) |
+| P6 | #25 | Non-mutating 8,000+ document baseline and calibration |
+| P6 | #29 | Overlay/readability and machine-extraction scoring |
+| P6 | #115 | OWL quality review and comparison UI |
+| P6 | #18 | Independent candidates, Paperless versions, and rollback |
+| P6 | #114 | Downstream analysis invalidation and reprocessing |
+| P6 | #30 | Shared manual, batch, event, and schedule orchestration |
+| P6 | #23 | Cross-component integration and release |
+| P6 | #17 | Optional advisory secondary review after calibration |
 
-**Estimated effort: 60+ hours.** Consider whether Tagvico's OCR rescue feature (#815) eliminates the need for this.
+Automatic replacement is out of scope for the initial release.
 
 ---
 
@@ -353,8 +360,8 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 - #805 — Mobile/responsive experience
 - #847 — Historical trending + run history dashboard
 
-**Phase 6 — OCR Pipeline (optional):**
-- #160, #736, #737, #738, #739, #740
+**Phase 6 — OCR Quality Assessment and Review:**
+- #25, #29, #115, #18, #114, #30, #23, #17
 
 **Phase 7 — Cross-Platform Integration (future):**
 - #768, #765, #780

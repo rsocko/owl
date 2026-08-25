@@ -135,25 +135,32 @@ This document delineates what's **built and working today** versus what's **plan
 
 ### ✅ Today (Built)
 
-- 6 comprehensive design documents (baseline inventory, quality scoring, Ollama validation, remediation engine, n8n orchestration, umbrella spec)
-- Architecture fully specified with tiered remediation: Tesseract 5 → Azure DI
-- Budget controls and A–F grading system designed
+- 6 revised design documents covering inventory, multidimensional scoring,
+  OWL-native review, candidate/version handling, optional secondary review, and
+  orchestration
+- Review-first architecture specified for independent Tesseract and Azure
+  searchable-PDF candidates
+- Paperless original preservation, document versions, rollback, and explicit
+  acceptance policy specified
 - **Zero implementation** — design only
 
 ### 🔮 Future (Planned/Envisioned)
 
 | Feature | Priority | Effort | Issue |
 |---------|----------|--------|-------|
-| Baseline inventory script (score all existing docs) | LOW | M | #736 |
-| Quality scoring service (A–F grading on text metrics) | LOW | L | #737 |
-| Ollama validation for borderline scores | LOW | M | #738 |
-| Remediation engine (Tesseract 5 tier) | LOW | XL | #739 |
-| n8n workflow orchestration (weekly scans, webhooks) | LOW | M | #740 |
-| Azure DI tier for premium remediation | LOW | L | #739 |
+| Non-mutating 8,000+ document baseline and calibration | HIGH | M | #25 |
+| Overlay/readability and machine-extraction scoring | HIGH | L | #29 |
+| OWL OCR Quality review and comparison UI | HIGH | L | #115 |
+| Tesseract and Azure candidate generation | MEDIUM | L | #18 |
+| Paperless version application and rollback | MEDIUM | L | #18, #23 |
+| Downstream re-analysis after accepted OCR versions | HIGH | M | #114 |
+| Shared manual, batch, event, and schedule orchestration | MEDIUM | M | #30 |
+| Optional advisory secondary review | LOW | M | #17 |
 
-**Decision gate:** Only proceed if OCR quality is actively blocking other modules. Tagvico's OCR rescue feature (#815) may eliminate the need for this entirely. See [OCR Quality Implementation Plan](design/proposed/ocr-quality-implementation-plan.md) for phased build approach.
-
-**Estimated total effort: 60+ hours.**
+**Decision gate:** Proceed with read-only inventory and calibration first.
+Candidate application remains gated on corpus evidence and verified Paperless
+version/rollback behavior. Automatic replacement is not planned for the initial
+release. See the [OCR Quality Implementation Plan](design/proposed/ocr-quality-implementation-plan.md).
 
 ---
 
@@ -313,7 +320,7 @@ The Reconciliation Engine generalizes the proven EOB matching pattern into a rec
 | EOB/Medical Matching | ✅ Full pipeline, live + rich UI | 3 items |
 | Reconciliation Engine | 📋 Design complete | 4 phases (20+ items) |
 | Unified Alerts & Insights | ✅ Full system, charts, rules | 3 items |
-| OCR Quality System | 📋 Design only (6 docs) | 6 items (60+ hrs) |
+| OCR Quality System | 📋 Revised review-first design (6 module docs + implementation plan) | 6 current issues; phased after corpus calibration |
 | Triage & Correction | ✅ Complete workflow | 3 items |
 | Infrastructure & Platform | ✅ Production-deployed | 7 items |
 | Cross-Platform | 🔮 Not started | 3 items |

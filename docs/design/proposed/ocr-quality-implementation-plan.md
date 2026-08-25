@@ -4,176 +4,212 @@ sidebar_label: OCR Implementation Plan
 sidebar_position: 4
 status: proposed
 created: 2026-07-27
+revised: 2026-08-24
 ---
 
 # OCR Quality Pipeline — Implementation Plan
 
 ## Purpose
 
-This document bridges the gap between OWL's **6 existing OCR quality design documents** and actual implementation. The design is comprehensive; what's missing is a phased implementation plan that connects the design to the codebase and clarifies what to build first.
+Implement the revised OCR quality design as an OWL-first, calibration-first
+workflow. The plan separates safe corpus assessment from candidate generation
+and separates candidate generation from changing Paperless.
 
-:::info Current State
-- **Design**: 6 detailed documents covering scoring, Ollama validation, remediation, n8n orchestration, and baseline inventory
-- **Code**: A basic `text_quality_score` heuristic exists in the Action Queue pipeline (`_compute_text_quality`), but there is no dedicated OCR quality module
-- **Decision Gate**: The [feature roadmap](./../../feature-roadmap.md#ocr-quality-system) notes this should only proceed if OCR quality is actively blocking other modules, and that Tagvico's OCR rescue feature may eliminate the need entirely
-:::
+## Current state
 
----
+- OWL has six revised OCR design documents.
+- Action Queue records a basic legacy `text_quality_score`.
+- There is no dedicated OCR quality module or review UI.
+- Paperless remains the source of document metadata, original files, current
+  searchable versions, and extracted content.
+- Current Paperless capabilities include document file versions and Azure remote
+  OCR support, but the deployed version and exact version-application API must
+  be verified before OWL enables acceptance.
 
-## Existing Design Documents
+## Product decisions
 
-| Document | Location | Covers |
-|----------|----------|--------|
-| OCR Quality Design (umbrella) | `docs/modules/ocr-quality/ocr-quality-design.md` | End-to-end architecture, document lifecycle, gating rules |
-| Baseline Inventory | `docs/modules/ocr-quality/ocr-baseline-inventory.md` | Script to score all existing Paperless documents |
-| Quality Scoring | `docs/modules/ocr-quality/ocr-quality-scoring.md` | A–F grading system, heuristic metrics, thresholds |
-| Ollama Integration | `docs/modules/ocr-quality/ocr-ollama-integration.md` | LLM-based validation for borderline scores |
-| Remediation Engine | `docs/modules/ocr-quality/ocr-remediation-engine.md` | Tiered re-OCR: Tesseract 5 → Azure Document Intelligence |
-| n8n Workflow | `docs/modules/ocr-quality/ocr-n8n-workflow.md` | Orchestration via n8n webhooks, scheduling, alerting |
+1. OWL is the primary OCR Quality UI.
+2. No custom URL field is added to Paperless.
+3. The exact file originally ingested by Paperless remains immutable.
+4. Accepted candidates become the latest Paperless document version while a
+   prior usable version is preserved.
+5. Quality has separate overlay/readability and machine-extraction dimensions.
+6. Full-corpus scoring is non-mutating.
+7. Candidate generation is user-triggered or limited to a small explicit batch.
+8. Initial acceptance is always user-confirmed.
+9. Tesseract and Azure produce independent candidates; outputs are never merged.
+10. LLM secondary review is deferred and advisory only.
+11. n8n is optional integration glue; OWL owns run and candidate state.
 
----
+Third-party OCR-rescue or classification tools do not replace the need for a
+corpus baseline. They may be evaluated later as candidate providers only if
+they satisfy the same searchable-PDF, staging, provenance, version, and rollback
+contract.
 
-## What Already Exists in Code
+## Phase 0: Deployment and data check
 
-### Action Queue Text Quality Heuristic
+Before implementation:
 
-```
-modules/action_queue/pipeline.py :: _compute_text_quality()
-modules/action_queue/database.py :: content_length, word_count, text_quality_score columns
-```
+- identify the deployed Paperless version and enabled archive/version behavior;
+- verify API access to document content, current archive, originals, and version
+  operations;
+- measure how many documents already have Action Queue quality data;
+- measure downstream unreadable/low-confidence outcomes; and
+- confirm the trusted processing boundary and Azure policy.
 
-This provides a 0–100 heuristic score based on:
-- Content length (penalizes very short docs)
-- Non-alpha character ratio (detects garbled OCR)
-- Average word length (detects broken words)
+This phase blocks candidate application, not read-only inventory work.
 
-**This is explicitly annotated as "free data for future OCR quality pipeline"** — it was designed to seed the OCR module with data without requiring a separate pass over documents.
+## Phase 1: Full-corpus inventory — issue #25
 
----
+Build a resumable CLI/service operation that:
 
-## Phased Implementation Plan
+- scans a configured Paperless scope without mutation;
+- stores per-document OWL-local assessments;
+- produces privacy-safe aggregate reports;
+- records reproducible inputs and scorer version; and
+- supports the 8,000+ document corpus with progress and failure reporting.
 
-### Phase 0: Validate the Need (Before Writing Code)
+Start with text and metadata. Download PDFs for a deterministic stratified
+sample before deciding whether full-corpus overlay analysis is justified.
 
-Before investing 60+ hours, answer:
+**Exit gate:** Corpus distribution and representative calibration sample exist.
 
-1. **Is Tagvico's OCR rescue feature (#815) shipping?** If yes, it may handle remediation and this pipeline becomes scoring-only.
-2. **Are any downstream modules failing due to OCR quality?** Check Action Queue rejection rates for `unreadable` / `low_confidence` dispositions.
-3. **What does the existing `text_quality_score` data show?** Query the action queue DB to understand the distribution. If 95%+ of documents score >70, the pipeline has low ROI.
+## Phase 2: Multidimensional scoring — issue #29
 
-```sql
--- Run against action_queue.db to assess need
-SELECT
-    CASE
-        WHEN text_quality_score >= 80 THEN 'A-B (good)'
-        WHEN text_quality_score >= 60 THEN 'C (acceptable)'
-        WHEN text_quality_score >= 40 THEN 'D (poor)'
-        ELSE 'F (failing)'
-    END AS grade_bucket,
-    COUNT(*) AS doc_count,
-    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS pct
-FROM actions
-WHERE text_quality_score IS NOT NULL
-GROUP BY grade_bucket
-ORDER BY MIN(text_quality_score) DESC;
-```
+Implement:
 
-**Decision gate:** Only proceed to Phase 1 if >10% of documents score below 60.
+- page-aware document profiling;
+- overlay/readability score;
+- machine-extraction score;
+- explainable reasons and unavailable-signal markers;
+- downstream outcome evidence;
+- scorer/configuration versioning; and
+- boundary and malformed-input tests.
 
-### Phase 1: Scoring Module (Standalone, No Remediation)
+Calibrate thresholds against explicit human labels. Do not preserve the old A–F
+formula as the quality contract.
 
-**Goal:** Dedicated OCR quality scoring as a first-class module, consuming the design in `ocr-quality-scoring.md`.
+**Exit gate:** False-positive and false-negative behavior is understood by
+document profile.
 
-**What to build:**
-1. `modules/ocr_quality/` directory with its own SQLAlchemy models and DB
-2. A–F grading function implementing the full scoring rubric (not just the 3-metric heuristic from Action Queue)
-3. API router: `GET /api/ocr/scores`, `POST /api/ocr/scan` (score a batch of documents)
-4. Integration with Action Queue: replace inline `_compute_text_quality` with a call to the OCR module
-5. Paperless custom field writeback: populate an "OCR Quality" custom field so scores are visible in Paperless UI
+## Phase 3: OWL Quality Review UI — issue #115
 
-**What NOT to build yet:** Remediation, Ollama validation, n8n orchestration, dashboard UI.
+Add:
 
-**Effort: M (1–2 weeks)**  
-**Depends on:** Phase 0 validation
+- corpus distribution and review queue;
+- metadata filters and Paperless deep links;
+- document assessment details;
+- synchronized current/candidate PDF views;
+- text and changed-region comparison;
+- score explanations and downstream extraction differences; and
+- accept, reject, retry, and rollback controls gated by permissions.
 
-### Phase 2: Baseline Inventory Run
+At first, the UI can review current assessments before candidate generation is
+available.
 
-**Goal:** Score every existing document in Paperless, implementing `ocr-baseline-inventory.md`.
+**Exit gate:** Users can inspect and calibrate current-document quality entirely
+inside OWL.
 
-**What to build:**
-1. CLI command: `doc-hub ocr-scan --all` (batch score with progress reporting)
-2. Rate limiting (respect Paperless API limits)
-3. Results summary: grade distribution, worst offenders list
+## Phase 4: Candidate generation — issue #18
 
-**Effort: S (2–3 days)**  
-**Depends on:** Phase 1
+Implement provider-neutral candidate storage and two providers:
 
-### Phase 3: Ollama Validation (Optional)
+1. OCRmyPDF/Tesseract searchable PDF.
+2. Azure Document Intelligence `prebuilt-read` searchable PDF.
 
-**Goal:** Use LLM to validate borderline scores (C/D grades), implementing `ocr-ollama-integration.md`.
+Add document-level generation first, followed by capped explicit batches.
+Record cost, runtime, engine versions, settings, geometry/confidence evidence,
+and candidate checksums.
 
-**What to build:**
-1. Prompt template: send document text to LLM, ask "is this coherent?"
-2. Upgrade/downgrade scores based on LLM assessment
-3. Cost tracking (token usage per validation)
+Run the 50–100 document engine bake-off before enabling general use.
 
-**Effort: M (1 week)**  
-**Depends on:** Phase 1; only if borderline-grade documents are a significant population
+**Exit gate:** Candidates can be generated and compared without changing
+Paperless.
 
-### Phase 4: Remediation Engine
+## Phase 5: Paperless version application and rollback — issues #18 and #23
 
-**Goal:** Re-OCR poor-quality documents, implementing `ocr-remediation-engine.md`.
+Verify and implement the deployed Paperless version workflow:
 
-**What to build:**
-1. Tesseract 5 tier: re-OCR locally, compare before/after scores, gate on improvement
-2. Azure DI tier: cloud fallback for documents Tesseract can't improve, with budget controls
-3. Before/after comparison with rollback capability
-4. Never replace text unless new score > old score (the critical gating rule from the design)
+- preserve the current usable version;
+- make an approved candidate the latest version;
+- align Paperless extracted content and search with it;
+- detect stale comparisons;
+- verify normal Paperless preview, copy, download, and API behavior; and
+- roll back to the prior version.
 
-**Effort: XL (3–4 weeks)**  
-**Depends on:** Phase 2 baseline data showing remediation would help
+Application remains disabled if these guarantees cannot be integration-tested.
 
-### Phase 5: Orchestration & Dashboard
+**Exit gate:** An accepted candidate and rollback both work without duplicate
+documents or metadata drift.
 
-**Goal:** n8n integration + UI, implementing `ocr-n8n-workflow.md`.
+## Phase 6: Downstream invalidation — issue #114
 
-**What to build:**
-1. n8n webhook triggers for scheduled scans
-2. Dashboard page showing grade distribution, remediation history, cost tracking
-3. Home Assistant alerts for quality degradation
+Carry forward the prior ideation analysis-versioning work:
 
-**Effort: M (1–2 weeks)**  
-**Depends on:** Phase 4
+- persist exact Paperless version and accepted content/archive checksum;
+- fingerprint module/extractor and validated configuration versions;
+- mark prior TYRION, EOB, Action Queue, statement, correspondent, and Insights
+  outputs stale without deleting their audit history;
+- reprocess affected modules idempotently; and
+- repeat invalidation on rollback.
 
----
+Version application is not reported coordinately complete until the invalidation
+record is durable. Downstream modules may complete asynchronously and expose
+partial failure for retry.
 
-## Relationship to Other Systems
+**Exit gate:** Accepted version changes and rollback cannot leave apparently
+current downstream results based on older OCR.
 
-```mermaid
-graph LR
-    AQ[Action Queue] -->|text_quality_score| OCR[OCR Quality Module]
-    OCR -->|A-F grades| PL[Paperless Custom Fields]
-    OCR -->|poor quality alerts| Alerts[Alerts Engine]
-    OCR -->|re-OCR triggers| Tesseract[Tesseract 5]
-    OCR -->|fallback| Azure[Azure DI]
-    OCR -->|orchestration| n8n[n8n Workflows]
-    Tagvico[Tagvico] -.->|may replace| OCR
-```
+## Phase 7: Shared orchestration — issue #30
 
----
+Add idempotent scheduled, event-driven, and manual entry points around the same
+OWL run model.
 
-## Relationship to Plugin Architecture
+- Manual inventory, assessment, and candidate runs are first.
+- New-document and scheduled operations perform assessment only.
+- Small batches generate candidates but never bulk-accept them.
+- n8n may invoke endpoints or route safe notifications.
 
-If the [Plugin Module Architecture](./plugin-module-architecture.md) is implemented first, the OCR Quality module would be an ideal second adopter (after Action Queue) of the `DocumentModule` protocol. Its self-contained nature (own DB, own router, no cross-module dependencies) makes it a clean fit.
+**Exit gate:** Retries, concurrent triggers, cancellation, state synchronization,
+and alerts are exercised.
 
-If the plugin architecture is NOT implemented, the OCR module follows the same manual wiring pattern as existing modules — add to `app.py`, add to TopNav, etc.
+## Phase 8: Optional secondary review — issue #17
 
----
+Only after calibration, evaluate whether a provider-neutral advisory reviewer
+improves handling of uncertain documents. It must be measured against held-out
+human labels and cannot accept candidates.
+
+## Release integration — issue #23
+
+Release evidence includes:
+
+- scorer and provider versions;
+- calibration and engine bake-off results;
+- privacy review;
+- Paperless version/rollback verification;
+- end-to-end failure isolation;
+- UI and aggregate dashboard verification;
+- known limitations; and
+- rollback readiness.
+
+## Issue map
+
+| Scope | Issue |
+|---|---|
+| Baseline inventory | [#25](https://github.com/rsocko/owl/issues/25) |
+| Quality scoring | [#29](https://github.com/rsocko/owl/issues/29) |
+| Optional secondary review | [#17](https://github.com/rsocko/owl/issues/17) |
+| Candidate generation, application, rollback | [#18](https://github.com/rsocko/owl/issues/18) |
+| Downstream analysis invalidation | [#114](https://github.com/rsocko/owl/issues/114) |
+| Orchestration | [#30](https://github.com/rsocko/owl/issues/30) |
+| OWL review and comparison UI | [#115](https://github.com/rsocko/owl/issues/115) |
+| Integration and release | [#23](https://github.com/rsocko/owl/issues/23) |
 
 ## References
 
-- [OCR Quality Design Documents](./../../modules/ocr-quality/) — Full design specifications
-- [Feature Roadmap — OCR Quality System](./../../feature-roadmap.md#ocr-quality-system) — Roadmap entry with issue links
-- [Audit Findings — ARCH-03](./../../design/active/audit-findings.md#priority-2-critical-architecture-gaps) — Original audit finding
-- [Audit Findings — Priority 5](./../../design/active/audit-findings.md#priority-5-observations--future-considerations) — Observation on design docs accelerating implementation
-- [Action Queue Pipeline — `_compute_text_quality`](https://github.com/rsocko/owl/blob/main/src/doc_intelligence_hub/modules/action_queue/pipeline.py) — Existing text quality heuristic
+- [OCR Quality Design](../../modules/ocr-quality/ocr-quality-design.md)
+- [Baseline Inventory](../../modules/ocr-quality/ocr-baseline-inventory.md)
+- [Quality Scoring](../../modules/ocr-quality/ocr-quality-scoring.md)
+- [Candidate and Version Engine](../../modules/ocr-quality/ocr-remediation-engine.md)
+- [Secondary Review](../../modules/ocr-quality/ocr-ollama-integration.md)
+- [Orchestration](../../modules/ocr-quality/ocr-n8n-workflow.md)
