@@ -264,7 +264,10 @@ def test_suggestion_identity_does_not_change_when_titles_change() -> None:
     original_result = analyze_correspondent_policy(42, "Example Bank", original, [])
     renamed_result = analyze_correspondent_policy(42, "Example Bank", renamed, [])
 
-    assert original_result.suggestions[0].suggestion_key == renamed_result.suggestions[0].suggestion_key
+    assert (
+        original_result.suggestions[0].suggestion_key
+        == renamed_result.suggestions[0].suggestion_key
+    )
 
 
 def test_document_type_takes_priority_over_conflicting_title_keyword() -> None:

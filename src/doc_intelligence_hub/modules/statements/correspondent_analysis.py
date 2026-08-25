@@ -84,9 +84,7 @@ def analyze_correspondent_policy(
             f"series:{series['id']}"
             if series
             else (
-                f"account:{account_key}"
-                if account_key
-                else metadata_key or f"title:{normalized}"
+                f"account:{account_key}" if account_key else metadata_key or f"title:{normalized}"
             )
         )
         key = (kind, group_key)
