@@ -238,6 +238,52 @@ def test_curated_series_membership_overrides_title_grouping() -> None:
     assert result.suggestions[0].series_discriminator == "Household Checking"
 
 
+def test_paperless_metadata_groups_inconsistent_titles() -> None:
+    documents = [
+        _document(1, "January download", date(2026, 1, 3)),
+        _document(2, "Bank thing from February", date(2026, 2, 3)),
+        _document(3, "statement-final-really-final", date(2026, 3, 3)),
+    ]
+
+    result = analyze_correspondent_policy(42, "Example Bank", documents, [])
+
+    assert len(result.suggestions) == 1
+    assert result.suggestions[0].document_ids == [1, 2, 3]
+
+
+def test_suggestion_identity_does_not_change_when_titles_change() -> None:
+    original = [
+        _document(1, "Checking January", date(2026, 1, 3)),
+        _document(2, "Checking February", date(2026, 2, 3)),
+    ]
+    renamed = [
+        document.model_copy(update={"title": f"Ad hoc label {document.id}"})
+        for document in original
+    ]
+
+    original_result = analyze_correspondent_policy(42, "Example Bank", original, [])
+    renamed_result = analyze_correspondent_policy(42, "Example Bank", renamed, [])
+
+    assert (
+        original_result.suggestions[0].suggestion_key
+        == renamed_result.suggestions[0].suggestion_key
+    )
+
+
+def test_document_type_takes_priority_over_conflicting_title_keyword() -> None:
+    document = _document(
+        1,
+        "Invoice copied from portal",
+        date(2026, 1, 3),
+        document_type_id=3,
+        document_type="Statement",
+    )
+
+    result = analyze_correspondent_policy(42, "Example Bank", [document], [])
+
+    assert result.suggestions[0].kind == "statement"
+
+
 def test_curated_series_membership_overrides_ambiguous_document_kind() -> None:
     documents = [
         _document(
