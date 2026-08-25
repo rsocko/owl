@@ -95,6 +95,7 @@ def _make_mock_paperless() -> AsyncMock:
         "created": "2026-01-01",
         "added": "2026-01-01",
     }
+    mock.get_document_suggestions.return_value = {"correspondents": [2]}
     mock.get_document_content.return_value = "Sample document content for testing."
     mock.get_document_thumbnail.return_value = (b"\x89PNG", "image/png")
     mock.get_document_preview.return_value = (b"%PDF-1.4", "application/pdf")

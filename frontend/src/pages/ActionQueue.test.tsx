@@ -16,6 +16,7 @@ const {
   refreshActionMock,
   feedbackMock,
   metadataTagsMock,
+  metadataCorrespondentsMock,
   runPipelineStreamMock,
 } = vi.hoisted(() => ({
   statusMock: vi.fn(),
@@ -24,6 +25,7 @@ const {
   refreshActionMock: vi.fn(),
   feedbackMock: vi.fn(),
   metadataTagsMock: vi.fn(),
+  metadataCorrespondentsMock: vi.fn(),
   runPipelineStreamMock: vi.fn(),
 }));
 
@@ -50,7 +52,7 @@ vi.mock('../lib/api', () => ({
       updateSettings: vi.fn(),
       metadataTags: metadataTagsMock,
       metadataSavedViews: vi.fn(),
-      metadataCorrespondents: vi.fn(),
+      metadataCorrespondents: metadataCorrespondentsMock,
       metadataDocumentTypes: vi.fn(),
     },
     statements: {
@@ -123,6 +125,7 @@ beforeEach(() => {
   refreshActionMock.mockReset();
   feedbackMock.mockReset();
   metadataTagsMock.mockReset();
+  metadataCorrespondentsMock.mockReset();
   runPipelineStreamMock.mockReset();
   metadataTagsMock.mockResolvedValue({
     tags: [
@@ -130,6 +133,12 @@ beforeEach(() => {
       { id: 2, name: 'Utilities', colour: '#fbca04' },
       { id: 343, name: 'Bills', colour: '#d73a4a' },
       { id: 4, name: 'Household', colour: '#7057ff' },
+    ],
+  });
+  metadataCorrespondentsMock.mockResolvedValue({
+    correspondents: [
+      { id: 74, name: 'University of Michigan', suggested: true },
+      { id: 12, name: 'Utility Co', suggested: false },
     ],
   });
   statusMock.mockResolvedValue({
@@ -276,6 +285,26 @@ describe('ActionQueue', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Action details updated.')).toBeTruthy();
+    });
+  });
+
+  it('shows Paperless correspondent suggestions first and saves the selection', async () => {
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /pay electric bill/i }));
+    fireEvent.click(screen.getByRole('button', { name: /correct details/i }));
+    fireEvent.focus(await screen.findByRole('combobox', { name: 'Correspondent' }));
+    fireEvent.click(await screen.findByRole('option', {
+      name: 'University of Michigan (Paperless suggestion)',
+    }));
+    fireEvent.click(screen.getByRole('button', { name: /save details/i }));
+
+    await waitFor(() => {
+      expect(metadataCorrespondentsMock).toHaveBeenCalledWith(1);
+      expect(updateActionMock).toHaveBeenCalledWith('1', {
+        version: 3,
+        correspondent: 'University of Michigan',
+      });
     });
   });
 

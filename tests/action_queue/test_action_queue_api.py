@@ -291,6 +291,46 @@ class TestUpdateAction:
         finally:
             db.close()
 
+    def test_correspondent_correction_writes_through_to_paperless(self, seeded_client):
+        from unittest.mock import AsyncMock, patch
+
+        paperless = AsyncMock()
+        paperless.resolve_correspondent_id.return_value = 74
+        with patch(
+            "doc_intelligence_hub.api.routers.action_queue.make_paperless_client",
+            return_value=paperless,
+        ):
+            response = seeded_client.patch(
+                "/api/queue/actions/1",
+                json={"correspondent": "University of Michigan", "version": 1},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["correspondent"] == "University of Michigan"
+        paperless.update_document.assert_awaited_once_with(42, {"correspondent": 74})
+
+    def test_correspondent_correction_keeps_local_value_when_paperless_fails(self, seeded_client):
+        from unittest.mock import AsyncMock, patch
+
+        paperless = AsyncMock()
+        paperless.resolve_correspondent_id.return_value = 74
+        paperless.update_document.side_effect = RuntimeError("write failed")
+        with patch(
+            "doc_intelligence_hub.api.routers.action_queue.make_paperless_client",
+            return_value=paperless,
+        ):
+            response = seeded_client.patch(
+                "/api/queue/actions/1",
+                json={"correspondent": "University of Michigan", "version": 1},
+            )
+
+        assert response.status_code == 502
+        db = get_session()
+        try:
+            assert db.query(Action).filter_by(id=1).one().correspondent == "Power Co"
+        finally:
+            db.close()
+
     def test_file_action_completes_only_after_paperless_filing(self, seeded_client):
         from unittest.mock import AsyncMock, patch
 
