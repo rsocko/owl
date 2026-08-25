@@ -1175,7 +1175,9 @@ async def merge_actions(
             raise HTTPException(status_code=422, detail="A survivor cannot absorb itself")
         absorbed = db.query(Action).filter(Action.id.in_(body.absorbed_action_ids)).all()
         if len(absorbed) != len(set(body.absorbed_action_ids)):
-            raise HTTPException(status_code=404, detail="One or more absorbed actions were not found")
+            raise HTTPException(
+                status_code=404, detail="One or more absorbed actions were not found"
+            )
         if any(action.document_id != survivor.document_id for action in absorbed):
             raise HTTPException(status_code=422, detail="Only sibling actions can be merged")
         if any(action.superseded_by_action_id is not None for action in absorbed):
@@ -1199,9 +1201,7 @@ async def merge_actions(
                 },
             )
         current_document_amount = (
-            survivor.document_amount
-            if survivor.document_amount is not None
-            else survivor.amount
+            survivor.document_amount if survivor.document_amount is not None else survivor.amount
         )
         amount_changed = (
             "amount" in body.model_fields_set and body.amount != current_document_amount
@@ -1762,8 +1762,7 @@ async def backfill_paperless(request: Request, body: BackfillRequest) -> dict[st
             actions_to_sync = [
                 action
                 for action in actions_to_sync
-                if action.last_synced_status
-                != document_action_status(db, action.document_id)
+                if action.last_synced_status != document_action_status(db, action.document_id)
             ]
         if body.limit:
             actions_to_sync = actions_to_sync[: body.limit]
@@ -1814,9 +1813,7 @@ async def backfill_paperless(request: Request, body: BackfillRequest) -> dict[st
                         else action.amount
                     ),
                     "document_due_date": (
-                        action.document_due_date.isoformat()
-                        if action.document_due_date
-                        else None
+                        action.document_due_date.isoformat() if action.document_due_date else None
                     ),
                     "summary": action.summary or "",
                     "overall_confidence": action.confidence or 0,

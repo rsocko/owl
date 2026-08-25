@@ -563,8 +563,7 @@ class Pipeline:
                     )
                     stored_actions.append(action)
                 document_amount_overridden = bool(
-                    existing_document_action
-                    and existing_document_action.document_amount_overridden
+                    existing_document_action and existing_document_action.document_amount_overridden
                 )
                 document_due_date_overridden = bool(
                     existing_document_action

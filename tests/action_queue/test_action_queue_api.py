@@ -577,12 +577,15 @@ class TestUpdateAction:
 
         projection = AsyncMock()
         enricher = AsyncMock()
-        with patch(
-            "doc_intelligence_hub.api.routers.action_queue.project_action_metadata",
-            new=projection,
-        ), patch(
-            "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
-            return_value=enricher,
+        with (
+            patch(
+                "doc_intelligence_hub.api.routers.action_queue.project_action_metadata",
+                new=projection,
+            ),
+            patch(
+                "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
+                return_value=enricher,
+            ),
         ):
             response = seeded_client.patch(
                 "/api/queue/actions/1",

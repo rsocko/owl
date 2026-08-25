@@ -299,6 +299,7 @@ class TestMCSourceActions:
     def test_classifier_corrections_update_action_and_feedback(self, client, seed_actions):
         action = client.get("/api/action-queue/actions?status=pending").json()[0]
         action_id = action["id"]
+        enricher_patch, enricher = _paperless_enricher()
 
         type_resp = client.post(
             f"/api/action-queue/actions/{action_id}/feedback",
@@ -308,14 +309,16 @@ class TestMCSourceActions:
             f"/api/action-queue/actions/{action_id}/feedback",
             json={"feedback_type": "wrong_urgency", "corrected_urgency": "low"},
         )
-        amount_resp = client.post(
-            f"/api/action-queue/actions/{action_id}/feedback",
-            json={"feedback_type": "wrong_amount", "corrected_amount": 42.25},
-        )
+        with enricher_patch:
+            amount_resp = client.post(
+                f"/api/action-queue/actions/{action_id}/feedback",
+                json={"feedback_type": "wrong_amount", "corrected_amount": 42.25},
+            )
 
         assert type_resp.json()["action_type"] == "FILE"
         assert urgency_resp.json()["urgency"] == "LOW"
         assert amount_resp.json()["amount"] == 42.25
+        enricher.sync_document_amount.assert_awaited_once_with(action["document_id"], 42.25)
         db = get_session()
         try:
             feedback = (

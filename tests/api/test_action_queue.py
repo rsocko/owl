@@ -173,24 +173,32 @@ class TestUpdateAction:
         assert resp.status_code == 422
 
     def test_update_action_details(self, client, seed_actions):
+        from unittest.mock import AsyncMock, patch
+
         actions = client.get("/api/queue/actions?status=pending").json()
         action = actions["actions"][0]
         action_id = action["id"]
 
-        resp = client.patch(
-            f"/api/queue/actions/{action_id}",
-            json={
-                "version": action["version"],
-                "action_type": "task",
-                "title": "Call utility company",
-                "summary": "Confirm the latest balance",
-                "due_date": "2026-08-15",
-                "amount": 123.45,
-                "urgency": "HIGH",
-                "correspondent": "Utility Co",
-            },
-        )
+        enricher = AsyncMock()
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
+            return_value=enricher,
+        ):
+            resp = client.patch(
+                f"/api/queue/actions/{action_id}",
+                json={
+                    "version": action["version"],
+                    "action_type": "task",
+                    "title": "Call utility company",
+                    "summary": "Confirm the latest balance",
+                    "due_date": "2026-08-15",
+                    "amount": 123.45,
+                    "urgency": "HIGH",
+                    "correspondent": "Utility Co",
+                },
+            )
         assert resp.status_code == 200
+        enricher.sync_document_amount.assert_awaited_once_with(action["document_id"], 123.45)
         data = resp.json()
         assert data["status"] == "pending"
         assert data["action_type"] == "TASK"
@@ -203,21 +211,29 @@ class TestUpdateAction:
         assert data["version"] == action["version"] + 1
 
     def test_update_action_allows_clearing_optional_fields(self, client, seed_actions):
+        from unittest.mock import AsyncMock, patch
+
         actions = client.get("/api/queue/actions?status=pending").json()
         action = actions["actions"][0]
         action_id = action["id"]
 
-        resp = client.patch(
-            f"/api/queue/actions/{action_id}",
-            json={
-                "version": action["version"],
-                "summary": None,
-                "due_date": None,
-                "amount": None,
-                "correspondent": None,
-            },
-        )
+        enricher = AsyncMock()
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
+            return_value=enricher,
+        ):
+            resp = client.patch(
+                f"/api/queue/actions/{action_id}",
+                json={
+                    "version": action["version"],
+                    "summary": None,
+                    "due_date": None,
+                    "amount": None,
+                    "correspondent": None,
+                },
+            )
         assert resp.status_code == 200
+        enricher.sync_document_amount.assert_awaited_once_with(action["document_id"], None)
         data = resp.json()
         assert data["summary"] is None
         assert data["due_date"] is None
