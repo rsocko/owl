@@ -566,6 +566,59 @@ describe('ActionQueue', () => {
 
     expect(screen.getAllByDisplayValue('Choose surviving value')).toHaveLength(6);
   });
+
+  it('expands an obligation timeline and offers receipt-based completion', async () => {
+    const linkedAction = {
+      ...initialAction,
+      linked_document_count: 2,
+      linked_documents: [
+        {
+          document_id: 1,
+          role: 'invoice',
+          title: 'Electric Bill',
+          document_date: '2026-07-20',
+          amount: 89.12,
+          confidence: 1,
+          source: 'action_queue',
+          thumbnail_url: '/thumb-1.png',
+          preview_url: '/documents/1/details',
+        },
+        {
+          document_id: 2,
+          role: 'receipt',
+          title: 'Payment Receipt',
+          document_date: '2026-07-22',
+          amount: 89.12,
+          confidence: 0.98,
+          source: 'receipt_match',
+          thumbnail_url: '/thumb-2.png',
+          preview_url: '/documents/2/details',
+        },
+      ],
+      completion_suggestion: {
+        type: 'payment_receipt',
+        reason: 'Payment receipt #2 matches this obligation at 98% confidence.',
+        receipt_document_id: 2,
+        confidence: 0.98,
+      },
+    };
+    actionsMock.mockReset();
+    actionsMock.mockResolvedValue({ actions: [linkedAction], total: 1 });
+    updateActionMock.mockResolvedValue({ ...linkedAction, status: 'completed' });
+
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /View 2 docs/i }));
+    expect(screen.getByText('Obligation timeline')).toBeInTheDocument();
+    expect(screen.getAllByText('Payment Receipt')).toHaveLength(2);
+    expect(screen.getByText('Payment evidence found')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark completed' }));
+    await waitFor(() => expect(updateActionMock).toHaveBeenCalledWith(
+      '1',
+      expect.objectContaining({ status: 'completed' }),
+    ));
+  });
 });
 
 describe('action deadline grouping', () => {

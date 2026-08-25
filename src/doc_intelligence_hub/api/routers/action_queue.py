@@ -43,6 +43,12 @@ from doc_intelligence_hub.modules.action_queue.lifecycle import (
     sync_action_status,
     transition_action_status,
 )
+from doc_intelligence_hub.modules.action_queue.obligations import (
+    backfill_obligations,
+    completion_suggestion,
+    linked_documents,
+    sync_obligation_status,
+)
 from doc_intelligence_hub.modules.action_queue.pipeline import get_pipeline_progress, run_pipeline
 from doc_intelligence_hub.modules.action_queue.risk_scoring import recalculate_risk_scores
 from doc_intelligence_hub.modules.statements.config import resolve_api_token
@@ -366,6 +372,18 @@ def _serialize_action_with_siblings(db: Session, action: Action) -> dict[str, An
         (index for index, sibling in enumerate(siblings, start=1) if sibling.id == action.id),
         None,
     )
+    documents = linked_documents(db, action)
+    serialized["obligation_id"] = action.obligation_id
+    serialized["linked_documents"] = [
+        {
+            **document,
+            "thumbnail_url": f"/api/statements/documents/{document['document_id']}/thumb",
+            "preview_url": _build_preview_url(document["document_id"]),
+        }
+        for document in documents
+    ]
+    serialized["linked_document_count"] = len(documents)
+    serialized["completion_suggestion"] = completion_suggestion(db, action)
     return serialized
 
 
@@ -723,6 +741,8 @@ async def list_actions(
     db = get_session()
     try:
         await _resurface_expired_snoozes(db)
+        if backfill_obligations(db):
+            db.commit()
         query = db.query(Action)
         if include_resolved_no_action and not include_not_ready:
             query = query.filter(
@@ -1032,6 +1052,8 @@ async def update_action(
 
         if not feedback_changed:
             action.version = (action.version or 1) + 1
+        if status_changed:
+            sync_obligation_status(db, action)
         db.commit()
         if routed_to_review:
             try:
@@ -1388,6 +1410,7 @@ async def bulk_action(request: Request, body: BulkActionRequest) -> dict[str, An
                 if previous_status == "not_an_action" and target_status == "pending":
                     mark_action_ready(action)
                 action.version = (action.version or 1) + 1
+                sync_obligation_status(db, action)
             affected += 1
             sync_actions.append(action)
 

@@ -1,5 +1,6 @@
 """Database models and connection management."""
 
+import uuid
 from datetime import datetime
 
 from sqlalchemy import (
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     create_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -40,6 +42,20 @@ VALID_ACTION_TYPES = {
 
 class Base(DeclarativeBase):
     pass
+
+
+class Obligation(Base):
+    """A real-world obligation represented by one Action Queue action and many documents."""
+
+    __tablename__ = "obligations"
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    primary_action_id = Column(Integer, nullable=True, index=True)
+    status = Column(String, nullable=False, default="open", index=True)
+    completion_suggested = Column(Boolean, nullable=False, default=False)
+    suggestion_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Action(Base):
@@ -83,12 +99,36 @@ class Action(Base):
     is_primary = Column(Boolean, nullable=False, default=True)
     parent_action_id = Column(Integer, nullable=True, index=True)
     superseded_by_action_id = Column(Integer, nullable=True, index=True)
+    obligation_id = Column(String, nullable=True, index=True)
     version = Column(Integer, default=1, nullable=False)  # Optimistic locking
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
     acknowledged_at = Column(DateTime, nullable=True)
     snoozed_until = Column(DateTime, nullable=True)  # When snooze expires; null = not snoozed
+
+
+class ObligationDocument(Base):
+    """A document attached to an obligation timeline."""
+
+    __tablename__ = "obligation_documents"
+    __table_args__ = (
+        UniqueConstraint("obligation_id", "document_id", name="uq_obligation_document"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    obligation_id = Column(String, nullable=False, index=True)
+    document_id = Column(Integer, nullable=False, index=True)
+    role = Column(String, nullable=False, default="supporting")
+    title = Column(String, nullable=True)
+    document_type = Column(String, nullable=True)
+    correspondent = Column(String, nullable=True)
+    document_date = Column(Date, nullable=True)
+    amount = Column(Float, nullable=True)
+    reference_number = Column(String, nullable=True)
+    confidence = Column(Float, nullable=False, default=1.0)
+    source = Column(String, nullable=False, default="action_queue")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class ActionFeedback(Base):
@@ -206,6 +246,7 @@ def _migrate_missing_columns(engine):
             ("is_primary", "BOOLEAN DEFAULT 1 NOT NULL"),
             ("parent_action_id", "INTEGER"),
             ("superseded_by_action_id", "INTEGER"),
+            ("obligation_id", "TEXT"),
         ],
         "action_feedback": [
             ("original_urgency", "TEXT"),
