@@ -462,14 +462,28 @@ export default function ActionQueue() {
   const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [editDraft, setEditDraft] = useState<ActionEditDraft | null>(null);
 
-  const [correspondents, setCorrespondents] = useState<Array<{ id: number; name: string }>>([]);
-  const [correspondentsLoaded, setCorrespondentsLoaded] = useState(false);
+  const [correspondents, setCorrespondents] = useState<Array<{
+    id: number;
+    name: string;
+    suggested?: boolean;
+  }>>([]);
+  const [correspondentsDocumentId, setCorrespondentsDocumentId] = useState<
+    number | null | undefined
+  >(undefined);
   const correspondentOptions = useMemo(() => {
-    const names = new Set(correspondents.map((correspondent) => correspondent.name));
-    if (editDraft?.correspondent) names.add(editDraft.correspondent);
-    return [...names]
-      .sort((left, right) => left.localeCompare(right))
-      .map((name) => ({ value: name, label: name }));
+    const options = correspondents.map((correspondent) => ({
+      value: correspondent.name,
+      label: correspondent.suggested
+        ? `${correspondent.name} (Paperless suggestion)`
+        : correspondent.name,
+    }));
+    if (
+      editDraft?.correspondent
+      && !correspondents.some((correspondent) => correspondent.name === editDraft.correspondent)
+    ) {
+      options.push({ value: editDraft.correspondent, label: editDraft.correspondent });
+    }
+    return options;
   }, [correspondents, editDraft?.correspondent]);
   const tagsByValue = useMemo(() => {
     const lookup = new Map<string, PaperlessTag>();
@@ -714,14 +728,17 @@ export default function ActionQueue() {
     }
   };
 
-  const loadCorrectionMetadata = async () => {
-    if (correspondentsLoaded) return;
+  const loadCorrectionMetadata = async (documentId?: number | null) => {
+    const requestedDocumentId = documentId ?? null;
+    if (correspondentsDocumentId === requestedDocumentId) return;
     try {
-      const response = await endpoints.actionQueue.metadataCorrespondents() as {
-        correspondents: Array<{ id: number; name: string }>;
+      const response = await endpoints.actionQueue.metadataCorrespondents(
+        documentId ?? undefined,
+      ) as {
+        correspondents: Array<{ id: number; name: string; suggested?: boolean }>;
       };
       setCorrespondents(response.correspondents ?? []);
-      setCorrespondentsLoaded(true);
+      setCorrespondentsDocumentId(requestedDocumentId);
     } catch (err) {
       setToast({
         message: err instanceof Error ? err.message : 'Could not load Paperless correspondents.',
@@ -1293,7 +1310,7 @@ export default function ActionQueue() {
                       } else {
                         setEditDraft(buildEditDraft(selectedAction));
                         setIsEditingDetails(true);
-                        void loadCorrectionMetadata();
+                        void loadCorrectionMetadata(selectedAction.document_id);
                       }
                     }}
                     disabled={busyKey !== null}

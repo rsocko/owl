@@ -753,6 +753,47 @@ async def update_action(
         supplied_fields = body.model_fields_set
         risk_inputs_changed = False
         status_changed = False
+        paperless_correspondent_id: int | None = None
+        paperless_client = None
+
+        if "correspondent" in supplied_fields:
+            if not action_queue_settings.write_to_paperless:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=409,
+                    detail="Paperless writes are disabled; the correspondent was not changed.",
+                )
+            if action.document_id is None:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=409,
+                    detail="This action has no Paperless document to update.",
+                )
+            try:
+                paperless_client = make_paperless_client(request, timeout=15.0)
+                if body.correspondent is not None:
+                    paperless_correspondent_id = await paperless_client.resolve_correspondent_id(
+                        body.correspondent
+                    )
+            except Exception as exc:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Could not resolve the Paperless correspondent: {exc}",
+                ) from exc
+            if body.correspondent is not None and paperless_correspondent_id is None:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Correspondent {body.correspondent!r} does not uniquely match "
+                        "a Paperless correspondent."
+                    ),
+                )
 
         feedback_changed = False
         routed_to_review = False
@@ -841,6 +882,20 @@ async def update_action(
             routed_to_review = True
         elif readiness_inputs_changed and action.review_state != "needs_review":
             mark_action_ready(action)
+
+        if "correspondent" in supplied_fields:
+            try:
+                await paperless_client.update_document(
+                    action.document_id,
+                    {"correspondent": paperless_correspondent_id},
+                )
+            except Exception as exc:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Paperless rejected the correspondent change: {exc}",
+                ) from exc
 
         if not feedback_changed:
             action.version = (action.version or 1) + 1
@@ -1843,14 +1898,46 @@ async def list_paperless_saved_views(request: Request) -> dict[str, Any]:
 
 
 @router.get("/metadata/correspondents")
-async def list_paperless_correspondents(request: Request) -> dict[str, Any]:
-    """List all correspondents from Paperless."""
+async def list_paperless_correspondents(
+    request: Request, document_id: int | None = None
+) -> dict[str, Any]:
+    """List correspondents and identify Paperless suggestions for a document."""
     _sync_action_queue_settings(request)
     try:
         client = make_paperless_client(request, timeout=15.0)
         correspondents = await client.list_correspondents()
+        suggested_ids: list[int] = []
+        suggestion_error = None
+        if document_id is not None:
+            try:
+                suggestions = await client.get_document_suggestions(document_id)
+                suggested_ids = [
+                    value
+                    for value in suggestions.get("correspondents", [])
+                    if isinstance(value, int)
+                ]
+            except Exception as exc:
+                suggestion_error = str(exc)
+        suggestion_rank = {
+            correspondent_id: index for index, correspondent_id in enumerate(suggested_ids)
+        }
+        options = [
+            {
+                "id": correspondent["id"],
+                "name": correspondent["name"],
+                "suggested": correspondent["id"] in suggestion_rank,
+            }
+            for correspondent in correspondents
+        ]
+        options.sort(
+            key=lambda correspondent: (
+                suggestion_rank.get(correspondent["id"], len(suggestion_rank)),
+                correspondent["name"].casefold(),
+            )
+        )
         return {
-            "correspondents": [{"id": c["id"], "name": c["name"]} for c in correspondents],
+            "correspondents": options,
+            "suggestion_error": suggestion_error,
         }
     except Exception as exc:
         return {"correspondents": [], "error": str(exc)}

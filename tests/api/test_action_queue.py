@@ -688,6 +688,16 @@ class TestQueueMetadata:
         assert "correspondents" in data
         assert len(data["correspondents"]) == 2
 
+    def test_list_correspondents_prioritizes_document_suggestions(self, client, mock_paperless):
+        resp = client.get("/api/queue/metadata/correspondents?document_id=42")
+
+        assert resp.status_code == 200
+        assert resp.json()["correspondents"] == [
+            {"id": 2, "name": "Aetna", "suggested": True},
+            {"id": 1, "name": "UnitedHealth", "suggested": False},
+        ]
+        mock_paperless.get_document_suggestions.assert_awaited_once_with(42)
+
     def test_list_document_types(self, client, mock_paperless):
         resp = client.get("/api/queue/metadata/document-types")
         assert resp.status_code == 200

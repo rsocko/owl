@@ -732,6 +732,17 @@ class PaperlessClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def get_document_suggestions(self, document_id: int) -> dict:
+        """Get Paperless classifier suggestions for a document."""
+        resp = await self._request("GET", f"/api/documents/{document_id}/suggestions/")
+        resp.raise_for_status()
+        suggestions = resp.json()
+        if not isinstance(suggestions, dict):
+            raise PaperlessError(
+                f"Paperless suggestions for document {document_id} returned an invalid response"
+            )
+        return suggestions
+
     async def get_document_content(self, document_id: int) -> str:
         """Get the OCR/text content of a document."""
         resp = await self._request("GET", f"/api/documents/{document_id}/")
@@ -865,6 +876,25 @@ class PaperlessClient:
         """List all correspondents (paginated, returns full list)."""
         client = self._get_client()
         return await self._paginate(client, "/api/correspondents/", {"page_size": 100})
+
+    async def resolve_correspondent_id(self, name: str) -> int | None:
+        """Resolve an exact correspondent name to its Paperless ID."""
+        normalized = name.strip().casefold()
+        if not normalized:
+            return None
+        matches = [
+            correspondent
+            for correspondent in await self.list_correspondents()
+            if str(correspondent.get("name", "")).strip().casefold() == normalized
+        ]
+        if len(matches) != 1:
+            return None
+        correspondent_id = matches[0].get("id")
+        return (
+            int(correspondent_id)
+            if isinstance(correspondent_id, int) and not isinstance(correspondent_id, bool)
+            else None
+        )
 
     # ------------------------------------------------------------------
     # Custom fields

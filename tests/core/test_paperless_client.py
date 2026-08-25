@@ -86,6 +86,8 @@ def _mock_transport():
             return httpx.Response(
                 200, json={"id": 1, "title": "Doc A", "content": "Hello world", "custom_fields": []}
             )
+        if request.url.path == "/api/documents/1/suggestions/":
+            return httpx.Response(200, json={"correspondents": [20, 10], "tags": [3]})
         if request.url.path == "/api/custom_fields/":
             return httpx.Response(
                 200, json={"results": [{"id": 1, "name": "Status", "data_type": "string"}]}
@@ -167,6 +169,18 @@ async def test_list_documents_filters_by_correspondent_id_without_name_lookup(mo
 async def test_get_document(client):
     doc = await client.get_document(1)
     assert doc["title"] == "Doc A"
+
+
+@pytest.mark.asyncio
+async def test_get_document_suggestions(client):
+    suggestions = await client.get_document_suggestions(1)
+    assert suggestions["correspondents"] == [20, 10]
+
+
+@pytest.mark.asyncio
+async def test_resolve_correspondent_id_requires_exact_name(client):
+    assert await client.resolve_correspondent_id(" acme ") == 10
+    assert await client.resolve_correspondent_id("Ac") is None
 
 
 @pytest.mark.asyncio

@@ -184,7 +184,9 @@ export const endpoints = {
     updateSettings: (body: unknown) => api.put('/api/queue/settings', body),
     metadataTags: () => api.get('/api/queue/metadata/tags'),
     metadataSavedViews: () => api.get('/api/queue/metadata/saved-views'),
-    metadataCorrespondents: () => api.get('/api/queue/metadata/correspondents'),
+    metadataCorrespondents: (documentId?: number) => api.get(
+      `/api/queue/metadata/correspondents${documentId == null ? '' : `?document_id=${documentId}`}`,
+    ),
     metadataDocumentTypes: () => api.get('/api/queue/metadata/document-types'),
   },
   alerts: {
