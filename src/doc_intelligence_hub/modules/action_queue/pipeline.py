@@ -521,6 +521,36 @@ class Pipeline:
 
                 # Store ALL actions in internal DB
                 primary_idx = assessment.get("primary_action_index", 0)
+                primary_action_data = (
+                    actions[primary_idx] if primary_idx < len(actions) else actions[0]
+                )
+                existing_document_action = (
+                    db.query(Action)
+                    .filter(
+                        Action.document_id == doc["id"],
+                        Action.superseded_by_action_id.is_(None),
+                    )
+                    .order_by(Action.is_primary.desc(), Action.id.asc())
+                    .first()
+                )
+                actions = sorted(
+                    actions,
+                    key=lambda item: (
+                        str(item.get("action_type") or ""),
+                        str(item.get("title") or ""),
+                        str(item.get("due_date") or ""),
+                        str(item.get("summary") or ""),
+                    ),
+                )
+                (
+                    db.query(Action)
+                    .filter(
+                        Action.document_id == doc["id"],
+                        Action.parent_action_id.is_(None),
+                        Action.superseded_by_action_id.is_(None),
+                    )
+                    .update({"is_primary": False}, synchronize_session=False)
+                )
                 stored_actions = []
                 for i, action_data in enumerate(actions):
                     action = self._store_action(
@@ -528,9 +558,40 @@ class Pipeline:
                         doc,
                         action_data,
                         assessment,
-                        is_primary=(i == primary_idx),
+                        action_index=i,
+                        is_primary=(action_data is primary_action_data),
                     )
                     stored_actions.append(action)
+                document_amount_overridden = bool(
+                    existing_document_action and existing_document_action.document_amount_overridden
+                )
+                document_due_date_overridden = bool(
+                    existing_document_action
+                    and existing_document_action.document_due_date_overridden
+                )
+                document_amount = (
+                    existing_document_action.document_amount
+                    if document_amount_overridden
+                    else primary_action_data.get("amount")
+                )
+                document_due_date = (
+                    existing_document_action.document_due_date
+                    if document_due_date_overridden
+                    else self._parse_date(primary_action_data.get("due_date"))
+                )
+                document_actions = (
+                    db.query(Action)
+                    .filter(
+                        Action.document_id == doc["id"],
+                        Action.superseded_by_action_id.is_(None),
+                    )
+                    .all()
+                )
+                for document_action in document_actions:
+                    document_action.document_amount = document_amount
+                    document_action.document_due_date = document_due_date
+                    document_action.document_amount_overridden = document_amount_overridden
+                    document_action.document_due_date_overridden = document_due_date_overridden
                 db.flush()
 
                 review_reasons: list[str] = []
@@ -577,9 +638,16 @@ class Pipeline:
                 self._emit_inline_alerts(stored_actions)
 
                 # Enrich Paperless with PRIMARY action's data (only if writes enabled and available)
-                primary_action = actions[primary_idx] if primary_idx < len(actions) else actions[0]
+                primary_action = primary_action_data
                 if settings.write_to_paperless and self._enrichment_available:
-                    enrichment_data = {**primary_action, **assessment}
+                    enrichment_data = {
+                        **primary_action,
+                        **assessment,
+                        "amount": document_amount,
+                        "document_due_date": (
+                            document_due_date.isoformat() if document_due_date else None
+                        ),
+                    }
                     logger.info(
                         "doc_id=%s: enriching Paperless — action_type=%s urgency=%s fields=%s",
                         doc_id,
@@ -717,7 +785,13 @@ class Pipeline:
         return await self.paperless.list_documents(tags=tags, limit=fetch_limit)
 
     def _store_action(
-        self, db, document: dict, action_data: dict, assessment: dict, is_primary: bool = True
+        self,
+        db,
+        document: dict,
+        action_data: dict,
+        assessment: dict,
+        action_index: int = 0,
+        is_primary: bool = True,
     ) -> Action:
         """Store or update an action in the internal database.
 
@@ -761,17 +835,27 @@ class Pipeline:
         # Extract document date (Paperless "created" field)
         document_date = self._parse_date(document.get("created"))
 
-        # Strategy 1: exact match on document_id + title
+        # Stable analyzer position preserves one row per inferred action, even
+        # when a document contains multiple actions of the same type.
         existing = (
-            db.query(Action).filter_by(document_id=doc_id, title=action_data["title"]).first()
+            db.query(Action)
+            .filter_by(document_id=doc_id, action_index=action_index)
+            .filter(
+                Action.parent_action_id.is_(None),
+                Action.superseded_by_action_id.is_(None),
+            )
+            .first()
         )
 
-        # Strategy 2: match on document_id + action_type for pending actions
+        # Compatibility fallback for rows created before action ordinals existed.
         if not existing:
             existing = (
                 db.query(Action)
-                .filter_by(
-                    document_id=doc_id, action_type=action_data["action_type"], status="pending"
+                .filter_by(document_id=doc_id, title=action_data["title"])
+                .filter(
+                    Action.action_index.is_(None),
+                    Action.parent_action_id.is_(None),
+                    Action.superseded_by_action_id.is_(None),
                 )
                 .first()
             )
@@ -813,6 +897,8 @@ class Pipeline:
             existing.extracted_data = assessment.get("extracted_data")
             existing.ai_reasoning = assessment.get("reasoning")
             existing.recommended_cta = _serialize_cta(action_data.get("recommended_cta"))
+            existing.action_index = action_index
+            existing.is_primary = is_primary
             existing.updated_at = datetime.utcnow()
             return existing
         else:
@@ -835,6 +921,8 @@ class Pipeline:
                 extracted_data=assessment.get("extracted_data"),
                 ai_reasoning=assessment.get("reasoning"),
                 recommended_cta=_serialize_cta(action_data.get("recommended_cta")),
+                action_index=action_index,
+                is_primary=is_primary,
                 action_ready=True,
                 review_state="ready",
             )

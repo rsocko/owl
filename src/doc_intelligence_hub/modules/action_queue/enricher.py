@@ -33,6 +33,7 @@ _ACTION_FIELDS = (
     MetadataFieldKey.ACCOUNT_IDENTIFIER,
     MetadataFieldKey.INVOICE_NUMBER,
     MetadataFieldKey.DOCUMENT_AMOUNT,
+    MetadataFieldKey.DOCUMENT_DUE_DATE,
     MetadataFieldKey.ACTION_STATUS,
     MetadataFieldKey.ACTION_ANALYZED,
 )
@@ -132,6 +133,14 @@ class PaperlessEnricher:
                     schema,
                 )
             )
+        if extraction.get("document_due_date") is not None:
+            updates.append(
+                build_metadata_update(
+                    MetadataFieldKey.DOCUMENT_DUE_DATE,
+                    extraction["document_due_date"],
+                    schema,
+                )
+            )
         if action_status is not None:
             updates.append(
                 build_metadata_update(MetadataFieldKey.ACTION_STATUS, action_status, schema)
@@ -161,6 +170,26 @@ class PaperlessEnricher:
             [update["field"] for update in updates],
         )
         await self.client.update_custom_fields(document_id, updates)
+
+    async def sync_document_amount(self, document_id: int, amount: float | None) -> None:
+        """Write or explicitly clear the canonical document amount."""
+        if not settings.write_to_paperless:
+            raise PermissionError("Paperless writes are disabled")
+        schema = await self.get_schema()
+        await self.client.update_custom_fields(
+            document_id,
+            [build_metadata_update(MetadataFieldKey.DOCUMENT_AMOUNT, amount, schema)],
+        )
+
+    async def sync_document_due_date(self, document_id: int, due_date: date | None) -> None:
+        """Write or explicitly clear the canonical document due date."""
+        if not settings.write_to_paperless:
+            raise PermissionError("Paperless writes are disabled")
+        schema = await self.get_schema()
+        await self.client.update_custom_fields(
+            document_id,
+            [build_metadata_update(MetadataFieldKey.DOCUMENT_DUE_DATE, due_date, schema)],
+        )
 
     async def sync_status(self, document_id: int, status: str) -> None:
         """Mirror a status change from the internal database to Paperless."""

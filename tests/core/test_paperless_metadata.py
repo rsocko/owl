@@ -319,6 +319,51 @@ def test_build_update_rejects_unmasked_account_identifier() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "value",
+    ["***AB", "XXX", "xxxx-4321", " - Xx.A9", "*\u2003XX"],
+)
+def test_build_update_accepts_deterministically_masked_identifiers(value: str) -> None:
+    schema = resolve_metadata_schema(
+        [_definition(92, MetadataFieldKey.ACCOUNT_IDENTIFIER)],
+        (MetadataFieldKey.ACCOUNT_IDENTIFIER,),
+    )
+
+    assert build_metadata_update(
+        MetadataFieldKey.ACCOUNT_IDENTIFIER,
+        value,
+        schema,
+    ) == {"field": 92, "value": value.strip()}
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["AB", "*A", "***ABCDEFGHI", "***AB!"],
+)
+def test_build_update_rejects_invalid_masked_identifier_shapes(value: str) -> None:
+    schema = resolve_metadata_schema(
+        [_definition(92, MetadataFieldKey.ACCOUNT_IDENTIFIER)],
+        (MetadataFieldKey.ACCOUNT_IDENTIFIER,),
+    )
+
+    with pytest.raises(MetadataValueError, match="masked"):
+        build_metadata_update(MetadataFieldKey.ACCOUNT_IDENTIFIER, value, schema)
+
+
+def test_build_update_rejects_adversarial_long_masked_identifier() -> None:
+    schema = resolve_metadata_schema(
+        [_definition(92, MetadataFieldKey.ACCOUNT_IDENTIFIER)],
+        (MetadataFieldKey.ACCOUNT_IDENTIFIER,),
+    )
+
+    with pytest.raises(MetadataValueError, match="masked"):
+        build_metadata_update(
+            MetadataFieldKey.ACCOUNT_IDENTIFIER,
+            "X" * 1_000_000 + "!",
+            schema,
+        )
+
+
 def test_normalized_document_type_remains_inventory_gated() -> None:
     spec = get_metadata_field_spec(MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE)
     assert {field_type.value for field_type in spec.compatible_types} == {"select", "string"}

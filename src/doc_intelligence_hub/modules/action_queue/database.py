@@ -55,6 +55,10 @@ class Action(Base):
     summary = Column(Text)
     due_date = Column(Date, nullable=True)
     amount = Column(Float, nullable=True)
+    document_amount = Column(Float, nullable=True)
+    document_due_date = Column(Date, nullable=True)
+    document_amount_overridden = Column(Boolean, nullable=False, default=False)
+    document_due_date_overridden = Column(Boolean, nullable=False, default=False)
     urgency = Column(String, default="LOW")  # CRITICAL, HIGH, MEDIUM, LOW
     severity = Column(String, default="safe")  # critical, focus, safe (3-tier display bucket)
     confidence = Column(Integer, default=0)
@@ -75,6 +79,10 @@ class Action(Base):
     action_ready = Column(Boolean, nullable=False, default=True, index=True)
     review_state = Column(String, nullable=False, default="ready", index=True)
     review_item_id = Column(String, nullable=True, index=True)
+    action_index = Column(Integer, nullable=True)
+    is_primary = Column(Boolean, nullable=False, default=True)
+    parent_action_id = Column(Integer, nullable=True, index=True)
+    superseded_by_action_id = Column(Integer, nullable=True, index=True)
     version = Column(Integer, default=1, nullable=False)  # Optimistic locking
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -190,6 +198,14 @@ def _migrate_missing_columns(engine):
             ("document_date", "DATE"),
             ("document_type", "TEXT"),
             ("tags", "TEXT"),  # JSON array stored as TEXT in SQLite
+            ("document_amount", "REAL"),
+            ("document_due_date", "DATE"),
+            ("document_amount_overridden", "BOOLEAN DEFAULT 0 NOT NULL"),
+            ("document_due_date_overridden", "BOOLEAN DEFAULT 0 NOT NULL"),
+            ("action_index", "INTEGER"),
+            ("is_primary", "BOOLEAN DEFAULT 1 NOT NULL"),
+            ("parent_action_id", "INTEGER"),
+            ("superseded_by_action_id", "INTEGER"),
         ],
         "action_feedback": [
             ("original_urgency", "TEXT"),
@@ -204,6 +220,51 @@ def _migrate_missing_columns(engine):
             if not inspector.has_table(table):
                 continue
             existing = {c["name"] for c in inspector.get_columns(table)}
+            adding_action_identity = table == "actions" and "action_index" not in existing
             for col_name, col_ddl in columns:
                 if col_name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_ddl}"))
+            if adding_action_identity:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE actions
+                        SET action_index = (
+                            SELECT COUNT(*)
+                            FROM actions AS older
+                            WHERE older.document_id = actions.document_id
+                              AND older.id < actions.id
+                        )
+                        WHERE action_index IS NULL
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        """
+                        UPDATE actions
+                        SET is_primary = CASE WHEN action_index = 0 THEN 1 ELSE 0 END
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        """
+                        UPDATE actions
+                        SET document_amount = (
+                            SELECT chosen.amount
+                            FROM actions AS chosen
+                            WHERE chosen.document_id = actions.document_id
+                            ORDER BY chosen.action_index, chosen.id
+                            LIMIT 1
+                        ),
+                        document_due_date = (
+                            SELECT chosen.due_date
+                            FROM actions AS chosen
+                            WHERE chosen.document_id = actions.document_id
+                            ORDER BY chosen.action_index, chosen.id
+                            LIMIT 1
+                        )
+                        """
+                    )
+                )

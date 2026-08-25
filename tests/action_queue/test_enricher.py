@@ -18,6 +18,7 @@ _ACTION_KEYS = (
     MetadataFieldKey.ACCOUNT_IDENTIFIER,
     MetadataFieldKey.INVOICE_NUMBER,
     MetadataFieldKey.DOCUMENT_AMOUNT,
+    MetadataFieldKey.DOCUMENT_DUE_DATE,
     MetadataFieldKey.ACTION_STATUS,
     MetadataFieldKey.ACTION_ANALYZED,
     MetadataFieldKey.LEGACY_ACTION_TYPE,
@@ -33,6 +34,7 @@ def _prime_schema(enricher: PaperlessEnricher, *, include_legacy: bool = False) 
         {"id": 10, "name": "Account Identifier", "data_type": "string"},
         {"id": 11, "name": "Invoice Number", "data_type": "string"},
         {"id": 1, "name": "Document Amount", "data_type": "float"},
+        {"id": 4, "name": "Document Due Date", "data_type": "date"},
         {
             "id": 2,
             "name": "Action Status",
@@ -77,6 +79,21 @@ def test_action_status_field_supports_full_lifecycle():
         "dismissed",
         "not_an_action",
     }
+
+
+@pytest.mark.asyncio
+async def test_sync_document_amount_can_explicitly_clear_value(monkeypatch):
+    monkeypatch.setattr(settings, "write_to_paperless", True)
+    enricher = PaperlessEnricher()
+    enricher.client = AsyncMock()
+    _prime_schema(enricher)
+
+    await enricher.sync_document_amount(42, None)
+
+    enricher.client.update_custom_fields.assert_awaited_once_with(
+        42,
+        [{"field": 1, "value": None}],
+    )
 
 
 @pytest.mark.asyncio

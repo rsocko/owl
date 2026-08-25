@@ -184,6 +184,8 @@ class TestListActions:
             "summary",
             "due_date",
             "amount",
+            "document_amount",
+            "document_due_date",
             "urgency",
             "severity",
             "confidence",
@@ -200,6 +202,13 @@ class TestListActions:
             "extracted_data",
             "ai_reasoning",
             "version",
+            "action_index",
+            "action_position",
+            "sibling_count",
+            "sibling_action_ids",
+            "is_primary",
+            "parent_action_id",
+            "superseded_by_action_id",
             "preview_url",
             "created_at",
             "updated_at",
@@ -527,15 +536,56 @@ class TestUpdateAction:
         assert response.status_code == 409
         assert "file action" in response.json()["error"]["message"]
 
+    def test_document_stays_pending_while_a_sibling_action_is_open(self, seeded_client):
+        from unittest.mock import AsyncMock, patch
+
+        db = get_session()
+        try:
+            db.add(
+                Action(
+                    document_id=42,
+                    document_title="Electric Bill Jan 2026",
+                    action_type="RESPOND",
+                    title="Dispute late fee",
+                    urgency="HIGH",
+                    status="pending",
+                    action_index=1,
+                    is_primary=False,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        enricher = AsyncMock()
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
+            return_value=enricher,
+        ):
+            response = seeded_client.patch(
+                "/api/queue/actions/1",
+                json={"status": "completed", "version": 1},
+            )
+
+        assert response.status_code == 200
+        enricher.sync_status.assert_awaited_once_with(42, "pending")
+
     def test_incomplete_correction_clears_paperless_inference_and_routes_to_review(
         self, seeded_client
     ):
         from unittest.mock import AsyncMock, patch
 
         projection = AsyncMock()
-        with patch(
-            "doc_intelligence_hub.api.routers.action_queue.project_action_metadata",
-            new=projection,
+        enricher = AsyncMock()
+        with (
+            patch(
+                "doc_intelligence_hub.api.routers.action_queue.project_action_metadata",
+                new=projection,
+            ),
+            patch(
+                "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
+                return_value=enricher,
+            ),
         ):
             response = seeded_client.patch(
                 "/api/queue/actions/1",
@@ -547,6 +597,66 @@ class TestUpdateAction:
         assert response.json()["review_state"] == "needs_review"
         projection.assert_awaited_once()
         assert projection.await_args.kwargs["action_status"] is None
+        enricher.sync_document_amount.assert_awaited_once_with(42, None)
+
+    def test_split_creates_stable_sibling_identity(self, seeded_client):
+        response = seeded_client.post(
+            "/api/queue/actions/1/split",
+            json={
+                "action_type": "RESPOND",
+                "title": "Dispute late fee",
+                "summary": "Ask the provider to remove the fee",
+                "urgency": "HIGH",
+            },
+        )
+
+        assert response.status_code == 200
+        created = response.json()
+        assert created["id"] != 1
+        assert created["parent_action_id"] == 1
+        assert created["is_primary"] is False
+        assert created["sibling_count"] == 2
+        assert set(created["sibling_action_ids"]) == {1, created["id"]}
+
+    def test_merge_requires_explicit_conflict_resolution(self, seeded_client):
+        created = seeded_client.post(
+            "/api/queue/actions/1/split",
+            json={"action_type": "RESPOND", "title": "Dispute fee", "urgency": "HIGH"},
+        ).json()
+
+        response = seeded_client.post(
+            "/api/queue/actions/1/merge",
+            json={"absorbed_action_ids": [created["id"]]},
+        )
+
+        assert response.status_code == 422
+        assert set(response.json()["error"]["fields"]) >= {"action_type", "title"}
+
+    def test_merge_preserves_survivor_and_marks_absorbed_action(self, seeded_client):
+        created = seeded_client.post(
+            "/api/queue/actions/1/split",
+            json={"action_type": "RESPOND", "title": "Dispute fee", "urgency": "HIGH"},
+        ).json()
+
+        response = seeded_client.post(
+            "/api/queue/actions/1/merge",
+            json={
+                "absorbed_action_ids": [created["id"]],
+                "action_type": "PAY",
+                "title": "Pay electric bill",
+                "summary": "Monthly electric bill due",
+                "due_date": "2026-02-15",
+                "amount": 125.5,
+                "urgency": "CRITICAL",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["id"] == 1
+        siblings = seeded_client.get("/api/queue/actions/1/siblings").json()["actions"]
+        absorbed = next(action for action in siblings if action["id"] == created["id"])
+        assert absorbed["superseded_by_action_id"] == 1
+        assert absorbed["action_ready"] is False
 
     def test_status_counts_exclude_uncertain_pending_actions(self, seeded_client):
         db = get_session()
@@ -943,7 +1053,17 @@ class TestRefreshAction:
                 "document_type": 6,
                 "tags": [12],
                 "correspondent": 2,
+                "custom_fields": [
+                    {"field": 20, "value": 123.45},
+                    {"field": 21, "value": "2026-02-15"},
+                ],
             }
+        )
+        mock_custom_fields = AsyncMock(
+            return_value=[
+                {"id": 20, "name": "Document Amount", "data_type": "float"},
+                {"id": 21, "name": "Document Due Date", "data_type": "date"},
+            ]
         )
 
         with (
@@ -955,6 +1075,10 @@ class TestRefreshAction:
                 "doc_intelligence_hub.core.paperless.PaperlessClient.get_document",
                 mock_get_doc,
             ),
+            patch(
+                "doc_intelligence_hub.core.paperless.PaperlessClient.list_custom_fields",
+                mock_custom_fields,
+            ),
         ):
             resp = seeded_client.get("/api/queue/actions/1/refresh")
 
@@ -965,6 +1089,8 @@ class TestRefreshAction:
         assert action["document_date"] == "2026-02-03"
         assert action["document_type"] == "Statement"
         assert action["tags"] == ["Reviewed"]
+        assert action["document_amount"] == 123.45
+        assert action["document_due_date"] == "2026-02-15"
         assert action["version"] == 2
 
     def test_refresh_action_clears_removed_metadata(self, seeded_client):
@@ -979,7 +1105,14 @@ class TestRefreshAction:
                 "document_type": None,
                 "tag_names": [],
                 "correspondent": None,
+                "custom_fields": [],
             }
+        )
+        mock_custom_fields = AsyncMock(
+            return_value=[
+                {"id": 20, "name": "Document Amount", "data_type": "float"},
+                {"id": 21, "name": "Document Due Date", "data_type": "date"},
+            ]
         )
 
         with (
@@ -990,6 +1123,10 @@ class TestRefreshAction:
             patch(
                 "doc_intelligence_hub.core.paperless.PaperlessClient.get_document",
                 mock_get_doc,
+            ),
+            patch(
+                "doc_intelligence_hub.core.paperless.PaperlessClient.list_custom_fields",
+                mock_custom_fields,
             ),
         ):
             resp = seeded_client.get("/api/queue/actions/1/refresh")

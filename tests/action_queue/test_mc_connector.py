@@ -166,6 +166,77 @@ class TestMcListActions:
         assert action["needs_review_url"].endswith("item=review-123")
         assert action["source_actions"] == []
 
+    def test_connector_exposes_document_group_and_sibling_context(self, seeded_client):
+        db = get_session()
+        try:
+            db.add(
+                Action(
+                    id=2,
+                    document_id=42,
+                    document_title="Electric Bill Jan 2026",
+                    action_type="RESPOND",
+                    title="Dispute late fee",
+                    urgency="HIGH",
+                    status="pending",
+                    action_index=1,
+                    is_primary=False,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        actions = seeded_client.get("/api/action-queue/actions").json()
+
+        assert {action["document_group_id"] for action in actions} == {"paperless:42"}
+        assert all(action["sibling_count"] == 2 for action in actions)
+        assert all(set(action["sibling_action_ids"]) == {"1", "2"} for action in actions)
+
+    def test_connector_exposes_merged_non_ready_action_as_tombstone(self, seeded_client):
+        db = get_session()
+        try:
+            db.add(
+                Action(
+                    id=2,
+                    document_id=42,
+                    document_title="Electric Bill Jan 2026",
+                    action_type="RESPOND",
+                    title="Absorbed action",
+                    urgency="LOW",
+                    status="dismissed",
+                    action_ready=False,
+                    review_state="resolved_no_action",
+                    superseded_by_action_id=1,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        actions = seeded_client.get("/api/action-queue/actions").json()
+        tombstone = next(action for action in actions if action["id"] == "2")
+
+        assert tombstone["status"] == "dismissed"
+        assert tombstone["superseded_by_action_id"] == "1"
+        assert tombstone["action_ready"] is False
+
+    def test_amount_feedback_can_clear_paperless_document_amount(self, seeded_client):
+        from unittest.mock import AsyncMock, patch
+
+        enricher = AsyncMock()
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
+            return_value=enricher,
+        ):
+            response = seeded_client.post(
+                "/api/action-queue/actions/1/feedback",
+                json={"feedback_type": "wrong_amount", "corrected_amount": None},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["amount"] is None
+        enricher.sync_document_amount.assert_awaited_once_with(42, None)
+
     def test_connector_preserves_additive_cta_shape_and_file_source_action(self, seeded_client):
         db = get_session()
         try:

@@ -13,11 +13,13 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 
 from doc_intelligence_hub.api.routers import get_loaded_statement_config
 from doc_intelligence_hub.api.routers.action_queue import (
     _resurface_expired_snoozes,
     _serialize_action,
+    _serialize_action_with_siblings,
     _sync_action_queue_settings,
 )
 from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
@@ -111,7 +113,14 @@ async def mc_list_actions(
         await _resurface_expired_snoozes(db)
         query = db.query(Action)
         if not include_not_ready:
-            query = query.filter(Action.action_ready.is_(True))
+            query = query.filter(
+                or_(
+                    Action.action_ready.is_(True),
+                    Action.status.in_(stored_status_values("dismissed")),
+                    Action.status.in_(stored_status_values("not_an_action")),
+                    Action.superseded_by_action_id.isnot(None),
+                )
+            )
         if status and status != "all":
             try:
                 normalized_filter = normalize_action_status(status)
@@ -141,7 +150,7 @@ async def mc_list_actions(
                     action.status,
                 )
                 normalized_status = "pending"
-            serialized = _serialize_action(action)
+            serialized = _serialize_action_with_siblings(db, action)
             source_actions = []
             if action.action_ready:
                 source_actions.append(
@@ -167,6 +176,21 @@ async def mc_list_actions(
                 {
                     "id": str(action.id),
                     "document_id": action.document_id,
+                    "document_group_id": f"paperless:{action.document_id}",
+                    "sibling_action_ids": [
+                        str(sibling_id) for sibling_id in serialized["sibling_action_ids"]
+                    ],
+                    "sibling_count": serialized["sibling_count"],
+                    "action_position": serialized["action_position"],
+                    "is_primary": serialized["is_primary"],
+                    "parent_action_id": (
+                        str(action.parent_action_id) if action.parent_action_id else None
+                    ),
+                    "superseded_by_action_id": (
+                        str(action.superseded_by_action_id)
+                        if action.superseded_by_action_id
+                        else None
+                    ),
                     "document_title": action.document_title or "",
                     "title": action.title or "",
                     # Contract (INTEGRATION-API-CONTRACT.md) requires lowercase enum values —
@@ -302,6 +326,30 @@ async def mc_submit_feedback(
         if not action:
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
         try:
+            corrected_amount_supplied = "corrected_amount" in body.model_fields_set
+            if body.feedback_type == "wrong_amount":
+                if not corrected_amount_supplied:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="corrected_amount is required for wrong_amount feedback",
+                    )
+                if not action_queue_settings.write_to_paperless:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Paperless writes are disabled; the document amount was not changed.",
+                    )
+                from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
+
+                try:
+                    await PaperlessEnricher().sync_document_amount(
+                        action.document_id,
+                        body.corrected_amount,
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Paperless rejected the document amount change: {exc}",
+                    ) from exc
             feedback, _ = record_action_feedback(
                 db,
                 action,
@@ -309,8 +357,14 @@ async def mc_submit_feedback(
                 corrected_action_type=body.corrected_action_type,
                 corrected_urgency=body.corrected_urgency,
                 corrected_amount=body.corrected_amount,
+                corrected_amount_supplied=corrected_amount_supplied,
                 reason=body.reason,
             )
+            if body.feedback_type == "wrong_amount":
+                for sibling in db.query(Action).filter_by(document_id=action.document_id).all():
+                    sibling.amount = body.corrected_amount
+                    sibling.document_amount = body.corrected_amount
+                    sibling.document_amount_overridden = True
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         routed_to_review = body.feedback_type in {

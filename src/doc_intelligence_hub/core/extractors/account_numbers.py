@@ -16,6 +16,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+from doc_intelligence_hub.core.masked_identifiers import masked_identifier_suffix
 from doc_intelligence_hub.core.paperless import (
     MetadataFieldKey,
     PaperlessMetadataResolver,
@@ -160,9 +161,9 @@ def normalize_masked_account_identifier(value: object) -> str | None:
         prefix = "member " if ending_match.group(1) else ""
         return f"{prefix}ending {ending_match.group(2).upper()}"
 
-    masked_match = re.fullmatch(r"[*Xx.\s-]+([A-Za-z0-9]{2,8})", stripped)
-    if masked_match:
-        return f"ending {masked_match.group(1).upper()}"
+    masked_suffix = masked_identifier_suffix(stripped)
+    if masked_suffix is not None:
+        return f"ending {masked_suffix.upper()}"
     return None
 
 

@@ -14,6 +14,9 @@ const {
   actionsMock,
   updateActionMock,
   refreshActionMock,
+  actionSiblingsMock,
+  splitActionMock,
+  mergeActionsMock,
   feedbackMock,
   metadataTagsMock,
   metadataCorrespondentsMock,
@@ -23,6 +26,9 @@ const {
   actionsMock: vi.fn(),
   updateActionMock: vi.fn(),
   refreshActionMock: vi.fn(),
+  actionSiblingsMock: vi.fn(),
+  splitActionMock: vi.fn(),
+  mergeActionsMock: vi.fn(),
   feedbackMock: vi.fn(),
   metadataTagsMock: vi.fn(),
   metadataCorrespondentsMock: vi.fn(),
@@ -44,6 +50,9 @@ vi.mock('../lib/api', () => ({
       actions: actionsMock,
       updateAction: updateActionMock,
       refreshAction: refreshActionMock,
+      actionSiblings: actionSiblingsMock,
+      splitAction: splitActionMock,
+      mergeActions: mergeActionsMock,
       bulk: vi.fn(),
       backfill: vi.fn(),
       refreshMetadata: vi.fn(),
@@ -95,6 +104,10 @@ const initialAction = {
   preview_url: '/documents/1/details',
   tags: ['9', '2', '343', '4'],
   version: 3,
+  sibling_count: 1,
+  sibling_action_ids: [1],
+  action_position: 1,
+  is_primary: true,
   created_at: '2026-07-20T10:00:00Z',
   updated_at: '2026-07-21T10:00:00Z',
 };
@@ -125,6 +138,9 @@ beforeEach(() => {
   actionsMock.mockReset();
   updateActionMock.mockReset();
   refreshActionMock.mockReset();
+  actionSiblingsMock.mockReset();
+  splitActionMock.mockReset();
+  mergeActionsMock.mockReset();
   feedbackMock.mockReset();
   metadataTagsMock.mockReset();
   metadataCorrespondentsMock.mockReset();
@@ -160,6 +176,9 @@ beforeEach(() => {
     .mockResolvedValueOnce({ actions: [initialAction], total: 1 })
     .mockResolvedValueOnce({ actions: [updatedAction], total: 1 });
   updateActionMock.mockResolvedValue(updatedAction);
+  actionSiblingsMock.mockResolvedValue({ actions: [initialAction] });
+  splitActionMock.mockResolvedValue({ ...initialAction, id: 2, parent_action_id: 1 });
+  mergeActionsMock.mockResolvedValue(initialAction);
   refreshActionMock.mockResolvedValue({
     ...initialAction,
     document_title: 'Corrected Electric Statement',
@@ -374,8 +393,8 @@ describe('ActionQueue', () => {
     fireEvent.change(screen.getByLabelText('Action type'), { target: { value: 'TASK' } });
     fireEvent.change(screen.getByLabelText('Task name'), { target: { value: 'Call utility company' } });
     fireEvent.change(screen.getByLabelText('Summary'), { target: { value: 'Confirm latest balance' } });
-    fireEvent.change(screen.getByLabelText('Due date'), { target: { value: '2026-08-15' } });
-    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '123.45' } });
+    fireEvent.change(screen.getByLabelText('Action deadline'), { target: { value: '2026-08-15' } });
+    fireEvent.change(screen.getByLabelText('Document amount'), { target: { value: '123.45' } });
     fireEvent.change(screen.getByLabelText('Urgency'), { target: { value: 'HIGH' } });
 
     fireEvent.click(screen.getByRole('button', { name: /save details/i }));
@@ -474,6 +493,78 @@ describe('ActionQueue', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Pay' }));
     fireEvent.change(screen.getByLabelText('Search actions'), { target: { value: 'missing' } });
     expect(screen.queryByRole('button', { name: /open pay electric bill/i })).toBeNull();
+  });
+
+  it('shows and navigates separate actions from one document', async () => {
+    window.localStorage.setItem('owl.actionQueue.typeFilter', 'all');
+    const sibling = {
+      ...initialAction,
+      id: 2,
+      action_type: 'RESPOND',
+      title: 'Dispute late fee',
+      sibling_count: 2,
+      sibling_action_ids: [1, 2],
+      action_position: 2,
+      is_primary: false,
+    };
+    const primary = {
+      ...initialAction,
+      sibling_count: 2,
+      sibling_action_ids: [1, 2],
+      action_position: 1,
+    };
+    actionsMock.mockReset().mockResolvedValue({ actions: [primary, sibling], total: 2 });
+    actionSiblingsMock.mockResolvedValue({ actions: [primary, sibling] });
+
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    expect(await screen.findAllByText('2 actions from this document')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: /open pay electric bill/i }));
+    expect(await screen.findByText(/Action 1 of 2 \(primary\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /RESPOND\s*Dispute late fee/i }));
+    expect(await screen.findByText(/Action 2 of 2/)).toBeInTheDocument();
+  });
+
+  it('separates action edits from document-wide facts', async () => {
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Correct details' }));
+
+    expect(screen.getByText('This action')).toBeInTheDocument();
+    expect(screen.getByLabelText('Action deadline')).toBeInTheDocument();
+    expect(screen.getByLabelText('Document amount')).toBeInTheDocument();
+    expect(screen.getByLabelText('Document due date')).toBeInTheDocument();
+  });
+
+  it('requires explicit surviving values before merging actions', async () => {
+    const sibling = {
+      ...initialAction,
+      id: 2,
+      action_type: 'RESPOND',
+      title: 'Dispute late fee',
+      sibling_count: 2,
+      sibling_action_ids: [1, 2],
+      action_position: 2,
+      is_primary: false,
+    };
+    const primary = {
+      ...initialAction,
+      sibling_count: 2,
+      sibling_action_ids: [1, 2],
+      action_position: 1,
+    };
+    window.localStorage.setItem('owl.actionQueue.typeFilter', 'all');
+    actionsMock.mockReset().mockResolvedValue({ actions: [primary, sibling], total: 2 });
+    actionSiblingsMock.mockResolvedValue({ actions: [primary, sibling] });
+
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Merge actions' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Dispute late fee/ }));
+
+    expect(screen.getAllByDisplayValue('Choose surviving value')).toHaveLength(6);
   });
 });
 

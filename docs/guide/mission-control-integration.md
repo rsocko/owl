@@ -27,7 +27,7 @@ GET /api/action-queue/actions?status=all&limit=100&offset=0&updated_since=2026-0
 | `limit` | `100` | Page size from 1 through 500 |
 | `offset` | `0` | Deterministic page offset |
 | `updated_since` | none | Inclusive ISO-8601 lower bound on `updated_at` |
-| `include_not_ready` | `false` | When false, returns trusted actions only. Set true only for review/diagnostic experiences. |
+| `include_not_ready` | `false` | When false, returns trusted actions plus terminal reconciliation records. Set true only for review/diagnostic experiences. |
 
 The response remains a flat JSON array for backward compatibility. Each item
 includes `id`, normalized lowercase `action_type` and `urgency`, normalized OWL
@@ -35,6 +35,21 @@ includes `id`, normalized lowercase `action_type` and `urgency`, normalized OWL
 existing document/action metadata. Results preserve the legacy newest-first
 order by `created_at`, then `id`, so unpaginated clients continue to receive the
 newest actions.
+
+OWL creates one MC item per action, not one per Paperless document. Additive
+grouping fields let MC present related work without collapsing task identity:
+
+| Field | Semantics |
+|-------|-----------|
+| `document_group_id` | Stable `paperless:{document_id}` group key |
+| `sibling_action_ids` / `sibling_count` | Current non-superseded actions from the document |
+| `action_position` / `is_primary` | OWL display order and analyzer-selected primary action |
+| `parent_action_id` | Source action when a user manually split out another task |
+| `superseded_by_action_id` | Survivor ID when this action was absorbed by a merge |
+
+A split creates a new OWL ID and therefore a new MC task. A merge preserves the
+survivor ID and returns the absorbed ID as a non-ready, dismissed reconciliation
+record so MC can cancel the old task instead of leaving it orphaned.
 
 ### Readiness and review fields
 
@@ -49,7 +64,9 @@ ingestion must use `action_ready` as its sole trust gate.
 | `recommended_cta` | object or null | `{id, label, url?: string|null, phone?: string|null, metadata?: object}`; fields are additive and must not be narrowed |
 | `source_actions` | array | OWL-owned mutations available for this item |
 
-The default response does **not** include not-ready items. With
+The default response does **not** include uncertain not-ready items. It does
+include dismissed, `not_an_action`, and superseded terminal records needed to
+reconcile tasks that MC may already hold. With
 `include_not_ready=true`, uncertain items are returned with
 `action_ready=false`, `review_state=needs_review`, and a `needs_review_url`.
 They must not be converted into MC tasks. `resolved_no_action` items are
@@ -116,7 +133,10 @@ Content-Type: application/json
 ```
 
 OWL stores the `snoozed` lifecycle status and `snoozed_until`, writes the status
-to Paperless when write-back is enabled, and returns both values.
+to Paperless when write-back is enabled, and returns both values. Paperless
+stores one aggregate document status: any pending sibling keeps the document
+pending, and the document is completed only after no required sibling remains
+open.
 
 ## Submit classifier feedback
 
@@ -134,13 +154,15 @@ Supported payloads are:
 | `not_an_action` | `reason` |
 | `misclassified` | `corrected_action_type` |
 | `wrong_urgency` | `corrected_urgency` |
-| `wrong_amount` | `corrected_amount` |
+| `wrong_amount` | Required `corrected_amount`; JSON `null` explicitly clears it |
 
 Corrections are recorded in Action Queue feedback history and update the source
 action when a corrected value is supplied. `not_an_action` always records
 feedback, changes the OWL lifecycle status, and writes that status to Paperless.
 It is reserved for false positives. Wrong action types use `misclassified`,
 which immediately returns the corrected type and recomputed contextual CTA.
+`wrong_amount` updates the shared Paperless `Document Amount` and every OWL
+sibling. A Paperless write failure leaves the OWL correction uncommitted.
 
 ## Needs Review resolution
 
