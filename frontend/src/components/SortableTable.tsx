@@ -185,8 +185,13 @@ export function SortableTable<T>({
           <tr key={headerGroup.id}>
             {headerGroup.headers.map((header) => {
               const width = (header.column.columnDef.meta as { width?: string } | undefined)?.width;
+              const sorted = header.column.getIsSorted();
               return (
-                <th key={header.id} style={{ width }}>
+                <th
+                  key={header.id}
+                  style={{ width }}
+                  aria-sort={sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined}
+                >
                   {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
                 </th>
               );
@@ -208,7 +213,7 @@ export function SortableTable<T>({
               className={typeof rowClassName === 'function' ? rowClassName(row.original) : rowClassName}
               onClick={onRowActivate ? () => onRowActivate(row.original) : undefined}
               onKeyDown={onRowActivate ? (event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
+                if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
                   event.preventDefault();
                   onRowActivate(row.original);
                 }

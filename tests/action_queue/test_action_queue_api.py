@@ -126,6 +126,31 @@ class TestListActions:
         assert data["actions"][0]["status"] == "pending"
         assert data["actions"][0]["preview_url"] is not None
 
+    def test_terminal_actions_are_paginated_by_latest_lifecycle_change(self, seeded_client):
+        db = get_session()
+        try:
+            db.add(
+                Action(
+                    id=3,
+                    document_id=100,
+                    document_title="Recently completed older document",
+                    action_type="TASK",
+                    title="Recent completion",
+                    status="completed",
+                    created_at=datetime(2025, 1, 1, 10, 0, 0),
+                    updated_at=datetime(2026, 7, 1, 10, 0, 0),
+                    completed_at=datetime(2026, 7, 1, 10, 0, 0),
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        data = seeded_client.get("/api/queue/actions?status=completed&limit=1").json()
+
+        assert data["total"] == 2
+        assert data["actions"][0]["id"] == 3
+
     def test_list_actions_empty(self, client):
         resp = client.get("/api/queue/actions")
         data = resp.json()
@@ -177,6 +202,7 @@ class TestListActions:
             "version",
             "preview_url",
             "created_at",
+            "updated_at",
             "completed_at",
             "acknowledged_at",
             "snoozed_until",
@@ -202,6 +228,35 @@ class TestListActions:
         assert ready["total"] == 0
         assert review["total"] == 1
         assert review["actions"][0]["review_state"] == "needs_review"
+
+    def test_all_history_includes_no_action_but_excludes_needs_review(self, seeded_client):
+        feedback = seeded_client.post(
+            "/api/queue/actions/1/feedback",
+            json={"feedback_type": "not_an_action"},
+        )
+        assert feedback.status_code == 200
+        db = get_session()
+        try:
+            db.add(
+                Action(
+                    id=3,
+                    document_id=100,
+                    document_title="Untrusted pending action",
+                    action_type="TASK",
+                    title="Needs review",
+                    status="pending",
+                    action_ready=False,
+                    review_state="needs_review",
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        data = seeded_client.get("/api/queue/actions?include_resolved_no_action=true").json()
+
+        assert data["total"] == 2
+        assert {action["id"] for action in data["actions"]} == {1, 2}
 
 
 class TestUpdateAction:
@@ -236,6 +291,42 @@ class TestUpdateAction:
         assert data["status"] == "pending"
         assert data["completed_at"] is None
         assert data["preview_url"] is not None
+
+    def test_update_reopens_no_action_record_as_ready(self, seeded_client):
+        feedback = seeded_client.post(
+            "/api/queue/actions/1/feedback",
+            json={"feedback_type": "not_an_action"},
+        )
+        assert feedback.status_code == 200
+
+        reopened = seeded_client.patch(
+            "/api/queue/actions/1",
+            json={"status": "pending", "dry_run": False},
+        )
+
+        assert reopened.status_code == 200
+        assert reopened.json()["action_ready"] is True
+        assert reopened.json()["review_state"] == "ready"
+        pending = seeded_client.get("/api/queue/actions?status=pending").json()
+        assert [action["id"] for action in pending["actions"]] == [1]
+
+    def test_bulk_reopens_no_action_record_as_ready(self, seeded_client):
+        feedback = seeded_client.post(
+            "/api/queue/actions/1/feedback",
+            json={"feedback_type": "not_an_action"},
+        )
+        assert feedback.status_code == 200
+
+        reopened = seeded_client.post(
+            "/api/queue/actions/bulk",
+            json={"action": "reopen", "action_ids": [1]},
+        )
+
+        assert reopened.status_code == 200
+        pending = seeded_client.get("/api/queue/actions?status=pending").json()
+        assert pending["total"] == 1
+        assert pending["actions"][0]["id"] == 1
+        assert pending["actions"][0]["action_ready"] is True
 
     def test_update_nonexistent_action(self, seeded_client):
         resp = seeded_client.patch(

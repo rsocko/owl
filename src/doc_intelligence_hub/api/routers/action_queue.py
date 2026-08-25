@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 from sqlalchemy import String as SAString
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
@@ -288,6 +289,7 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         "version": a.version or 1,
         "preview_url": _build_preview_url(a.document_id),
         "created_at": a.created_at.isoformat() if a.created_at else None,
+        "updated_at": a.updated_at.isoformat() if a.updated_at else None,
         "completed_at": a.completed_at.isoformat() if a.completed_at else None,
         "acknowledged_at": a.acknowledged_at.isoformat() if a.acknowledged_at else None,
         "snoozed_until": a.snoozed_until.isoformat() if a.snoozed_until else None,
@@ -640,6 +642,7 @@ async def list_actions(
     limit: int = 50,
     offset: int = 0,
     include_not_ready: bool = False,
+    include_resolved_no_action: bool = False,
 ) -> dict[str, Any]:
     """List action items from the database with optional status/document_type/tag filters."""
     _sync_action_queue_settings(request)
@@ -648,7 +651,11 @@ async def list_actions(
     try:
         await _resurface_expired_snoozes(db)
         query = db.query(Action)
-        if not include_not_ready:
+        if include_resolved_no_action and not include_not_ready:
+            query = query.filter(
+                or_(Action.action_ready.is_(True), Action.status == "not_an_action")
+            )
+        elif not include_not_ready:
             query = query.filter(Action.action_ready.is_(True))
         if status:
             query = query.filter_by(status=status)
@@ -658,9 +665,14 @@ async def list_actions(
             # SQLite JSON: check if tag appears in the JSON array
             query = query.filter(Action.tags.isnot(None))
             query = query.filter(Action.tags.cast(SAString).contains(f'"{tag}"'))
-        # Sort pending actions by risk_score (highest risk first), then by created_at
+        # Sort before pagination so history views receive the newest lifecycle changes.
         if status == "pending":
             query = query.order_by(Action.risk_score.desc(), Action.created_at.desc())
+        elif status in {"completed", "dismissed", "not_an_action"} or status is None:
+            query = query.order_by(
+                func.coalesce(Action.completed_at, Action.updated_at, Action.created_at).desc(),
+                Action.id.desc(),
+            )
         else:
             query = query.order_by(Action.created_at.desc())
         total = query.count()
@@ -824,6 +836,7 @@ async def update_action(
 
         if "status" in supplied_fields or "snoozed_until" in supplied_fields:
             effective_status = body.status or action.status
+            previous_status = action.status
             if effective_status == "completed" and (action.action_type or "").upper() in {
                 "FILE",
                 "ARCHIVE",
@@ -864,6 +877,8 @@ async def update_action(
                 effective_status,
                 snoozed_until=snoozed_until,
             )
+            if previous_status == "not_an_action" and effective_status == "pending":
+                mark_action_ready(action)
 
         if risk_inputs_changed:
             recalculate_action_risk(action)
@@ -1052,11 +1067,14 @@ async def bulk_action(request: Request, body: BulkActionRequest) -> dict[str, An
             if target_status == "not_an_action":
                 record_action_feedback(db, action, feedback_type="not_an_action")
             else:
+                previous_status = action.status
                 transition_action_status(
                     action,
                     target_status,
                     snoozed_until=snoozed_until,
                 )
+                if previous_status == "not_an_action" and target_status == "pending":
+                    mark_action_ready(action)
                 action.version = (action.version or 1) + 1
             affected += 1
             sync_actions.append(action)

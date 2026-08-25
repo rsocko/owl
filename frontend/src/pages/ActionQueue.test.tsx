@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import ActionQueue, {
   ACTION_GROUP_BATCH_SIZE,
@@ -96,6 +96,7 @@ const initialAction = {
   tags: ['9', '2', '343', '4'],
   version: 3,
   created_at: '2026-07-20T10:00:00Z',
+  updated_at: '2026-07-21T10:00:00Z',
 };
 
 const updatedAction = {
@@ -119,6 +120,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  window.localStorage.removeItem('owl.actionQueue.view');
   statusMock.mockReset();
   actionsMock.mockReset();
   updateActionMock.mockReset();
@@ -229,6 +231,113 @@ describe('ActionQueue', () => {
       'href',
       '#/action-queue/operations',
     );
+  });
+
+  it('persists the table preference and restores sortable columns', async () => {
+    const laterAction = {
+      ...initialAction,
+      id: 2,
+      title: 'Arrange payment',
+      due_date: '2026-09-01',
+    };
+    actionsMock.mockReset();
+    actionsMock.mockResolvedValue({ actions: [initialAction, laterAction], total: 2 });
+
+    const firstRender = render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+    expect(await screen.findByRole('button', { name: /overdue/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }));
+    expect(window.localStorage.getItem('owl.actionQueue.view')).toBe('table');
+    expect(screen.getByRole('button', { name: 'Sort by Due' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sort by Action' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Action' }));
+    const sortedRows = screen.getAllByRole('row').slice(1);
+    expect(within(sortedRows[0]).getByText('Arrange payment')).toBeTruthy();
+
+    firstRender.unmount();
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+    expect(await screen.findByRole('button', { name: 'Sort by Due' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /overdue/i })).toBeNull();
+  });
+
+  it('uses newest-first table history with Re-open for completed actions and bulk selection', async () => {
+    const olderDone = {
+      ...initialAction,
+      id: 2,
+      title: 'Older completed action',
+      status: 'completed',
+      completed_at: '2026-08-20T10:00:00Z',
+      updated_at: '2026-08-20T10:00:00Z',
+    };
+    const newerDone = {
+      ...initialAction,
+      id: 3,
+      title: 'Newer completed action',
+      status: 'completed',
+      completed_at: null,
+      updated_at: '2026-08-24T10:00:00Z',
+    };
+    statusMock.mockResolvedValue({
+      status: 'idle',
+      database: {
+        pending: 1,
+        acknowledged: 0,
+        completed: 2,
+        dismissed: 0,
+        snoozed: 0,
+        not_an_action: 0,
+        total: 3,
+      },
+      progress: {},
+    });
+    actionsMock.mockReset();
+    actionsMock.mockImplementation(async (params: string) => (
+      params.includes('status=completed')
+        ? { actions: [olderDone, newerDone], total: 2 }
+        : { actions: [initialAction], total: 1 }
+    ));
+
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+    fireEvent.click(await screen.findByRole('radio', { name: 'Done (2)' }));
+
+    const rows = await screen.findAllByRole('row');
+    expect(within(rows[1]).getByText('Newer completed action')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Grouped' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }));
+    expect(window.localStorage.getItem('owl.actionQueue.view')).toBe('grouped');
+    expect(screen.getAllByRole('button', { name: 'Re-open' })).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /select visible/i }));
+    expect(screen.getAllByRole('button', { name: 'Re-open' })).toHaveLength(3);
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+
+    fireEvent.click(within(rows[1]).getByRole('button', { name: /open newer completed action/i }));
+    expect(screen.getAllByRole('button', { name: 'Re-open' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+  });
+
+  it('includes no-action history in the All table', async () => {
+    const noAction = {
+      ...initialAction,
+      id: 4,
+      title: 'Informational document',
+      status: 'not_an_action',
+      updated_at: '2026-08-24T11:00:00Z',
+    };
+    actionsMock.mockReset();
+    actionsMock.mockImplementation(async (params: string) => (
+      params.startsWith('limit=200')
+        ? { actions: [initialAction, noAction], total: 2 }
+        : { actions: [initialAction], total: 1 }
+    ));
+
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+    fireEvent.click(await screen.findByRole('radio', { name: /All \(1\)/i }));
+
+    expect(await screen.findByText('Informational document')).toBeTruthy();
+    expect(actionsMock).toHaveBeenCalledWith('limit=200&include_resolved_no_action=true');
   });
 
   it('shows safe extracted links and useful action details', async () => {
