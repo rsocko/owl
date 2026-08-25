@@ -349,9 +349,7 @@ class TestUpdateAction:
             db.commit()
         finally:
             db.close()
-        monkeypatch.setattr(
-            seeded_client.app.state.hub_settings, "write_to_paperless", False
-        )
+        monkeypatch.setattr(seeded_client.app.state.hub_settings, "write_to_paperless", False)
 
         response = seeded_client.post("/api/queue/actions/1/file")
 

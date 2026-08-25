@@ -352,9 +352,7 @@ class TestTriageResolve:
         assert refreshed["metadata"]["title"] == "Corrected payment"
         assert "critical details" in refreshed["reason"]
 
-    def test_resolved_action_classification_cannot_be_resolved_again(
-        self, client, action_review
-    ):
+    def test_resolved_action_classification_cannot_be_resolved_again(self, client, action_review):
         from unittest.mock import AsyncMock, patch
 
         with patch(
@@ -399,9 +397,7 @@ class TestTriageResolve:
             "/api/triage/queue/bulk",
             json={"action": "confirm", "item_ids": [action_review["item_id"]]},
         )
-        dismiss_response = client.post(
-            f"/api/triage/queue/{action_review['item_id']}/dismiss"
-        )
+        dismiss_response = client.post(f"/api/triage/queue/{action_review['item_id']}/dismiss")
 
         assert bulk_response.status_code == 422
         assert dismiss_response.status_code == 422
@@ -419,9 +415,7 @@ class TestTriageResolve:
                 f"/api/triage/queue/{action_review['item_id']}/resolve",
                 json={"action": "confirm"},
             )
-        undo_response = client.post(
-            f"/api/triage/queue/{action_review['item_id']}/undo"
-        )
+        undo_response = client.post(f"/api/triage/queue/{action_review['item_id']}/undo")
 
         assert confirm_response.status_code == 200
         assert undo_response.status_code == 422

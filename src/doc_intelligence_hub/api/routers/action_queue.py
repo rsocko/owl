@@ -336,9 +336,7 @@ async def _database_counts() -> dict[str, int]:
         await _resurface_expired_snoozes(db)
         trusted = Action.action_ready.is_(True)
         pending = db.query(Action).filter(Action.status == "pending", trusted).count()
-        acknowledged = db.query(Action).filter(
-            Action.status == "acknowledged", trusted
-        ).count()
+        acknowledged = db.query(Action).filter(Action.status == "acknowledged", trusted).count()
         completed = db.query(Action).filter(Action.status == "completed", trusted).count()
         dismissed = db.query(Action).filter(Action.status == "dismissed", trusted).count()
         snoozed = db.query(Action).filter(Action.status == "snoozed", trusted).count()
@@ -785,10 +783,10 @@ async def update_action(
 
         if "status" in supplied_fields or "snoozed_until" in supplied_fields:
             effective_status = body.status or action.status
-            if (
-                effective_status == "completed"
-                and (action.action_type or "").upper() in {"FILE", "ARCHIVE"}
-            ):
+            if effective_status == "completed" and (action.action_type or "").upper() in {
+                "FILE",
+                "ARCHIVE",
+            }:
                 from fastapi import HTTPException
 
                 raise HTTPException(
@@ -982,8 +980,7 @@ async def bulk_action(request: Request, body: BulkActionRequest) -> dict[str, An
         if not actions:
             raise HTTPException(status_code=404, detail="No matching actions found")
         if body.action == "complete" and any(
-            (action.action_type or "").upper() in {"FILE", "ARCHIVE"}
-            for action in actions
+            (action.action_type or "").upper() in {"FILE", "ARCHIVE"} for action in actions
         ):
             raise HTTPException(
                 status_code=409,

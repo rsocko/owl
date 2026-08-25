@@ -303,8 +303,7 @@ async def _resolve_action_classification(
                     raise HTTPException(
                         status_code=502,
                         detail=(
-                            "Correction was saved, but Paperless metadata cleanup "
-                            f"failed: {exc}"
+                            f"Correction was saved, but Paperless metadata cleanup failed: {exc}"
                         ),
                     ) from exc
                 refreshed_item = get_queue_item(action.review_item_id) or item
@@ -357,7 +356,9 @@ async def _resolve_action_classification(
         if body.action == "no_action":
             import logging
 
-            await sync_action_status(db, action, "not_an_action", logger=logging.getLogger(__name__))
+            await sync_action_status(
+                db, action, "not_an_action", logger=logging.getLogger(__name__)
+            )
         resolved = resolve_queue_item(item["id"], body.action, payload)
         return {
             **(resolved or item),

@@ -160,9 +160,7 @@ class TestMcListActions:
             db.close()
 
         assert seeded_client.get("/api/action-queue/actions").json() == []
-        action = seeded_client.get(
-            "/api/action-queue/actions?include_not_ready=true"
-        ).json()[0]
+        action = seeded_client.get("/api/action-queue/actions?include_not_ready=true").json()[0]
         assert action["action_ready"] is False
         assert action["review_state"] == "needs_review"
         assert action["needs_review_url"].endswith("item=review-123")
@@ -223,9 +221,7 @@ class TestMcListActions:
                 db.close()
 
             action = TestClient(app).get("/api/action-queue/actions").json()[0]
-            assert {source["id"] for source in action["source_actions"]} == {
-                "send_to_review"
-            }
+            assert {source["id"] for source in action["source_actions"]} == {"send_to_review"}
         finally:
             aq_settings.database_url = original_db_url
 

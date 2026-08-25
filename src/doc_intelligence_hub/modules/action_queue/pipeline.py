@@ -549,7 +549,9 @@ class Pipeline:
                     for stored_action in stored_actions:
                         route_action_to_review(db, stored_action, reason=reason)
                     if settings.write_to_paperless and self._enrichment_available:
-                        primary_action = actions[primary_idx] if primary_idx < len(actions) else actions[0]
+                        primary_action = (
+                            actions[primary_idx] if primary_idx < len(actions) else actions[0]
+                        )
                         await self.enricher.enrich_document(
                             doc_id,
                             {**primary_action, **assessment},

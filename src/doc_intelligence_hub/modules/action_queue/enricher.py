@@ -133,7 +133,9 @@ class PaperlessEnricher:
                 )
             )
         if action_status is not None:
-            updates.append(build_metadata_update(MetadataFieldKey.ACTION_STATUS, action_status, schema))
+            updates.append(
+                build_metadata_update(MetadataFieldKey.ACTION_STATUS, action_status, schema)
+            )
         elif clear_action_inference:
             action_status_id = self._field_id_cache.get(MetadataFieldKey.ACTION_STATUS)
             if action_status_id is not None:

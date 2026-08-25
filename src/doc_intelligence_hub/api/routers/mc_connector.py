@@ -152,10 +152,9 @@ async def mc_list_actions(
                         "url": f"/api/action-queue/actions/{action.id}/review",
                     }
                 )
-                if (
-                    action_queue_settings.write_to_paperless
-                    and (action.action_type or "").upper() in {"FILE", "ARCHIVE"}
-                ):
+                if action_queue_settings.write_to_paperless and (
+                    action.action_type or ""
+                ).upper() in {"FILE", "ARCHIVE"}:
                     source_actions.append(
                         {
                             "id": "file_document",
@@ -231,10 +230,10 @@ async def mc_update_action(
         action = db.query(Action).filter_by(id=action_id).first()
         if not action:
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
-        if (
-            internal_status == "completed"
-            and (action.action_type or "").upper() in {"FILE", "ARCHIVE"}
-        ):
+        if internal_status == "completed" and (action.action_type or "").upper() in {
+            "FILE",
+            "ARCHIVE",
+        }:
             raise HTTPException(
                 status_code=409,
                 detail="Use the file_document source action for FILE or ARCHIVE work",
@@ -314,10 +313,10 @@ async def mc_submit_feedback(
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        routed_to_review = (
-            body.feedback_type in {"misclassified", "wrong_amount"}
-            and not action_has_critical_details(action)
-        )
+        routed_to_review = body.feedback_type in {
+            "misclassified",
+            "wrong_amount",
+        } and not action_has_critical_details(action)
         if routed_to_review:
             route_action_to_review(
                 db,
