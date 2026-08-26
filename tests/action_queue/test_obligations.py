@@ -18,6 +18,7 @@ from doc_intelligence_hub.modules.action_queue.obligations import (
     completion_suggestion,
     linked_documents,
     manually_link_actions,
+    manually_link_document,
     suggest_related_actions,
     sync_obligation_status,
 )
@@ -135,6 +136,29 @@ def test_manual_link_merges_obligations_and_suppresses_related_action(db):
     assert related.superseded_by_action_id == primary.id
     assert related.action_ready is False
     assert {document["document_id"] for document in linked_documents(db, primary)} == {1, 2}
+
+
+def test_manual_link_receipt_suggests_completion_without_receipt_action(db):
+    action = _pay_action(1, "Utility invoice")
+    db.add(action)
+    db.flush()
+
+    linked = manually_link_document(
+        db,
+        action,
+        {
+            "id": 9,
+            "title": "Payment Receipt",
+            "document_type_name": "Receipt",
+            "correspondent_name": "Utility Co",
+            "created": "2026-08-20",
+            "content": "Payment completed. Invoice INV-42. Total $100.00",
+        },
+    )
+
+    assert linked.role == "receipt"
+    assert linked.source == "user_link"
+    assert completion_suggestion(db, action)["receipt_document_id"] == 9
 
 
 def test_receipt_suggests_completion_without_closing_action(db):

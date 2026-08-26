@@ -49,6 +49,7 @@ from doc_intelligence_hub.modules.action_queue.obligations import (
     completion_suggestion,
     linked_documents,
     manually_link_actions,
+    manually_link_document,
     suggest_related_actions,
     sync_obligation_status,
 )
@@ -189,7 +190,17 @@ class ActionUpdateRequest(BaseModel):
 
 
 class ActionLinkRequest(BaseModel):
-    related_action_id: int = Field(..., gt=0)
+    related_action_id: int | None = Field(default=None, gt=0)
+    related_document_id: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _require_one_target(self) -> ActionLinkRequest:
+        if (self.related_action_id is None) == (self.related_document_id is None):
+            raise PydanticCustomError(
+                "invalid_link_target",
+                "Provide exactly one related action or Paperless document",
+            )
+        return self
 
 
 class ActionCreateRequest(BaseModel):
@@ -1101,7 +1112,7 @@ async def list_action_link_candidates(
     q: str | None = None,
     limit: int = 10,
 ) -> dict[str, Any]:
-    """Suggest related PAY actions for explicit user-reviewed linking."""
+    """Suggest related actions and search Paperless documents for manual linking."""
     _sync_action_queue_settings(request)
     init_db()
     db = get_session()
@@ -1117,16 +1128,58 @@ async def list_action_link_candidates(
             query=q,
             limit=max(1, min(limit, 25)),
         )
+        candidates = [
+            {
+                "kind": "action",
+                "action": _serialize_action_with_siblings(db, candidate["action"]),
+                "score": candidate["score"],
+                "reasons": candidate["reasons"],
+            }
+            for candidate in suggestions
+        ]
+        if q and q.strip():
+            try:
+                paperless = make_paperless_client(request, timeout=15.0)
+                documents = await paperless.list_documents(
+                    query=q.strip(),
+                    limit=max(1, min(limit, 25)),
+                )
+            except Exception as exc:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Paperless document search failed: {exc}",
+                ) from exc
+
+            action_document_ids = {
+                row[0]
+                for row in db.query(Action.document_id).filter(Action.document_id.isnot(None))
+            }
+            linked_document_ids = {
+                document["document_id"] for document in linked_documents(db, action)
+            }
+            for document in documents:
+                document_id = int(document["id"])
+                if document_id in action_document_ids or document_id in linked_document_ids:
+                    continue
+                candidates.append(
+                    {
+                        "kind": "document",
+                        "document": {
+                            "id": document_id,
+                            "title": document.get("title") or f"Document #{document_id}",
+                            "document_type": document.get("document_type_name"),
+                            "correspondent": document.get("correspondent_name"),
+                            "document_date": document.get("created"),
+                        },
+                        "score": 0.0,
+                        "reasons": ["Paperless document search result"],
+                    }
+                )
         return {
             "action_id": action_id,
-            "candidates": [
-                {
-                    "action": _serialize_action_with_siblings(db, candidate["action"]),
-                    "score": candidate["score"],
-                    "reasons": candidate["reasons"],
-                }
-                for candidate in suggestions
-            ],
+            "candidates": candidates,
         }
     finally:
         db.close()
@@ -1138,7 +1191,7 @@ async def link_action_document(
     action_id: int,
     body: ActionLinkRequest,
 ) -> dict[str, Any]:
-    """Explicitly link another PAY action's document to this obligation."""
+    """Explicitly link another action or Paperless document to this obligation."""
     from fastapi import HTTPException
 
     _sync_action_queue_settings(request)
@@ -1146,23 +1199,40 @@ async def link_action_document(
     db = get_session()
     try:
         primary = db.query(Action).filter_by(id=action_id).first()
-        related = db.query(Action).filter_by(id=body.related_action_id).first()
-        if not primary or not related:
-            raise HTTPException(status_code=404, detail="One or both actions were not found")
-        try:
-            manually_link_actions(db, primary, related)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if not primary:
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        if body.related_action_id is not None:
+            related = db.query(Action).filter_by(id=body.related_action_id).first()
+            if not related:
+                raise HTTPException(status_code=404, detail="Related action was not found")
+            try:
+                manually_link_actions(db, primary, related)
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            related.version = (related.version or 1) + 1
+            db.commit()
+            await sync_action_status(
+                db,
+                related,
+                related.status,
+                logger=logging.getLogger(__name__),
+            )
+        else:
+            try:
+                paperless = make_paperless_client(request, timeout=15.0)
+                document = await paperless.get_document(body.related_document_id)
+                manually_link_document(db, primary, document)
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Could not load the Paperless document: {exc}",
+                ) from exc
+            db.commit()
         primary.version = (primary.version or 1) + 1
-        related.version = (related.version or 1) + 1
         db.commit()
         db.refresh(primary)
-        await sync_action_status(
-            db,
-            related,
-            related.status,
-            logger=logging.getLogger(__name__),
-        )
         return _serialize_action_with_siblings(db, primary)
     finally:
         db.close()

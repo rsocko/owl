@@ -131,7 +131,15 @@ interface CompletionSuggestion {
 }
 
 interface RelatedActionCandidate {
-  action: ActionItem;
+  kind?: 'action' | 'document';
+  action?: ActionItem;
+  document?: {
+    id: number;
+    title: string;
+    document_type?: string | null;
+    correspondent?: string | null;
+    document_date?: string | null;
+  };
   score: number;
   reasons: string[];
 }
@@ -783,13 +791,16 @@ export default function ActionQueue() {
     }
   }, [actions, loadLinkCandidates, selectedActionId]);
 
-  const linkRelatedAction = async (relatedActionId: number) => {
+  const linkRelatedCandidate = async (candidate: RelatedActionCandidate) => {
     if (!selectedAction) return;
-    setBusyKey(`link-action-${relatedActionId}`);
+    const targetId = candidate.action?.id ?? candidate.document?.id;
+    if (targetId == null) return;
+    setBusyKey(`link-document-${targetId}`);
     try {
-      const updated = await endpoints.actionQueue.linkAction(
-        String(selectedAction.id),
-        relatedActionId,
+      const updated = (
+        candidate.kind === 'document' || (!candidate.action && candidate.document)
+          ? await endpoints.actionQueue.linkDocument(String(selectedAction.id), targetId)
+          : await endpoints.actionQueue.linkAction(String(selectedAction.id), targetId)
       ) as ActionItem;
       setCachedAction(updated);
       await loadData();
@@ -1764,7 +1775,7 @@ export default function ActionQueue() {
                     <div>
                       <div className="section-title">Related documents</div>
                       <div className="text-muted">
-                        Review suggestions or find another PAY action to link manually.
+                        Review suggestions or search any Paperless document, including receipts.
                       </div>
                     </div>
                     {(selectedAction.linked_document_count ?? 1) > 1 && (
@@ -1779,8 +1790,8 @@ export default function ActionQueue() {
                     }}
                   >
                     <input
-                      aria-label="Find related actions"
-                      placeholder="Search title, correspondent, account, or reference"
+                      aria-label="Find related documents"
+                      placeholder="Search Paperless by title, provider, account, or reference"
                       value={linkSearch}
                       onChange={(event) => setLinkSearch(event.target.value)}
                     />
@@ -1790,23 +1801,34 @@ export default function ActionQueue() {
                   </form>
                   <div className="aq-related-candidates">
                     {!linkCandidatesLoading && linkCandidates.length === 0 && (
-                      <div className="text-muted">No other open PAY actions found.</div>
+                      <div className="text-muted">
+                        No suggestions found. Search Paperless to find a receipt or other document.
+                      </div>
                     )}
-                    {linkCandidates.map((candidate) => (
-                      <div className="aq-related-candidate" key={candidate.action.id}>
+                    {linkCandidates.map((candidate) => {
+                      const target = candidate.action;
+                      const document = candidate.document;
+                      const targetId = target?.id ?? document?.id;
+                      if (targetId == null) return null;
+                      return (
+                      <div
+                        className="aq-related-candidate"
+                        key={`${candidate.kind ?? 'action'}-${targetId}`}
+                      >
                         <div>
                           <div className="aq-related-candidate-title">
                             <strong>
-                              {candidate.action.document_title || candidate.action.title}
+                              {target?.document_title || target?.title || document?.title}
                             </strong>
                             {candidate.score >= 0.5 && (
                               <Badge tone="warning">{Math.round(candidate.score * 100)}% suggestion</Badge>
                             )}
                           </div>
                           <div className="text-muted">
-                            {candidate.action.correspondent || 'Unknown correspondent'}
-                            {candidate.action.amount != null
-                              ? ` · ${formatCurrency(candidate.action.amount)}`
+                            {target?.correspondent || document?.correspondent
+                              || (document ? `Paperless document #${document.id}` : 'Unknown correspondent')}
+                            {target?.amount != null
+                              ? ` · ${formatCurrency(target.amount)}`
                               : ''}
                           </div>
                           {candidate.reasons.length > 0 && (
@@ -1817,12 +1839,13 @@ export default function ActionQueue() {
                           size="sm"
                           variant={candidate.score >= 0.5 ? 'primary' : 'ghost'}
                           disabled={busyKey !== null}
-                          onClick={() => void linkRelatedAction(candidate.action.id)}
+                          onClick={() => void linkRelatedCandidate(candidate)}
                         >
                           Link
                         </Button>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}

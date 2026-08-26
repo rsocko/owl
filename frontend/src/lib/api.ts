@@ -176,6 +176,8 @@ export const endpoints = {
       api.get(`/api/queue/actions/${id}/link-candidates${query ? `?q=${encodeURIComponent(query)}` : ''}`),
     linkAction: (id: string, relatedActionId: number) =>
       api.post(`/api/queue/actions/${id}/link`, { related_action_id: relatedActionId }),
+    linkDocument: (id: string, relatedDocumentId: number) =>
+      api.post(`/api/queue/actions/${id}/link`, { related_document_id: relatedDocumentId }),
     splitAction: (id: string, body: unknown) => api.post(`/api/queue/actions/${id}/split`, body),
     mergeActions: (id: string, body: unknown) => api.post(`/api/queue/actions/${id}/merge`, body),
     refreshAction: (id: string) => api.get(`/api/queue/actions/${id}/refresh`),

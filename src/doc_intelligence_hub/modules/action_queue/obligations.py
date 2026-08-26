@@ -388,6 +388,56 @@ def manually_link_actions(db: Session, primary: Action, related: Action) -> Obli
     return primary_obligation
 
 
+def manually_link_document(
+    db: Session,
+    action: Action,
+    document: dict[str, Any],
+) -> ObligationDocument:
+    """Attach a Paperless document without requiring it to have an action."""
+    document_id = int(document["id"])
+    if document_id == action.document_id:
+        raise ValueError("Choose a different document")
+
+    title = str(document.get("title") or f"Document #{document_id}")
+    raw_document_type = document.get("document_type_name") or document.get("document_type")
+    document_type = raw_document_type if isinstance(raw_document_type, str) else None
+    raw_correspondent = document.get("correspondent_name") or document.get("correspondent")
+    correspondent = raw_correspondent if isinstance(raw_correspondent, str) else None
+    content = str(document.get("content") or "")
+    role = _document_role(title, document_type)
+    if role == "invoice" and not re.search(
+        r"\b(invoice|bill)\b", f"{title} {document_type or ''}", re.I
+    ):
+        role = "supporting"
+
+    obligation = ensure_obligation(db, action)
+    _add_action_document(db, obligation, action, {}, source="action_queue")
+    linked = add_document(
+        db,
+        obligation,
+        document_id=document_id,
+        role=role,
+        title=title,
+        document_type=document_type,
+        correspondent=correspondent,
+        document_date=_document_date(document),
+        amount=_document_amount(document, content),
+        reference_number=_document_reference(document, content)
+        or _document_account(document, content)
+        or None,
+        confidence=1.0,
+        source="user_link",
+    )
+    if role == "receipt":
+        obligation.status = "payment_detected"
+        obligation.completion_suggested = True
+        obligation.suggestion_reason = (
+            f"Payment receipt #{document_id} was manually linked to this obligation."
+        )
+    db.flush()
+    return linked
+
+
 def associate_pay_action(db: Session, action: Action, document: dict[str, Any]) -> Obligation:
     """Attach a PAY action to an existing obligation or create a new one."""
     if action.action_type != "PAY":

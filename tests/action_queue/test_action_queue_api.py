@@ -189,7 +189,12 @@ class TestListActions:
         candidates = seeded_client.get("/api/queue/actions/1/link-candidates").json()
         assert candidates["candidates"][0]["action"]["id"] == 3
 
-        sync_status = AsyncMock()
+        synchronized: list[tuple[int, str]] = []
+
+        async def capture_sync(_db, action, status, **_kwargs):
+            synchronized.append((action.id, status))
+
+        sync_status = AsyncMock(side_effect=capture_sync)
         with patch(
             "doc_intelligence_hub.api.routers.action_queue.sync_action_status",
             sync_status,
@@ -200,10 +205,53 @@ class TestListActions:
             )
         assert linked.status_code == 200
         assert linked.json()["linked_document_count"] == 2
-        assert sync_status.await_args.args[1].id == 3
-        assert sync_status.await_args.args[2] == "pending"
+        assert synchronized == [(3, "pending")]
         ready = seeded_client.get("/api/queue/actions?status=pending").json()
         assert [action["id"] for action in ready["actions"]] == [1]
+
+    def test_searches_and_links_receipt_without_an_action(self, seeded_client):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        paperless = MagicMock()
+        paperless.list_documents = AsyncMock(
+            return_value=[
+                {
+                    "id": 77,
+                    "title": "Power Co payment receipt",
+                    "document_type_name": "Receipt",
+                    "correspondent_name": "Power Co",
+                    "created": "2026-02-10",
+                }
+            ]
+        )
+        paperless.get_document = AsyncMock(
+            return_value={
+                "id": 77,
+                "title": "Power Co payment receipt",
+                "document_type_name": "Receipt",
+                "correspondent_name": "Power Co",
+                "created": "2026-02-10",
+                "content": "Payment received for invoice INV-42. Total $125.50.",
+            }
+        )
+
+        with patch(
+            "doc_intelligence_hub.api.routers.action_queue.make_paperless_client",
+            return_value=paperless,
+        ):
+            candidates = seeded_client.get(
+                "/api/queue/actions/1/link-candidates?q=payment%20receipt"
+            ).json()
+            linked = seeded_client.post(
+                "/api/queue/actions/1/link",
+                json={"related_document_id": 77},
+            )
+
+        assert candidates["candidates"][-1]["kind"] == "document"
+        assert candidates["candidates"][-1]["document"]["id"] == 77
+        assert linked.status_code == 200
+        assert linked.json()["linked_document_count"] == 2
+        assert linked.json()["completion_suggestion"]["receipt_document_id"] == 77
 
     def test_list_actions_resurfaces_expired_snoozes(self, seeded_client):
         seeded_client.post(
