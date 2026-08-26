@@ -15,6 +15,8 @@ const {
   updateActionMock,
   refreshActionMock,
   actionSiblingsMock,
+  actionLinkCandidatesMock,
+  linkActionMock,
   splitActionMock,
   mergeActionsMock,
   feedbackMock,
@@ -27,6 +29,8 @@ const {
   updateActionMock: vi.fn(),
   refreshActionMock: vi.fn(),
   actionSiblingsMock: vi.fn(),
+  actionLinkCandidatesMock: vi.fn(),
+  linkActionMock: vi.fn(),
   splitActionMock: vi.fn(),
   mergeActionsMock: vi.fn(),
   feedbackMock: vi.fn(),
@@ -51,6 +55,8 @@ vi.mock('../lib/api', () => ({
       updateAction: updateActionMock,
       refreshAction: refreshActionMock,
       actionSiblings: actionSiblingsMock,
+      actionLinkCandidates: actionLinkCandidatesMock,
+      linkAction: linkActionMock,
       splitAction: splitActionMock,
       mergeActions: mergeActionsMock,
       bulk: vi.fn(),
@@ -139,6 +145,8 @@ beforeEach(() => {
   updateActionMock.mockReset();
   refreshActionMock.mockReset();
   actionSiblingsMock.mockReset();
+  actionLinkCandidatesMock.mockReset();
+  linkActionMock.mockReset();
   splitActionMock.mockReset();
   mergeActionsMock.mockReset();
   feedbackMock.mockReset();
@@ -177,6 +185,8 @@ beforeEach(() => {
     .mockResolvedValueOnce({ actions: [updatedAction], total: 1 });
   updateActionMock.mockResolvedValue(updatedAction);
   actionSiblingsMock.mockResolvedValue({ actions: [initialAction] });
+  actionLinkCandidatesMock.mockResolvedValue({ candidates: [] });
+  linkActionMock.mockResolvedValue(initialAction);
   splitActionMock.mockResolvedValue({ ...initialAction, id: 2, parent_action_id: 1 });
   mergeActionsMock.mockResolvedValue(initialAction);
   refreshActionMock.mockResolvedValue({
@@ -618,6 +628,69 @@ describe('ActionQueue', () => {
       '1',
       expect.objectContaining({ status: 'completed' }),
     ));
+  });
+  it('suggests and manually links a related PAY action', async () => {
+    const relatedAction = {
+      ...initialAction,
+      id: 2,
+      document_id: 2,
+      document_title: 'READ CODE Total Current Billing',
+      amount: 229,
+    };
+    actionLinkCandidatesMock.mockResolvedValue({
+      candidates: [{
+        action: relatedAction,
+        score: 0.62,
+        reasons: ['same account', 'same correspondent', 'nearby document dates'],
+      }],
+    });
+    linkActionMock.mockResolvedValue({
+      ...initialAction,
+      linked_document_count: 2,
+    });
+
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
+    expect(await screen.findByText('READ CODE Total Current Billing')).toBeInTheDocument();
+    expect(screen.getByText('same account · same correspondent · nearby document dates')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Link' }));
+    await waitFor(() => expect(linkActionMock).toHaveBeenCalledWith('1', 2));
+  });
+
+  it('ignores stale related-action search responses', async () => {
+    let resolveInitial!: (value: unknown) => void;
+    let resolveSearch!: (value: unknown) => void;
+    actionLinkCandidatesMock
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveInitial = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSearch = resolve; }));
+
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
+    const search = await screen.findByRole('textbox', { name: 'Find related actions' });
+    fireEvent.change(search, { target: { value: 'current' } });
+    fireEvent.submit(search.closest('form')!);
+
+    resolveSearch({
+      candidates: [{
+        action: { ...initialAction, id: 3, document_title: 'Current result' },
+        score: 0.8,
+        reasons: ['same account'],
+      }],
+    });
+    expect(await screen.findByText('Current result')).toBeInTheDocument();
+
+    resolveInitial({
+      candidates: [{
+        action: { ...initialAction, id: 2, document_title: 'Stale result' },
+        score: 0.9,
+        reasons: ['same amount'],
+      }],
+    });
+    await waitFor(() => expect(screen.queryByText('Stale result')).not.toBeInTheDocument());
+    expect(screen.getByText('Current result')).toBeInTheDocument();
   });
 });
 

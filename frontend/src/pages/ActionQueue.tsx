@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import type { SortingState } from '@tanstack/react-table';
 import { SortableTable, type SortableColumnDef } from '../components/SortableTable';
@@ -128,6 +128,12 @@ interface CompletionSuggestion {
   reason?: string | null;
   receipt_document_id?: number | null;
   confidence?: number | null;
+}
+
+interface RelatedActionCandidate {
+  action: ActionItem;
+  score: number;
+  reasons: string[];
 }
 
 interface ActionListResponse {
@@ -540,6 +546,10 @@ export default function ActionQueue() {
   const [splitOpen, setSplitOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeSelection, setMergeSelection] = useState<number[]>([]);
+  const [linkCandidates, setLinkCandidates] = useState<RelatedActionCandidate[]>([]);
+  const [linkSearch, setLinkSearch] = useState('');
+  const [linkCandidatesLoading, setLinkCandidatesLoading] = useState(false);
+  const linkRequestRef = useRef(0);
 
   const [correspondents, setCorrespondents] = useState<Array<{
     id: number;
@@ -738,6 +748,62 @@ export default function ActionQueue() {
         tone: 'error',
       }));
   }, [selectedActionId, actions]);
+
+  const loadLinkCandidates = useCallback(async (actionId: number, query = '') => {
+    const requestId = linkRequestRef.current + 1;
+    linkRequestRef.current = requestId;
+    setLinkCandidatesLoading(true);
+    try {
+      const response = await endpoints.actionQueue.actionLinkCandidates(
+        String(actionId),
+        query.trim() || undefined,
+      ) as { candidates?: RelatedActionCandidate[] };
+      if (requestId !== linkRequestRef.current) return;
+      setLinkCandidates(response.candidates ?? []);
+    } catch (err) {
+      if (requestId !== linkRequestRef.current) return;
+      setToast({
+        message: err instanceof Error ? err.message : 'Could not load related action suggestions.',
+        tone: 'error',
+      });
+    } finally {
+      if (requestId === linkRequestRef.current) {
+        setLinkCandidatesLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    setLinkSearch('');
+    setLinkCandidates([]);
+    if (selectedActionId === null) return;
+    const action = actions.find((candidate) => candidate.id === selectedActionId);
+    if (normalizeType(action?.action_type) === 'PAY') {
+      void loadLinkCandidates(selectedActionId);
+    }
+  }, [actions, loadLinkCandidates, selectedActionId]);
+
+  const linkRelatedAction = async (relatedActionId: number) => {
+    if (!selectedAction) return;
+    setBusyKey(`link-action-${relatedActionId}`);
+    try {
+      const updated = await endpoints.actionQueue.linkAction(
+        String(selectedAction.id),
+        relatedActionId,
+      ) as ActionItem;
+      setCachedAction(updated);
+      await loadData();
+      await loadLinkCandidates(selectedAction.id, linkSearch);
+      setToast({ message: 'Documents linked to one obligation.', tone: 'success' });
+    } catch (err) {
+      setToast({
+        message: err instanceof Error ? err.message : 'Could not link these documents.',
+        tone: 'error',
+      });
+    } finally {
+      setBusyKey(null);
+    }
+  };
 
   // Lock body scroll when drawer is open
   useEffect(() => {
@@ -1689,6 +1755,75 @@ export default function ActionQueue() {
                   <Button size="sm" variant="ghost" onClick={() => setSplitOpen(true)}>
                     Add another action from this document
                   </Button>
+                </div>
+              )}
+
+              {normalizeType(selectedAction.action_type) === 'PAY' && (
+                <div className="aq-related-panel" aria-label="Related document linking">
+                  <div className="aq-edit-header">
+                    <div>
+                      <div className="section-title">Related documents</div>
+                      <div className="text-muted">
+                        Review suggestions or find another PAY action to link manually.
+                      </div>
+                    </div>
+                    {(selectedAction.linked_document_count ?? 1) > 1 && (
+                      <Badge tone="info">{selectedAction.linked_document_count} linked</Badge>
+                    )}
+                  </div>
+                  <form
+                    className="aq-related-search"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void loadLinkCandidates(selectedAction.id, linkSearch);
+                    }}
+                  >
+                    <input
+                      aria-label="Find related actions"
+                      placeholder="Search title, correspondent, account, or reference"
+                      value={linkSearch}
+                      onChange={(event) => setLinkSearch(event.target.value)}
+                    />
+                    <Button size="sm" type="submit" disabled={linkCandidatesLoading}>
+                      {linkCandidatesLoading ? 'Searching…' : 'Search'}
+                    </Button>
+                  </form>
+                  <div className="aq-related-candidates">
+                    {!linkCandidatesLoading && linkCandidates.length === 0 && (
+                      <div className="text-muted">No other open PAY actions found.</div>
+                    )}
+                    {linkCandidates.map((candidate) => (
+                      <div className="aq-related-candidate" key={candidate.action.id}>
+                        <div>
+                          <div className="aq-related-candidate-title">
+                            <strong>
+                              {candidate.action.document_title || candidate.action.title}
+                            </strong>
+                            {candidate.score >= 0.5 && (
+                              <Badge tone="warning">{Math.round(candidate.score * 100)}% suggestion</Badge>
+                            )}
+                          </div>
+                          <div className="text-muted">
+                            {candidate.action.correspondent || 'Unknown correspondent'}
+                            {candidate.action.amount != null
+                              ? ` · ${formatCurrency(candidate.action.amount)}`
+                              : ''}
+                          </div>
+                          {candidate.reasons.length > 0 && (
+                            <div className="aq-related-reasons">{candidate.reasons.join(' · ')}</div>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={candidate.score >= 0.5 ? 'primary' : 'ghost'}
+                          disabled={busyKey !== null}
+                          onClick={() => void linkRelatedAction(candidate.action.id)}
+                        >
+                          Link
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 

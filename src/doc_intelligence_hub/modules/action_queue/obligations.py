@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime
+from difflib import SequenceMatcher
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -218,6 +219,173 @@ def _action_match_score(candidate: Action, action: Action) -> float:
     if _normalized(candidate.title) == _normalized(action.title):
         score += 0.05
     return min(score, 1.0)
+
+
+def _date_proximity_score(left: date | None, right: date | None) -> float:
+    if not left or not right:
+        return 0.0
+    difference = abs((left - right).days)
+    if difference <= 7:
+        return 1.0
+    if difference <= 45:
+        return 0.5
+    return 0.0
+
+
+def _suggestion_amount_score(left: float | None, right: float | None) -> float:
+    if left is None or right is None:
+        return 0.0
+    maximum = max(abs(left), abs(right))
+    if maximum == 0:
+        return 1.0
+    difference = abs(left - right)
+    if difference <= 0.01:
+        return 1.0
+    difference_ratio = difference / maximum
+    if difference <= INVOICE_FEE_TOLERANCE or difference_ratio <= 0.05:
+        return 0.9
+    if difference_ratio <= 0.1:
+        return 0.6
+    return 0.0
+
+
+def suggest_related_actions(
+    db: Session,
+    action: Action,
+    *,
+    query: str | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Rank open PAY actions for explicit user-reviewed linking."""
+    candidates = (
+        db.query(Action)
+        .filter(
+            Action.id != action.id,
+            Action.document_id != action.document_id,
+            Action.action_type == "PAY",
+            Action.status.in_(ACTIVE_ACTION_STATUSES),
+            Action.superseded_by_action_id.is_(None),
+        )
+        .all()
+    )
+    needle = _normalized(query)
+    if needle:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if needle
+            in _normalized(
+                " ".join(
+                    [
+                        candidate.title or "",
+                        candidate.document_title or "",
+                        candidate.correspondent or "",
+                        _action_reference(candidate),
+                        _action_account(candidate),
+                    ]
+                )
+            )
+        ]
+
+    suggestions: list[dict[str, Any]] = []
+    for candidate in candidates:
+        score = 0.0
+        reasons: list[str] = []
+        if _action_reference(action) and _action_reference(action) == _action_reference(candidate):
+            score += 0.55
+            reasons.append("same invoice reference")
+        if _action_account(action) and _action_account(action) == _action_account(candidate):
+            score += 0.35
+            reasons.append("same account")
+        if _normalized(action.correspondent) and _normalized(action.correspondent) == _normalized(
+            candidate.correspondent
+        ):
+            score += 0.2
+            reasons.append("same correspondent")
+        amount_score = _suggestion_amount_score(action.amount, candidate.amount)
+        if amount_score:
+            score += 0.2 * amount_score
+            reasons.append("similar amount" if amount_score < 1.0 else "same amount")
+        date_score = _date_proximity_score(action.document_date, candidate.document_date)
+        if date_score:
+            score += 0.1 * date_score
+            reasons.append("nearby document dates")
+        due_score = _date_proximity_score(action.due_date, candidate.due_date)
+        if due_score:
+            score += 0.1 * due_score
+            reasons.append("nearby due dates")
+        title_score = SequenceMatcher(
+            None,
+            _normalized(action.document_title or action.title),
+            _normalized(candidate.document_title or candidate.title),
+        ).ratio()
+        if title_score >= 0.5:
+            score += 0.1 * title_score
+            reasons.append("similar titles")
+        suggestions.append(
+            {
+                "action": candidate,
+                "score": round(min(score, 1.0), 3),
+                "reasons": reasons,
+            }
+        )
+    suggestions.sort(key=lambda item: (item["score"], item["action"].created_at), reverse=True)
+    return suggestions[:limit]
+
+
+def manually_link_actions(db: Session, primary: Action, related: Action) -> Obligation:
+    """Merge two action obligations, preserving the selected primary action."""
+    if primary.id == related.id or primary.document_id == related.document_id:
+        raise ValueError("Choose an action from a different document")
+    if primary.action_type != "PAY" or related.action_type != "PAY":
+        raise ValueError("Only PAY actions can be linked as one obligation")
+    if related.superseded_by_action_id is not None:
+        raise ValueError("The related action is already linked to another obligation")
+
+    primary_obligation = ensure_obligation(db, primary)
+    related_obligation = ensure_obligation(db, related)
+    _add_action_document(db, primary_obligation, primary, {}, source="action_queue")
+
+    if related_obligation.id != primary_obligation.id:
+        related_documents = (
+            db.query(ObligationDocument).filter_by(obligation_id=related_obligation.id).all()
+        )
+        for document in related_documents:
+            existing = (
+                db.query(ObligationDocument)
+                .filter_by(
+                    obligation_id=primary_obligation.id,
+                    document_id=document.document_id,
+                )
+                .first()
+            )
+            if existing:
+                db.delete(document)
+            else:
+                document.obligation_id = primary_obligation.id
+        for obligation_action in db.query(Action).filter_by(obligation_id=related_obligation.id):
+            obligation_action.obligation_id = primary_obligation.id
+        if related_obligation.completion_suggested:
+            primary_obligation.completion_suggested = True
+            primary_obligation.suggestion_reason = related_obligation.suggestion_reason
+            primary_obligation.status = related_obligation.status
+        db.delete(related_obligation)
+
+    related.obligation_id = primary_obligation.id
+    related.superseded_by_action_id = primary.id
+    related.action_ready = False
+    related.review_state = "linked_document"
+    _add_action_document(
+        db,
+        primary_obligation,
+        related,
+        {},
+        confidence=1.0,
+        source="user_link",
+    )
+    primary_obligation.primary_action_id = primary.id
+    db.flush()
+    return primary_obligation
 
 
 def associate_pay_action(db: Session, action: Action, document: dict[str, Any]) -> Obligation:
