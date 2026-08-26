@@ -657,6 +657,13 @@ describe('ActionQueue', () => {
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
 
     fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
+    expect(screen.queryByRole('textbox', { name: 'Find related documents' })).not.toBeInTheDocument();
+    const linkRelatedButton = screen.getByRole('button', { name: 'Link related document' });
+    expect(
+      screen.getByText('Document metadata').compareDocumentPosition(linkRelatedButton)
+      & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    fireEvent.click(linkRelatedButton);
     expect(await screen.findByText('READ CODE Total Current Billing')).toBeInTheDocument();
     expect(screen.getByText('same account · same correspondent · nearby document dates')).toBeInTheDocument();
 
@@ -674,6 +681,7 @@ describe('ActionQueue', () => {
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
 
     fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Link related document' }));
     const search = await screen.findByRole('textbox', { name: 'Find related documents' });
     fireEvent.change(search, { target: { value: 'current' } });
     fireEvent.submit(search.closest('form')!);
@@ -708,6 +716,10 @@ describe('ActionQueue', () => {
             title: 'Power Co payment receipt',
             document_type: 'Receipt',
             correspondent: 'Power Co',
+            document_date: '2026-02-10',
+            amount: 125.5,
+            thumbnail_url: '/receipt-thumb.png',
+            paperless_url: 'https://paperless.test/documents/77/details',
           },
           score: 0,
           reasons: ['Paperless document search result'],
@@ -721,10 +733,18 @@ describe('ActionQueue', () => {
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
 
     fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Link related document' }));
     const search = await screen.findByRole('textbox', { name: 'Find related documents' });
     fireEvent.change(search, { target: { value: 'payment receipt' } });
     fireEvent.submit(search.closest('form')!);
     expect(await screen.findByText('Power Co payment receipt')).toBeInTheDocument();
+    expect(screen.getByText('Receipt')).toBeInTheDocument();
+    expect(screen.getByText('$125.50')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preview Power Co payment receipt' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Open in Paperless/i })).toHaveAttribute(
+      'href',
+      'https://paperless.test/documents/77/details',
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Link' }));
     await waitFor(() => expect(linkDocumentMock).toHaveBeenCalledWith('1', 77));

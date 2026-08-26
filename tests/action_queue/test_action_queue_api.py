@@ -219,9 +219,23 @@ class TestListActions:
                     "id": 77,
                     "title": "Power Co payment receipt",
                     "document_type_name": "Receipt",
-                    "correspondent_name": "Power Co",
+                    "correspondent": 12,
+                    "document_type": 4,
                     "created": "2026-02-10",
+                    "custom_fields": [
+                        {"field": 20, "value": 125.50},
+                        {"field": 21, "value": "2026-02-15"},
+                    ],
                 }
+            ]
+        )
+        paperless.fetch_all_metadata = AsyncMock(
+            return_value=({12: "Power Co"}, {}, {4: "Receipt"})
+        )
+        paperless.list_custom_fields = AsyncMock(
+            return_value=[
+                {"id": 20, "name": "Document Amount", "data_type": "float"},
+                {"id": 21, "name": "Document Due Date", "data_type": "date"},
             ]
         )
         paperless.get_document = AsyncMock(
@@ -232,6 +246,7 @@ class TestListActions:
                 "correspondent_name": "Power Co",
                 "created": "2026-02-10",
                 "content": "Payment received for invoice INV-42. Total $125.50.",
+                "custom_fields": [{"field": 20, "value": 125.50}],
             }
         )
 
@@ -249,9 +264,25 @@ class TestListActions:
 
         assert candidates["candidates"][-1]["kind"] == "document"
         assert candidates["candidates"][-1]["document"]["id"] == 77
+        assert candidates["candidates"][-1]["document"]["correspondent"] == "Power Co"
+        assert candidates["candidates"][-1]["document"]["document_type"] == "Receipt"
+        assert candidates["candidates"][-1]["document"]["amount"] == 125.5
+        assert candidates["candidates"][-1]["document"]["due_date"] == "2026-02-15"
+        assert candidates["candidates"][-1]["document"]["thumbnail_url"].endswith("/77/thumb")
+        assert candidates["candidates"][-1]["document"]["paperless_url"].endswith(
+            "/documents/77/details"
+        )
         assert linked.status_code == 200
         assert linked.json()["linked_document_count"] == 2
         assert linked.json()["completion_suggestion"]["receipt_document_id"] == 77
+        receipt = next(
+            document
+            for document in linked.json()["linked_documents"]
+            if document["document_id"] == 77
+        )
+        assert receipt["document_type"] == "Receipt"
+        assert receipt["correspondent"] == "Power Co"
+        assert receipt["amount"] == 125.5
 
     def test_list_actions_resurfaces_expired_snoozes(self, seeded_client):
         seeded_client.post(

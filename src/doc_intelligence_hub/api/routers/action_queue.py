@@ -1140,9 +1140,13 @@ async def list_action_link_candidates(
         if q and q.strip():
             try:
                 paperless = make_paperless_client(request, timeout=15.0)
-                documents = await paperless.list_documents(
-                    query=q.strip(),
-                    limit=max(1, min(limit, 25)),
+                documents, metadata, custom_fields = await asyncio.gather(
+                    paperless.list_documents(
+                        query=q.strip(),
+                        limit=max(1, min(limit, 25)),
+                    ),
+                    paperless.fetch_all_metadata(),
+                    paperless.list_custom_fields(),
                 )
             except Exception as exc:
                 from fastapi import HTTPException
@@ -1152,6 +1156,16 @@ async def list_action_link_candidates(
                     detail=f"Paperless document search failed: {exc}",
                 ) from exc
 
+            correspondents, _, document_types = metadata
+            metadata_schema = resolve_metadata_schema(
+                custom_fields,
+                (
+                    MetadataFieldKey.DOCUMENT_AMOUNT,
+                    MetadataFieldKey.DOCUMENT_DUE_DATE,
+                    MetadataFieldKey.ACCOUNT_IDENTIFIER,
+                    MetadataFieldKey.INVOICE_NUMBER,
+                ),
+            )
             action_document_ids = {
                 row[0]
                 for row in db.query(Action.document_id).filter(Action.document_id.isnot(None))
@@ -1163,15 +1177,48 @@ async def list_action_link_candidates(
                 document_id = int(document["id"])
                 if document_id in action_document_ids or document_id in linked_document_ids:
                     continue
+                document_custom_fields = document.get("custom_fields") or []
+                amount = resolve_metadata_value(
+                    MetadataFieldKey.DOCUMENT_AMOUNT,
+                    document_custom_fields,
+                    metadata_schema,
+                ).value
+                due_date = resolve_metadata_value(
+                    MetadataFieldKey.DOCUMENT_DUE_DATE,
+                    document_custom_fields,
+                    metadata_schema,
+                ).value
+                account_identifier = resolve_metadata_value(
+                    MetadataFieldKey.ACCOUNT_IDENTIFIER,
+                    document_custom_fields,
+                    metadata_schema,
+                ).value
+                reference_number = resolve_metadata_value(
+                    MetadataFieldKey.INVOICE_NUMBER,
+                    document_custom_fields,
+                    metadata_schema,
+                ).value
                 candidates.append(
                     {
                         "kind": "document",
                         "document": {
                             "id": document_id,
                             "title": document.get("title") or f"Document #{document_id}",
-                            "document_type": document.get("document_type_name"),
-                            "correspondent": document.get("correspondent_name"),
+                            "document_type": document.get("document_type_name")
+                            or _resolve_metadata_name(
+                                document.get("document_type"), document_types
+                            ),
+                            "correspondent": document.get("correspondent_name")
+                            or _resolve_metadata_name(
+                                document.get("correspondent"), correspondents
+                            ),
                             "document_date": document.get("created"),
+                            "amount": float(amount) if amount is not None else None,
+                            "due_date": due_date,
+                            "account_identifier": account_identifier,
+                            "reference_number": reference_number,
+                            "thumbnail_url": (f"/api/statements/documents/{document_id}/thumb"),
+                            "paperless_url": _build_preview_url(document_id),
                         },
                         "score": 0.0,
                         "reasons": ["Paperless document search result"],
@@ -1220,7 +1267,42 @@ async def link_action_document(
         else:
             try:
                 paperless = make_paperless_client(request, timeout=15.0)
-                document = await paperless.get_document(body.related_document_id)
+                document, metadata, custom_fields = await asyncio.gather(
+                    paperless.get_document(body.related_document_id),
+                    paperless.fetch_all_metadata(),
+                    paperless.list_custom_fields(),
+                )
+                correspondents, _, document_types = metadata
+                metadata_schema = resolve_metadata_schema(
+                    custom_fields,
+                    (
+                        MetadataFieldKey.DOCUMENT_AMOUNT,
+                        MetadataFieldKey.ACCOUNT_IDENTIFIER,
+                        MetadataFieldKey.INVOICE_NUMBER,
+                    ),
+                )
+                document = {
+                    **document,
+                    "correspondent_name": document.get("correspondent_name")
+                    or _resolve_metadata_name(document.get("correspondent"), correspondents),
+                    "document_type_name": document.get("document_type_name")
+                    or _resolve_metadata_name(document.get("document_type"), document_types),
+                    "document_amount": resolve_metadata_value(
+                        MetadataFieldKey.DOCUMENT_AMOUNT,
+                        document.get("custom_fields") or [],
+                        metadata_schema,
+                    ).value,
+                    "account_identifier": resolve_metadata_value(
+                        MetadataFieldKey.ACCOUNT_IDENTIFIER,
+                        document.get("custom_fields") or [],
+                        metadata_schema,
+                    ).value,
+                    "invoice_number": resolve_metadata_value(
+                        MetadataFieldKey.INVOICE_NUMBER,
+                        document.get("custom_fields") or [],
+                        metadata_schema,
+                    ).value,
+                }
                 manually_link_document(db, primary, document)
             except ValueError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
