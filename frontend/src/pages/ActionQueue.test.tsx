@@ -697,7 +697,6 @@ describe('ActionQueue', () => {
     await waitFor(() => expect(screen.queryByText('Stale result')).not.toBeInTheDocument());
     expect(screen.getByText('Current result')).toBeInTheDocument();
   });
-
   it('searches and links a Paperless receipt that has no action', async () => {
     actionLinkCandidatesMock
       .mockResolvedValueOnce({ candidates: [] })
