@@ -17,6 +17,7 @@ const {
   actionSiblingsMock,
   actionLinkCandidatesMock,
   linkActionMock,
+  linkDocumentMock,
   splitActionMock,
   mergeActionsMock,
   feedbackMock,
@@ -31,6 +32,7 @@ const {
   actionSiblingsMock: vi.fn(),
   actionLinkCandidatesMock: vi.fn(),
   linkActionMock: vi.fn(),
+  linkDocumentMock: vi.fn(),
   splitActionMock: vi.fn(),
   mergeActionsMock: vi.fn(),
   feedbackMock: vi.fn(),
@@ -57,6 +59,7 @@ vi.mock('../lib/api', () => ({
       actionSiblings: actionSiblingsMock,
       actionLinkCandidates: actionLinkCandidatesMock,
       linkAction: linkActionMock,
+      linkDocument: linkDocumentMock,
       splitAction: splitActionMock,
       mergeActions: mergeActionsMock,
       bulk: vi.fn(),
@@ -147,6 +150,7 @@ beforeEach(() => {
   actionSiblingsMock.mockReset();
   actionLinkCandidatesMock.mockReset();
   linkActionMock.mockReset();
+  linkDocumentMock.mockReset();
   splitActionMock.mockReset();
   mergeActionsMock.mockReset();
   feedbackMock.mockReset();
@@ -187,6 +191,7 @@ beforeEach(() => {
   actionSiblingsMock.mockResolvedValue({ actions: [initialAction] });
   actionLinkCandidatesMock.mockResolvedValue({ candidates: [] });
   linkActionMock.mockResolvedValue(initialAction);
+  linkDocumentMock.mockResolvedValue(initialAction);
   splitActionMock.mockResolvedValue({ ...initialAction, id: 2, parent_action_id: 1 });
   mergeActionsMock.mockResolvedValue(initialAction);
   refreshActionMock.mockResolvedValue({
@@ -669,7 +674,7 @@ describe('ActionQueue', () => {
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
 
     fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
-    const search = await screen.findByRole('textbox', { name: 'Find related actions' });
+    const search = await screen.findByRole('textbox', { name: 'Find related documents' });
     fireEvent.change(search, { target: { value: 'current' } });
     fireEvent.submit(search.closest('form')!);
 
@@ -691,6 +696,38 @@ describe('ActionQueue', () => {
     });
     await waitFor(() => expect(screen.queryByText('Stale result')).not.toBeInTheDocument());
     expect(screen.getByText('Current result')).toBeInTheDocument();
+  });
+  it('searches and links a Paperless receipt that has no action', async () => {
+    actionLinkCandidatesMock
+      .mockResolvedValueOnce({ candidates: [] })
+      .mockResolvedValueOnce({
+        candidates: [{
+          kind: 'document',
+          document: {
+            id: 77,
+            title: 'Power Co payment receipt',
+            document_type: 'Receipt',
+            correspondent: 'Power Co',
+          },
+          score: 0,
+          reasons: ['Paperless document search result'],
+        }],
+      });
+    linkDocumentMock.mockResolvedValue({
+      ...initialAction,
+      linked_document_count: 2,
+    });
+
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
+    const search = await screen.findByRole('textbox', { name: 'Find related documents' });
+    fireEvent.change(search, { target: { value: 'payment receipt' } });
+    fireEvent.submit(search.closest('form')!);
+    expect(await screen.findByText('Power Co payment receipt')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Link' }));
+    await waitFor(() => expect(linkDocumentMock).toHaveBeenCalledWith('1', 77));
   });
 });
 
