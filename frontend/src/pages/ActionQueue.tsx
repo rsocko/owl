@@ -139,6 +139,12 @@ interface RelatedActionCandidate {
     document_type?: string | null;
     correspondent?: string | null;
     document_date?: string | null;
+    amount?: number | null;
+    due_date?: string | null;
+    account_identifier?: string | null;
+    reference_number?: string | null;
+    thumbnail_url?: string | null;
+    paperless_url?: string | null;
   };
   score: number;
   reasons: string[];
@@ -557,6 +563,7 @@ export default function ActionQueue() {
   const [linkCandidates, setLinkCandidates] = useState<RelatedActionCandidate[]>([]);
   const [linkSearch, setLinkSearch] = useState('');
   const [linkCandidatesLoading, setLinkCandidatesLoading] = useState(false);
+  const [relatedPanelOpen, setRelatedPanelOpen] = useState(false);
   const linkRequestRef = useRef(0);
 
   const [correspondents, setCorrespondents] = useState<Array<{
@@ -739,6 +746,7 @@ export default function ActionQueue() {
     setSplitOpen(false);
     setMergeOpen(false);
     setMergeSelection([]);
+    setRelatedPanelOpen(false);
   }, [selectedActionId]);
 
   useEffect(() => {
@@ -784,12 +792,12 @@ export default function ActionQueue() {
   useEffect(() => {
     setLinkSearch('');
     setLinkCandidates([]);
-    if (selectedActionId === null) return;
+    if (selectedActionId === null || !relatedPanelOpen) return;
     const action = actions.find((candidate) => candidate.id === selectedActionId);
     if (normalizeType(action?.action_type) === 'PAY') {
       void loadLinkCandidates(selectedActionId);
     }
-  }, [actions, loadLinkCandidates, selectedActionId]);
+  }, [actions, loadLinkCandidates, relatedPanelOpen, selectedActionId]);
 
   const linkRelatedCandidate = async (candidate: RelatedActionCandidate) => {
     if (!selectedAction) return;
@@ -1769,87 +1777,6 @@ export default function ActionQueue() {
                 </div>
               )}
 
-              {normalizeType(selectedAction.action_type) === 'PAY' && (
-                <div className="aq-related-panel" aria-label="Related document linking">
-                  <div className="aq-edit-header">
-                    <div>
-                      <div className="section-title">Related documents</div>
-                      <div className="text-muted">
-                        Review suggestions or search any Paperless document, including receipts.
-                      </div>
-                    </div>
-                    {(selectedAction.linked_document_count ?? 1) > 1 && (
-                      <Badge tone="info">{selectedAction.linked_document_count} linked</Badge>
-                    )}
-                  </div>
-                  <form
-                    className="aq-related-search"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void loadLinkCandidates(selectedAction.id, linkSearch);
-                    }}
-                  >
-                    <input
-                      aria-label="Find related documents"
-                      placeholder="Search Paperless by title, provider, account, or reference"
-                      value={linkSearch}
-                      onChange={(event) => setLinkSearch(event.target.value)}
-                    />
-                    <Button size="sm" type="submit" disabled={linkCandidatesLoading}>
-                      {linkCandidatesLoading ? 'Searching…' : 'Search'}
-                    </Button>
-                  </form>
-                  <div className="aq-related-candidates">
-                    {!linkCandidatesLoading && linkCandidates.length === 0 && (
-                      <div className="text-muted">
-                        No suggestions found. Search Paperless to find a receipt or other document.
-                      </div>
-                    )}
-                    {linkCandidates.map((candidate) => {
-                      const target = candidate.action;
-                      const document = candidate.document;
-                      const targetId = target?.id ?? document?.id;
-                      if (targetId == null) return null;
-                      return (
-                      <div
-                        className="aq-related-candidate"
-                        key={`${candidate.kind ?? 'action'}-${targetId}`}
-                      >
-                        <div>
-                          <div className="aq-related-candidate-title">
-                            <strong>
-                              {target?.document_title || target?.title || document?.title}
-                            </strong>
-                            {candidate.score >= 0.5 && (
-                              <Badge tone="warning">{Math.round(candidate.score * 100)}% suggestion</Badge>
-                            )}
-                          </div>
-                          <div className="text-muted">
-                            {target?.correspondent || document?.correspondent
-                              || (document ? `Paperless document #${document.id}` : 'Unknown correspondent')}
-                            {target?.amount != null
-                              ? ` · ${formatCurrency(target.amount)}`
-                              : ''}
-                          </div>
-                          {candidate.reasons.length > 0 && (
-                            <div className="aq-related-reasons">{candidate.reasons.join(' · ')}</div>
-                          )}
-                        </div>
-                        <Button
-                          size="sm"
-                          variant={candidate.score >= 0.5 ? 'primary' : 'ghost'}
-                          disabled={busyKey !== null}
-                          onClick={() => void linkRelatedCandidate(candidate)}
-                        >
-                          Link
-                        </Button>
-                      </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
               {splitOpen && (
                 <form
                   className="aq-operation-dialog"
@@ -2259,6 +2186,161 @@ export default function ActionQueue() {
                 {selectedAction.acknowledged_at && <div className="aq-meta-row"><span>Acknowledged (legacy)</span><span>{formatDateTime(selectedAction.acknowledged_at)}</span></div>}
                 {selectedAction.snoozed_until && <div className="aq-meta-row"><span>Remind on</span><span>{formatDateTime(selectedAction.snoozed_until)}</span></div>}
               </div>
+
+              {normalizeType(selectedAction.action_type) === 'PAY' && (
+                <div className="aq-related-panel" aria-label="Related document linking">
+                  <div className="aq-edit-header">
+                    <div>
+                      <div className="section-title">Related documents</div>
+                      <div className="text-muted">
+                        {(selectedAction.linked_document_count ?? 1) > 1
+                          ? `${selectedAction.linked_document_count} documents are linked to this obligation.`
+                          : 'Attach another invoice, receipt, or supporting document.'}
+                      </div>
+                    </div>
+                    <div className="btn-group">
+                      {(selectedAction.linked_document_count ?? 1) > 1 && (
+                        <Badge tone="info">{selectedAction.linked_document_count} linked</Badge>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setRelatedPanelOpen((open) => !open)}
+                      >
+                        {relatedPanelOpen ? 'Close' : 'Link related document'}
+                      </Button>
+                    </div>
+                  </div>
+                  {relatedPanelOpen && (
+                    <>
+                      <form
+                        className="aq-related-search"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void loadLinkCandidates(selectedAction.id, linkSearch);
+                        }}
+                      >
+                        <input
+                          aria-label="Find related documents"
+                          placeholder="Search Paperless by title, provider, account, or reference"
+                          value={linkSearch}
+                          onChange={(event) => setLinkSearch(event.target.value)}
+                        />
+                        <Button size="sm" type="submit" disabled={linkCandidatesLoading}>
+                          {linkCandidatesLoading ? 'Searching…' : 'Search'}
+                        </Button>
+                      </form>
+                      <div className="aq-related-candidates">
+                        {!linkCandidatesLoading && linkCandidates.length === 0 && (
+                          <div className="text-muted">
+                            No suggestions found. Search Paperless to find a receipt or other document.
+                          </div>
+                        )}
+                        {linkCandidates.map((candidate) => {
+                          const target = candidate.action;
+                          const document = candidate.document;
+                          const targetId = target?.id ?? document?.id;
+                          const documentId = target?.document_id ?? document?.id;
+                          if (targetId == null || documentId == null) return null;
+                          const title = target?.document_title || target?.title || document?.title
+                            || `Document #${documentId}`;
+                          const correspondent = target?.correspondent || document?.correspondent;
+                          const documentType = target?.document_type || document?.document_type;
+                          const documentDate = target?.document_date || document?.document_date;
+                          const amount = target?.document_amount ?? target?.amount ?? document?.amount;
+                          const dueDate = target?.document_due_date ?? target?.due_date ?? document?.due_date;
+                          const account = target?.extracted_data?.account_identifier
+                            || document?.account_identifier;
+                          const reference = target?.extracted_data?.reference_number
+                            || document?.reference_number;
+                          const thumbnailUrl = document?.thumbnail_url
+                            || `/api/statements/documents/${documentId}/thumb`;
+                          const paperlessUrl = document?.paperless_url || target?.preview_url;
+                          return (
+                            <div
+                              className="aq-related-candidate"
+                              key={`${candidate.kind ?? 'action'}-${targetId}`}
+                            >
+                              <button
+                                type="button"
+                                className="aq-related-preview"
+                                onClick={() => setTimelineViewer({
+                                  document_id: documentId,
+                                  role: documentType?.toLowerCase().includes('receipt')
+                                    ? 'receipt'
+                                    : 'supporting',
+                                  title,
+                                  document_type: documentType,
+                                  correspondent,
+                                  document_date: documentDate,
+                                  amount,
+                                  reference_number: reference,
+                                  confidence: candidate.score,
+                                  source: candidate.kind === 'document'
+                                    ? 'paperless_search'
+                                    : 'action_queue',
+                                  thumbnail_url: thumbnailUrl,
+                                  preview_url: paperlessUrl,
+                                })}
+                                aria-label={`Preview ${title}`}
+                              >
+                                <img src={thumbnailUrl} alt="" loading="lazy" />
+                                <span>Preview</span>
+                              </button>
+                              <div className="aq-related-candidate-content">
+                                <div className="aq-related-candidate-title">
+                                  <strong>{title}</strong>
+                                  {candidate.score >= 0.5 && (
+                                    <Badge tone="warning">
+                                      {Math.round(candidate.score * 100)}% suggestion
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="aq-related-candidate-meta">
+                                  <span>{correspondent || 'Unknown correspondent'}</span>
+                                  <span>{documentType || 'Unknown type'}</span>
+                                  <span>{formatDate(documentDate)}</span>
+                                  <span>{formatCurrency(amount)}</span>
+                                </div>
+                                {(dueDate || account || reference) && (
+                                  <div className="aq-related-candidate-meta secondary">
+                                    {dueDate && <span>Due {formatDate(dueDate)}</span>}
+                                    {account && <span>Account {account}</span>}
+                                    {reference && <span>Reference {reference}</span>}
+                                  </div>
+                                )}
+                                {candidate.reasons.length > 0 && (
+                                  <div className="aq-related-reasons">
+                                    {candidate.reasons.join(' · ')}
+                                  </div>
+                                )}
+                                {paperlessUrl && (
+                                  <a
+                                    className="aq-related-paperless"
+                                    href={paperlessUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    Open in Paperless ↗
+                                  </a>
+                                )}
+                              </div>
+                              <Button
+                                size="sm"
+                                variant={candidate.score >= 0.5 ? 'primary' : 'ghost'}
+                                disabled={busyKey !== null}
+                                onClick={() => void linkRelatedCandidate(candidate)}
+                              >
+                                Link
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
 
               {selectedAction.confidence != null && (
                 <ConfidenceBar label="AI confidence" pct={selectedAction.confidence} />
