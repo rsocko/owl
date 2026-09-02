@@ -9,6 +9,7 @@ from doc_intelligence_hub.modules.ocr_quality import config as ocr_quality_confi
 from doc_intelligence_hub.modules.ocr_quality.database import (
     DocumentAssessment,
     InventoryRun,
+    PdfProfile,
     get_session,
     init_db,
 )
@@ -298,6 +299,64 @@ class TestGetDocument:
         body = resp.json()
         assert body["document_id"] == 1
         assert body["review_status"] == "GOOD"
+
+    def test_has_stage2_analysis_false_without_pdf_profile(self, client, ocr_quality_db):
+        # Stage 1 only — no PdfProfile row was ever written for this document.
+        _seed_scored_document(1, overlay_score=None)
+        resp = client.get("/api/ocr-quality/documents/1")
+        assert resp.status_code == 200
+        assert resp.json()["has_stage2_analysis"] is False
+
+    def test_has_stage2_analysis_true_when_pdf_profile_exists(self, client, ocr_quality_db):
+        _seed_scored_document(1)
+        db = get_session()
+        try:
+            db.add(
+                PdfProfile(
+                    run_id="run-2-stratified-sample",
+                    document_id=1,
+                    profile_version="pdf-profile-v1",
+                    profile="scanned_overlay",
+                    page_count=1,
+                    digital_pages=0,
+                    scanned_overlay_pages=1,
+                    no_text_pages=0,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+        resp = client.get("/api/ocr-quality/documents/1")
+        assert resp.status_code == 200
+        assert resp.json()["has_stage2_analysis"] is True
+
+    def test_has_stage2_analysis_true_even_if_overlay_score_is_null(self, client, ocr_quality_db):
+        # Stage 2 ran (PdfProfile row exists) but overlay scoring itself
+        # didn't produce a score — has_stage2_analysis must still be True,
+        # distinct from the overlay_score-is-null signal.
+        _seed_scored_document(1, overlay_score=None)
+        db = get_session()
+        try:
+            db.add(
+                PdfProfile(
+                    run_id="run-2-stratified-sample",
+                    document_id=1,
+                    profile_version="pdf-profile-v1",
+                    profile="no_text",
+                    page_count=1,
+                    digital_pages=0,
+                    scanned_overlay_pages=0,
+                    no_text_pages=1,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+        resp = client.get("/api/ocr-quality/documents/1")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["has_stage2_analysis"] is True
+        assert body["overlay_score"] is None
 
 
 # ---------------------------------------------------------------------------
