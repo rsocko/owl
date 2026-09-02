@@ -59,6 +59,7 @@ paq = "doc_intelligence_hub.modules.action_queue.cli:cli"
 paperless-metadata = "doc_intelligence_hub.modules.metadata_migration.cli:cli"
 ocr-quality-score = "doc_intelligence_hub.modules.ocr_quality.scoring_cli:cli"
 ocr-quality = "doc_intelligence_hub.modules.ocr_quality.cli:cli"
+analysis-invalidation = "doc_intelligence_hub.modules.analysis_invalidation.cli:cli"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
