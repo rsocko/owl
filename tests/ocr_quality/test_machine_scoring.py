@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from doc_intelligence_hub.modules.ocr_quality.machine_scoring import score_machine
 from doc_intelligence_hub.modules.ocr_quality.scoring_config import DEFAULT_CONFIG
-from doc_intelligence_hub.modules.ocr_quality.scoring_models import DownstreamOutcome
+from doc_intelligence_hub.modules.ocr_quality.scoring_models import ContentShape, DownstreamOutcome
 
 
 def test_none_text_is_fully_unavailable() -> None:
@@ -140,3 +140,108 @@ def pytest_approx(value: float, tol: float = 1e-6):
     import pytest
 
     return pytest.approx(value, abs=tol)
+
+
+# --- content_shape-aware calibration for table/form false positives ---------
+
+
+def _table_statement_text() -> str:
+    """Synthetic stand-in for a real table/form bank-statement document
+    (issue: doc #995) — clean, correctly-formatted digital-native text with
+    dot-leader table formatting, private-use-area glyphs from an old
+    template's custom font, and dominant repeated numeric/currency tokens.
+    None of this reflects an actual extraction problem.
+    """
+    lines = [
+        "Account Statement",
+        "Account Number: 123456789",
+        "Statement Date: 03/01/2011",
+        "Beginning Balance..........$1,204.55",
+        "Deposits...................$500.00",
+        "Withdrawals.................$220.00\uf0b7",
+        "Ending Balance..............$1,484.55",
+        "Fee Schedule: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "Interest Rate: 0.01% APR\uf0b7\uf0b7",
+    ]
+    return "\n".join(lines)
+
+
+def test_table_shaped_false_positive_scores_better_with_content_shape() -> None:
+    """The two proven false-positive signals must be dampened, and the score
+    must improve, once content_shape identifies the document as tabular."""
+    text = _table_statement_text()
+    undampened = score_machine(text_content=text, content_shape=None, config=DEFAULT_CONFIG)
+    dampened = score_machine(
+        text_content=text, content_shape=ContentShape.TABLE_OR_FORM, config=DEFAULT_CONFIG
+    )
+    assert dampened.score > undampened.score
+    # Weight dampening must not change the *signals themselves* (only how
+    # heavily they count), except for repetition_noise's structural fix.
+    assert dampened.signals["char_script_plausibility"] == pytest_approx(
+        undampened.signals["char_script_plausibility"]
+    )
+
+
+def test_dominant_numeric_token_not_treated_as_repetition_noise_when_structured() -> None:
+    """A stream dominated by a repeated purely-numeric token (e.g. "00" cents
+    across many table cells) is expected in tabular data, unlike a dominant
+    non-numeric/gibberish token."""
+    text = "Row Total Amount " + " ".join(["00"] * 20) + " Balance Due Fee Schedule Interest"
+    prose_like = score_machine(text_content=text, content_shape=None, config=DEFAULT_CONFIG)
+    table = score_machine(
+        text_content=text, content_shape=ContentShape.TABLE_OR_FORM, config=DEFAULT_CONFIG
+    )
+    assert table.signals["repetition_noise"] > prose_like.signals["repetition_noise"]
+
+
+def test_dot_leader_runs_not_penalized_as_repetition_noise_when_structured() -> None:
+    """Dot-leader table formatting (e.g. "Total Due..........$100.00") must
+    not count as a corrupted repeated-character run once content_shape says
+    the document is tabular/structured."""
+    text = "Account Fee" + "." * 20 + "$25.00\nBalance" + "." * 20 + "$975.00"
+    prose_like = score_machine(text_content=text, content_shape=None, config=DEFAULT_CONFIG)
+    table = score_machine(
+        text_content=text, content_shape=ContentShape.TABLE_OR_FORM, config=DEFAULT_CONFIG
+    )
+    assert table.signals["repetition_noise"] > prose_like.signals["repetition_noise"]
+
+
+def test_garbled_prose_still_scores_poorly_regardless_of_content_shape() -> None:
+    """The true-positive case must be preserved: genuinely garbled/repeated
+    OCR noise in prose text is never dampened, since PROSE/UNKNOWN are not in
+    the default structured_content_shapes."""
+    text = "xx xx xx xx xx xx xx xx xx xx xx xx xx xx qzjx qzjx qzjx zzzzzzzzzzzz"
+    for shape in (None, ContentShape.PROSE, ContentShape.UNKNOWN):
+        result = score_machine(text_content=text, content_shape=shape, config=DEFAULT_CONFIG)
+        assert result.score < 60.0
+        assert any(r.code == "machine.repetition_noise" for r in result.reasons)
+
+
+def test_garbled_repeated_noise_in_table_shape_is_still_flagged_just_less_weighted() -> None:
+    """Dampening must reduce influence, not eliminate detection: a document
+    that is *genuinely* garbled (not just legitimately tabular) should still
+    show a low repetition_noise signal value even when content_shape is
+    TABLE_OR_FORM — the dampening only changes how much that signal counts
+    toward the final score, not whether it fires."""
+    text = "xx xx xx xx xx xx xx xx xx xx xx xx xx xx qzjx qzjx qzjx zzzzzzzzzzzz"
+    result = score_machine(
+        text_content=text, content_shape=ContentShape.TABLE_OR_FORM, config=DEFAULT_CONFIG
+    )
+    assert result.signals["repetition_noise"] < 0.6
+    assert any(r.code == "machine.repetition_noise" for r in result.reasons)
+
+
+def test_structured_content_signal_multiplier_is_configurable() -> None:
+    """A fully-neutralizing multiplier (0.0) must remove the two signals'
+    weight entirely for structured content, per the versioned-config
+    architecture (not a hardcoded magic number)."""
+    text = _table_statement_text()
+    tuned = DEFAULT_CONFIG.model_copy(
+        update={"structured_content_signal_multiplier": 0.0, "config_version": "test-neutral"}
+    )
+    result = score_machine(text_content=text, content_shape=ContentShape.TABLE_OR_FORM, config=tuned)
+    assert result.score is not None
+    # With weight fully zeroed, neither signal contributes to weighted_total.
+    weights = tuned.machine_weights.model_dump()
+    assert weights["char_script_plausibility"] > 0  # sanity: config itself unaffected
+

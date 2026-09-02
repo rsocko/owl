@@ -8,7 +8,7 @@
 # These starting values are NOT calibrated. They must be tuned against
 # explicit human labels once issue #25 produces a representative sample.
 
-config_version: "default-1"
+config_version: "default-2"
 
 overlay_weights:
   searchable_text: 20.0
@@ -38,3 +38,9 @@ short_document_char_threshold: 200
 common_word_min_hits: 3
 max_downstream_penalty: 15.0
 max_downstream_bonus: 5.0
+
+structured_content_shapes:
+  - table_or_form
+  - code_heavy
+  - mixed
+structured_content_signal_multiplier: 0.3
