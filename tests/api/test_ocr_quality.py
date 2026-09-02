@@ -840,6 +840,39 @@ class TestPaperlessFetchFailure:
         assert resp.status_code == 502
 
 
+class TestDiffRegions:
+    def test_diff_endpoint_returns_added_removed_shifted(self, client):
+        resp = client.post(
+            "/api/ocr-quality/regions/diff",
+            json={
+                "words_a": [
+                    {"text": "Hello", "x0": 10, "top": 50, "x1": 50, "bottom": 62},
+                    {"text": "Removed", "x0": 100, "top": 50, "x1": 160, "bottom": 62},
+                ],
+                "words_b": [
+                    {"text": "Hello", "x0": 10, "top": 50, "x1": 50, "bottom": 62},
+                    {"text": "Added", "x0": 300, "top": 700, "x1": 340, "bottom": 712},
+                ],
+                "page_width": 600.0,
+                "page_height": 800.0,
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["removed_from_b"] == [1]
+        assert body["added_in_b"] == [1]
+        assert body["shifted"] == []
+
+    def test_diff_endpoint_handles_empty_word_lists(self, client):
+        resp = client.post(
+            "/api/ocr-quality/regions/diff",
+            json={"words_a": [], "words_b": [], "page_width": 600.0, "page_height": 800.0},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body == {"removed_from_b": [], "added_in_b": [], "shifted": []}
+
+
 # ---------------------------------------------------------------------------
 # Manual annotation endpoints (issue #134, Part 2)
 # ---------------------------------------------------------------------------

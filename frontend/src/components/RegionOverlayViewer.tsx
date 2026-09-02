@@ -42,6 +42,8 @@ export type Annotation = {
 
 export type DrawnBox = { x0: number; top: number; x1: number; bottom: number };
 
+export type DiffHighlightKind = 'added' | 'removed' | 'shifted';
+
 export const ANNOTATION_LABELS = ['wrong', 'key_data', 'table_region', 'other'] as const;
 
 interface RegionOverlayViewerProps {
@@ -57,6 +59,14 @@ interface RegionOverlayViewerProps {
   onDeleteAnnotation?: (annotationId: number) => void | Promise<void>;
   /** Optional page navigation controls (rendered only when page_count > 1). */
   onPageChange?: (page: number) => void;
+  /**
+   * Optional box-diff result (issue #134 x #18 candidate overlay
+   * comparison), keyed by this instance's word index in `regions.words`.
+   * When present, overrides the normal neutral/passed/flagged styling with
+   * a distinct diff style for the flagged indices — takes precedence over
+   * heatmap mode, which is otherwise mutually exclusive UI state.
+   */
+  diffHighlights?: Map<number, DiffHighlightKind>;
 }
 
 /**
@@ -64,7 +74,9 @@ interface RegionOverlayViewerProps {
  * (issue #134, Part 1) plus an ad hoc "draw a box and flag it" annotation
  * tool (Part 2). Deliberately takes a single image/regions/annotations set
  * as generic props (not hard-wired to "the current document") so a future
- * side-by-side comparison view could mount two instances without changes.
+ * side-by-side comparison view could reuse it with two instances — see
+ * `OcrOverlayComparisonPanel.tsx` (issue #134 x #18), which does exactly
+ * that and drives the optional `diffHighlights` prop.
  */
 export default function RegionOverlayViewer({
   imageUrl,
@@ -73,6 +85,7 @@ export default function RegionOverlayViewer({
   onCreateAnnotation,
   onDeleteAnnotation,
   onPageChange,
+  diffHighlights,
 }: RegionOverlayViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [imgSize, setImgSize] = useState<{ width: number; height: number } | null>(null);
@@ -250,13 +263,20 @@ export default function RegionOverlayViewer({
           regions?.words.map((word, i) => {
             const rect = toPixelRect(word);
             if (!rect) return null;
-            const boxClass = heatmap ? (word.flagged ? 'flagged' : 'passed') : 'neutral';
+            const diffKind = diffHighlights?.get(i);
+            const boxClass = diffKind
+              ? `diff-${diffKind}`
+              : heatmap
+                ? word.flagged
+                  ? 'flagged'
+                  : 'passed'
+                : 'neutral';
             return (
               <div
                 key={i}
                 className={`region-overlay-box ${boxClass}`}
                 style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
-                title={word.text}
+                title={diffKind ? `${word.text} (${diffKind})` : word.text}
                 onClick={() => setSelectedWord(word)}
                 data-testid="word-box"
               />

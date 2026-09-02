@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Badge, Breadcrumb, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, type Tone } from '../components/ui';
 import DocumentPreview from '../components/DocumentPreview';
 import OcrCandidatesPanel from '../components/OcrCandidatesPanel';
+import OcrOverlayComparisonPanel from '../components/OcrOverlayComparisonPanel';
 import RegionOverlayViewer, { type Annotation, type DrawnBox, type PageRegions } from '../components/RegionOverlayViewer';
 import AnnotationListPanel from '../components/AnnotationListPanel';
 import { endpoints } from '../lib/api';
@@ -368,6 +369,7 @@ export default function OcrQualityDocumentDetail() {
               rollback are not yet available (blocked on issue #114). Candidate generation and
               comparison below never modify the live Paperless document.
             </div>
+            <OcrOverlayComparisonPanel documentId={detail.document_id} />
           </Card>
 
           <OcrCandidatesPanel

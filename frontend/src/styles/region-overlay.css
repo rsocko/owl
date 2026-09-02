@@ -66,6 +66,74 @@
   pointer-events: none;
 }
 
+/* Box-level diff highlighting (issue #134 x #18 candidate overlay
+   comparison) — distinct from the neutral/passed/flagged/annotation
+   palette above so diff mode never gets mistaken for per-word flagging. */
+.region-overlay-box.diff-added {
+  border-color: rgba(139, 92, 246, 0.9);
+  background: rgba(139, 92, 246, 0.22);
+}
+
+.region-overlay-box.diff-removed {
+  border: 1px dashed rgba(107, 114, 128, 0.8);
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(107, 114, 128, 0.18),
+    rgba(107, 114, 128, 0.18) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
+
+.region-overlay-box.diff-shifted {
+  border-color: rgba(6, 182, 212, 0.9);
+  background: rgba(6, 182, 212, 0.2);
+}
+
+/* Side-by-side candidate overlay comparison panel. */
+.ocr-overlay-comparison-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ocr-overlay-comparison-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.ocr-overlay-source-select {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 220px;
+}
+
+.ocr-overlay-source-select label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted, #6b7280);
+}
+
+.ocr-overlay-comparison-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.ocr-overlay-comparison-heading {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+@media (max-width: 900px) {
+  .ocr-overlay-comparison-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .region-overlay-annotation-box {
   position: absolute;
   box-sizing: border-box;

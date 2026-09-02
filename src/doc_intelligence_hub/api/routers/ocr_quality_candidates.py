@@ -14,6 +14,14 @@ Endpoints:
     GET  /api/ocr-quality/candidates/{candidate_id}      — Candidate detail incl. comparison
     POST /api/ocr-quality/candidates/{candidate_id}/decision — Accept/reject (OWL-only, no Paperless write)
     POST /api/ocr-quality/candidates/{candidate_id}/cancel   — Best-effort cancel of a pending candidate
+
+    Region-level inspection for a candidate's own stored PDF (issue #134 x
+    issue #18 — connects the region-inspection viewer to candidate
+    comparison). Read-only; reuses ``region_inspection.py``'s existing
+    word-flagging/page-rendering logic unchanged, sourced from the
+    candidate's on-disk artifact instead of a Paperless fetch:
+    GET  /api/ocr-quality/candidates/{candidate_id}/regions            — Word boxes + flags for one page
+    GET  /api/ocr-quality/candidates/{candidate_id}/pages/{page}/image — Rendered page PNG
 """
 
 from __future__ import annotations
@@ -21,11 +29,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.api.routers import make_paperless_client
 from doc_intelligence_hub.core.paperless import PaperlessClient
+from doc_intelligence_hub.modules.ocr_quality import region_inspection
 from doc_intelligence_hub.modules.ocr_quality.candidate_models import Decision, EngineName
 from doc_intelligence_hub.modules.ocr_quality.candidate_service import (
     BatchCapExceeded,
@@ -202,3 +211,89 @@ async def cancel_candidate(candidate_id: str) -> dict[str, Any]:
         raise HTTPException(
             status_code=400, detail={"code": "invalid_state", "message": str(exc)}
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Region-level inspection for a candidate's stored PDF (issue #134 x #18) —
+# read-only, on-demand, reusing region_inspection.py's flagging/rendering
+# logic unchanged; only the PDF byte source differs from the live-document
+# endpoints in ocr_quality.py.
+# ---------------------------------------------------------------------------
+
+
+def _candidate_service() -> OcrCandidateService:
+    init_ocr_quality_db()
+    return OcrCandidateService(None, get_ocr_quality_session)  # type: ignore[arg-type]
+
+
+def _require_candidate_pdf_bytes(candidate_id: str) -> bytes:
+    service = _candidate_service()
+    detail = service.get_candidate(candidate_id)
+    if detail is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Unknown candidate {candidate_id}"},
+        )
+    pdf_bytes = service.get_candidate_pdf_bytes(candidate_id)
+    if pdf_bytes is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "no_pdf_artifact",
+                "message": f"Candidate {candidate_id} has no stored PDF artifact yet "
+                f"(state: {detail.get('state')}).",
+            },
+        )
+    return pdf_bytes
+
+
+@router.get("/candidates/{candidate_id}/regions")
+async def get_candidate_regions(candidate_id: str, page: int = Query(1, ge=1)) -> dict[str, Any]:
+    """Word-level geometry + heuristic flags for one page of a candidate's PDF.
+
+    Mirrors ``GET /documents/{document_id}/regions`` (issue #134, Part 1)
+    but sources bytes from the candidate's own on-disk artifact instead of
+    a Paperless fetch. No document-level scorer ``reasons`` cross-reference
+    is available for candidates in this slice, so ``matched_reasons`` is
+    always empty here.
+    """
+    pdf_bytes = _require_candidate_pdf_bytes(candidate_id)
+    regions = region_inspection.build_page_regions(pdf_bytes=pdf_bytes, page_number=page)
+    if regions is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "page_not_found",
+                "message": f"Candidate {candidate_id} has no page {page} with parseable geometry.",
+            },
+        )
+    return regions
+
+
+@router.get("/candidates/{candidate_id}/pages/{page}/image")
+async def get_candidate_page_image(
+    candidate_id: str,
+    page: int,
+    dpi: int = Query(
+        region_inspection.DEFAULT_PAGE_IMAGE_DPI,
+        ge=region_inspection.MIN_PAGE_IMAGE_DPI,
+        le=region_inspection.MAX_PAGE_IMAGE_DPI,
+    ),
+) -> Response:
+    """Render one page of a candidate's PDF as a PNG image, for overlay display."""
+    if page < 1:
+        raise HTTPException(
+            status_code=422, detail={"code": "invalid_page", "message": "page must be >= 1"}
+        )
+    pdf_bytes = _require_candidate_pdf_bytes(candidate_id)
+    rendered = region_inspection.render_page_image(pdf_bytes=pdf_bytes, page_number=page, dpi=dpi)
+    if rendered is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "page_not_found",
+                "message": f"Candidate {candidate_id} has no renderable page {page}.",
+            },
+        )
+    png_bytes, _width, _height = rendered
+    return Response(content=png_bytes, media_type="image/png")
