@@ -325,5 +325,16 @@ export const endpoints = {
     distribution: () => api.get('/api/ocr-quality/distribution'),
     documents: (params?: string) => api.get(`/api/ocr-quality/documents${params ? `?${params}` : ''}`),
     documentDetail: (documentId: number | string) => api.get(`/api/ocr-quality/documents/${documentId}`),
+    runs: (limit?: number) => api.get(`/api/ocr-quality/runs${limit ? `?limit=${limit}` : ''}`),
+    run: (runId: string) => api.get(`/api/ocr-quality/runs/${runId}`),
+    runReport: (runId: string) => api.get(`/api/ocr-quality/runs/${runId}/report`),
+    startRun: (body?: { batch_size?: number; tags?: string[]; correspondent?: string }) =>
+      api.post('/api/ocr-quality/runs', body ?? {}),
+    resumeRun: (runId: string, body?: { batch_size?: number; tags?: string[]; correspondent?: string }) =>
+      api.post(`/api/ocr-quality/runs/${runId}/resume`, body ?? {}),
+    sampleRun: (
+      runId: string,
+      body?: { sample_size?: number; seed?: string; min_per_stratum?: number; max_pages?: number },
+    ) => api.post(`/api/ocr-quality/runs/${runId}/sample`, body ?? {}),
   },
 };
