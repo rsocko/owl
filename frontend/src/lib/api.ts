@@ -325,6 +325,7 @@ export const endpoints = {
     distribution: () => api.get('/api/ocr-quality/distribution'),
     documents: (params?: string) => api.get(`/api/ocr-quality/documents${params ? `?${params}` : ''}`),
     documentDetail: (documentId: number | string) => api.get(`/api/ocr-quality/documents/${documentId}`),
+    forceStage2: (documentId: number | string) => api.post(`/api/ocr-quality/documents/${documentId}/stage2`),
     downstreamOutcomes: () => api.get('/api/ocr-quality/downstream-outcomes'),
     runs: (limit?: number) => api.get(`/api/ocr-quality/runs${limit ? `?limit=${limit}` : ''}`),
     run: (runId: string) => api.get(`/api/ocr-quality/runs/${runId}`),
