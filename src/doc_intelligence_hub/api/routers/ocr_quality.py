@@ -737,8 +737,12 @@ class RegionDiffRequest(BaseModel):
     words_b: list[RegionDiffWordRequest] = Field(
         default_factory=list, description="Word boxes from the second ('B') source."
     )
-    page_width: float = Field(description="Shared page width (points) both word lists are relative to.")
-    page_height: float = Field(description="Shared page height (points) both word lists are relative to.")
+    page_width: float = Field(
+        description="Shared page width (points) both word lists are relative to."
+    )
+    page_height: float = Field(
+        description="Shared page height (points) both word lists are relative to."
+    )
 
 
 @router.post("/regions/diff")

@@ -12,8 +12,16 @@ PAGE_WIDTH = 600.0
 PAGE_HEIGHT = 800.0
 
 
-def word(text: str, x0: float, top: float, x1: float | None = None, bottom: float | None = None) -> DiffWord:
-    return DiffWord(text=text, x0=x0, top=top, x1=x1 if x1 is not None else x0 + 40.0, bottom=bottom if bottom is not None else top + 12.0)
+def word(
+    text: str, x0: float, top: float, x1: float | None = None, bottom: float | None = None
+) -> DiffWord:
+    return DiffWord(
+        text=text,
+        x0=x0,
+        top=top,
+        x1=x1 if x1 is not None else x0 + 40.0,
+        bottom=bottom if bottom is not None else top + 12.0,
+    )
 
 
 class TestIdenticalPages:

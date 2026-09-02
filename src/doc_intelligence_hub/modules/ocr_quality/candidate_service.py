@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -48,6 +49,8 @@ logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[[], Session]
 
+_SAFE_CANDIDATE_ARTIFACT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
 
 class BatchCapExceeded(ValueError):
     """Raised when a requested batch violates a configured cap."""
@@ -75,8 +78,14 @@ def _storage_dir() -> Path:
 
 
 def _artifact_paths(candidate_id: str) -> tuple[Path, Path]:
-    base = _storage_dir()
-    return base / f"{candidate_id}.pdf", base / f"{candidate_id}.txt"
+    if not _SAFE_CANDIDATE_ARTIFACT_ID.fullmatch(candidate_id):
+        raise ValueError(f"Invalid candidate artifact id: {candidate_id!r}")
+    base = _storage_dir().resolve()
+    pdf_path = (base / f"{candidate_id}.pdf").resolve()
+    text_path = (base / f"{candidate_id}.txt").resolve()
+    pdf_path.relative_to(base)
+    text_path.relative_to(base)
+    return pdf_path, text_path
 
 
 def _save_artifacts(candidate_id: str, pdf_bytes: bytes | None, text: str | None) -> None:

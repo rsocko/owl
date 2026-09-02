@@ -22,7 +22,9 @@ def ocr_candidates_db(tmp_path):
     from doc_intelligence_hub.modules.ocr_quality.database import init_db
 
     original = ocr_quality_config.settings.database_url
-    ocr_quality_config.settings.database_url = f"sqlite:///{tmp_path / 'api_test_candidate_regions.db'}"
+    ocr_quality_config.settings.database_url = (
+        f"sqlite:///{tmp_path / 'api_test_candidate_regions.db'}"
+    )
     init_db()
     yield
     ocr_quality_config.settings.database_url = original
