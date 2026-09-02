@@ -746,12 +746,8 @@ class TestAnnotationCrud:
         assert annotations[0]["id"] == created["id"]
 
     def test_list_filters_by_page(self, client, ocr_quality_db):
-        client.post(
-            "/api/ocr-quality/documents/1/annotations", json=_annotation_payload(page=1)
-        )
-        client.post(
-            "/api/ocr-quality/documents/1/annotations", json=_annotation_payload(page=2)
-        )
+        client.post("/api/ocr-quality/documents/1/annotations", json=_annotation_payload(page=1))
+        client.post("/api/ocr-quality/documents/1/annotations", json=_annotation_payload(page=2))
         resp = client.get("/api/ocr-quality/documents/1/annotations?page=2")
         assert resp.status_code == 200
         annotations = resp.json()["annotations"]

@@ -42,9 +42,7 @@ def list_annotations(
 ) -> list[dict[str, Any]]:
     db = session_factory()
     try:
-        query = db.query(DocumentAnnotation).filter(
-            DocumentAnnotation.document_id == document_id
-        )
+        query = db.query(DocumentAnnotation).filter(DocumentAnnotation.document_id == document_id)
         if page is not None:
             query = query.filter(DocumentAnnotation.page == page)
         rows = query.order_by(DocumentAnnotation.page.asc(), DocumentAnnotation.id.asc()).all()

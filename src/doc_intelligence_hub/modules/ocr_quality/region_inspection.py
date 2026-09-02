@@ -79,7 +79,9 @@ class _RawPdfCache:
         if key not in self._entries and len(self._entries) >= self._max_entries:
             oldest_key = min(self._entries, key=lambda k: self._entries[k].expires_at)
             self._entries.pop(oldest_key, None)
-        self._entries[key] = _CacheEntry(pdf_bytes=pdf_bytes, expires_at=time.monotonic() + self._ttl)
+        self._entries[key] = _CacheEntry(
+            pdf_bytes=pdf_bytes, expires_at=time.monotonic() + self._ttl
+        )
 
     def clear(self) -> None:
         self._entries.clear()
@@ -115,8 +117,12 @@ def _word_flags(page: PdfPageData, word: WordBox, *, seen_words: list[WordBox]) 
     """Compute which signal categories this single word trips, if any."""
     flags: list[str] = []
 
-    if page.width > 0 and page.height > 0 and not (
-        0 <= word.x0 <= word.x1 <= page.width and 0 <= word.top <= word.bottom <= page.height
+    if (
+        page.width > 0
+        and page.height > 0
+        and not (
+            0 <= word.x0 <= word.x1 <= page.width and 0 <= word.top <= word.bottom <= page.height
+        )
     ):
         flags.append("bounds_sanity")
 
