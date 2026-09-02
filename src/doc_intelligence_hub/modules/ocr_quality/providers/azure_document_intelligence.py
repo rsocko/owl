@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import math
 import time
 from typing import Any
 
@@ -286,6 +287,73 @@ def _polygon_to_overlay_box(
     return x0, pdf_y, box_height
 
 
+# Word polygons whose reading-direction edge is within this many degrees of
+# 0/180 (i.e. normal or upside-down horizontal text) keep the fast,
+# axis-aligned overlay-box path. Anything more skewed than this (e.g. a
+# ~90 deg rotated sidebar stamp) is drawn via the rotated-canvas path
+# instead, so it isn't collapsed into a wildly oversized horizontal box.
+_ROTATION_TOLERANCE_DEGREES = 3.0
+
+
+def _polygon_edge_angle_degrees(polygon: list[float], scale_x: float, scale_y: float) -> float:
+    """Angle of a word polygon's reading-direction edge (``p0 -> p1``).
+
+    Returned in PDF-space (y-up) degrees, counter-clockwise-positive --
+    matching the convention reportlab's ``Canvas.rotate`` expects. Azure's
+    polygon coordinates use a y-axis that points down, so the raw
+    ``atan2`` angle (clockwise-from-x-axis in that frame) is negated to
+    convert it to PDF's y-up, counter-clockwise convention.
+    """
+    dx = (polygon[2] - polygon[0]) * scale_x
+    dy = (polygon[3] - polygon[1]) * scale_y
+    return -math.degrees(math.atan2(dy, dx))
+
+
+def _is_near_horizontal(angle_degrees: float) -> bool:
+    """Is this angle within ``_ROTATION_TOLERANCE_DEGREES`` of 0/180 deg?
+
+    i.e. is it normal or upside-down horizontal text, for which the
+    simple/fast axis-aligned-box overlay path is a fine approximation.
+    """
+    normalized = abs(angle_degrees) % 180.0
+    return normalized <= _ROTATION_TOLERANCE_DEGREES or normalized >= (
+        180.0 - _ROTATION_TOLERANCE_DEGREES
+    )
+
+
+def _polygon_to_rotated_overlay(
+    polygon: list[float], scale_x: float, scale_y: float, page_height_pts: float
+) -> tuple[float, float, float, float]:
+    """Convert one rotated Azure word polygon into rotated-overlay draw parameters.
+
+    Returns ``(anchor_x, anchor_y, angle_degrees, text_height)`` in PDF
+    points (bottom-left origin). ``(anchor_x, anchor_y)`` is where the
+    word's baseline should start *before* rotating the canvas by
+    ``angle_degrees`` (reportlab's ``rotate``, counter-clockwise-positive)
+    around it, and ``text_height`` is the font size to use so the drawn
+    word's perpendicular extent matches the polygon's -- mirroring
+    ``_polygon_to_overlay_box``'s axis-aligned ``box_height``.
+
+    Non-uniform ``scale_x``/``scale_y`` (only possible when Azure's
+    reported page size doesn't match the PDF's aspect ratio) is a known,
+    accepted approximation here: rotating a non-uniformly-scaled quad
+    isn't perfectly angle-preserving, but scale_x/scale_y are effectively
+    always equal in practice.
+    """
+    xs = [polygon[i] * scale_x for i in range(0, len(polygon), 2)]
+    ys = [polygon[i] * scale_y for i in range(1, len(polygon), 2)]
+
+    angle_degrees = _polygon_edge_angle_degrees(polygon, scale_x, scale_y)
+
+    # p3 (bottom-left in the word's own reading frame) is the baseline
+    # start point -- analogous to (x0, y1) in the axis-aligned case.
+    anchor_x = xs[3]
+    anchor_y = page_height_pts - ys[3]
+
+    text_height = max(math.hypot(xs[3] - xs[0], ys[3] - ys[0]), 1.0)
+    return anchor_x, anchor_y, angle_degrees, text_height
+
+
 def _render_text_overlay(azure_page: Any, page_width_pts: float, page_height_pts: float) -> bytes:
     """Render one page's invisible text layer as a standalone single-page PDF."""
     from reportlab.pdfgen import canvas
@@ -301,12 +369,24 @@ def _render_text_overlay(azure_page: Any, page_width_pts: float, page_height_pts
         text = getattr(word, "content", "") or ""
         if not text or len(polygon) < 8:
             continue
-        x0, pdf_y, box_height = _polygon_to_overlay_box(polygon, scale_x, scale_y, page_height_pts)
 
         c.saveState()
-        c.setFont("Helvetica", box_height * 0.9)
-        c.translate(x0, pdf_y)
-        c.drawString(0, 0, text)
+        angle_degrees = _polygon_edge_angle_degrees(polygon, scale_x, scale_y)
+        if _is_near_horizontal(angle_degrees):
+            x0, pdf_y, box_height = _polygon_to_overlay_box(
+                polygon, scale_x, scale_y, page_height_pts
+            )
+            c.setFont("Helvetica", box_height * 0.9)
+            c.translate(x0, pdf_y)
+            c.drawString(0, 0, text)
+        else:
+            anchor_x, anchor_y, rotate_angle, text_height = _polygon_to_rotated_overlay(
+                polygon, scale_x, scale_y, page_height_pts
+            )
+            c.setFont("Helvetica", text_height * 0.9)
+            c.translate(anchor_x, anchor_y)
+            c.rotate(rotate_angle)
+            c.drawString(0, 0, text)
         c.restoreState()
 
     c.showPage()
