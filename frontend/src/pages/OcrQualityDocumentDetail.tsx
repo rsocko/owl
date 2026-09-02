@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Badge, Breadcrumb, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, type Tone } from '../components/ui';
+import DocumentPreview from '../components/DocumentPreview';
 import { endpoints } from '../lib/api';
 import { statusTone, formatDate } from './OcrQualityDashboard';
 import { formatScore } from './OcrQualityReviewQueue';
@@ -172,6 +173,15 @@ export default function OcrQualityDocumentDetail() {
               <div><span className="text-muted">Assessed:</span> {formatDate(detail.assessed_at)}</div>
               <div><span className="text-muted">Scorer version:</span> {detail.quality_scorer_version ?? 'not yet scored'}</div>
             </div>
+          </Card>
+
+          <Card title="Document preview">
+            <DocumentPreview
+              documentId={detail.document_id}
+              paperlessUrl={paperlessUrl ? `${paperlessUrl}/documents/${detail.document_id}/details` : null}
+              variant="card"
+              label="Document"
+            />
           </Card>
 
           <Card title="Scores">

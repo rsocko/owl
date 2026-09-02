@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import OcrQualityDocumentDetail from './OcrQualityDocumentDetail';
@@ -6,6 +6,10 @@ import OcrQualityDocumentDetail from './OcrQualityDocumentDetail';
 const mocks = vi.hoisted(() => ({
   documentDetail: vi.fn(),
   paperlessUrl: vi.fn(),
+  metadata: vi.fn(),
+  thumbnailUrl: vi.fn(),
+  downloadUrl: vi.fn(),
+  previewUrl: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
@@ -15,6 +19,12 @@ vi.mock('../lib/api', () => ({
     },
     statements: {
       paperlessUrl: mocks.paperlessUrl,
+    },
+    documents: {
+      metadata: mocks.metadata,
+      thumbnailUrl: mocks.thumbnailUrl,
+      downloadUrl: mocks.downloadUrl,
+      previewUrl: mocks.previewUrl,
     },
   },
 }));
@@ -33,6 +43,14 @@ describe('OcrQualityDocumentDetail', () => {
   beforeEach(() => {
     mocks.documentDetail.mockReset();
     mocks.paperlessUrl.mockReset();
+    mocks.metadata.mockReset();
+    mocks.thumbnailUrl.mockReset();
+    mocks.downloadUrl.mockReset();
+    mocks.previewUrl.mockReset();
+    mocks.metadata.mockResolvedValue({ title: 'Statement.pdf', page_count: 2 });
+    mocks.thumbnailUrl.mockReturnValue('/thumbnail/501');
+    mocks.downloadUrl.mockReturnValue('/download/501');
+    mocks.previewUrl.mockReturnValue('/preview/501');
   });
 
   it('shows a not-found state for an unknown document', async () => {
@@ -79,6 +97,42 @@ describe('OcrQualityDocumentDetail', () => {
       'href',
       'https://paperless.test/documents/501/details',
     );
+  });
+
+  it('renders an inline document preview with a Paperless deep link', async () => {
+    mocks.paperlessUrl.mockResolvedValue({ paperless_url: 'https://paperless.test' });
+    mocks.documentDetail.mockResolvedValue({
+      document_id: 501,
+      review_status: 'UNCERTAIN',
+      reasons: [],
+      document_profile: null,
+    });
+    renderPage('501');
+
+    await waitFor(() => expect(screen.getByText('Document preview')).toBeInTheDocument());
+    expect(mocks.metadata).toHaveBeenCalledWith(501);
+    expect(screen.getByRole('button', { name: /View Document/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /View in Paperless/i })).toHaveAttribute(
+      'href',
+      'https://paperless.test/documents/501/details',
+    );
+  });
+
+  it('expands the document preview into the full viewer modal on click', async () => {
+    mocks.paperlessUrl.mockResolvedValue({ paperless_url: 'https://paperless.test' });
+    mocks.documentDetail.mockResolvedValue({
+      document_id: 501,
+      review_status: 'UNCERTAIN',
+      reasons: [],
+      document_profile: null,
+    });
+    renderPage('501');
+
+    const viewButton = await screen.findByRole('button', { name: /View Document/i });
+    fireEvent.click(viewButton);
+
+    const iframe = await screen.findByTitle('Statement.pdf');
+    expect(iframe).toHaveAttribute('src', '/preview/501');
   });
 
   it('shows an unavailable-signal note when overlay score has not been computed', async () => {
