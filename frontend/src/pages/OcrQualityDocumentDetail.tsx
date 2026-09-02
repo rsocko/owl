@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Badge, Breadcrumb, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, type Tone } from '../components/ui';
 import DocumentPreview from '../components/DocumentPreview';
+import OcrCandidatesPanel from '../components/OcrCandidatesPanel';
 import RegionOverlayViewer, { type Annotation, type DrawnBox, type PageRegions } from '../components/RegionOverlayViewer';
 import AnnotationListPanel from '../components/AnnotationListPanel';
 import { endpoints } from '../lib/api';
@@ -330,11 +331,13 @@ export default function OcrQualityDocumentDetail() {
 
           <Card title="Candidate comparison">
             <div className="ocr-stub-note">
-              Candidate generation, comparison, and accept/reject/rollback controls are not yet available
-              (blocked on issues #18 and #114). This view will show alternate-OCR candidates once that
-              backend work lands.
+              Applying an accepted candidate as the new Paperless version, version preservation, and
+              rollback are not yet available (blocked on issue #114). Candidate generation and
+              comparison below never modify the live Paperless document.
             </div>
           </Card>
+
+          <OcrCandidatesPanel documentId={detail.document_id} />
         </>
       )}
     </div>

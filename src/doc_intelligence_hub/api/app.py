@@ -33,6 +33,7 @@ from doc_intelligence_hub.api.routers import (
     mc_connector,
     metadata,
     ocr_quality,
+    ocr_quality_candidates,
     relationships,
     statements,
     stats,
@@ -332,6 +333,13 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
                 "name": "ocr-quality",
                 "description": "Read-only OCR baseline inventory run status and aggregate reports.",
             },
+            {
+                "name": "ocr-quality-candidates",
+                "description": (
+                    "OCR candidate generation, comparison, and review staging (issue #18, "
+                    "slice 1). Never writes to Paperless."
+                ),
+            },
         ],
         lifespan=lifespan,
     )
@@ -389,6 +397,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(extraction.router)
     app.include_router(webhooks.router)
     app.include_router(ocr_quality.router)
+    app.include_router(ocr_quality_candidates.router)
     app.include_router(analysis_invalidation.router)
 
     @app.get("/", include_in_schema=False)
