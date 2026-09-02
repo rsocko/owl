@@ -261,9 +261,10 @@ describe('OcrQualityDocumentDetail', () => {
       review_status: 'UNCERTAIN',
       reasons: [],
       document_profile: null,
+      has_stage2_analysis: false,
     });
     renderPage('501');
-    await waitFor(() => expect(screen.getByText(/Overlay score is unavailable/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/has not had deep Stage 2 analysis yet/i)).toBeInTheDocument());
 
     let resolveForce: (value: unknown) => void = () => {};
     mocks.forceStage2.mockReturnValue(
@@ -284,10 +285,11 @@ describe('OcrQualityDocumentDetail', () => {
       review_status: 'GOOD',
       reasons: [],
       document_profile: { page_count: 1, dominant_classification: 'digital_text' },
+      has_stage2_analysis: true,
     });
 
     await waitFor(() => expect(screen.getByText('GOOD')).toBeInTheDocument());
-    expect(screen.queryByText(/Overlay score is unavailable/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/has not had deep Stage 2 analysis yet/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Force Stage 2 analysis/i })).not.toBeDisabled();
   });
 

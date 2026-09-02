@@ -109,6 +109,44 @@ function scoreDelta(current?: number | null, candidate?: number | null): number 
   return candidate - current;
 }
 
+// Floating-point tolerance for "is this candidate's score the max" comparisons
+// below — scores are rounded server-side but comparing floats directly risks
+// missing true ties.
+const RELATIVE_SCORE_TIE_EPSILON = 0.01;
+
+// Candidate-vs-candidate relative badges (as distinct from the vs-current
+// "suggested read" badges above). These are purely factual/descriptive
+// ("this one is highest") — never a "best pick" or ranked #1/#2 label — so a
+// reviewer choosing between multiple ready candidates isn't left with two
+// identically-worded vs-current badges and no way to tell them apart, while
+// still stopping short of anything that reads as the system recommending an
+// engine or authorizing acceptance.
+function relativeBadges(
+  candidate: CandidateSummary,
+  readyCandidates: CandidateSummary[],
+): SuggestedReadBadge[] {
+  if (readyCandidates.length < 2) return [];
+  const badges: SuggestedReadBadge[] = [];
+
+  const overlayScores = readyCandidates.map((c) => c.overlay_score).filter((v): v is number => v != null);
+  if (overlayScores.length >= 2 && candidate.overlay_score != null) {
+    const maxOverlay = Math.max(...overlayScores);
+    if (maxOverlay - candidate.overlay_score <= RELATIVE_SCORE_TIE_EPSILON) {
+      badges.push({ tone: 'info', label: 'Highest overlay score of ready candidates' });
+    }
+  }
+
+  const machineScores = readyCandidates.map((c) => c.machine_score).filter((v): v is number => v != null);
+  if (machineScores.length >= 2 && candidate.machine_score != null) {
+    const maxMachine = Math.max(...machineScores);
+    if (maxMachine - candidate.machine_score <= RELATIVE_SCORE_TIE_EPSILON) {
+      badges.push({ tone: 'info', label: 'Highest machine score of ready candidates' });
+    }
+  }
+
+  return badges;
+}
+
 // Inverse of scoreDelta: the comparison endpoint only stores candidate score
 // + delta, so the "current" baseline for the side-by-side line is derived
 // rather than fetched again.
@@ -285,11 +323,15 @@ export default function OcrCandidatesPanel({
           </thead>
           <tbody>
             {candidates.map((c) => {
-              const rowBadges = suggestedReadBadges({
-                blocking_findings: [],
-                overlay_score_delta: scoreDelta(currentOverlayScore, c.overlay_score),
-                machine_score_delta: scoreDelta(currentMachineScore, c.machine_score),
-              });
+              const readyCandidates = candidates.filter((cand) => cand.state === 'ready');
+              const rowBadges = [
+                ...suggestedReadBadges({
+                  blocking_findings: [],
+                  overlay_score_delta: scoreDelta(currentOverlayScore, c.overlay_score),
+                  machine_score_delta: scoreDelta(currentMachineScore, c.machine_score),
+                }),
+                ...(c.state === 'ready' ? relativeBadges(c, readyCandidates) : []),
+              ];
               return (
                 <tr key={c.candidate_id} className={selectedId === c.candidate_id ? 'is-selected' : ''}>
                   <td>{ENGINE_LABELS[c.engine] ?? c.engine}</td>
@@ -357,10 +399,18 @@ export default function OcrCandidatesPanel({
                 <div className="text-muted">No blocking findings.</div>
               )}
               <div className="ocr-suggested-read-row" style={{ marginTop: 6 }}>
-                <SuggestedReadBadges badges={suggestedReadBadges(detail.comparison)} />
+                <SuggestedReadBadges
+                  badges={[
+                    ...suggestedReadBadges(detail.comparison),
+                    ...(detail.state === 'ready'
+                      ? relativeBadges(detail, candidates.filter((c) => c.state === 'ready'))
+                      : []),
+                  ]}
+                />
               </div>
               <div className="ocr-comparison-note text-muted">
-                These are suggested reads based on score deltas and comparison findings — not a
+                These are suggested reads based on score deltas, comparison findings, and how this
+                candidate's scores compare to other ready candidates for this document — not a
                 recommendation. A higher score is informational only — it does not authorize
                 acceptance. A human reviewer makes the final call for each candidate.
               </div>
