@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { Badge, Breadcrumb, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, type Tone } from '../components/ui';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Badge, Breadcrumb, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, type Tone } from '../components/ui';
 import DocumentPreview from '../components/DocumentPreview';
 import { endpoints } from '../lib/api';
 import { statusTone, formatDate } from './OcrQualityDashboard';
@@ -110,6 +110,7 @@ function PageProfileTable({ pages }: { pages: PageProfile[] }) {
 
 export default function OcrQualityDocumentDetail() {
   const { documentId } = useParams();
+  const navigate = useNavigate();
   const [detail, setDetail] = useState<DocumentDetail | null>(null);
   const [paperlessUrl, setPaperlessUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -146,7 +147,15 @@ export default function OcrQualityDocumentDetail() {
   return (
     <div className="ocr-quality-document-detail">
       <Breadcrumb items={[{ label: 'OCR Quality', to: '/ocr-quality' }, { label: 'Review queue', to: '/ocr-quality/queue' }, { label: `Document #${documentId}` }]} />
-      <PageHeader title={`Document #${documentId}`} desc="OCR quality assessment detail" />
+      <PageHeader
+        title={`Document #${documentId}`}
+        desc="OCR quality assessment detail"
+        actions={
+          <Button variant="ghost" size="sm" onClick={() => navigate('/ocr-quality/queue')}>
+            ← Back to review queue
+          </Button>
+        }
+      />
 
       {loading && <SkeletonLoader variant="detail-panel" />}
       {!loading && notFound && (
