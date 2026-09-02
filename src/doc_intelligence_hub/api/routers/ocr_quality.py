@@ -22,6 +22,18 @@ Endpoints:
     GET  /api/ocr-quality/documents/{document_id} — Single document's full assessment detail
     GET  /api/ocr-quality/downstream-outcomes     — Distinct downstream_outcome values (filter dropdown)
 
+    Region-level inspection (issue #134, Part 1 — read-only, on-demand):
+    GET  /api/ocr-quality/documents/{document_id}/regions            — Word boxes + flags for one page
+    GET  /api/ocr-quality/documents/{document_id}/pages/{page}/image — Rendered page PNG
+
+    Manual annotations (issue #134, Part 2 — the only mutation endpoints
+    added by this feature; they mutate OWL's own local annotation table
+    only, never Paperless or the OCR quality assessment tables):
+    GET    /api/ocr-quality/documents/{document_id}/annotations                   — List annotations
+    POST   /api/ocr-quality/documents/{document_id}/annotations                   — Create an annotation
+    PATCH  /api/ocr-quality/documents/{document_id}/annotations/{annotation_id}   — Edit an annotation
+    DELETE /api/ocr-quality/documents/{document_id}/annotations/{annotation_id}   — Delete an annotation
+
 All three POST endpoints are fire-and-forget: they validate input, reject
 duplicate concurrently-active runs, and return the ``run_id`` immediately.
 The scan/sample itself continues in a FastAPI ``BackgroundTasks`` job — the
@@ -37,12 +49,14 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from doc_intelligence_hub.api.routers import make_paperless_client
 from doc_intelligence_hub.core.paperless import PaperlessClient
+from doc_intelligence_hub.modules.ocr_quality import annotations as annotations_service
+from doc_intelligence_hub.modules.ocr_quality import region_inspection
 from doc_intelligence_hub.modules.ocr_quality.config import settings as ocr_quality_settings
 from doc_intelligence_hub.modules.ocr_quality.database import InventoryRun
 from doc_intelligence_hub.modules.ocr_quality.database import get_session as get_ocr_quality_session
@@ -521,3 +535,212 @@ async def get_document(document_id: int) -> dict[str, Any]:
             },
         )
     return detail
+
+
+# ---------------------------------------------------------------------------
+# Region-level inspection (issue #134, Part 1) — read-only, on-demand
+# ---------------------------------------------------------------------------
+
+
+async def _fetch_pdf_bytes(request: Request, document_id: int) -> bytes:
+    """Get PDF bytes for a document, reusing the short-lived in-process cache.
+
+    Downloads from Paperless (via the existing preview endpoint, same
+    convention as ``DocumentPreview``/``DocumentViewerModal``) only on a
+    cache miss — never precomputed for the whole corpus.
+    """
+    cached = region_inspection.peek_cached_pdf_bytes(document_id)
+    if cached is not None:
+        return cached
+
+    client = make_paperless_client(request, timeout=30.0)
+    try:
+        pdf_bytes, _content_type = await client.get_document_preview(document_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "paperless_fetch_failed",
+                "message": f"Could not fetch document {document_id} from Paperless.",
+            },
+        ) from exc
+    finally:
+        await client.aclose()
+
+    region_inspection.store_pdf_bytes(document_id, pdf_bytes)
+    return pdf_bytes
+
+
+@router.get("/documents/{document_id}/regions")
+async def get_document_regions(
+    request: Request, document_id: int, page: int = Query(1, ge=1)
+) -> dict[str, Any]:
+    """Word-level geometry + heuristic flags for one page of one document.
+
+    Computed on demand: downloads (or reuses a briefly cached copy of) the
+    document's PDF and parses page geometry with the same ``pdf_loader``
+    used by the Stage 2 profiler — nothing here is precomputed for the
+    whole corpus. Each word is flagged ``duplicate_overlap``,
+    ``bounds_sanity``, and/or ``alignment`` using the same heuristics as
+    ``overlay_scoring.py``, evaluated per-word, and cross-referenced against
+    this document's stored scorer ``reasons`` where the flag category
+    matches.
+    """
+    pdf_bytes = await _fetch_pdf_bytes(request, document_id)
+
+    assessment = _service().get_document_assessment(document_id)
+    document_reasons = (assessment or {}).get("reasons") or []
+
+    regions = region_inspection.build_page_regions(
+        pdf_bytes=pdf_bytes, page_number=page, document_reasons=document_reasons
+    )
+    if regions is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "page_not_found",
+                "message": f"Document {document_id} has no page {page} with parseable geometry.",
+            },
+        )
+    return regions
+
+
+@router.get("/documents/{document_id}/pages/{page}/image")
+async def get_document_page_image(
+    request: Request,
+    document_id: int,
+    page: int,
+    dpi: int = Query(
+        region_inspection.DEFAULT_PAGE_IMAGE_DPI,
+        ge=region_inspection.MIN_PAGE_IMAGE_DPI,
+        le=region_inspection.MAX_PAGE_IMAGE_DPI,
+    ),
+) -> Response:
+    """Render one page of a document as a PNG image, for overlay display.
+
+    Fetched/rendered on demand (same short-lived cache as ``/regions``) —
+    never precomputed for the whole corpus.
+    """
+    if page < 1:
+        raise HTTPException(
+            status_code=422, detail={"code": "invalid_page", "message": "page must be >= 1"}
+        )
+    pdf_bytes = await _fetch_pdf_bytes(request, document_id)
+    rendered = region_inspection.render_page_image(pdf_bytes=pdf_bytes, page_number=page, dpi=dpi)
+    if rendered is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "page_not_found",
+                "message": f"Document {document_id} has no renderable page {page}.",
+            },
+        )
+    png_bytes, _width_px, _height_px = rendered
+    return Response(content=png_bytes, media_type="image/png")
+
+
+# ---------------------------------------------------------------------------
+# Manual annotations (issue #134, Part 2) — the only mutation endpoints in
+# this router; they mutate OWL's own local annotation table only, never
+# Paperless or the OCR quality assessment tables.
+# ---------------------------------------------------------------------------
+
+
+class AnnotationCreateRequest(BaseModel):
+    page: int = Field(default=1, ge=1)
+    x0: float
+    top: float
+    x1: float
+    bottom: float
+    label: str = Field(min_length=1, max_length=100)
+    note: str | None = Field(default=None, max_length=2000)
+    created_by: str | None = Field(default=None, max_length=200)
+
+
+class AnnotationUpdateRequest(BaseModel):
+    page: int | None = Field(default=None, ge=1)
+    x0: float | None = None
+    top: float | None = None
+    x1: float | None = None
+    bottom: float | None = None
+    label: str | None = Field(default=None, min_length=1, max_length=100)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+def _annotations_session_factory() -> Any:
+    init_ocr_quality_db()
+    return get_ocr_quality_session
+
+
+@router.get("/documents/{document_id}/annotations")
+async def list_document_annotations(
+    document_id: int, page: int | None = Query(default=None, ge=1)
+) -> dict[str, Any]:
+    """List saved manual annotations for a document, optionally filtered by page."""
+    session_factory = _annotations_session_factory()
+    return {
+        "annotations": annotations_service.list_annotations(
+            session_factory, document_id=document_id, page=page
+        )
+    }
+
+
+@router.post("/documents/{document_id}/annotations", status_code=201)
+async def create_document_annotation(
+    document_id: int, body: AnnotationCreateRequest
+) -> dict[str, Any]:
+    """Create a manual bounding-box annotation for a document/page."""
+    session_factory = _annotations_session_factory()
+    return annotations_service.create_annotation(
+        session_factory,
+        document_id=document_id,
+        page=body.page,
+        x0=body.x0,
+        top=body.top,
+        x1=body.x1,
+        bottom=body.bottom,
+        label=body.label,
+        note=body.note,
+        created_by=body.created_by,
+    )
+
+
+@router.patch("/documents/{document_id}/annotations/{annotation_id}")
+async def update_document_annotation(
+    document_id: int, annotation_id: int, body: AnnotationUpdateRequest
+) -> dict[str, Any]:
+    """Edit an existing annotation's bbox, label, or note."""
+    session_factory = _annotations_session_factory()
+    updated = annotations_service.update_annotation(
+        session_factory,
+        document_id=document_id,
+        annotation_id=annotation_id,
+        updates=body.model_dump(exclude_unset=True),
+    )
+    if updated is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"No annotation {annotation_id} for document {document_id}",
+            },
+        )
+    return updated
+
+
+@router.delete("/documents/{document_id}/annotations/{annotation_id}", status_code=204)
+async def delete_document_annotation(document_id: int, annotation_id: int) -> Response:
+    """Delete an annotation."""
+    session_factory = _annotations_session_factory()
+    deleted = annotations_service.delete_annotation(
+        session_factory, document_id=document_id, annotation_id=annotation_id
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"No annotation {annotation_id} for document {document_id}",
+            },
+        )
+    return Response(status_code=204)
