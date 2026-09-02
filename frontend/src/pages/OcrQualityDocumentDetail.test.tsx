@@ -158,7 +158,7 @@ describe('OcrQualityDocumentDetail', () => {
 
     await waitFor(() => expect(screen.getByText('Document preview')).toBeInTheDocument());
     expect(mocks.metadata).toHaveBeenCalledWith(501);
-    expect(screen.getByRole('button', { name: /View Document/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /View Document/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /View in Paperless/i })).toHaveAttribute(
       'href',
       'https://paperless.test/documents/501/details',
