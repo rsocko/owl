@@ -13,6 +13,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     AccountIdentifierAnalysis,
     AcquisitionSuggestion,
     Cadence,
+    CandidateOverride,
     CorrespondentAnalysisResult,
     DocumentKind,
     ExpectationEvidence,
@@ -45,11 +46,27 @@ def analyze_correspondent_policy(
     *,
     analyzed_at: datetime | None = None,
     account_identifier_extraction_requested: bool = False,
+    candidate_overrides: dict[int, CandidateOverride] | None = None,
 ) -> CorrespondentAnalysisResult:
-    """Build deterministic, explainable policy suggestions from Paperless metadata."""
-    profile_documents = [
+    """Build deterministic, explainable policy suggestions from Paperless metadata.
+
+    ``candidate_overrides`` carries user-confirmed merge/split/noise decisions keyed
+    by document ID. They take priority over automatic grouping (but not over an
+    existing curated statement series) and persist across reanalysis so reviewed
+    membership is never silently undone.
+    """
+    candidate_overrides = candidate_overrides or {}
+    all_profile_documents = [
         document for document in documents if document.correspondent_id == correspondent_id
     ]
+    profile_documents = [
+        document
+        for document in all_profile_documents
+        if not (
+            (override := candidate_overrides.get(document.id)) is not None and override.excluded
+        )
+    ]
+    excluded_document_count = len(all_profile_documents) - len(profile_documents)
     matching_series = [
         series
         for series in statement_series
@@ -76,17 +93,19 @@ def analyze_correspondent_policy(
         series = series_by_document.get(str(document.id))
         kind: DocumentKind = "statement" if series else classify_document_kind(document)
         normalized = _normalized_document_title(document) or kind
+        override = candidate_overrides.get(document.id)
         account_key = normalize_masked_account_identifier(
             document.account_identifier
         ) or _account_group_key(document.title, identifier_counts)
         metadata_key = _metadata_group_key(document)
-        group_key = (
-            f"series:{series['id']}"
-            if series
-            else (
-                f"account:{account_key}" if account_key else metadata_key or f"title:{normalized}"
-            )
-        )
+        if series:
+            group_key = f"series:{series['id']}"
+        elif override and override.group_key:
+            group_key = f"manual:{override.group_key}"
+        elif account_key:
+            group_key = f"account:{account_key}"
+        else:
+            group_key = metadata_key or f"title:{normalized}"
         key = (kind, group_key)
         groups[key].append(document)
         if series:
@@ -140,6 +159,7 @@ def analyze_correspondent_policy(
         title_pattern_count=len({normalize_title(item.title) for item in profile_documents}),
         tag_family_counts=_tag_family_counts(profile_documents),
         candidate_series_count=len(suggestions),
+        excluded_document_count=excluded_document_count,
     )
     timestamp = (analyzed_at or datetime.now(UTC)).isoformat()
     return CorrespondentAnalysisResult(
@@ -197,8 +217,13 @@ def _build_suggestion(
         else _match_statement_series(discriminator, normalized_title, statement_series)
     )
     reason_codes = ["paperless_history", cadence_reason]
+    signal_reason_code = _group_signal_reason_code(group_key)
+    if signal_reason_code:
+        reason_codes.append(signal_reason_code)
     if bound_series_id:
         reason_codes.append("existing_statement_series")
+    if group_key.startswith("title:") and len(ordered) == 1:
+        reason_codes.append("single_document_low_evidence")
 
     return ExpectationPolicySuggestion(
         suggestion_key=_suggestion_key(correspondent_id, kind, group_key),
@@ -233,15 +258,44 @@ def _suggestion_key(correspondent_id: int, kind: DocumentKind, group_key: str) -
     return f"{correspondent_id}-{kind}-{hashlib.sha256(identity).hexdigest()[:16]}"
 
 
+def _group_signal_reason_code(group_key: str) -> str | None:
+    """Explain which signal established candidate identity, for review transparency."""
+    if group_key.startswith("manual:"):
+        return "manual_candidate_override"
+    if group_key.startswith("series:"):
+        return "existing_statement_series"
+    if group_key.startswith("account:"):
+        return "account_identifier_match"
+    if group_key.startswith("family:"):
+        return "tag_family_match"
+    if group_key.startswith("title:"):
+        return "title_pattern_match"
+    return None
+
+
 def _metadata_group_key(document: DocumentRecord) -> str | None:
     if document.document_type_id is not None:
         return f"document-type-id:{document.document_type_id}"
     document_type = normalize_title(document.document_type or "")
     if document_type:
         return f"document-type:{document_type}"
+    family_key = _family_tag_group_key(document)
+    if family_key:
+        return f"family:{family_key}"
     if document.tag_ids:
         return "tags:" + ",".join(str(tag_id) for tag_id in sorted(set(document.tag_ids)))
     return None
+
+
+def _family_tag_group_key(document: DocumentRecord) -> str | None:
+    """Group by discriminating ``FAMILY:VALUE`` tags (e.g. ``DOG:Quinn``).
+
+    This is independent of title text and of unrelated one-off tags, so a
+    correspondent without a configured document type still groups reliably
+    when tagging conventions like this are present.
+    """
+    family_tags = sorted({tag.strip().casefold() for tag in document.tags if _tag_family(tag)})
+    return "|".join(family_tags) or None
 
 
 def _dominant_title_pattern(documents: list[DocumentRecord]) -> str:

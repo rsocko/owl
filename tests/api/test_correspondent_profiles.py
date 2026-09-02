@@ -943,6 +943,7 @@ def test_selected_policy_apply_is_exact_audited_and_bounded_undo(
             "operation": finding["operation"],
         },
     )
+
     assert conflicted.json()["error_code"] == "undo_conflict"
 
     mock_paperless.get_document.return_value = {
@@ -977,6 +978,81 @@ def test_selected_policy_apply_is_exact_audited_and_bounded_undo(
         "paperless_policy_correction",
     ]
     assert events[1]["undone"] is True
+
+
+def test_candidate_overrides_require_existing_profile(client, app, tmp_path) -> None:
+    _configure_statement_database(app, tmp_path)
+
+    for response in (
+        client.get("/api/statements/correspondent-profiles/42/candidate-overrides"),
+        client.put(
+            "/api/statements/correspondent-profiles/42/candidate-overrides",
+            json={"document_ids": [1], "group_key": "household-bills"},
+        ),
+        client.request(
+            "DELETE",
+            "/api/statements/correspondent-profiles/42/candidate-overrides",
+            json={"document_ids": [1]},
+        ),
+    ):
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "correspondent_profile_not_found"
+
+
+def test_candidate_overrides_merge_exclude_and_clear(client, app, mock_paperless, tmp_path) -> None:
+    _configure_statement_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    sync = client.post("/api/statements/correspondent-profiles/sync")
+    assert sync.status_code == 200
+
+    assert client.get("/api/statements/correspondent-profiles/42/candidate-overrides").json() == []
+
+    merge = client.put(
+        "/api/statements/correspondent-profiles/42/candidate-overrides",
+        json={"document_ids": [1, 2], "group_key": "household-bills"},
+    )
+    assert merge.status_code == 200
+    merged = merge.json()
+    assert {item["document_id"] for item in merged} == {1, 2}
+    assert all(item["group_key"] == "household-bills" for item in merged)
+    assert all(item["excluded"] is False for item in merged)
+
+    exclude = client.put(
+        "/api/statements/correspondent-profiles/42/candidate-overrides",
+        json={"document_ids": [3], "excluded": True},
+    )
+    assert exclude.status_code == 200
+    excluded_entry = next(item for item in exclude.json() if item["document_id"] == 3)
+    assert excluded_entry["excluded"] is True
+
+    listed = client.get("/api/statements/correspondent-profiles/42/candidate-overrides").json()
+    assert {item["document_id"] for item in listed} == {1, 2, 3}
+
+    cleared = client.request(
+        "DELETE",
+        "/api/statements/correspondent-profiles/42/candidate-overrides",
+        json={"document_ids": [3]},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json() == {"cleared": 1}
+
+    remaining = client.get("/api/statements/correspondent-profiles/42/candidate-overrides").json()
+    assert {item["document_id"] for item in remaining} == {1, 2}
+
+
+def test_candidate_override_requires_group_key_or_excluded(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    _configure_statement_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    assert client.post("/api/statements/correspondent-profiles/sync").status_code == 200
+
+    response = client.put(
+        "/api/statements/correspondent-profiles/42/candidate-overrides",
+        json={"document_ids": [1]},
+    )
+
+    assert response.status_code == 422
 
 
 def test_policy_apply_reports_tampered_and_stale_operations_independently(

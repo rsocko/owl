@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime
 from doc_intelligence_hub.modules.statements.correspondent_analysis import (
     analyze_correspondent_policy,
 )
+from doc_intelligence_hub.modules.statements.correspondent_models import CandidateOverride
 from doc_intelligence_hub.modules.statements.models import DocumentRecord
 
 
@@ -315,3 +316,114 @@ def test_curated_series_membership_overrides_ambiguous_document_kind() -> None:
     assert len(result.suggestions) == 1
     assert result.suggestions[0].kind == "statement"
     assert result.suggestions[0].statement_series_id == "checking"
+
+
+def test_family_tag_grouping_used_when_no_document_type() -> None:
+    documents = [
+        _document(
+            month,
+            f"Vet visit {date(2026, month, 1):%B %Y}",
+            date(2026, month, 15),
+            document_type_id=None,
+            document_type=None,
+            tag_ids=[10, animal_tag],
+            tags=["Veterinary", animal_name],
+        )
+        for month, animal_tag, animal_name in (
+            (1, 21, "DOG:Quinn"),
+            (2, 22, "DOG:Avery"),
+            (3, 21, "DOG:Quinn"),
+        )
+    ]
+
+    result = analyze_correspondent_policy(42, "West Street Vet", documents, [])
+
+    assert len(result.suggestions) == 2
+    grouped_ids = sorted(suggestion.document_ids for suggestion in result.suggestions)
+    assert grouped_ids == [[1, 3], [2]]
+    for suggestion in result.suggestions:
+        assert "tag_family_match" in suggestion.evidence.reason_codes
+
+
+def test_candidate_override_merges_documents_across_title_groups() -> None:
+    documents = [
+        DocumentRecord(
+            id=1,
+            title="January download",
+            correspondent_id=42,
+            correspondent_name="Example Bank",
+            document_type_id=None,
+            document_type=None,
+            created=date(2026, 1, 3),
+            tag_ids=[],
+            tags=[],
+        ),
+        DocumentRecord(
+            id=2,
+            title="Completely different label",
+            correspondent_id=42,
+            correspondent_name="Example Bank",
+            document_type_id=None,
+            document_type=None,
+            created=date(2026, 2, 3),
+            tag_ids=[],
+            tags=[],
+        ),
+    ]
+
+    unmerged = analyze_correspondent_policy(42, "Example Bank", documents, [])
+    assert len(unmerged.suggestions) == 2
+
+    overrides = {
+        1: CandidateOverride(document_id=1, group_key="household-bills"),
+        2: CandidateOverride(document_id=2, group_key="household-bills"),
+    }
+    merged = analyze_correspondent_policy(
+        42, "Example Bank", documents, [], candidate_overrides=overrides
+    )
+
+    assert len(merged.suggestions) == 1
+    suggestion = merged.suggestions[0]
+    assert suggestion.document_ids == [1, 2]
+    assert "manual_candidate_override" in suggestion.evidence.reason_codes
+    assert merged.observed_summary.excluded_document_count == 0
+
+
+def test_candidate_override_excludes_document_from_suggestions() -> None:
+    documents = [
+        _document(1, "Checking January", date(2026, 1, 3)),
+        _document(2, "Checking February", date(2026, 2, 3)),
+        _document(3, "Unrelated junk mail", date(2026, 3, 3)),
+    ]
+    overrides = {3: CandidateOverride(document_id=3, excluded=True)}
+
+    result = analyze_correspondent_policy(
+        42, "Example Bank", documents, [], candidate_overrides=overrides
+    )
+
+    assert result.observed_summary.document_count == 2
+    assert result.observed_summary.excluded_document_count == 1
+    all_document_ids = {
+        document_id for suggestion in result.suggestions for document_id in suggestion.document_ids
+    }
+    assert 3 not in all_document_ids
+
+
+def test_single_document_title_only_group_flags_low_evidence() -> None:
+    document = DocumentRecord(
+        id=1,
+        title="One-off note",
+        correspondent_id=42,
+        correspondent_name="Example Bank",
+        document_type_id=None,
+        document_type=None,
+        created=date(2026, 1, 3),
+        tag_ids=[],
+        tags=[],
+    )
+
+    result = analyze_correspondent_policy(42, "Example Bank", [document], [])
+
+    suggestion = result.suggestions[0]
+    assert "title_pattern_match" in suggestion.evidence.reason_codes
+    assert "single_document_low_evidence" in suggestion.evidence.reason_codes

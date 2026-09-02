@@ -31,6 +31,9 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSource,
     AcquisitionSourceCreate,
     AcquisitionSourceUpdate,
+    CandidateOverride,
+    CandidateOverrideClearRequest,
+    CandidateOverrideRequest,
     CorrespondentAnalysisResult,
     CorrespondentProfile,
     CorrespondentProfileUpdate,
@@ -610,6 +613,78 @@ async def update_document_expectation(
             return service.update_expectation(expectation_id, body)
         except (KeyError, ValueError) as exc:
             _raise_policy_error(exc)
+    finally:
+        service.close()
+
+
+@router.get(
+    "/correspondent-profiles/{correspondent_id}/candidate-overrides",
+    response_model=list[CandidateOverride],
+    summary="List reviewed candidate membership overrides for a correspondent",
+)
+async def list_candidate_overrides(
+    request: Request, correspondent_id: int
+) -> list[CandidateOverride]:
+    service = _get_policy_service(request)
+    try:
+        if service.get_profile(correspondent_id) is None:
+            raise_api_error(
+                404,
+                "correspondent_profile_not_found",
+                "Correspondent profile not found.",
+            )
+        return service.list_candidate_overrides(correspondent_id)
+    finally:
+        service.close()
+
+
+@router.put(
+    "/correspondent-profiles/{correspondent_id}/candidate-overrides",
+    response_model=list[CandidateOverride],
+    summary="Merge documents into one candidate, or mark them noise",
+)
+async def set_candidate_overrides(
+    request: Request,
+    correspondent_id: int,
+    body: CandidateOverrideRequest,
+) -> list[CandidateOverride]:
+    service = _get_policy_service(request)
+    try:
+        if service.get_profile(correspondent_id) is None:
+            raise_api_error(
+                404,
+                "correspondent_profile_not_found",
+                "Correspondent profile not found.",
+            )
+        return service.set_candidate_overrides(
+            correspondent_id,
+            body.document_ids,
+            group_key=body.group_key,
+            excluded=body.excluded,
+        )
+    finally:
+        service.close()
+
+
+@router.delete(
+    "/correspondent-profiles/{correspondent_id}/candidate-overrides",
+    summary="Revert documents to automatic candidate grouping",
+)
+async def clear_candidate_overrides(
+    request: Request,
+    correspondent_id: int,
+    body: CandidateOverrideClearRequest,
+) -> dict[str, int]:
+    service = _get_policy_service(request)
+    try:
+        if service.get_profile(correspondent_id) is None:
+            raise_api_error(
+                404,
+                "correspondent_profile_not_found",
+                "Correspondent profile not found.",
+            )
+        cleared = service.clear_candidate_overrides(correspondent_id, body.document_ids)
+        return {"cleared": cleared}
     finally:
         service.close()
 
