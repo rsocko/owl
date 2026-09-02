@@ -17,14 +17,14 @@ def words_for_line(
     x = start_x
     for i, w in enumerate(words):
         width = max(len(w) * char_w * 0.6, char_w)
-        result.append(
-            make_word(w, x, top, x + width, top + 12.0, order_start + i)
-        )
+        result.append(make_word(w, x, top, x + width, top + 12.0, order_start + i))
         x += width + 5.0
     return result
 
 
-def make_digital_page(page_number: int = 1, width: float = 600.0, height: float = 800.0) -> PdfPageData:
+def make_digital_page(
+    page_number: int = 1, width: float = 600.0, height: float = 800.0
+) -> PdfPageData:
     """A clean digital-native page: text only, no images, well-ordered."""
     words: list[WordBox] = []
     order = 0
@@ -36,7 +36,9 @@ def make_digital_page(page_number: int = 1, width: float = 600.0, height: float 
         )
         words.extend(line_words)
         order += len(line_words)
-    return PdfPageData(page_number=page_number, width=width, height=height, words=words, char_count=200)
+    return PdfPageData(
+        page_number=page_number, width=width, height=height, words=words, char_count=200
+    )
 
 
 def make_scanned_overlay_page(
@@ -58,18 +60,29 @@ def make_scanned_overlay_page(
         words.extend(line_words)
         order += len(line_words)
     return PdfPageData(
-        page_number=page_number, width=width, height=height, words=words, images=[image], char_count=180
+        page_number=page_number,
+        width=width,
+        height=height,
+        words=words,
+        images=[image],
+        char_count=180,
     )
 
 
-def make_image_only_page(page_number: int = 1, width: float = 600.0, height: float = 800.0) -> PdfPageData:
+def make_image_only_page(
+    page_number: int = 1, width: float = 600.0, height: float = 800.0
+) -> PdfPageData:
     """A scanned page with no OCR text layer at all."""
     image = ImageBox(x0=0.0, top=0.0, x1=width, bottom=height)
-    return PdfPageData(page_number=page_number, width=width, height=height, images=[image], char_count=0)
+    return PdfPageData(
+        page_number=page_number, width=width, height=height, images=[image], char_count=0
+    )
 
 
 def make_error_page(page_number: int = 1) -> PdfPageData:
-    return PdfPageData(page_number=page_number, width=0.0, height=0.0, error="could not decode stream")
+    return PdfPageData(
+        page_number=page_number, width=0.0, height=0.0, error="could not decode stream"
+    )
 
 
 def make_minimal_pdf_bytes(text: str = "Hello World", width: int = 200, height: int = 100) -> bytes:

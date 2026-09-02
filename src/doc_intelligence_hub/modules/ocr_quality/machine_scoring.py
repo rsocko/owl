@@ -38,7 +38,9 @@ _DATE_RE = re.compile(
 )
 _CURRENCY_RE = re.compile(r"[$€£]\s?\d[\d,]*\.\d{2}\b|\b\d[\d,]*\.\d{2}\s?(?:USD|EUR|GBP)\b")
 _CODE_RE = re.compile(r"\b(?:[A-Z]\d{2}\.?[0-9A-Z]{0,4}|\d{5})\b")
-_IDENTIFIER_RE = re.compile(r"\b(?=[A-Za-z0-9-]{6,20}\b)(?=[^ ]*\d)(?=[^ ]*[A-Za-z])[A-Za-z0-9-]+\b")
+_IDENTIFIER_RE = re.compile(
+    r"\b(?=[A-Za-z0-9-]{6,20}\b)(?=[^ ]*\d)(?=[^ ]*[A-Za-z])[A-Za-z0-9-]+\b"
+)
 
 _LABEL_VALUE_RE = re.compile(r"^[\w \-/()#]{1,40}:\s*\S")
 _MULTI_SPACE_COLUMNS_RE = re.compile(r"(\t| {2,})\S+(\t| {2,})\S+")

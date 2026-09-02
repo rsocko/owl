@@ -121,7 +121,9 @@ def _dominant_classification(pages: list[PageProfile]) -> PageClassification | N
     if not pages:
         return None
 
-    non_error = [p.classification for p in pages if p.classification != PageClassification.UNSUPPORTED_ERROR]
+    non_error = [
+        p.classification for p in pages if p.classification != PageClassification.UNSUPPORTED_ERROR
+    ]
     if not non_error:
         return PageClassification.UNSUPPORTED_ERROR
 

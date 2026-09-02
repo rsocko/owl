@@ -62,7 +62,9 @@ def test_duplicate_overlapping_text_lowers_signal() -> None:
 
 def test_out_of_bounds_words_lower_bounds_sanity() -> None:
     page = make_digital_page(1, width=100.0, height=100.0)
-    out_of_bounds_word = WordBox(text="Overflow", x0=90.0, top=90.0, x1=250.0, bottom=250.0, order_index=999)
+    out_of_bounds_word = WordBox(
+        text="Overflow", x0=90.0, top=90.0, x1=250.0, bottom=250.0, order_index=999
+    )
     page.words.append(out_of_bounds_word)
     profile = build_document_profile(pdf_pages=[page])
     result = score_overlay(pdf_pages=[page], profile=profile, config=DEFAULT_CONFIG)
@@ -92,7 +94,9 @@ def test_shuffled_reading_order_lowers_signal() -> None:
     profile = build_document_profile(pdf_pages=[shuffled_page])
 
     ordered_result = score_overlay(pdf_pages=[ordered_page], profile=profile, config=DEFAULT_CONFIG)
-    shuffled_result = score_overlay(pdf_pages=[shuffled_page], profile=profile, config=DEFAULT_CONFIG)
+    shuffled_result = score_overlay(
+        pdf_pages=[shuffled_page], profile=profile, config=DEFAULT_CONFIG
+    )
 
     assert ordered_result.signals["reading_order"] == 1.0
     assert shuffled_result.signals["reading_order"] < ordered_result.signals["reading_order"]

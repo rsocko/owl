@@ -96,4 +96,3 @@ def _load_page(page_number: int, page) -> PdfPageData:
             height=0.0,
             error=str(exc),
         )
-
