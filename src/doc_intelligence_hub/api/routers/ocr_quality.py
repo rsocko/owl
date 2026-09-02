@@ -149,4 +149,3 @@ async def get_document(document_id: int) -> dict[str, Any]:
             },
         )
     return detail
-

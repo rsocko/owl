@@ -128,8 +128,14 @@ def _seed_scored_document(
                 overlay_score=overlay_score,
                 machine_score=machine_score,
                 review_status=review_status,
-                reasons=[{"code": "status.combined_score", "message": "ok", "severity": "info",
-                          "component": "profile"}],
+                reasons=[
+                    {
+                        "code": "status.combined_score",
+                        "message": "ok",
+                        "severity": "info",
+                        "component": "profile",
+                    }
+                ],
                 document_profile={"page_count": 1, "dominant_classification": "digital_text"},
                 quality_scorer_version="ocr-quality-scoring-v1",
             )

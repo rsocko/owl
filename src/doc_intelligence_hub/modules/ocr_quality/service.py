@@ -688,9 +688,7 @@ class OcrQualityInventoryService:
                 .limit(max(1, min(limit, 200)))
                 .all()
             )
-            rows.sort(
-                key=lambda r: self._RISK_ORDER.get(r.review_status or "", 4)
-            )
+            rows.sort(key=lambda r: self._RISK_ORDER.get(r.review_status or "", 4))
             return {
                 "documents": [_assessment_summary(row) for row in rows],
                 "total": total,
@@ -724,9 +722,7 @@ class OcrQualityInventoryService:
             latest = self._latest_assessment_query(db)
             total = latest.count()
 
-            status_counts = Counter(
-                (row.review_status or "unscored") for row in latest.all()
-            )
+            status_counts = Counter((row.review_status or "unscored") for row in latest.all())
 
             def _decile_distribution(column) -> dict[str, int]:
                 buckets: Counter[str] = Counter()
