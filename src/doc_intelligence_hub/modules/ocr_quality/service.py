@@ -619,7 +619,10 @@ class OcrQualityInventoryService:
                 .order_by(DocumentAssessment.id.desc())
                 .first()
             )
-            return _assessment_detail(refreshed)
+            return _assessment_detail(
+                refreshed,
+                has_stage2_analysis=_has_stage2_analysis(db, document_id),
+            )
         finally:
             db.close()
 
@@ -870,12 +873,7 @@ class OcrQualityInventoryService:
             # deep Stage 2 analysis" — independent of whether overlay_score
             # happens to be populated (e.g. profiling could have run but
             # failed to produce a score).
-            has_stage2_analysis = (
-                db.query(PdfProfile.id)
-                .filter(PdfProfile.document_id == document_id)
-                .first()
-                is not None
-            )
+            has_stage2_analysis = _has_stage2_analysis(db, document_id)
             return _assessment_detail(row, has_stage2_analysis=has_stage2_analysis)
         finally:
             db.close()
@@ -937,6 +935,10 @@ def _assessment_summary(row: DocumentAssessment) -> dict[str, Any]:
         "quality_scorer_version": row.quality_scorer_version,
         "assessed_at": row.updated_at.isoformat() if row.updated_at else None,
     }
+
+
+def _has_stage2_analysis(db: Session, document_id: int) -> bool:
+    return db.query(PdfProfile.id).filter(PdfProfile.document_id == document_id).first() is not None
 
 
 def _assessment_detail(row: DocumentAssessment, *, has_stage2_analysis: bool) -> dict[str, Any]:
