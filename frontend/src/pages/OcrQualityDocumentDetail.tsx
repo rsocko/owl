@@ -58,6 +58,10 @@ export type DocumentDetail = {
   legacy_action_queue_score?: number | null;
   reasons: Reason[];
   document_profile?: DocumentProfile | null;
+  // Whether Stage 2 (deeper per-document PDF profiling / overlay scoring) has
+  // ever run for this document — independent of whether overlay_score ended
+  // up populated (profiling can run without producing a usable score).
+  has_stage2_analysis?: boolean;
 };
 
 const SEVERITY_TONE: Record<string, Tone> = { info: 'info', warning: 'warn', blocking: 'err' };
@@ -319,9 +323,16 @@ export default function OcrQualityDocumentDetail() {
                 <span className="text-muted">Stage-1 preliminary heuristic: {detail.preliminary_score}</span>
               )}
             </div>
-            {detail.overlay_score == null && (
+            {!detail.has_stage2_analysis && (
               <div className="ocr-unavailable-note">
-                Overlay score is unavailable — this document has not yet been PDF-profiled by the Stage 2 stratified sample.
+                <Badge tone="info">Stage 2 not run</Badge> This document has not had deep Stage 2
+                analysis yet — overlay/geometry signals below (and in any candidate comparison) may
+                be incomplete or unavailable. Only Stage 1 (corpus-wide machine scoring) has run.
+              </div>
+            )}
+            {detail.has_stage2_analysis && detail.overlay_score == null && (
+              <div className="ocr-unavailable-note">
+                Stage 2 has run for this document, but no overlay score was produced.
               </div>
             )}
             <div className="ocr-force-stage2">
@@ -359,7 +370,12 @@ export default function OcrQualityDocumentDetail() {
             </div>
           </Card>
 
-          <OcrCandidatesPanel documentId={detail.document_id} />
+          <OcrCandidatesPanel
+            documentId={detail.document_id}
+            hasStage2Analysis={detail.has_stage2_analysis ?? false}
+            currentOverlayScore={detail.overlay_score}
+            currentMachineScore={detail.machine_score}
+          />
         </>
       )}
     </div>
