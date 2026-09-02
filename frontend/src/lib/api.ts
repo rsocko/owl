@@ -337,5 +337,21 @@ export const endpoints = {
       runId: string,
       body?: { sample_size?: number; seed?: string; min_per_stratum?: number; max_pages?: number },
     ) => api.post(`/api/ocr-quality/runs/${runId}/sample`, body ?? {}),
+    candidates: {
+      request: (body: { document_ids: number[]; engines?: string[]; settings?: unknown; actor?: string }) =>
+        api.post<{ candidate_ids: string[]; count: number }>('/api/ocr-quality/candidates', body),
+      list: (params?: { document_id?: number; state?: string }) => {
+        const qs = new URLSearchParams();
+        if (params?.document_id != null) qs.set('document_id', String(params.document_id));
+        if (params?.state) qs.set('state', params.state);
+        const query = qs.toString();
+        return api.get(`/api/ocr-quality/candidates${query ? `?${query}` : ''}`);
+      },
+      get: (candidateId: string) => api.get(`/api/ocr-quality/candidates/${candidateId}`),
+      text: (candidateId: string) => api.get(`/api/ocr-quality/candidates/${candidateId}/text`),
+      decide: (candidateId: string, body: { decision: 'accepted' | 'rejected'; reason?: string; actor?: string }) =>
+        api.post(`/api/ocr-quality/candidates/${candidateId}/decision`, body),
+      cancel: (candidateId: string) => api.post(`/api/ocr-quality/candidates/${candidateId}/cancel`),
+    },
   },
 };

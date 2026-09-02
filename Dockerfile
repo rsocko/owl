@@ -69,7 +69,9 @@ COPY --from=builder /build/dist/*.whl /tmp/
 ENV SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-amd64 \
     SUPERCRONIC_SHA1SUM=71b0d58cc53f6bd72cf2f293e09e294b79c666d8
 RUN pip install --no-cache-dir /tmp/*.whl && rm -rf /tmp/*.whl && \
-    apt-get update && apt-get install -y --no-install-recommends gosu curl && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        gosu curl \
+        tesseract-ocr ghostscript qpdf unpaper pngquant && \
     curl -fsSLo /usr/local/bin/supercronic "$SUPERCRONIC_URL" && \
     echo "$SUPERCRONIC_SHA1SUM /usr/local/bin/supercronic" | sha1sum -c - && \
     chmod +x /usr/local/bin/supercronic && \

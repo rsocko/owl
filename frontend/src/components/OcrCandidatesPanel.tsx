@@ -1,0 +1,276 @@
+/**
+ * OCR candidate generation, comparison, and accept/reject UI (issue #18, slice 1).
+ *
+ * Everything here is read-only-to-Paperless: generation stages candidates in
+ * OWL's own tables, and accepting/rejecting a candidate only records a
+ * decision in those same tables. Nothing on this page ever changes the live
+ * Paperless document — applying an accepted candidate as a new Paperless
+ * version, version preservation, and rollback are a later slice gated on
+ * issue #114.
+ */
+import { useCallback, useEffect, useState } from 'react';
+import { Badge, Button, Card, EmptyState, type Tone } from './ui';
+import { endpoints } from '../lib/api';
+
+type CandidateSummary = {
+  candidate_id: string;
+  document_id: number;
+  state: string;
+  engine: string;
+  model_version?: string | null;
+  overlay_score?: number | null;
+  machine_score?: number | null;
+  page_count: number;
+  requested_at?: string | null;
+  completed_at?: string | null;
+  decision?: string | null;
+  expires_at?: string | null;
+};
+
+type ComparisonSummary = {
+  comparison_id: string;
+  blocking_findings: string[];
+  text_diff_summary: Record<string, unknown>;
+  overlay_score_delta?: number | null;
+  machine_score_delta?: number | null;
+  performed_at?: string | null;
+};
+
+type CandidateDetail = CandidateSummary & {
+  comparison: ComparisonSummary | null;
+  failure_reason?: string | null;
+  decision_reason?: string | null;
+  decided_at?: string | null;
+  actor?: string | null;
+};
+
+const ENGINE_LABELS: Record<string, string> = {
+  'ocrmypdf-tesseract-5': 'OCRmyPDF / Tesseract 5',
+  'azure-prebuilt-read': 'Azure Document Intelligence (prebuilt-read)',
+};
+
+const ACTIVE_STATES = new Set(['requested', 'running']);
+
+function stateTone(state: string): Tone {
+  switch (state) {
+    case 'ready': return 'info';
+    case 'accepted': return 'ok';
+    case 'rejected': return 'muted';
+    case 'expired': return 'muted';
+    case 'failed': return 'err';
+    case 'running': return 'warn';
+    default: return 'muted';
+  }
+}
+
+function formatScoreDelta(delta?: number | null) {
+  if (delta == null) return '—';
+  const sign = delta > 0 ? '+' : '';
+  return `${sign}${delta}`;
+}
+
+export default function OcrCandidatesPanel({ documentId }: { documentId: number }) {
+  const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [engines, setEngines] = useState<string[]>(['ocrmypdf-tesseract-5']);
+  const [requesting, setRequesting] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<CandidateDetail | null>(null);
+  const [text, setText] = useState<{ current_text: string | null; candidate_text: string | null } | null>(null);
+  const [deciding, setDeciding] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const loadCandidates = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    endpoints.ocrQuality.candidates
+      .list({ document_id: documentId })
+      .then((data) => setCandidates((data as { candidates: CandidateSummary[] }).candidates))
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load candidates.'))
+      .finally(() => setLoading(false));
+  }, [documentId]);
+
+  useEffect(() => {
+    loadCandidates();
+  }, [loadCandidates]);
+
+  // Lightweight polling while any candidate is still generating, so the
+  // reviewer doesn't have to manually refresh to see it flip to READY/FAILED.
+  useEffect(() => {
+    if (!candidates.some((c) => ACTIVE_STATES.has(c.state))) return;
+    const timer = setInterval(loadCandidates, 3000);
+    return () => clearInterval(timer);
+  }, [candidates, loadCandidates]);
+
+  const loadDetail = useCallback((candidateId: string) => {
+    setSelectedId(candidateId);
+    setDetail(null);
+    setText(null);
+    setActionError(null);
+    endpoints.ocrQuality.candidates
+      .get(candidateId)
+      .then((data) => setDetail(data as CandidateDetail))
+      .catch((err) => setActionError(err instanceof Error ? err.message : 'Failed to load candidate.'));
+    endpoints.ocrQuality.candidates
+      .text(candidateId)
+      .then((data) => setText(data as { current_text: string | null; candidate_text: string | null }))
+      .catch(() => setText(null));
+  }, []);
+
+  const toggleEngine = (engine: string) => {
+    setEngines((prev) => (prev.includes(engine) ? prev.filter((e) => e !== engine) : [...prev, engine]));
+  };
+
+  const requestGeneration = () => {
+    if (engines.length === 0) return;
+    setRequesting(true);
+    setActionError(null);
+    endpoints.ocrQuality.candidates
+      .request({ document_ids: [documentId], engines })
+      .then(() => loadCandidates())
+      .catch((err) => setActionError(err instanceof Error ? err.message : 'Failed to request candidate generation.'))
+      .finally(() => setRequesting(false));
+  };
+
+  const decide = (decision: 'accepted' | 'rejected') => {
+    if (!selectedId) return;
+    setDeciding(true);
+    setActionError(null);
+    endpoints.ocrQuality.candidates
+      .decide(selectedId, { decision })
+      .then(() => {
+        loadCandidates();
+        loadDetail(selectedId);
+      })
+      .catch((err) => setActionError(err instanceof Error ? err.message : `Failed to ${decision} candidate.`))
+      .finally(() => setDeciding(false));
+  };
+
+  return (
+    <Card title="OCR candidates">
+      <div className="ocr-stub-note">
+        Generating and comparing candidates never changes the live Paperless document. Accepting a
+        candidate only records a decision in OWL's own records — applying it as the new Paperless
+        version is a later step, not yet built (tracked in issues #18/#114).
+      </div>
+
+      <div className="ocr-candidate-generate" style={{ marginTop: 12, marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          {Object.entries(ENGINE_LABELS).map(([value, label]) => (
+            <label key={value} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={engines.includes(value)}
+                onChange={() => toggleEngine(value)}
+              />
+              {label}
+            </label>
+          ))}
+          <Button onClick={requestGeneration} disabled={requesting || engines.length === 0}>
+            {requesting ? 'Requesting…' : 'Generate candidates'}
+          </Button>
+        </div>
+      </div>
+
+      {actionError && <div className="ocr-unavailable-note">{actionError}</div>}
+
+      {loading && <div className="text-muted">Loading candidates…</div>}
+      {!loading && error && <div className="ocr-unavailable-note">{error}</div>}
+      {!loading && !error && candidates.length === 0 && (
+        <EmptyState icon="🧾" title="No candidates yet" desc="Generate a candidate above to compare it against the current document." />
+      )}
+      {!loading && !error && candidates.length > 0 && (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Engine</th>
+              <th>State</th>
+              <th>Overlay</th>
+              <th>Machine</th>
+              <th>Pages</th>
+              <th>Decision</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {candidates.map((c) => (
+              <tr key={c.candidate_id} className={selectedId === c.candidate_id ? 'is-selected' : ''}>
+                <td>{ENGINE_LABELS[c.engine] ?? c.engine}</td>
+                <td><Badge tone={stateTone(c.state)}>{c.state}</Badge></td>
+                <td>{c.overlay_score == null ? '—' : c.overlay_score}</td>
+                <td>{c.machine_score == null ? '—' : c.machine_score}</td>
+                <td>{c.page_count || '—'}</td>
+                <td>{c.decision ?? '—'}</td>
+                <td>
+                  <Button variant="ghost" size="sm" onClick={() => loadDetail(c.candidate_id)}>
+                    View
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {selectedId && detail && (
+        <div className="ocr-candidate-detail" style={{ marginTop: 20 }}>
+          <h3>Candidate {detail.candidate_id.slice(0, 8)}</h3>
+          {detail.failure_reason && <div className="ocr-unavailable-note">Generation failed: {detail.failure_reason}</div>}
+
+          {detail.comparison && (
+            <div className="ocr-comparison-summary" style={{ marginBottom: 12 }}>
+              <div>
+                Overlay Δ: <strong>{formatScoreDelta(detail.comparison.overlay_score_delta)}</strong>{' '}
+                &nbsp;Machine Δ: <strong>{formatScoreDelta(detail.comparison.machine_score_delta)}</strong>
+              </div>
+              {detail.comparison.blocking_findings.length > 0 ? (
+                <div className="ocr-blocking-findings">
+                  {detail.comparison.blocking_findings.map((f) => (
+                    <Badge key={f} tone="warn">{f}</Badge>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-muted">No blocking findings.</div>
+              )}
+              <div className="ocr-comparison-note text-muted">
+                A higher score is informational only — it does not authorize acceptance. A human
+                reviewer makes the final call.
+              </div>
+            </div>
+          )}
+
+          {text && (
+            <div className="ocr-text-diff" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <h4>Current (live Paperless)</h4>
+                <pre className="ocr-text-pane">{text.current_text || '(no text)'}</pre>
+              </div>
+              <div>
+                <h4>Candidate ({ENGINE_LABELS[detail.engine] ?? detail.engine})</h4>
+                <pre className="ocr-text-pane">{text.candidate_text || '(no text)'}</pre>
+              </div>
+            </div>
+          )}
+
+          {detail.state === 'ready' && (
+            <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+              <Button variant="success" onClick={() => decide('accepted')} disabled={deciding}>
+                Accept
+              </Button>
+              <Button variant="danger" onClick={() => decide('rejected')} disabled={deciding}>
+                Reject
+              </Button>
+            </div>
+          )}
+          {detail.decision && (
+            <div className="text-muted" style={{ marginTop: 8 }}>
+              Decision recorded: <strong>{detail.decision}</strong> by {detail.actor ?? 'unknown'} — this has
+              not modified the live Paperless document.
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}

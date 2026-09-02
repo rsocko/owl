@@ -33,6 +33,10 @@ dependencies = [
   "click>=8.0",
   "rich>=13.0",
   "apscheduler>=3.10,<4",
+  "ocrmypdf>=16.0",
+  "azure-ai-documentintelligence>=1.0.0",
+  "pypdf>=5.0",
+  "reportlab>=4.0",
 ]
 
 [project.urls]
@@ -45,7 +49,6 @@ dev = [
   "pytest>=8.3.0",
   "pytest-asyncio>=0.24.0",
   "ruff>=0.8.0",
-  "reportlab>=4.0",
 ]
 dashboard = [
   "streamlit>=1.30",

@@ -10,6 +10,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -148,6 +149,72 @@ class RunFailure(Base):
     reason_code = Column(String, nullable=False)
     error_type = Column(String, nullable=True)  # exception class name only
     occurred_at = Column(DateTime, default=datetime.utcnow)
+
+
+class OcrQualityCandidate(Base):
+    """Candidate OCR result for a document (issue #18, slice 1).
+
+    Storage-only: no field here ever reflects a Paperless write. The actual
+    candidate PDF/text bytes live on disk under ``settings.candidate_storage_dir``
+    (keyed by ``candidate_id``); only checksums/paths are persisted here,
+    matching the "no raw OCR text in the DB" precedent set by
+    ``DocumentAssessment``. Applying an accepted candidate to Paperless and
+    the accompanying ``InvalidationRecord`` (issue #114) are a later slice —
+    this table intentionally has no such column yet.
+    """
+
+    __tablename__ = "ocr_quality_candidates"
+    __table_args__ = (
+        Index("idx_candidate_document_state", "document_id", "state"),
+        Index("idx_candidate_state_expires", "state", "expires_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    candidate_id = Column(String, nullable=False, unique=True, index=True)
+    document_id = Column(Integer, nullable=False, index=True)
+    source_version_id = Column(String, nullable=True)
+    source_checksum = Column(String, nullable=False)
+
+    state = Column(String, nullable=False, default="requested", index=True)
+
+    engine = Column(String, nullable=False)
+    model_version = Column(String, nullable=False)
+    settings = Column(JSON, nullable=False, default=dict)
+
+    candidate_pdf_checksum = Column(String, nullable=True)
+    candidate_text_checksum = Column(String, nullable=True)
+
+    page_count = Column(Integer, nullable=False, default=0)
+    runtime_seconds = Column(Float, nullable=True)
+    cost_estimate = Column(Float, nullable=True)
+    provider_operation_id = Column(String, nullable=True)
+
+    overlay_score = Column(Float, nullable=True)
+    machine_score = Column(Float, nullable=True)
+    scorer_version = Column(String, nullable=True)
+
+    comparison_id = Column(String, nullable=True, index=True)
+    blocking_findings = Column(JSON, nullable=True)
+    text_diff_summary = Column(JSON, nullable=True)
+    overlay_score_delta = Column(Float, nullable=True)
+    machine_score_delta = Column(Float, nullable=True)
+    comparison_performed_at = Column(DateTime, nullable=True)
+
+    actor = Column(String, nullable=False, default="system")
+    decision = Column(String, nullable=True)  # "accepted" | "rejected"
+    decision_reason = Column(String, nullable=True)
+    decided_at = Column(DateTime, nullable=True)
+
+    failure_reason = Column(String, nullable=True)
+
+    requested_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    retention_window_days = Column(Integer, nullable=False, default=30)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 def get_engine():

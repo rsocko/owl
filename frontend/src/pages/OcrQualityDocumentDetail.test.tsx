@@ -10,12 +10,21 @@ const mocks = vi.hoisted(() => ({
   thumbnailUrl: vi.fn(),
   downloadUrl: vi.fn(),
   previewUrl: vi.fn(),
+  candidatesList: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
   endpoints: {
     ocrQuality: {
       documentDetail: mocks.documentDetail,
+      candidates: {
+        list: mocks.candidatesList,
+        get: vi.fn(),
+        text: vi.fn(),
+        request: vi.fn(),
+        decide: vi.fn(),
+        cancel: vi.fn(),
+      },
     },
     statements: {
       paperlessUrl: mocks.paperlessUrl,
@@ -47,6 +56,8 @@ describe('OcrQualityDocumentDetail', () => {
     mocks.thumbnailUrl.mockReset();
     mocks.downloadUrl.mockReset();
     mocks.previewUrl.mockReset();
+    mocks.candidatesList.mockReset();
+    mocks.candidatesList.mockResolvedValue({ candidates: [] });
     mocks.metadata.mockResolvedValue({ title: 'Statement.pdf', page_count: 2 });
     mocks.thumbnailUrl.mockReturnValue('/thumbnail/501');
     mocks.downloadUrl.mockReturnValue('/download/501');
