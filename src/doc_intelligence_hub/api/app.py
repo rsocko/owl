@@ -31,6 +31,7 @@ from doc_intelligence_hub.api.routers import (
     insights,
     mc_connector,
     metadata,
+    ocr_quality,
     relationships,
     statements,
     stats,
@@ -315,6 +316,10 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
                 "name": "document-views",
                 "description": "Allowlisted Paperless and OWL review-view launcher.",
             },
+            {
+                "name": "ocr-quality",
+                "description": "Read-only OCR baseline inventory run status and aggregate reports.",
+            },
         ],
         lifespan=lifespan,
     )
@@ -371,6 +376,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(insights.router)
     app.include_router(extraction.router)
     app.include_router(webhooks.router)
+    app.include_router(ocr_quality.router)
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
