@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Badge, Breadcrumb, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, type Tone } from '../components/ui';
 import DocumentPreview from '../components/DocumentPreview';
+import RegionOverlayViewer, { type Annotation, type DrawnBox, type PageRegions } from '../components/RegionOverlayViewer';
+import AnnotationListPanel from '../components/AnnotationListPanel';
 import { endpoints } from '../lib/api';
 import { statusTone, formatDate } from './OcrQualityDashboard';
 import { formatScore } from './OcrQualityReviewQueue';
@@ -117,6 +119,13 @@ export default function OcrQualityDocumentDetail() {
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Region-level inspection (issue #134) — fetched on-demand only when this
+  // detail page is open, never pre-computed for the whole corpus.
+  const [inspectionPage, setInspectionPage] = useState(1);
+  const [regions, setRegions] = useState<PageRegions | null>(null);
+  const [regionsError, setRegionsError] = useState<string | null>(null);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+
   const load = useCallback(() => {
     if (!documentId) return;
     setLoading(true);
@@ -143,6 +152,74 @@ export default function OcrQualityDocumentDetail() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Load word-region geometry for the current inspection page on demand.
+  useEffect(() => {
+    if (!documentId) return;
+    let cancelled = false;
+    setRegionsError(null);
+    endpoints.ocrQuality
+      .regions(documentId, inspectionPage)
+      .then((data) => {
+        if (!cancelled) setRegions(data as PageRegions);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setRegions(null);
+          setRegionsError(err instanceof Error ? err.message : 'Failed to load region geometry.');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [documentId, inspectionPage]);
+
+  // Load saved annotations for the whole document (all pages), so the list
+  // panel can show every annotation while the overlay filters to the
+  // currently displayed page.
+  const loadAnnotations = useCallback(() => {
+    if (!documentId) return;
+    endpoints.ocrQuality.annotations
+      .list(documentId)
+      .then((data) => setAnnotations((data as { annotations: Annotation[] }).annotations))
+      .catch(() => setAnnotations([]));
+  }, [documentId]);
+
+  useEffect(() => {
+    loadAnnotations();
+  }, [loadAnnotations]);
+
+  const handleCreateAnnotation = useCallback(
+    async (box: DrawnBox & { label: string; note: string | null }) => {
+      if (!documentId) return;
+      const created = (await endpoints.ocrQuality.annotations.create(documentId, {
+        page: inspectionPage,
+        ...box,
+      })) as Annotation;
+      setAnnotations((prev) => [...prev, created]);
+    },
+    [documentId, inspectionPage],
+  );
+
+  const handleUpdateAnnotation = useCallback(
+    async (annotationId: number, updates: Partial<Pick<Annotation, 'label' | 'note'>>) => {
+      if (!documentId) return;
+      const updated = (await endpoints.ocrQuality.annotations.update(documentId, annotationId, updates)) as Annotation;
+      setAnnotations((prev) => prev.map((a) => (a.id === annotationId ? updated : a)));
+    },
+    [documentId],
+  );
+
+  const handleDeleteAnnotation = useCallback(
+    async (annotationId: number) => {
+      if (!documentId) return;
+      await endpoints.ocrQuality.annotations.remove(documentId, annotationId);
+      setAnnotations((prev) => prev.filter((a) => a.id !== annotationId));
+    },
+    [documentId],
+  );
+
+  const pageAnnotations = annotations.filter((a) => a.page === inspectionPage);
 
   return (
     <div className="ocr-quality-document-detail">
@@ -191,6 +268,29 @@ export default function OcrQualityDocumentDetail() {
               variant="card"
               label="Document"
             />
+          </Card>
+
+          <Card title="Region inspection">
+            {regionsError && <ErrorState message={regionsError} />}
+            {!regionsError && (
+              <>
+                <RegionOverlayViewer
+                  imageUrl={endpoints.ocrQuality.pageImageUrl(detail.document_id, inspectionPage)}
+                  regions={regions}
+                  annotations={pageAnnotations}
+                  onCreateAnnotation={handleCreateAnnotation}
+                  onDeleteAnnotation={handleDeleteAnnotation}
+                  onPageChange={setInspectionPage}
+                />
+                <div className="ocr-annotation-panel-heading">Saved annotations</div>
+                <AnnotationListPanel
+                  annotations={annotations}
+                  onUpdate={handleUpdateAnnotation}
+                  onDelete={handleDeleteAnnotation}
+                  onSelectPage={setInspectionPage}
+                />
+              </>
+            )}
           </Card>
 
           <Card title="Scores">

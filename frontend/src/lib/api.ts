@@ -337,5 +337,43 @@ export const endpoints = {
       runId: string,
       body?: { sample_size?: number; seed?: string; min_per_stratum?: number; max_pages?: number },
     ) => api.post(`/api/ocr-quality/runs/${runId}/sample`, body ?? {}),
+    // Region-level inspection (issue #134, Part 1 — read-only, on-demand).
+    regions: (documentId: number | string, page = 1) =>
+      api.get(`/api/ocr-quality/documents/${documentId}/regions?page=${page}`),
+    pageImageUrl: (documentId: number | string, page: number, dpi?: number) =>
+      `/api/ocr-quality/documents/${documentId}/pages/${page}/image${dpi ? `?dpi=${dpi}` : ''}`,
+    // Manual annotations (issue #134, Part 2 — the only mutation endpoints here).
+    annotations: {
+      list: (documentId: number | string, page?: number) =>
+        api.get(`/api/ocr-quality/documents/${documentId}/annotations${page ? `?page=${page}` : ''}`),
+      create: (
+        documentId: number | string,
+        body: {
+          page?: number;
+          x0: number;
+          top: number;
+          x1: number;
+          bottom: number;
+          label: string;
+          note?: string | null;
+          created_by?: string | null;
+        },
+      ) => api.post(`/api/ocr-quality/documents/${documentId}/annotations`, body),
+      update: (
+        documentId: number | string,
+        annotationId: number | string,
+        body: Partial<{
+          page: number;
+          x0: number;
+          top: number;
+          x1: number;
+          bottom: number;
+          label: string;
+          note: string | null;
+        }>,
+      ) => api.patch(`/api/ocr-quality/documents/${documentId}/annotations/${annotationId}`, body),
+      remove: (documentId: number | string, annotationId: number | string) =>
+        api.delete(`/api/ocr-quality/documents/${documentId}/annotations/${annotationId}`),
+    },
   },
 };

@@ -10,12 +10,26 @@ const mocks = vi.hoisted(() => ({
   thumbnailUrl: vi.fn(),
   downloadUrl: vi.fn(),
   previewUrl: vi.fn(),
+  regions: vi.fn(),
+  pageImageUrl: vi.fn(),
+  annotationsList: vi.fn(),
+  annotationsCreate: vi.fn(),
+  annotationsUpdate: vi.fn(),
+  annotationsRemove: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
   endpoints: {
     ocrQuality: {
       documentDetail: mocks.documentDetail,
+      regions: mocks.regions,
+      pageImageUrl: mocks.pageImageUrl,
+      annotations: {
+        list: mocks.annotationsList,
+        create: mocks.annotationsCreate,
+        update: mocks.annotationsUpdate,
+        remove: mocks.annotationsRemove,
+      },
     },
     statements: {
       paperlessUrl: mocks.paperlessUrl,
@@ -47,10 +61,19 @@ describe('OcrQualityDocumentDetail', () => {
     mocks.thumbnailUrl.mockReset();
     mocks.downloadUrl.mockReset();
     mocks.previewUrl.mockReset();
+    mocks.regions.mockReset();
+    mocks.pageImageUrl.mockReset();
+    mocks.annotationsList.mockReset();
+    mocks.annotationsCreate.mockReset();
+    mocks.annotationsUpdate.mockReset();
+    mocks.annotationsRemove.mockReset();
     mocks.metadata.mockResolvedValue({ title: 'Statement.pdf', page_count: 2 });
     mocks.thumbnailUrl.mockReturnValue('/thumbnail/501');
     mocks.downloadUrl.mockReturnValue('/download/501');
     mocks.previewUrl.mockReturnValue('/preview/501');
+    mocks.regions.mockResolvedValue({ page: 1, page_count: 1, width: 600, height: 800, words: [] });
+    mocks.pageImageUrl.mockReturnValue('/page-image/501/1');
+    mocks.annotationsList.mockResolvedValue({ annotations: [] });
   });
 
   it('shows a not-found state for an unknown document', async () => {
@@ -147,5 +170,35 @@ describe('OcrQualityDocumentDetail', () => {
     });
     renderPage('502');
     await waitFor(() => expect(screen.getByText(/Overlay score is unavailable/i)).toBeInTheDocument());
+  });
+
+  it('fetches region geometry and saved annotations for the region inspection panel', async () => {
+    mocks.paperlessUrl.mockResolvedValue({ paperless_url: null });
+    mocks.documentDetail.mockResolvedValue({
+      document_id: 501,
+      review_status: 'UNCERTAIN',
+      reasons: [],
+      document_profile: null,
+    });
+    mocks.regions.mockResolvedValue({
+      page: 1,
+      page_count: 1,
+      width: 600,
+      height: 800,
+      words: [
+        { text: 'Hello', x0: 10, top: 10, x1: 50, bottom: 30, confidence: 0.9, flagged: false, flag_reasons: [], matched_reasons: [] },
+      ],
+    });
+    mocks.annotationsList.mockResolvedValue({
+      annotations: [
+        { id: 1, document_id: 501, page: 1, x0: 5, top: 5, x1: 20, bottom: 20, label: 'wrong', note: 'looks off' },
+      ],
+    });
+    renderPage('501');
+
+    await waitFor(() => expect(screen.getByText('Region inspection')).toBeInTheDocument());
+    await waitFor(() => expect(mocks.regions).toHaveBeenCalledWith('501', 1));
+    await waitFor(() => expect(mocks.annotationsList).toHaveBeenCalledWith('501'));
+    expect(await screen.findByText('looks off')).toBeInTheDocument();
   });
 });
