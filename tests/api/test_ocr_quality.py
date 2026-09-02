@@ -360,6 +360,78 @@ class TestGetDocument:
 
 
 # ---------------------------------------------------------------------------
+# Force Stage-2 for a single document (OCR quality force-stage2 feature)
+# ---------------------------------------------------------------------------
+
+
+class TestForceStage2Analysis:
+    def test_unknown_document_returns_404(self, client, ocr_quality_db, mock_paperless):
+        resp = client.post("/api/ocr-quality/documents/999/stage2")
+        assert resp.status_code == 404
+        mock_paperless.get_document_preview.assert_not_called()
+
+    def test_success_recomputes_score_and_profile(self, client, ocr_quality_db, mock_paperless):
+        _seed_scored_document(1, overlay_score=None, review_status="UNCERTAIN")
+        mock_paperless.get_document_preview.return_value = (
+            _make_real_pdf_bytes("Forced stage 2 document"),
+            "application/pdf",
+        )
+        resp = client.post("/api/ocr-quality/documents/1/stage2")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["document_id"] == 1
+        # Overlay score was null (Stage-1 only); forcing Stage-2 must have
+        # fetched the PDF and re-scored with overlay signals.
+        assert body["overlay_score"] is not None
+        assert body["document_profile"]["page_count"] == 1
+        mock_paperless.get_document_preview.assert_called_once_with(1)
+
+        # A dedicated manual run, linked back to the original Stage-1 run,
+        # is now the run_id attached to the refreshed assessment row.
+        assert body["run_id"] != "run-1"
+        db = get_session()
+        try:
+            manual_run = db.query(InventoryRun).filter_by(run_id=body["run_id"]).one()
+            assert manual_run.stage == RunStage.STAGE_2_MANUAL_SINGLE_DOCUMENT.value
+            assert manual_run.source_run_id == "run-1"
+            assert manual_run.status == RunStatus.COMPLETED.value
+        finally:
+            db.close()
+
+    def test_never_writes_to_paperless(self, client, ocr_quality_db, mock_paperless):
+        """A forced Stage-2 re-analysis must never write back to Paperless."""
+        _seed_scored_document(1)
+        mock_paperless.get_document_preview.return_value = (
+            _make_real_pdf_bytes("No paperless writes"),
+            "application/pdf",
+        )
+        resp = client.post("/api/ocr-quality/documents/1/stage2")
+        assert resp.status_code == 200
+        mock_paperless.update_document.assert_not_called()
+        mock_paperless.update_custom_field.assert_not_called()
+        mock_paperless.update_custom_fields.assert_not_called()
+        mock_paperless.create_custom_field.assert_not_called()
+
+    def test_paperless_fetch_failure_returns_502(self, client, ocr_quality_db, mock_paperless):
+        _seed_scored_document(1)
+        mock_paperless.get_document_preview.side_effect = RuntimeError("connection refused")
+        resp = client.post("/api/ocr-quality/documents/1/stage2")
+        assert resp.status_code == 502
+        assert resp.json()["error"]["code"] == "paperless_fetch_failed"
+
+    def test_duplicate_trigger_returns_409(self, client, ocr_quality_db, mock_paperless):
+        _seed_scored_document(1)
+        ocr_quality_router._active_manual_stage2_document_ids.add(1)
+        try:
+            resp = client.post("/api/ocr-quality/documents/1/stage2")
+            assert resp.status_code == 409
+            assert resp.json()["error"]["code"] == "stage2_already_in_progress"
+            mock_paperless.get_document_preview.assert_not_called()
+        finally:
+            ocr_quality_router._active_manual_stage2_document_ids.discard(1)
+
+
+# ---------------------------------------------------------------------------
 # Manual trigger endpoints (issue #30, Phase 7 — manual entry points only)
 # ---------------------------------------------------------------------------
 #

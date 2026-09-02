@@ -28,6 +28,9 @@ SUMMARY_SCHEMA_VERSION = "1.0"
 class RunStage(str, Enum):
     STAGE_1_CORPUS_SCAN = "stage_1_corpus_scan"
     STAGE_2_STRATIFIED_SAMPLE = "stage_2_stratified_sample"
+    # A single-document, on-demand Stage-2 trigger (e.g. from the document
+    # detail page) rather than a corpus-wide random sample.
+    STAGE_2_MANUAL_SINGLE_DOCUMENT = "stage_2_manual_single_document"
 
 
 class RunStatus(str, Enum):
