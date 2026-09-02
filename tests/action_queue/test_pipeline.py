@@ -49,15 +49,23 @@ def _make_docs(n: int) -> list[dict]:
 def db(tmp_path):
     """Isolated SQLite database for pipeline runs."""
     original = aq_settings.database_url
+    from doc_intelligence_hub.modules.analysis_invalidation import config as ai_config
+    from doc_intelligence_hub.modules.analysis_invalidation.database import (
+        init_db as ai_init_db,
+    )
     from doc_intelligence_hub.modules.triage import database as triage_database
 
     aq_settings.database_url = f"sqlite:///{tmp_path / 'test_pipeline.db'}"
     triage_database.configure(f"sqlite:///{tmp_path / 'test_triage.db'}")
+    original_ai_db_url = ai_config.settings.database_url
+    ai_config.settings.database_url = f"sqlite:///{tmp_path / 'test_analysis_invalidation.db'}"
     init_db()
     triage_database.init_db()
+    ai_init_db()
     yield
     aq_settings.database_url = original
     triage_database.configure("sqlite:///data/triage.db")
+    ai_config.settings.database_url = original_ai_db_url
 
 
 class TestAnalyzerTimeout:
