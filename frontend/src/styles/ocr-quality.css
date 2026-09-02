@@ -282,3 +282,19 @@ tr.is-selected {
   background: var(--surface-hover);
 }
 
+.ocr-suggested-read-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ocr-score-compare-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+

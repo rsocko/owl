@@ -187,4 +187,68 @@ describe('OcrCandidatesPanel', () => {
     await waitFor(() => expect(screen.getByText(/ocrmypdf binary not found/i)).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Accept' })).not.toBeInTheDocument();
   });
+
+  it('shows a "Text quality looks improved" suggested read when machine score improves and there are no blocking findings', async () => {
+    mocks.list.mockResolvedValue({ candidates: [readyCandidate] });
+    const improved = {
+      ...readyCandidateDetail,
+      comparison: { ...readyCandidateDetail.comparison, machine_score_delta: 5.0, overlay_score_delta: 0 },
+    };
+    mocks.get.mockResolvedValue(improved);
+    mocks.text.mockResolvedValue({ current_text: 'old text', candidate_text: 'new text' });
+
+    render(<OcrCandidatesPanel documentId={501} />);
+    await waitFor(() => expect(screen.getByText('OCRmyPDF / Tesseract 5')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /View/i }));
+
+    await waitFor(() => expect(screen.getByText(/Text quality looks improved/i)).toBeInTheDocument());
+    // Still non-authoritative — never a one-click "accept recommended" action.
+    expect(screen.queryByRole('button', { name: /accept recommended/i })).not.toBeInTheDocument();
+  });
+
+  it('shows a "Box/highlight placement may be less precise" suggested read when overlay score drops meaningfully', async () => {
+    mocks.list.mockResolvedValue({ candidates: [readyCandidate] });
+    const declined = {
+      ...readyCandidateDetail,
+      comparison: { ...readyCandidateDetail.comparison, overlay_score_delta: -6.0, machine_score_delta: 0 },
+    };
+    mocks.get.mockResolvedValue(declined);
+    mocks.text.mockResolvedValue({ current_text: 'old text', candidate_text: 'new text' });
+
+    render(<OcrCandidatesPanel documentId={501} />);
+    await waitFor(() => screen.getByRole('button', { name: /View/i }));
+    fireEvent.click(screen.getByRole('button', { name: /View/i }));
+
+    await waitFor(() => expect(screen.getByText(/Box\/highlight placement may be less precise/i)).toBeInTheDocument());
+  });
+
+  it('shows a distinct "Needs careful review" suggested read when there are blocking findings', async () => {
+    mocks.list.mockResolvedValue({ candidates: [readyCandidate] });
+    const flagged = {
+      ...readyCandidateDetail,
+      comparison: { ...readyCandidateDetail.comparison, blocking_findings: ['pages_missing'] },
+    };
+    mocks.get.mockResolvedValue(flagged);
+    mocks.text.mockResolvedValue({ current_text: 'old text', candidate_text: 'new text' });
+
+    render(<OcrCandidatesPanel documentId={501} />);
+    await waitFor(() => screen.getByRole('button', { name: /View/i }));
+    fireEvent.click(screen.getByRole('button', { name: /View/i }));
+
+    await waitFor(() => expect(screen.getByText(/Needs careful review/i)).toBeInTheDocument());
+  });
+
+  it('shows an analysis-gap note in the comparison view when the document has no Stage 2 baseline', async () => {
+    mocks.list.mockResolvedValue({ candidates: [readyCandidate] });
+    mocks.get.mockResolvedValue(readyCandidateDetail);
+    mocks.text.mockResolvedValue({ current_text: 'old text', candidate_text: 'new text' });
+
+    render(<OcrCandidatesPanel documentId={501} hasStage2Analysis={false} />);
+    await waitFor(() => screen.getByRole('button', { name: /View/i }));
+    fireEvent.click(screen.getByRole('button', { name: /View/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/hasn't had Stage 2 analysis, so the overlay comparison below may be incomplete/i)).toBeInTheDocument(),
+    );
+  });
 });

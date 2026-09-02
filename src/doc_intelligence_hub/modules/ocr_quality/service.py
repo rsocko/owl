@@ -762,7 +762,19 @@ class OcrQualityInventoryService:
             )
             if row is None:
                 return None
-            return _assessment_detail(row)
+            # A PdfProfile row is only ever written when Stage 2 page-aware
+            # profiling has run for this specific document_id (any run), so
+            # its existence is the ground truth for "has this document had
+            # deep Stage 2 analysis" — independent of whether overlay_score
+            # happens to be populated (e.g. profiling could have run but
+            # failed to produce a score).
+            has_stage2_analysis = (
+                db.query(PdfProfile.id)
+                .filter(PdfProfile.document_id == document_id)
+                .first()
+                is not None
+            )
+            return _assessment_detail(row, has_stage2_analysis=has_stage2_analysis)
         finally:
             db.close()
 
@@ -825,7 +837,7 @@ def _assessment_summary(row: DocumentAssessment) -> dict[str, Any]:
     }
 
 
-def _assessment_detail(row: DocumentAssessment) -> dict[str, Any]:
+def _assessment_detail(row: DocumentAssessment, *, has_stage2_analysis: bool) -> dict[str, Any]:
     return {
         **_assessment_summary(row),
         "run_id": row.run_id,
@@ -835,6 +847,10 @@ def _assessment_detail(row: DocumentAssessment) -> dict[str, Any]:
         "reasons": row.reasons or [],
         "document_profile": row.document_profile,
         "reason_codes": row.reason_codes or [],
+        # Whether Stage 2 (deeper per-document PDF profiling / overlay
+        # scoring) has ever run for this document, independent of whether
+        # overlay_score ended up populated. See get_document_assessment.
+        "has_stage2_analysis": has_stage2_analysis,
     }
 
 
