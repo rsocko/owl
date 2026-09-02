@@ -89,6 +89,26 @@ function SourceSelect({
   );
 }
 
+function DiffLegend() {
+  return (
+    <div className="ocr-overlay-diff-legend" role="note" aria-label="Difference highlight legend">
+      <span className="ocr-overlay-diff-legend-title">Differences:</span>
+      <span className="ocr-overlay-diff-legend-item">
+        <span className="ocr-overlay-diff-legend-swatch diff-removed" />
+        Removed — word on this side has no match on the other side
+      </span>
+      <span className="ocr-overlay-diff-legend-item">
+        <span className="ocr-overlay-diff-legend-swatch diff-added" />
+        Added — word appears only on this side, missing from the other
+      </span>
+      <span className="ocr-overlay-diff-legend-item">
+        <span className="ocr-overlay-diff-legend-swatch diff-shifted" />
+        Shifted — matched on both sides, but text/position differs
+      </span>
+    </div>
+  );
+}
+
 export default function OcrOverlayComparisonPanel({ documentId }: { documentId: number }) {
   const [candidates, setCandidates] = useState<ComparisonCandidateOption[]>([]);
   const [sourceA, setSourceA] = useState<string>(CURRENT_SOURCE);
@@ -234,6 +254,7 @@ export default function OcrOverlayComparisonPanel({ documentId }: { documentId: 
       </div>
 
       {diffError && <ErrorState message={diffError} />}
+      {showDiff && !diffLoading && diff && <DiffLegend />}
 
       <div className="ocr-overlay-comparison-grid">
         <div>
