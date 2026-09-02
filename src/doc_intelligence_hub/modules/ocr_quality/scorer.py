@@ -99,6 +99,7 @@ def assess_document(
         text_content=effective_text,
         confidence_data=confidence_data,
         downstream_outcomes=downstream_outcomes,
+        content_shape=profile.content_shape,
         config=cfg,
     )
 

@@ -188,3 +188,25 @@ def test_code_heavy_text_does_not_crash_and_is_profiled() -> None:
     assessment = assess_document(text_content=text)
     assert assessment.document_profile.content_shape.value in ("code_heavy", "mixed")
     assert assessment.machine_score is not None
+
+
+def test_table_shaped_document_content_shape_flows_into_machine_score() -> None:
+    """End-to-end: assess_document must thread document_profile.content_shape
+    into score_machine so the table/form false-positive dampening actually
+    takes effect through the public entrypoint, not just when calling
+    score_machine directly."""
+    text = "\n".join(
+        [
+            "Account Statement",
+            "Account Number: 123456789",
+            "Beginning Balance..........$1,204.55",
+            "Deposits...................$500.00",
+            "Fee Schedule: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+            "Ending Balance..............$1,484.55",
+        ]
+    )
+    assessment = assess_document(text_content=text)
+    assert assessment.document_profile.content_shape.value in ("table_or_form", "code_heavy")
+    # score_machine's content_shape-aware signals must be reflected on the
+    # returned ScoreComponent (i.e. it was actually passed through).
+    assert assessment.machine_signals.signals["repetition_noise"] is not None

@@ -17,6 +17,7 @@ from collections import Counter
 from doc_intelligence_hub.modules.ocr_quality.common_words import common_word_hit_ratio
 from doc_intelligence_hub.modules.ocr_quality.scoring_config import DEFAULT_CONFIG, ScoringConfig
 from doc_intelligence_hub.modules.ocr_quality.scoring_models import (
+    ContentShape,
     DownstreamOutcome,
     Reason,
     ScoreComponent,
@@ -30,6 +31,14 @@ _TABLE_LINE_RATIO_SATURATION = 0.3
 _MIN_PLAUSIBILITY_FOR_STRUCTURE_SIGNALS = 0.5
 
 _REPLACEMENT_CHAR = "\ufffd"
+
+# Table/form "dot leader" or rule-line separator characters (e.g.
+# "Account Fee..........$25.00" or a "----" section rule). Long runs of these
+# specific characters are expected formatting artifacts in tabular/structured
+# layouts, not evidence of OCR corruption the way a run of e.g. random letters
+# would be — so they are exempted from the repetition-noise run penalty when
+# the document's content shape indicates structured content.
+_LEADER_CHARS = frozenset(".-_=*~\u00b7\u2022")
 
 _DATE_RE = re.compile(
     r"\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}"
@@ -62,6 +71,7 @@ def score_machine(
     text_content: str | None,
     confidence_data: list[float] | None = None,
     downstream_outcomes: list[DownstreamOutcome] | None = None,
+    content_shape: ContentShape | None = None,
     config: ScoringConfig | None = None,
 ) -> ScoreComponent:
     """Score machine-extraction quality/utility of extracted text.
@@ -72,11 +82,21 @@ def score_machine(
       signals are unavailable.
     - ``""`` (empty string) — text was looked for and there is none; this is
       a strong, computable negative signal (not "unavailable").
+
+    ``content_shape`` is the document's :class:`~...scoring_models.ContentShape`
+    from :func:`~...profiling.build_document_profile`, when available. It is
+    used to dampen ``char_script_plausibility`` and ``repetition_noise`` for
+    legitimately table/form-like (or code-heavy/mixed-classified structured)
+    content, where those two signals are prone to false positives — see
+    ``ScoringConfig.structured_content_shapes``/``structured_content_signal_multiplier``.
     """
     cfg = config or DEFAULT_CONFIG
     reasons: list[Reason] = []
     unavailable: list[str] = []
     signals: dict[str, float | None] = dict.fromkeys(_SIGNAL_NAMES)
+    is_structured_shape = (
+        content_shape is not None and content_shape in cfg.structured_content_shapes
+    )
 
     if text_content is None:
         unavailable.extend(_SIGNAL_NAMES[:6])
@@ -105,7 +125,9 @@ def score_machine(
         char_plausibility = _char_script_plausibility(text_content)
         signals["char_script_plausibility"] = char_plausibility
         signals["token_whitespace_quality"] = _token_whitespace_quality(tokens)
-        signals["repetition_noise"] = _repetition_noise(text_content, tokens)
+        signals["repetition_noise"] = _repetition_noise(
+            text_content, tokens, dampen_structural_noise=is_structured_shape
+        )
         signals["prose_coherence"] = _prose_coherence(tokens, cfg)
 
         # Structured-entity/table detection is meaningless on text that is
@@ -131,6 +153,11 @@ def score_machine(
             unavailable.append(name)
 
     weights = cfg.machine_weights.model_dump()
+    if is_structured_shape:
+        multiplier = cfg.structured_content_signal_multiplier
+        weights["char_script_plausibility"] *= multiplier
+        weights["repetition_noise"] *= multiplier
+
     weighted_total = 0.0
     weight_sum = 0.0
     for name in _SIGNAL_NAMES:
@@ -193,12 +220,17 @@ def _token_whitespace_quality(tokens: list[str]) -> float | None:
     return max(0.0, 1.0 - penalty)
 
 
-def _repetition_noise(text: str, tokens: list[str]) -> float | None:
+def _repetition_noise(
+    text: str, tokens: list[str], *, dampen_structural_noise: bool = False
+) -> float | None:
     if not tokens:
         return None
     # Long runs of a single repeated character (e.g. "-----------", "xxxxxx").
     run_penalty = 0.0
     for match in re.finditer(r"(.)\1{7,}", text):
+        if dampen_structural_noise and match.group(1) in _LEADER_CHARS:
+            # Dot-leader/rule-line table formatting, not corruption.
+            continue
         run_penalty += len(match.group(0))
     run_penalty = min(run_penalty / max(len(text), 1), 1.0)
 
@@ -207,7 +239,19 @@ def _repetition_noise(text: str, tokens: list[str]) -> float | None:
     if len(tokens) >= 10 and alnum_tokens:
         counts = Counter(alnum_tokens)
         # A single token dominating the stream (e.g. "xx xx xx ...").
-        dominance = counts.most_common(1)[0][1] / len(tokens)
+        if dampen_structural_noise:
+            # Purely-numeric tokens (row counts, cents, account/routing
+            # digits) legitimately dominate tabular data — that is
+            # structurally different from a dominant non-numeric/gibberish
+            # token stream, so they are not eligible to drive the dominance
+            # penalty. Vocabulary diversity below is left unaffected: a
+            # numeric-heavy table is still expected to have moderate
+            # diversity, so that check still applies as-is.
+            dominance_candidates = [c for tok, c in counts.items() if not tok.isdigit()]
+            dominant_count = max(dominance_candidates, default=0)
+        else:
+            dominant_count = counts.most_common(1)[0][1]
+        dominance = dominant_count / len(tokens)
         dominance_penalty = min(1.0, max(0.0, dominance - 0.15) / 0.35)
         # Low overall vocabulary diversity (many different repeated tokens,
         # not just one) is an equally strong noise indicator.

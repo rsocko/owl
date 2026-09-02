@@ -18,6 +18,8 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
+from doc_intelligence_hub.modules.ocr_quality.scoring_models import ContentShape
+
 logger = logging.getLogger(__name__)
 
 # Bumped when scoring *logic* changes (independent of tunable config values).
@@ -106,7 +108,7 @@ class ScoringConfig(BaseModel):
     ``scorer_version`` recorded on every assessment.
     """
 
-    config_version: str = Field(default="default-1")
+    config_version: str = Field(default="default-2")
     overlay_weights: OverlayWeights = Field(default_factory=OverlayWeights)
     machine_weights: MachineWeights = Field(default_factory=MachineWeights)
     status_thresholds: StatusThresholds = Field(default_factory=StatusThresholds)
@@ -135,6 +137,32 @@ class ScoringConfig(BaseModel):
         le=100.0,
         description="Cap on how much downstream-extraction success evidence can add to the "
         "machine score. Deliberately small: success does not prove the whole document correct.",
+    )
+    structured_content_shapes: list[ContentShape] = Field(
+        default_factory=lambda: [
+            ContentShape.TABLE_OR_FORM,
+            ContentShape.CODE_HEAVY,
+            ContentShape.MIXED,
+        ],
+        description="document_profile.content_shape values for which "
+        "structured_content_signal_multiplier is applied to the char_script_plausibility and "
+        "repetition_noise machine-scoring weights. Table/form layouts (and financial/tabular "
+        "text that the content-shape heuristic misclassifies as code-heavy because of symbols "
+        "like parentheses, equals signs, and slashes) routinely contain alignment whitespace, "
+        "dot-leader separators, and dominant repeated currency/numeric tokens that trip those "
+        "two signals even when the extracted text is completely correct. PROSE and UNKNOWN are "
+        "deliberately excluded: the same patterns in prose text really do indicate corruption.",
+    )
+    structured_content_signal_multiplier: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Multiplier applied to the char_script_plausibility and repetition_noise "
+        "weights when document_profile.content_shape is one of structured_content_shapes. "
+        "1.0 leaves the weights unchanged; 0.0 fully neutralizes them for that document. Does "
+        "not change how the signals themselves are computed for char_script_plausibility; "
+        "repetition_noise also gets a structural adjustment (see machine_scoring.py) so "
+        "table-typical dot leaders and dominant numeric tokens are not treated as noise.",
     )
 
 
