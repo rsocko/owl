@@ -252,6 +252,7 @@ def build_page_regions_from_pages(
                 "x1": word.x1,
                 "bottom": word.bottom,
                 "confidence": word.confidence,
+                "angle": word.angle_degrees,
                 "flagged": bool(flags),
                 "flag_reasons": flags,
                 "matched_reasons": _matching_document_reasons(flags, document_reasons),

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 from doc_intelligence_hub.modules.ocr_quality.pdf_loader import load_pdf_pages
 
-from .conftest import make_minimal_pdf_bytes
+from .conftest import make_minimal_pdf_bytes, make_rotated_text_pdf_bytes
 
 
 def test_loads_minimal_real_pdf() -> None:
@@ -16,6 +18,27 @@ def test_loads_minimal_real_pdf() -> None:
     assert page.width == 200
     assert page.height == 100
     assert [w.text for w in page.words] == ["Hello", "World"]
+    # Normal, non-rotated text must have an angle of exactly 0.0.
+    assert all(w.angle_degrees == 0.0 for w in page.words)
+
+
+def test_rotated_text_reports_nonzero_angle() -> None:
+    """A word drawn via an explicit ~90 deg rotated text matrix (issue #148)
+    must have its rotation reflected in ``WordBox.angle_degrees``, not
+    silently reported as upright (``0.0``).
+    """
+    pdf_bytes = make_rotated_text_pdf_bytes("Vertical", angle_degrees=90.0)
+    pages = load_pdf_pages(pdf_bytes)
+    assert len(pages) == 1
+    page = pages[0]
+    assert page.error is None
+    assert len(page.words) == 1
+    # pdfplumber may reorder glyphs within a rotated word differently than
+    # a normal left-to-right word (its default extraction direction
+    # heuristics assume upright text) -- only the character set, not
+    # ordering, is asserted here; the angle derivation is this test's point.
+    assert sorted(page.words[0].text) == sorted("Vertical")
+    assert page.words[0].angle_degrees == pytest.approx(90.0, abs=1.0)
 
 
 def test_multi_page_pdf_parses_each_page() -> None:

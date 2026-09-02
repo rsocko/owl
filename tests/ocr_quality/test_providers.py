@@ -403,3 +403,107 @@ class TestAzureOverlayPrecision:
         assert word["top"] == pytest.approx(7.2, abs=8.0)
         assert 0 <= word["x0"] <= 100.0
         assert 0 <= word["top"] <= 50.0
+
+    def test_polygon_edge_angle_degrees_horizontal_is_zero(self):
+        """A normal, horizontal (reading left-to-right) polygon must report
+        an angle of ~0 degrees.
+        """
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _polygon_edge_angle_degrees,
+        )
+
+        # p0=(1,1) top-left, p1=(2,1) top-right -- horizontal reading edge.
+        polygon = [1.0, 1.0, 2.0, 1.0, 2.0, 1.3, 1.0, 1.3]
+        angle = _polygon_edge_angle_degrees(polygon, scale_x=1.0, scale_y=1.0)
+        assert angle == pytest.approx(0.0, abs=1e-6)
+
+    def test_polygon_edge_angle_degrees_rotated_word(self):
+        """A word polygon rotated ~90 deg (e.g. a vertical sidebar stamp,
+        issue #148) must report an angle near 90 degrees, not 0.
+        """
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _polygon_edge_angle_degrees,
+        )
+
+        # p0=(1,3) top-left, p1=(1,1) top-right of a word whose reading
+        # direction points "up" in Azure's y-down space -- azure's dy is
+        # negative (1 - 3 = -2), so the PDF-space angle (negated) is +90.
+        polygon = [1.0, 3.0, 1.0, 1.0, 1.3, 1.0, 1.3, 3.0]
+        angle = _polygon_edge_angle_degrees(polygon, scale_x=1.0, scale_y=1.0)
+        assert angle == pytest.approx(90.0, abs=1e-6)
+
+    def test_is_near_horizontal_tolerance(self):
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _is_near_horizontal,
+        )
+
+        assert _is_near_horizontal(0.0) is True
+        assert _is_near_horizontal(2.5) is True  # within tolerance
+        assert _is_near_horizontal(180.0) is True
+        assert _is_near_horizontal(-178.0) is True  # near 180 the other way
+        assert _is_near_horizontal(90.0) is False
+        assert _is_near_horizontal(45.0) is False
+
+    def test_rotated_word_is_drawn_at_correct_location_not_smeared(self):
+        """Regression test for issue #148: a ~90 deg rotated word polygon
+        must no longer be collapsed into a giant axis-aligned box drawn
+        sideways across the page. After the fix, pdfplumber re-extracting
+        the invisible overlay text must find it near its true (small,
+        rotated) location, not smeared across a huge horizontal span.
+        """
+        import io
+
+        import pdfplumber
+        import reportlab.pdfgen.canvas as _canvas
+        from pypdf import PdfReader, PdfWriter
+
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _build_searchable_pdf,
+        )
+
+        raw_buf = io.BytesIO()
+        _c = _canvas.Canvas(raw_buf, pagesize=(300, 300))
+        _c.showPage()
+        _c.save()
+        reader = PdfReader(io.BytesIO(raw_buf.getvalue()))
+        writer = PdfWriter()
+        writer.add_page(reader.pages[0])
+        out_buf = io.BytesIO()
+        writer.write(out_buf)
+        plain_pdf_bytes = out_buf.getvalue()
+
+        # A tall, narrow polygon (width 20pt, height 100pt in azure's own
+        # "inch" unit with scale 1.0) rotated ~90 deg -- reading direction
+        # points straight up the page, mirroring the real-world vertical
+        # sidebar stamp from the Ford lease document.
+        fake_word = MagicMock(
+            confidence=0.9,
+            content="SidebarStamp",
+            # p0=(10,250) top-left, p1=(10,150) top-right (reading "up"),
+            # p2=(30,150) bottom-right, p3=(30,250) bottom-left.
+            polygon=[10.0, 250.0, 10.0, 150.0, 30.0, 150.0, 30.0, 250.0],
+        )
+        fake_page = MagicMock(
+            page_number=1,
+            unit="inch",
+            width=300.0,
+            height=300.0,
+            words=[fake_word],
+        )
+        fake_result = MagicMock(pages=[fake_page])
+
+        candidate_bytes = _build_searchable_pdf(plain_pdf_bytes, fake_result)
+
+        with pdfplumber.open(io.BytesIO(candidate_bytes)) as pdf:
+            words = pdf.pages[0].extract_words()
+
+        assert len(words) == 1
+        word = words[0]
+        # The old collapse-to-axis-aligned-box bug would produce a box
+        # whose width equals the polygon's long (100pt) axis, spanning far
+        # outside the tall/narrow region the word actually occupies -- e.g.
+        # x1 well beyond 30 + a small margin. The fixed rotated placement
+        # must stay within (approximately) the polygon's own footprint.
+        assert word["x1"] - word["x0"] < 60.0
+        assert 0.0 <= word["x0"] <= 300.0
+        assert 0.0 <= word["top"] <= 300.0

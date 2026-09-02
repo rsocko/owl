@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from doc_intelligence_hub.modules.ocr_quality.pdf_types import PdfPageData
 from doc_intelligence_hub.modules.ocr_quality.region_inspection import (
     build_page_regions_from_pages,
 )
@@ -10,6 +11,7 @@ from .conftest import (
     make_digital_page,
     make_digital_page_with_small_image,
     make_scanned_overlay_page,
+    make_word,
 )
 
 
@@ -63,3 +65,20 @@ def test_well_aligned_scanned_overlay_page_has_no_alignment_flags() -> None:
     assert payload["words"], "expected words on the synthetic aligned page"
     for word in payload["words"]:
         assert "alignment" not in word["flag_reasons"]
+
+
+def test_word_angle_surfaced_in_payload() -> None:
+    """A word's rotation angle (issue #148) must be surfaced in the
+    region-inspection payload so the frontend can draw a rotated box for
+    it, while an ordinary upright word reports exactly 0.0.
+    """
+    upright = make_word("Normal", 10.0, 50.0, 60.0, 62.0, order=0, angle=0.0)
+    rotated = make_word("Vertical", 100.0, 50.0, 112.0, 150.0, order=1, angle=90.0)
+    page = PdfPageData(
+        page_number=1, width=600.0, height=800.0, words=[upright, rotated], char_count=20
+    )
+    payload = build_page_regions_from_pages([page], page_number=1)
+    assert payload is not None
+    by_text = {w["text"]: w["angle"] for w in payload["words"]}
+    assert by_text["Normal"] == 0.0
+    assert by_text["Vertical"] == 90.0
