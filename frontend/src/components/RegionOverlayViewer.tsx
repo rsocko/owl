@@ -11,6 +11,8 @@ export type RegionWord = {
   x1: number;
   bottom: number;
   confidence?: number | null;
+  /** Rotation of the word's glyphs in degrees (0 = normal upright text). */
+  angle?: number;
   flagged: boolean;
   flag_reasons: string[];
   matched_reasons: { code: string; message: string; severity: string }[];
@@ -275,7 +277,13 @@ export default function RegionOverlayViewer({
               <div
                 key={i}
                 className={`region-overlay-box ${boxClass}`}
-                style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+                style={{
+                  left: rect.left,
+                  top: rect.top,
+                  width: rect.width,
+                  height: rect.height,
+                  ...(word.angle ? { transform: `rotate(${-word.angle}deg)`, transformOrigin: 'center' } : {}),
+                }}
                 title={diffKind ? `${word.text} (${diffKind})` : word.text}
                 onClick={() => setSelectedWord(word)}
                 data-testid="word-box"

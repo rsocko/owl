@@ -24,6 +24,14 @@ class WordBox:
     confidence: float | None = None
     order_index: int = 0
     """Index in native extraction order, used for reading-order checks."""
+    angle_degrees: float = 0.0
+    """Rotation of the word's glyphs, in degrees (0 = normal upright text).
+
+    Derived from the underlying PDF text-rendering matrix, so it reflects
+    arbitrary skew (not just cardinal 90 deg rotations) -- e.g. a vertical
+    sidebar stamp rotated ~90 deg relative to the rest of a page. Purely
+    informational: bbox-based signals/heuristics elsewhere are unaffected.
+    """
 
 
 @dataclass(frozen=True)

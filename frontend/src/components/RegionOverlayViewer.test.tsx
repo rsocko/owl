@@ -113,6 +113,22 @@ describe('RegionOverlayViewer', () => {
     expect(boxes[1]).toHaveAttribute('title', 'World (shifted)');
   });
 
+  it('renders a rotated box for a word with a non-zero angle, and no transform otherwise', () => {
+    const regionsWithRotatedWord: PageRegions = {
+      ...baseRegions,
+      words: [
+        baseRegions.words[0],
+        { ...baseRegions.words[1], angle: 90 },
+      ],
+    };
+    const { container } = render(<RegionOverlayViewer imageUrl="/img" regions={regionsWithRotatedWord} />);
+    loadImage(container);
+    const boxes = screen.getAllByTestId('word-box');
+    expect(boxes[0].style.transform).toBe('');
+    expect(boxes[1].style.transform).toBe('rotate(-90deg)');
+    expect(boxes[1].style.transformOrigin).toBe('center');
+  });
+
   it('renders existing annotations as boxes and supports deleting them', () => {
     const onDeleteAnnotation = vi.fn();
     const { container } = render(
