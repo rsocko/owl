@@ -79,6 +79,7 @@ export default function OcrCandidatesPanel({ documentId }: { documentId: number 
   const [detail, setDetail] = useState<CandidateDetail | null>(null);
   const [text, setText] = useState<{ current_text: string | null; candidate_text: string | null } | null>(null);
   const [deciding, setDeciding] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const loadCandidates = useCallback(() => {
@@ -147,6 +148,19 @@ export default function OcrCandidatesPanel({ documentId }: { documentId: number 
       .finally(() => setDeciding(false));
   };
 
+  const cancel = (candidateId: string) => {
+    setCancelling(true);
+    setActionError(null);
+    endpoints.ocrQuality.candidates
+      .cancel(candidateId)
+      .then(() => {
+        loadCandidates();
+        if (selectedId === candidateId) loadDetail(candidateId);
+      })
+      .catch((err) => setActionError(err instanceof Error ? err.message : 'Failed to cancel candidate.'))
+      .finally(() => setCancelling(false));
+  };
+
   return (
     <Card title="OCR candidates">
       <div className="ocr-stub-note">
@@ -202,10 +216,20 @@ export default function OcrCandidatesPanel({ documentId }: { documentId: number 
                 <td>{c.machine_score == null ? '—' : c.machine_score}</td>
                 <td>{c.page_count || '—'}</td>
                 <td>{c.decision ?? '—'}</td>
-                <td>
+                <td style={{ display: 'flex', gap: 6 }}>
                   <Button variant="ghost" size="sm" onClick={() => loadDetail(c.candidate_id)}>
                     View
                   </Button>
+                  {ACTIVE_STATES.has(c.state) && (
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => cancel(c.candidate_id)}
+                      disabled={cancelling}
+                    >
+                      Cancel
+                    </Button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -260,6 +284,13 @@ export default function OcrCandidatesPanel({ documentId }: { documentId: number 
               </Button>
               <Button variant="danger" onClick={() => decide('rejected')} disabled={deciding}>
                 Reject
+              </Button>
+            </div>
+          )}
+          {ACTIVE_STATES.has(detail.state) && (
+            <div style={{ marginTop: 12 }}>
+              <Button variant="danger" onClick={() => cancel(detail.candidate_id)} disabled={cancelling}>
+                {cancelling ? 'Cancelling…' : 'Cancel'}
               </Button>
             </div>
           )}

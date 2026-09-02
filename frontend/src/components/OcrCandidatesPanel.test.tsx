@@ -150,6 +150,29 @@ describe('OcrCandidatesPanel', () => {
     expect(screen.getByRole('button', { name: 'Accept' })).toBeInTheDocument();
   });
 
+  it('shows a Cancel button for a RUNNING candidate and cancels it', async () => {
+    const running = { ...readyCandidate, state: 'running', overlay_score: null, machine_score: null };
+    mocks.list.mockResolvedValue({ candidates: [running] });
+    mocks.cancel.mockResolvedValue({ candidate_id: 'cand-123456', state: 'rejected' });
+
+    render(<OcrCandidatesPanel documentId={501} />);
+    await waitFor(() => expect(screen.getByText('running')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(mocks.cancel).toHaveBeenCalledWith('cand-123456'));
+    // Cancellation only calls the candidate-cancel endpoint; it has no
+    // Paperless-facing side effect.
+    await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+  });
+
+  it('does not show a Cancel button once a candidate is READY', async () => {
+    mocks.list.mockResolvedValue({ candidates: [readyCandidate] });
+    render(<OcrCandidatesPanel documentId={501} />);
+    await waitFor(() => expect(screen.getByText('ready')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+  });
+
   it('surfaces a failure reason for a FAILED candidate', async () => {
     const failed = { ...readyCandidate, state: 'failed', overlay_score: null, machine_score: null };
     const failedDetail = { ...readyCandidateDetail, ...failed, comparison: null, failure_reason: 'ocrmypdf binary not found' };
