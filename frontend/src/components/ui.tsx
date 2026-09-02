@@ -522,40 +522,59 @@ export function Breadcrumb({ items }: { items: { label: string; to?: string }[] 
   );
 }
 
-export function DataTable<T>({
-  columns,
-  rows,
-  rowKey,
-  emptyLabel = 'No data',
-}: {
-  columns: { key: string; header: ReactNode; render: (row: T) => ReactNode; width?: string }[];
-  rows: T[];
-  rowKey: (row: T) => string;
-  emptyLabel?: string;
-}) {
-  if (rows.length === 0) {
-    return <EmptyState title={emptyLabel} />;
-  }
-  return (
-    <table className="data-table">
-      <thead>
-        <tr>
-          {columns.map((c) => (
-            <th key={c.key} style={{ width: c.width }}>
-              {c.header}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={rowKey(row)}>
-            {columns.map((c) => (
-              <td key={c.key}>{c.render(row)}</td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
+export type SortDir = 'asc' | 'desc';
+
+export function DataTable<T>({
+  columns,
+  rows,
+  rowKey,
+  emptyLabel = 'No data',
+  sortKey,
+  sortDir,
+  onSortChange,
+}: {
+  columns: { key: string; header: ReactNode; render: (row: T) => ReactNode; width?: string; sortable?: boolean }[];
+  rows: T[];
+  rowKey: (row: T) => string;
+  emptyLabel?: string;
+  /** Key of the column currently sorted, if any. Enables the sort-indicator arrow. */
+  sortKey?: string;
+  sortDir?: SortDir;
+  /** Called with a column's `key` when its header is clicked. Omit to render plain (non-clickable) headers. */
+  onSortChange?: (key: string) => void;
+}) {
+  if (rows.length === 0) {
+    return <EmptyState title={emptyLabel} />;
+  }
+  return (
+    <table className="data-table">
+      <thead>
+        <tr>
+          {columns.map((c) => (
+            <th key={c.key} style={{ width: c.width }} aria-sort={sortKey === c.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}>
+              {c.sortable && onSortChange ? (
+                <button type="button" className="data-table-sort-button" onClick={() => onSortChange(c.key)}>
+                  {c.header}
+                  <span className="data-table-sort-indicator" aria-hidden="true">
+                    {sortKey === c.key ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}
+                  </span>
+                </button>
+              ) : (
+                c.header
+              )}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={rowKey(row)}>
+            {columns.map((c) => (
+              <td key={c.key}>{c.render(row)}</td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}

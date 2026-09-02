@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Badge, DataTable, EmptyState, ErrorState, PageHeader, SkeletonLoader, type Tone } from '../components/ui';
+import { Badge, DataTable, EmptyState, ErrorState, PageHeader, SkeletonLoader, type SortDir, type Tone } from '../components/ui';
+import { MetadataTypeahead, type MetadataOption } from '../components/MetadataTypeahead';
 import { endpoints } from '../lib/api';
 import { statusTone } from './OcrQualityDashboard';
 import '../styles/ocr-quality.css';
@@ -30,16 +31,26 @@ export type DocumentListResponse = {
 
 const REVIEW_STATUS_OPTIONS = ['GOOD', 'UNCERTAIN', 'REVIEW_RECOMMENDED', 'FAILED'];
 const PAGE_SIZE = 25;
+const DEFAULT_SORT_DIR: SortDir = 'desc';
 
 export function formatScore(value?: number | null) {
   return value == null ? '—' : value.toFixed(1);
 }
 
-function buildQueryParams(filters: Record<string, string>, limit: number, offset: number): string {
+function buildQueryParams(
+  filters: Record<string, string>,
+  sort: { key: string; dir: SortDir } | null,
+  limit: number,
+  offset: number,
+): string {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
     if (value) params.set(key, value);
   });
+  if (sort) {
+    params.set('sort_by', sort.key);
+    params.set('sort_dir', sort.dir);
+  }
   params.set('limit', String(limit));
   params.set('offset', String(offset));
   return params.toString();
@@ -52,6 +63,9 @@ export default function OcrQualityReviewQueue() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
+  const [documentTypeOptions, setDocumentTypeOptions] = useState<MetadataOption[]>([]);
+  const [correspondentOptions, setCorrespondentOptions] = useState<MetadataOption[]>([]);
+  const [downstreamOutcomeOptions, setDownstreamOutcomeOptions] = useState<string[]>([]);
 
   const filters = useMemo(
     () => ({
@@ -63,16 +77,57 @@ export default function OcrQualityReviewQueue() {
     [searchParams],
   );
 
+  const sort = useMemo(() => {
+    const key = searchParams.get('sort_by');
+    if (!key) return null;
+    const dir = searchParams.get('sort_dir') === 'asc' ? 'asc' : DEFAULT_SORT_DIR;
+    return { key, dir: dir as SortDir };
+  }, [searchParams]);
+
+  // Document type / correspondent ID → name lookups. These reuse the same
+  // Paperless-backed endpoints already used elsewhere in the app (document
+  // type mapping admin screen, action queue metadata correction) instead of
+  // inventing a new resolution mechanism.
+  useEffect(() => {
+    endpoints.admin
+      .documentTypes()
+      .then((data) => {
+        const types = (data as { types?: Array<{ id: number; name: string }> }).types ?? [];
+        setDocumentTypeOptions(types.map((t) => ({ value: String(t.id), label: t.name })));
+      })
+      .catch(() => setDocumentTypeOptions([]));
+    endpoints.actionQueue
+      .metadataCorrespondents()
+      .then((data) => {
+        const correspondents = (data as { correspondents?: Array<{ id: number; name: string }> }).correspondents ?? [];
+        setCorrespondentOptions(correspondents.map((c) => ({ value: String(c.id), label: c.name })));
+      })
+      .catch(() => setCorrespondentOptions([]));
+    endpoints.ocrQuality
+      .downstreamOutcomes()
+      .then((data) => setDownstreamOutcomeOptions((data as { downstream_outcomes?: string[] }).downstream_outcomes ?? []))
+      .catch(() => setDownstreamOutcomeOptions([]));
+  }, []);
+
+  const documentTypeNameById = useMemo(
+    () => new Map(documentTypeOptions.map((o) => [o.value, o.label])),
+    [documentTypeOptions],
+  );
+  const correspondentNameById = useMemo(
+    () => new Map(correspondentOptions.map((o) => [o.value, o.label])),
+    [correspondentOptions],
+  );
+
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    const params = buildQueryParams(filters, PAGE_SIZE, offset);
+    const params = buildQueryParams(filters, sort, PAGE_SIZE, offset);
     endpoints.ocrQuality
       .documents(params)
       .then((data) => setResponse(data as DocumentListResponse))
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load the review queue.'))
       .finally(() => setLoading(false));
-  }, [filters, offset]);
+  }, [filters, sort, offset]);
 
   useEffect(() => {
     load();
@@ -80,12 +135,28 @@ export default function OcrQualityReviewQueue() {
 
   useEffect(() => {
     setOffset(0);
-  }, [filters]);
+  }, [filters, sort]);
 
   const updateFilter = (key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
     else next.delete(key);
+    setSearchParams(next);
+  };
+
+  const handleSortChange = (key: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (sort?.key === key) {
+      if (sort.dir === 'desc') {
+        next.set('sort_dir', 'asc');
+      } else {
+        next.delete('sort_by');
+        next.delete('sort_dir');
+      }
+    } else {
+      next.set('sort_by', key);
+      next.set('sort_dir', 'desc');
+    }
     setSearchParams(next);
   };
 
@@ -108,30 +179,32 @@ export default function OcrQualityReviewQueue() {
         </label>
         <label>
           Document type
-          <input
-            type="text"
+          <MetadataTypeahead
+            ariaLabel="Document type"
+            options={documentTypeOptions}
             value={filters.document_type}
-            onChange={(e) => updateFilter('document_type', e.target.value)}
-            placeholder="e.g. 5"
+            onChange={(value) => updateFilter('document_type', value)}
+            placeholder="Search document types…"
           />
         </label>
         <label>
           Correspondent
-          <input
-            type="text"
+          <MetadataTypeahead
+            ariaLabel="Correspondent"
+            options={correspondentOptions}
             value={filters.correspondent}
-            onChange={(e) => updateFilter('correspondent', e.target.value)}
-            placeholder="e.g. 9"
+            onChange={(value) => updateFilter('correspondent', value)}
+            placeholder="Search correspondents…"
           />
         </label>
         <label>
           Downstream outcome
-          <input
-            type="text"
-            value={filters.downstream_outcome}
-            onChange={(e) => updateFilter('downstream_outcome', e.target.value)}
-            placeholder="e.g. reviewed"
-          />
+          <select value={filters.downstream_outcome} onChange={(e) => updateFilter('downstream_outcome', e.target.value)}>
+            <option value="">All</option>
+            {downstreamOutcomeOptions.map((outcome) => (
+              <option key={outcome} value={outcome}>{outcome}</option>
+            ))}
+          </select>
         </label>
       </div>
 
@@ -145,23 +218,38 @@ export default function OcrQualityReviewQueue() {
           <DataTable<DocumentSummary>
             rows={documents}
             rowKey={(row) => String(row.document_id)}
+            sortKey={sort?.key}
+            sortDir={sort?.dir}
+            onSortChange={handleSortChange}
             columns={[
               {
                 key: 'document_id',
                 header: 'Document',
+                sortable: true,
                 render: (row) => <button type="button" className="ocr-link-button" onClick={() => navigate(`/ocr-quality/documents/${row.document_id}`)}>#{row.document_id}</button>,
               },
-              { key: 'document_type', header: 'Type', render: (row) => row.document_type ?? '—' },
-              { key: 'correspondent', header: 'Correspondent', render: (row) => row.correspondent ?? '—' },
-              { key: 'document_created', header: 'Created', render: (row) => row.document_created ?? '—' },
+              {
+                key: 'document_type',
+                header: 'Type',
+                sortable: true,
+                render: (row) => (row.document_type == null ? '—' : documentTypeNameById.get(row.document_type) ?? row.document_type),
+              },
+              {
+                key: 'correspondent',
+                header: 'Correspondent',
+                sortable: true,
+                render: (row) => (row.correspondent == null ? '—' : correspondentNameById.get(row.correspondent) ?? row.correspondent),
+              },
+              { key: 'document_created', header: 'Created', sortable: true, render: (row) => row.document_created ?? '—' },
               {
                 key: 'review_status',
                 header: 'Status',
+                sortable: true,
                 render: (row) => <Badge tone={statusTone(row.review_status ?? 'unscored') as Tone}>{row.review_status ?? 'unscored'}</Badge>,
               },
-              { key: 'overlay_score', header: 'Overlay', render: (row) => formatScore(row.overlay_score) },
-              { key: 'machine_score', header: 'Machine', render: (row) => formatScore(row.machine_score) },
-              { key: 'downstream_outcome', header: 'Downstream', render: (row) => row.downstream_outcome ?? '—' },
+              { key: 'overlay_score', header: 'Overlay', sortable: true, render: (row) => formatScore(row.overlay_score) },
+              { key: 'machine_score', header: 'Machine', sortable: true, render: (row) => formatScore(row.machine_score) },
+              { key: 'downstream_outcome', header: 'Downstream', sortable: true, render: (row) => row.downstream_outcome ?? '—' },
             ]}
           />
           <div className="ocr-pagination">

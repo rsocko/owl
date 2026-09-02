@@ -650,6 +650,20 @@ class OcrQualityInventoryService:
             query = query.filter(DocumentAssessment.document_created <= created_before)
         return query
 
+    # Columns the review queue UI is allowed to sort by, mapped to the
+    # underlying ORM column. Keep in sync with the frontend's sortable
+    # `DataTable` column keys in `OcrQualityReviewQueue.tsx`.
+    _SORTABLE_COLUMNS = {
+        "document_id": DocumentAssessment.document_id,
+        "document_type": DocumentAssessment.document_type,
+        "correspondent": DocumentAssessment.correspondent,
+        "document_created": DocumentAssessment.document_created,
+        "review_status": DocumentAssessment.review_status,
+        "overlay_score": DocumentAssessment.overlay_score,
+        "machine_score": DocumentAssessment.machine_score,
+        "downstream_outcome": DocumentAssessment.downstream_outcome,
+    }
+
     def list_document_assessments(
         self,
         *,
@@ -660,6 +674,8 @@ class OcrQualityInventoryService:
         downstream_outcome: str | None = None,
         created_after: str | None = None,
         created_before: str | None = None,
+        sort_by: str | None = None,
+        sort_dir: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -668,6 +684,11 @@ class OcrQualityInventoryService:
         Read-only over this module's own SQLite state — never contacts
         Paperless. Only aggregate-safe/metadata fields are returned; no raw
         OCR text.
+
+        When ``sort_by`` names one of ``_SORTABLE_COLUMNS`` the result is
+        ordered by that column at the database level (so sorting is stable
+        across pages of a large corpus); otherwise the historical default
+        ordering (most recent document first, then grouped by risk) is used.
         """
         db = self.session_factory()
         try:
@@ -682,13 +703,23 @@ class OcrQualityInventoryService:
                 created_before=created_before,
             )
             total = base_query.count()
-            rows = (
-                base_query.order_by(DocumentAssessment.document_id.desc())
-                .offset(max(offset, 0))
-                .limit(max(1, min(limit, 200)))
-                .all()
-            )
-            rows.sort(key=lambda r: self._RISK_ORDER.get(r.review_status or "", 4))
+            sort_column = self._SORTABLE_COLUMNS.get(sort_by or "")
+            if sort_column is not None:
+                order_column = sort_column.asc() if sort_dir == "asc" else sort_column.desc()
+                rows = (
+                    base_query.order_by(order_column, DocumentAssessment.document_id.desc())
+                    .offset(max(offset, 0))
+                    .limit(max(1, min(limit, 200)))
+                    .all()
+                )
+            else:
+                rows = (
+                    base_query.order_by(DocumentAssessment.document_id.desc())
+                    .offset(max(offset, 0))
+                    .limit(max(1, min(limit, 200)))
+                    .all()
+                )
+                rows.sort(key=lambda r: self._RISK_ORDER.get(r.review_status or "", 4))
             return {
                 "documents": [_assessment_summary(row) for row in rows],
                 "total": total,
@@ -696,6 +727,26 @@ class OcrQualityInventoryService:
                 "offset": offset,
                 "redacted": True,
             }
+        finally:
+            db.close()
+
+    def list_downstream_outcomes(self) -> list[str]:
+        """Distinct, non-null ``downstream_outcome`` values seen in the corpus.
+
+        Backs the review queue's "Downstream outcome" filter dropdown so it
+        always reflects the actual values written by the action-queue
+        pipeline (see ``action_queue.database.ProcessingHistory.disposition``)
+        instead of a hand-maintained enum that could drift out of date.
+        """
+        db = self.session_factory()
+        try:
+            rows = (
+                db.query(DocumentAssessment.downstream_outcome)
+                .filter(DocumentAssessment.downstream_outcome.isnot(None))
+                .distinct()
+                .all()
+            )
+            return sorted({value for (value,) in rows if value})
         finally:
             db.close()
 
