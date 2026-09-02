@@ -19,6 +19,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSourceCreate,
     AcquisitionSourceUpdate,
     Cadence,
+    CandidateOverride,
     CorrespondentProfile,
     CorrespondentProfileUpdate,
     CorrespondentSyncResult,
@@ -47,7 +48,7 @@ from doc_intelligence_hub.modules.statements.models import (
     RecommendationResult,
 )
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -186,6 +187,21 @@ CREATE TABLE IF NOT EXISTS correspondent_profiles (
 
 CREATE INDEX IF NOT EXISTS idx_correspondent_profiles_review
     ON correspondent_profiles(deployment_id, lifecycle_status, review_status);
+
+-- Reviewed candidate membership overrides (schema v9): lets a user merge documents
+-- into one candidate series or mark them as noise, independent of title similarity.
+CREATE TABLE IF NOT EXISTS correspondent_candidate_overrides (
+    deployment_id TEXT NOT NULL,
+    correspondent_id INTEGER NOT NULL,
+    document_id INTEGER NOT NULL,
+    group_key TEXT,
+    is_excluded INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (deployment_id, correspondent_id, document_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidate_overrides_group
+    ON correspondent_candidate_overrides(deployment_id, correspondent_id, group_key);
 
 CREATE TABLE IF NOT EXISTS acquisition_sources (
     id TEXT PRIMARY KEY,
@@ -1236,6 +1252,70 @@ class Database:
         profile = self.get_correspondent_profile(deployment_id, new_correspondent_id)
         assert profile is not None
         return profile
+
+    # ----- Candidate membership overrides -----
+
+    def set_candidate_overrides(
+        self,
+        deployment_id: str,
+        correspondent_id: int,
+        document_ids: list[int],
+        *,
+        group_key: str | None,
+        excluded: bool,
+    ) -> list[CandidateOverride]:
+        """Persist a user merge/split/noise decision for one or more documents."""
+        conn = self.connect()
+        with conn:
+            for document_id in document_ids:
+                conn.execute(
+                    """INSERT INTO correspondent_candidate_overrides (
+                           deployment_id, correspondent_id, document_id,
+                           group_key, is_excluded, updated_at
+                       ) VALUES (?, ?, ?, ?, ?, datetime('now'))
+                       ON CONFLICT (deployment_id, correspondent_id, document_id)
+                       DO UPDATE SET group_key = excluded.group_key,
+                                     is_excluded = excluded.is_excluded,
+                                     updated_at = datetime('now')""",
+                    (deployment_id, correspondent_id, document_id, group_key, int(excluded)),
+                )
+        return self.list_candidate_overrides(deployment_id, correspondent_id)
+
+    def clear_candidate_overrides(
+        self, deployment_id: str, correspondent_id: int, document_ids: list[int]
+    ) -> int:
+        """Revert one or more documents to automatic candidate grouping."""
+        conn = self.connect()
+        placeholders = ",".join("?" for _ in document_ids)
+        with conn:
+            cursor = conn.execute(
+                f"""DELETE FROM correspondent_candidate_overrides
+                    WHERE deployment_id = ? AND correspondent_id = ?
+                      AND document_id IN ({placeholders})""",
+                (deployment_id, correspondent_id, *document_ids),
+            )
+        return cursor.rowcount
+
+    def list_candidate_overrides(
+        self, deployment_id: str, correspondent_id: int
+    ) -> list[CandidateOverride]:
+        conn = self.connect()
+        rows = conn.execute(
+            """SELECT document_id, group_key, is_excluded, updated_at
+               FROM correspondent_candidate_overrides
+               WHERE deployment_id = ? AND correspondent_id = ?
+               ORDER BY document_id""",
+            (deployment_id, correspondent_id),
+        ).fetchall()
+        return [
+            CandidateOverride(
+                document_id=row["document_id"],
+                group_key=row["group_key"],
+                excluded=bool(row["is_excluded"]),
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
 
     @staticmethod
     def _insert_profile_event(

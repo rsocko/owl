@@ -10,6 +10,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSource,
     AcquisitionSourceCreate,
     AcquisitionSourceUpdate,
+    CandidateOverride,
     CorrespondentAnalysisResult,
     CorrespondentProfile,
     CorrespondentProfileUpdate,
@@ -74,6 +75,12 @@ class CorrespondentPolicyService:
                 document["document_id"]
                 for document in self.database.get_series_documents(series["id"])
             ]
+        overrides = {
+            override.document_id: override
+            for override in self.database.list_candidate_overrides(
+                self.deployment_id, correspondent_id
+            )
+        }
         result = analyze_correspondent_policy(
             correspondent_id,
             profile.current_name,
@@ -81,6 +88,7 @@ class CorrespondentPolicyService:
             statement_series,
             analyzed_at=analyzed_at,
             account_identifier_extraction_requested=account_identifier_extraction_requested,
+            candidate_overrides=overrides,
         )
         self.update_profile(
             correspondent_id,
@@ -106,6 +114,32 @@ class CorrespondentPolicyService:
             old_correspondent_id,
             new_correspondent_id,
             new_name,
+        )
+
+    def list_candidate_overrides(self, correspondent_id: int) -> list[CandidateOverride]:
+        return self.database.list_candidate_overrides(self.deployment_id, correspondent_id)
+
+    def set_candidate_overrides(
+        self,
+        correspondent_id: int,
+        document_ids: list[int],
+        *,
+        group_key: str | None,
+        excluded: bool,
+    ) -> list[CandidateOverride]:
+        """Merge documents into one candidate (``group_key``) or mark them noise."""
+        return self.database.set_candidate_overrides(
+            self.deployment_id,
+            correspondent_id,
+            document_ids,
+            group_key=group_key,
+            excluded=excluded,
+        )
+
+    def clear_candidate_overrides(self, correspondent_id: int, document_ids: list[int]) -> int:
+        """Revert documents to automatic candidate grouping."""
+        return self.database.clear_candidate_overrides(
+            self.deployment_id, correspondent_id, document_ids
         )
 
     def create_expectation(

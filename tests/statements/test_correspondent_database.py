@@ -168,6 +168,38 @@ def test_correspondent_sync_marks_orphans_and_requires_explicit_relink(tmp_path)
         db.close()
 
 
+def test_candidate_override_crud_roundtrip(tmp_path) -> None:
+    db = Database(str(tmp_path / "statements.db"))
+    try:
+        db.reconcile_correspondents(DEPLOYMENT_ID, [{"id": 42, "name": "Example Bank"}])
+
+        assert db.list_candidate_overrides(DEPLOYMENT_ID, 42) == []
+
+        created = db.set_candidate_overrides(
+            DEPLOYMENT_ID, 42, [1, 2], group_key="household-bills", excluded=False
+        )
+        assert [override.document_id for override in created] == [1, 2]
+        assert all(override.group_key == "household-bills" for override in created)
+        assert all(override.excluded is False for override in created)
+        assert all(override.updated_at is not None for override in created)
+
+        updated = db.set_candidate_overrides(DEPLOYMENT_ID, 42, [2], group_key=None, excluded=True)
+        by_id = {override.document_id: override for override in updated}
+        assert by_id[1].group_key == "household-bills"
+        assert by_id[1].excluded is False
+        assert by_id[2].group_key is None
+        assert by_id[2].excluded is True
+
+        cleared = db.clear_candidate_overrides(DEPLOYMENT_ID, 42, [1])
+        assert cleared == 1
+        remaining = db.list_candidate_overrides(DEPLOYMENT_ID, 42)
+        assert [override.document_id for override in remaining] == [2]
+
+        assert db.clear_candidate_overrides(DEPLOYMENT_ID, 42, [999]) == 0
+    finally:
+        db.close()
+
+
 def test_only_confirmed_cadenced_active_policy_is_alertable(tmp_path) -> None:
     db = Database(str(tmp_path / "statements.db"))
     try:

@@ -361,6 +361,7 @@ class ObservedSummary(PolicyModel):
     title_pattern_count: int = Field(default=0, ge=0)
     tag_family_counts: dict[str, int] = Field(default_factory=dict)
     candidate_series_count: int = Field(default=0, ge=0)
+    excluded_document_count: int = Field(default=0, ge=0)
 
 
 class Cadence(PolicyModel):
@@ -709,6 +710,39 @@ class CorrespondentSyncResult(PolicyModel):
 
 class RelinkProfileRequest(PolicyModel):
     correspondent_id: int = Field(gt=0)
+
+
+class CandidateOverride(PolicyModel):
+    """A user-confirmed candidate-membership decision for one document.
+
+    Persists across reanalysis so merges, splits, and noise markers are not
+    silently undone when candidate generation reruns.
+    """
+
+    document_id: int = Field(gt=0)
+    group_key: str | None = Field(default=None, max_length=200)
+    excluded: bool = False
+    updated_at: str | None = None
+
+
+class CandidateOverrideRequest(PolicyModel):
+    """Assign one or more documents to an explicit candidate group, or mark noise."""
+
+    document_ids: list[int] = Field(min_length=1, max_length=500)
+    group_key: str | None = Field(default=None, min_length=1, max_length=200)
+    excluded: bool = False
+
+    @model_validator(mode="after")
+    def validate_target(self) -> CandidateOverrideRequest:
+        if not self.excluded and not self.group_key:
+            raise ValueError("group_key is required unless excluded is true")
+        return self
+
+
+class CandidateOverrideClearRequest(PolicyModel):
+    """Revert one or more documents to automatic candidate grouping."""
+
+    document_ids: list[int] = Field(min_length=1, max_length=500)
 
 
 class LegacyOverrideReviewItem(PolicyModel):
