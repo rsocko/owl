@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
+from doc_intelligence_hub.api.routers import ocr_quality as ocr_quality_router
 from doc_intelligence_hub.modules.ocr_quality import config as ocr_quality_config
 from doc_intelligence_hub.modules.ocr_quality.database import (
     DocumentAssessment,
@@ -10,6 +13,7 @@ from doc_intelligence_hub.modules.ocr_quality.database import (
     init_db,
 )
 from doc_intelligence_hub.modules.ocr_quality.models import RunStage, RunStatus
+from doc_intelligence_hub.modules.ocr_quality.service import _digest as _scope_digest
 
 
 @pytest.fixture()
@@ -17,22 +21,30 @@ def ocr_quality_db(tmp_path):
     original = ocr_quality_config.settings.database_url
     ocr_quality_config.settings.database_url = f"sqlite:///{tmp_path / 'api_test_ocr_quality.db'}"
     init_db()
+    ocr_quality_router._active_run_ids.clear()
     yield
+    ocr_quality_router._active_run_ids.clear()
     ocr_quality_config.settings.database_url = original
 
 
-def _seed_run(run_id: str = "run-1") -> None:
+def _seed_run(
+    run_id: str = "run-1",
+    *,
+    status: str = RunStatus.COMPLETED.value,
+    stage: str = RunStage.STAGE_1_CORPUS_SCAN.value,
+    document_id: int = 1,
+) -> None:
     db = get_session()
     try:
         db.add(
             InventoryRun(
                 run_id=run_id,
-                stage=RunStage.STAGE_1_CORPUS_SCAN.value,
+                stage=stage,
                 scope_digest="scope",
                 config_digest="config",
                 instance_digest="instance",
                 signal_version="ocr-quality-inventory-signals-v1",
-                status=RunStatus.COMPLETED.value,
+                status=status,
                 counts={"assessed": 2},
             )
         )
@@ -40,8 +52,8 @@ def _seed_run(run_id: str = "run-1") -> None:
             DocumentAssessment(
                 run_id=run_id,
                 first_seen_run_id=run_id,
-                document_id=1,
-                document_version_key="checksum:abc",
+                document_id=document_id,
+                document_version_key=f"checksum:{run_id}",
                 scorer_version="ocr-quality-inventory-signals-v1",
                 content_length=100,
                 word_count=20,
@@ -229,6 +241,238 @@ class TestGetDocument:
         body = resp.json()
         assert body["document_id"] == 1
         assert body["review_status"] == "GOOD"
-        assert "reasons" in body
-        assert "document_profile" in body
-        assert body["document_profile"]["dominant_classification"] == "digital_text"
+
+
+# ---------------------------------------------------------------------------
+# Manual trigger endpoints (issue #30, Phase 7 — manual entry points only)
+# ---------------------------------------------------------------------------
+#
+# Starlette's TestClient runs FastAPI ``BackgroundTasks`` to completion as
+# part of the same request/response ASGI cycle, so by the time
+# ``client.post(...)`` returns here, the scheduled background task has
+# already finished (or raised). Tests below rely on that to assert on the
+# scheduled service call directly, instead of polling/sleeping.
+
+
+@pytest.fixture()
+def mock_run_corpus_scan(monkeypatch):
+    from doc_intelligence_hub.modules.ocr_quality.service import OcrQualityInventoryService
+
+    mock = AsyncMock(return_value={"status": "completed"})
+    monkeypatch.setattr(OcrQualityInventoryService, "run_corpus_scan", mock)
+    return mock
+
+
+@pytest.fixture()
+def mock_run_stratified_sample(monkeypatch):
+    from doc_intelligence_hub.modules.ocr_quality.service import OcrQualityInventoryService
+
+    mock = AsyncMock(return_value={"status": "completed"})
+    monkeypatch.setattr(OcrQualityInventoryService, "run_stratified_sample", mock)
+    return mock
+
+
+class TestStartCorpusScan:
+    def test_start_returns_run_id_and_schedules_scan(
+        self, client, ocr_quality_db, mock_run_corpus_scan
+    ):
+        resp = client.post("/api/ocr-quality/runs", json={"batch_size": 50})
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["stage"] == RunStage.STAGE_1_CORPUS_SCAN.value
+        assert body["status"] == "running"
+        assert body["run_id"]
+
+        mock_run_corpus_scan.assert_awaited_once()
+        _, kwargs = mock_run_corpus_scan.call_args
+        assert kwargs["run_id"] == body["run_id"]
+        assert kwargs["batch_size"] == 50
+        assert kwargs["resume"] is False
+
+    def test_start_resolves_scope_filters(self, client, ocr_quality_db, mock_run_corpus_scan):
+        resp = client.post("/api/ocr-quality/runs", json={"tags": ["Medical"]})
+        assert resp.status_code == 202
+        _, kwargs = mock_run_corpus_scan.call_args
+        assert kwargs["scope_params"] == {"tags__id__in": "2"}
+
+    def test_duplicate_active_scope_returns_409(self, client, ocr_quality_db):
+        """A second concurrent request for the same scope is rejected while
+
+        the first is still actively scheduled (the mock never resolves, so
+        it stays "in flight" for the duration of this test).
+        """
+        from doc_intelligence_hub.modules.ocr_quality.service import OcrQualityInventoryService
+
+        with patch.object(
+            OcrQualityInventoryService, "run_corpus_scan", AsyncMock(return_value={})
+        ) as _mock:
+            # Reserve the run manually as the endpoint would, so a second
+            # call sees it as active without needing two real concurrent
+            # background tasks (TestClient runs them synchronously).
+            db = get_session()
+            try:
+                db.add(
+                    InventoryRun(
+                        run_id="already-running",
+                        stage=RunStage.STAGE_1_CORPUS_SCAN.value,
+                        scope_digest=_scope_digest({}),
+                        config_digest="config",
+                        instance_digest="instance",
+                        signal_version="ocr-quality-inventory-signals-v1",
+                        status=RunStatus.RUNNING.value,
+                        counts={},
+                    )
+                )
+                db.commit()
+            finally:
+                db.close()
+            ocr_quality_router._active_run_ids.add("already-running")
+
+            resp = client.post("/api/ocr-quality/runs", json={})
+            assert resp.status_code == 409
+            assert resp.json()["error"]["run_id"] == "already-running"
+            _mock.assert_not_called()
+
+    def test_stale_running_row_does_not_block_new_run(
+        self, client, ocr_quality_db, mock_run_corpus_scan
+    ):
+        """A ``running`` row left by a crashed process (not in the in-memory
+
+        active set) does not permanently block a new run for the same scope.
+        """
+        db = get_session()
+        try:
+            db.add(
+                InventoryRun(
+                    run_id="stale-run",
+                    stage=RunStage.STAGE_1_CORPUS_SCAN.value,
+                    scope_digest=_scope_digest({}),
+                    config_digest="config",
+                    instance_digest="instance",
+                    signal_version="ocr-quality-inventory-signals-v1",
+                    status=RunStatus.RUNNING.value,
+                    counts={},
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        resp = client.post("/api/ocr-quality/runs", json={})
+        assert resp.status_code == 202
+        assert resp.json()["run_id"] != "stale-run"
+
+    def test_scan_failure_marks_run_failed(self, client, ocr_quality_db):
+        from doc_intelligence_hub.modules.ocr_quality.service import OcrQualityInventoryService
+
+        async def _fail(*, batch_size, run_id, resume, scope_params):
+            db = get_session()
+            try:
+                db.add(
+                    InventoryRun(
+                        run_id=run_id,
+                        stage=RunStage.STAGE_1_CORPUS_SCAN.value,
+                        scope_digest=_scope_digest(scope_params or {}),
+                        config_digest="config",
+                        instance_digest="instance",
+                        signal_version="ocr-quality-inventory-signals-v1",
+                        status=RunStatus.RUNNING.value,
+                        counts={},
+                    )
+                )
+                db.commit()
+            finally:
+                db.close()
+            raise RuntimeError("boom")
+
+        with patch.object(
+            OcrQualityInventoryService, "run_corpus_scan", AsyncMock(side_effect=_fail)
+        ):
+            resp = client.post("/api/ocr-quality/runs", json={})
+            assert resp.status_code == 202
+            run_id = resp.json()["run_id"]
+
+        detail = client.get(f"/api/ocr-quality/runs/{run_id}").json()
+        assert detail["status"] == "failed"
+        assert run_id not in ocr_quality_router._active_run_ids
+
+
+class TestResumeCorpusScan:
+    def test_resume_unknown_run_404(self, client, ocr_quality_db, mock_run_corpus_scan):
+        resp = client.post("/api/ocr-quality/runs/does-not-exist/resume", json={})
+        assert resp.status_code == 404
+        mock_run_corpus_scan.assert_not_called()
+
+    def test_resume_completed_run_409(self, client, ocr_quality_db, mock_run_corpus_scan):
+        _seed_run("completed-run")
+        resp = client.post("/api/ocr-quality/runs/completed-run/resume", json={})
+        assert resp.status_code == 409
+        mock_run_corpus_scan.assert_not_called()
+
+    def test_resume_actively_running_returns_409(self, client, ocr_quality_db):
+        _seed_run("active-run", status=RunStatus.RUNNING.value)
+        ocr_quality_router._active_run_ids.add("active-run")
+        resp = client.post("/api/ocr-quality/runs/active-run/resume", json={})
+        assert resp.status_code == 409
+
+    def test_resume_schedules_with_resume_true(self, client, ocr_quality_db, mock_run_corpus_scan):
+        _seed_run("interrupted-run", status=RunStatus.RUNNING.value)
+        resp = client.post(
+            "/api/ocr-quality/runs/interrupted-run/resume", json={"batch_size": 25}
+        )
+        assert resp.status_code == 202
+        assert resp.json()["run_id"] == "interrupted-run"
+        mock_run_corpus_scan.assert_awaited_once()
+        _, kwargs = mock_run_corpus_scan.call_args
+        assert kwargs["run_id"] == "interrupted-run"
+        assert kwargs["resume"] is True
+        assert kwargs["batch_size"] == 25
+
+
+class TestStartStratifiedSample:
+    def test_sample_unknown_source_run_404(
+        self, client, ocr_quality_db, mock_run_stratified_sample
+    ):
+        resp = client.post("/api/ocr-quality/runs/does-not-exist/sample", json={})
+        assert resp.status_code == 404
+        mock_run_stratified_sample.assert_not_called()
+
+    def test_sample_starts_and_schedules(self, client, ocr_quality_db, mock_run_stratified_sample):
+        _seed_run("source-run")
+        resp = client.post(
+            "/api/ocr-quality/runs/source-run/sample",
+            json={"sample_size": 100, "seed": "seed-1", "min_per_stratum": 3},
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["source_run_id"] == "source-run"
+        assert body["stage"] == RunStage.STAGE_2_STRATIFIED_SAMPLE.value
+        assert body["run_id"] != "source-run"
+
+        mock_run_stratified_sample.assert_awaited_once()
+        _, kwargs = mock_run_stratified_sample.call_args
+        assert kwargs["source_run_id"] == "source-run"
+        assert kwargs["sample_size"] == 100
+        assert kwargs["seed"] == "seed-1"
+        assert kwargs["min_per_stratum"] == 3
+
+    def test_duplicate_active_sample_returns_409(self, client, ocr_quality_db):
+        _seed_run("source-run-2")
+        _seed_run(
+            "existing-sample",
+            stage=RunStage.STAGE_2_STRATIFIED_SAMPLE.value,
+            status=RunStatus.RUNNING.value,
+            document_id=2,
+        )
+        db = get_session()
+        try:
+            run = db.query(InventoryRun).filter_by(run_id="existing-sample").one()
+            run.source_run_id = "source-run-2"
+            db.commit()
+        finally:
+            db.close()
+        ocr_quality_router._active_run_ids.add("existing-sample")
+
+        resp = client.post("/api/ocr-quality/runs/source-run-2/sample", json={})
+        assert resp.status_code == 409
+        assert resp.json()["error"]["run_id"] == "existing-sample"

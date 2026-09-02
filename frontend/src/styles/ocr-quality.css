@@ -158,3 +158,38 @@
   color: var(--text-muted);
   font-size: 13px;
 }
+
+.ocr-runs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ocr-run-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.ocr-run-row-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ocr-run-id {
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+}
+
+.ocr-sample-form {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+

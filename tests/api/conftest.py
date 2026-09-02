@@ -120,6 +120,7 @@ def mock_paperless():
         "doc_intelligence_hub.api.routers.eob.make_paperless_client",
         "doc_intelligence_hub.api.routers.action_queue.make_paperless_client",
         "doc_intelligence_hub.api.routers.document_views.make_paperless_client",
+        "doc_intelligence_hub.api.routers.ocr_quality.make_paperless_client",
         # "doc_intelligence_hub.api.routers.stats.make_paperless_client",  # stats doesn't import this
     ]
     patches = [patch(t, return_value=mock) for t in targets]
