@@ -417,9 +417,7 @@ class TestResumeCorpusScan:
 
     def test_resume_schedules_with_resume_true(self, client, ocr_quality_db, mock_run_corpus_scan):
         _seed_run("interrupted-run", status=RunStatus.RUNNING.value)
-        resp = client.post(
-            "/api/ocr-quality/runs/interrupted-run/resume", json={"batch_size": 25}
-        )
+        resp = client.post("/api/ocr-quality/runs/interrupted-run/resume", json={"batch_size": 25})
         assert resp.status_code == 202
         assert resp.json()["run_id"] == "interrupted-run"
         mock_run_corpus_scan.assert_awaited_once()
