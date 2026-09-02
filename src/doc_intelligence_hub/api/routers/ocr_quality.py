@@ -18,8 +18,9 @@ Endpoints:
     POST /api/ocr-quality/runs/{run_id}/resume    — Resume an interrupted Stage-1 run (background)
     POST /api/ocr-quality/runs/{run_id}/sample    — Start a Stage-2 stratified sample (background)
     GET  /api/ocr-quality/distribution            — Corpus-wide review-status/score snapshot
-    GET  /api/ocr-quality/documents               — Filterable/paginated review queue
+    GET  /api/ocr-quality/documents               — Filterable/paginated/sortable review queue
     GET  /api/ocr-quality/documents/{document_id} — Single document's full assessment detail
+    GET  /api/ocr-quality/downstream-outcomes     — Distinct downstream_outcome values (filter dropdown)
 
 All three POST endpoints are fire-and-forget: they validate input, reject
 duplicate concurrently-active runs, and return the ``run_id`` immediately.
@@ -473,13 +474,18 @@ async def list_documents(
     downstream_outcome: str | None = None,
     created_after: str | None = None,
     created_before: str | None = None,
+    sort_by: str | None = None,
+    sort_dir: str | None = Query(None, pattern="^(asc|desc)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     """Filterable, paginated review queue over the latest per-document assessment.
 
     All filters are optional and combine with AND. Only metadata and score
-    fields are returned — never raw OCR text.
+    fields are returned — never raw OCR text. ``sort_by``/``sort_dir`` support
+    server-side column sorting (see ``OcrQualityInventoryService._SORTABLE_COLUMNS``
+    for the allowed column keys); an unrecognized ``sort_by`` falls back to
+    the default ordering.
     """
     return _service().list_document_assessments(
         review_status=review_status,
@@ -489,9 +495,17 @@ async def list_documents(
         downstream_outcome=downstream_outcome,
         created_after=created_after,
         created_before=created_before,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
         limit=limit,
         offset=offset,
     )
+
+
+@router.get("/downstream-outcomes")
+async def list_downstream_outcomes() -> dict[str, Any]:
+    """Distinct downstream-outcome values in the corpus, for the filter dropdown."""
+    return {"downstream_outcomes": _service().list_downstream_outcomes()}
 
 
 @router.get("/documents/{document_id}")
