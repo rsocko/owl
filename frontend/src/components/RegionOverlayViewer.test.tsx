@@ -97,6 +97,22 @@ describe('RegionOverlayViewer', () => {
     );
   });
 
+  it('renders diff highlight classes and overrides heatmap styling when diffHighlights is set', () => {
+    const diffHighlights = new Map<number, 'added' | 'removed' | 'shifted'>([
+      [0, 'removed'],
+      [1, 'shifted'],
+    ]);
+    const { container } = render(
+      <RegionOverlayViewer imageUrl="/img" regions={baseRegions} diffHighlights={diffHighlights} />,
+    );
+    loadImage(container);
+    const boxes = screen.getAllByTestId('word-box');
+    expect(boxes[0].className).toContain('diff-removed');
+    expect(boxes[1].className).toContain('diff-shifted');
+    expect(boxes[0]).toHaveAttribute('title', 'Hello (removed)');
+    expect(boxes[1]).toHaveAttribute('title', 'World (shifted)');
+  });
+
   it('renders existing annotations as boxes and supports deleting them', () => {
     const onDeleteAnnotation = vi.fn();
     const { container } = render(

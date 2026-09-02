@@ -11,8 +11,11 @@ const mocks = vi.hoisted(() => ({
   downloadUrl: vi.fn(),
   previewUrl: vi.fn(),
   candidatesList: vi.fn(),
+  candidateRegions: vi.fn(),
+  candidatePageImageUrl: vi.fn(),
   regions: vi.fn(),
   pageImageUrl: vi.fn(),
+  regionsDiff: vi.fn(),
   annotationsList: vi.fn(),
   annotationsCreate: vi.fn(),
   annotationsUpdate: vi.fn(),
@@ -30,9 +33,12 @@ vi.mock('../lib/api', () => ({
         request: vi.fn(),
         decide: vi.fn(),
         cancel: vi.fn(),
+        regions: mocks.candidateRegions,
+        pageImageUrl: mocks.candidatePageImageUrl,
       },
       regions: mocks.regions,
       pageImageUrl: mocks.pageImageUrl,
+      regionsDiff: mocks.regionsDiff,
       annotations: {
         list: mocks.annotationsList,
         create: mocks.annotationsCreate,
@@ -72,6 +78,10 @@ describe('OcrQualityDocumentDetail', () => {
     mocks.previewUrl.mockReset();
     mocks.candidatesList.mockReset();
     mocks.candidatesList.mockResolvedValue({ candidates: [] });
+    mocks.candidateRegions.mockReset();
+    mocks.candidatePageImageUrl.mockReset();
+    mocks.candidatePageImageUrl.mockReturnValue('/candidate-page-image');
+    mocks.regionsDiff.mockReset();
     mocks.regions.mockReset();
     mocks.pageImageUrl.mockReset();
     mocks.annotationsList.mockReset();

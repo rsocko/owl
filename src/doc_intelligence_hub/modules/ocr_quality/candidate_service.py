@@ -396,6 +396,25 @@ class OcrCandidateService:
             "candidate_text": _load_candidate_text(candidate_id),
         }
 
+    def get_candidate_pdf_bytes(self, candidate_id: str) -> bytes | None:
+        """Return the candidate's own stored PDF artifact bytes, or ``None``.
+
+        ``None`` covers both "unknown candidate" and "candidate exists but
+        has no PDF artifact yet" (e.g. still ``REQUESTED``/``RUNNING``, or
+        generation ``FAILED``) — callers distinguish those via
+        :meth:`get_candidate` if they need a more specific 404 message.
+        Never touches Paperless; reads only the on-disk artifact written by
+        :func:`_save_artifacts` during generation.
+        """
+        db = self.session_factory()
+        try:
+            row = db.query(OcrQualityCandidate).filter_by(candidate_id=candidate_id).one_or_none()
+            if row is None:
+                return None
+        finally:
+            db.close()
+        return _load_candidate_pdf_bytes(candidate_id)
+
     async def decide_candidate(
         self,
         candidate_id: str,
