@@ -251,4 +251,40 @@ describe('OcrCandidatesPanel', () => {
       expect(screen.getByText(/hasn't had Stage 2 analysis, so the overlay comparison below may be incomplete/i)).toBeInTheDocument(),
     );
   });
+
+  it('shows relative badges distinguishing two ready candidates from each other, not just vs current', async () => {
+    // Both candidates improve over current (matches the reported UX gap: two
+    // identical "improved" badges give no way to tell them apart) — one
+    // engine has the higher overlay score, the other has the higher machine
+    // score, so each should get its own distinct relative badge.
+    const azureCandidate = {
+      ...readyCandidate,
+      candidate_id: 'cand-azure01',
+      engine: 'azure-prebuilt-read',
+      overlay_score: 80.45,
+      machine_score: 70.34,
+    };
+    const ocrmypdfCandidate = {
+      ...readyCandidate,
+      candidate_id: 'cand-ocrmy01',
+      engine: 'ocrmypdf-tesseract-5',
+      overlay_score: 99.48,
+      machine_score: 68.28,
+    };
+    mocks.list.mockResolvedValue({ candidates: [azureCandidate, ocrmypdfCandidate] });
+
+    render(<OcrCandidatesPanel documentId={501} currentOverlayScore={69.8} currentMachineScore={62.8} />);
+    await waitFor(() => expect(screen.getByText('Azure Document Intelligence (prebuilt-read)')).toBeInTheDocument());
+
+    expect(screen.getByText('Highest overlay score of ready candidates')).toBeInTheDocument();
+    expect(screen.getByText('Highest machine score of ready candidates')).toBeInTheDocument();
+  });
+
+  it('does not show relative badges when only one candidate is ready', async () => {
+    mocks.list.mockResolvedValue({ candidates: [readyCandidate] });
+    render(<OcrCandidatesPanel documentId={501} currentOverlayScore={69.8} currentMachineScore={62.8} />);
+    await waitFor(() => expect(screen.getByText('OCRmyPDF / Tesseract 5')).toBeInTheDocument());
+    expect(screen.queryByText(/Highest overlay score of ready candidates/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Highest machine score of ready candidates/i)).not.toBeInTheDocument();
+  });
 });
