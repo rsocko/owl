@@ -255,3 +255,151 @@ class TestAzureDocumentIntelligenceProvider:
 
         assert result.success is False
         assert "network unreachable" in result.error_message
+
+
+class TestAzureOverlayPrecision:
+    """Regression tests for the polygon -> PDF-point conversion (issue #18
+    slice 1 follow-up): a self-correcting Azure-units -> PDF-points scale,
+    and correct handling of PDF page ``/Rotate`` metadata.
+    """
+
+    def test_scale_self_corrects_for_page_size_mismatch(self):
+        """Azure's reported page size (in its own unit) may not exactly
+        match the PDF's actual point dimensions (rounding, the source PDF
+        having been rasterized at a different DPI before being sent to
+        Azure, etc.). The scale must be derived from Azure's own reported
+        size, not assumed to always be a flat 72pt/inch.
+        """
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _compute_overlay_scale,
+        )
+
+        azure_page = MagicMock(unit="inch", width=5.0, height=3.0)
+        # The real PDF page is 300x200pt, not the 360x216pt (5in x 3in) that
+        # a flat 72pt/inch conversion would assume.
+        scale_x, scale_y = _compute_overlay_scale(
+            azure_page, page_width_pts=300.0, page_height_pts=200.0
+        )
+
+        assert scale_x == pytest.approx(300.0 / 5.0, rel=1e-9)
+        assert scale_y == pytest.approx(200.0 / 3.0, rel=1e-9)
+        # The old hardcoded-72 behavior would have produced 72.0 exactly;
+        # the self-correcting scale must differ from that here.
+        assert scale_x != pytest.approx(72.0)
+
+    def test_scale_pixel_unit_unaffected(self):
+        """The "pixel" unit path (already self-correcting before this fix)
+        must keep working identically.
+        """
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _compute_overlay_scale,
+        )
+
+        azure_page = MagicMock(unit="pixel", width=850.0, height=1100.0)
+        scale_x, scale_y = _compute_overlay_scale(
+            azure_page, page_width_pts=612.0, page_height_pts=792.0
+        )
+        assert scale_x == pytest.approx(612.0 / 850.0, rel=1e-9)
+        assert scale_y == pytest.approx(792.0 / 1100.0, rel=1e-9)
+
+    def test_polygon_to_overlay_box_lands_at_expected_pdf_points(self):
+        """Given a known scale and polygon, the resulting PDF-point box must
+        match hand-computed expected coordinates within a tight tolerance.
+        """
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _polygon_to_overlay_box,
+        )
+
+        scale_x = 300.0 / 360.0
+        scale_y = 200.0 / 216.0
+        # A word polygon in Azure's inch-space (top-left origin): x in
+        # [1.0, 2.0], y in [1.0, 1.3].
+        polygon = [1.0, 1.0, 2.0, 1.0, 2.0, 1.3, 1.0, 1.3]
+
+        x0, pdf_y, box_height = _polygon_to_overlay_box(
+            polygon, scale_x, scale_y, page_height_pts=200.0
+        )
+
+        expected_x0 = 1.0 * scale_x
+        expected_y1 = 1.3 * scale_y
+        expected_y0 = 1.0 * scale_y
+        expected_box_height = max(expected_y1 - expected_y0, 1.0)
+        expected_pdf_y = 200.0 - expected_y1
+
+        assert x0 == pytest.approx(expected_x0, rel=1e-9)
+        assert box_height == pytest.approx(expected_box_height, rel=1e-9)
+        assert pdf_y == pytest.approx(expected_pdf_y, rel=1e-9)
+
+    def test_build_searchable_pdf_handles_rotated_page(self):
+        """A page with PDF ``/Rotate 90`` metadata must place the overlay
+        word near the visual position Azure reported, not the position it
+        would land at if the raw (unrotated) mediabox were used directly.
+        """
+        import io
+
+        import pdfplumber
+
+        # Raw (unrotated) portrait page: 100pt wide x 200pt tall, with no
+        # visible text (so pdfplumber only picks up the invisible overlay).
+        import reportlab.pdfgen.canvas as _canvas
+        from pypdf import PdfReader, PdfWriter
+
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _build_searchable_pdf,
+        )
+
+        raw_buf = io.BytesIO()
+        _c = _canvas.Canvas(raw_buf, pagesize=(100, 200))
+        _c.showPage()
+        _c.save()
+        raw_pdf = raw_buf.getvalue()
+        reader = PdfReader(io.BytesIO(raw_pdf))
+        writer = PdfWriter()
+        page = writer.add_page(reader.pages[0])
+        page.rotate(90)  # Sets /Rotate 90 -- visual size becomes 200x100.
+        rotated_buf = io.BytesIO()
+        writer.write(rotated_buf)
+        rotated_pdf_bytes = rotated_buf.getvalue()
+
+        # Azure measures the *visual* (post-rotation, landscape) page: its
+        # own unit is "inch", and 200pt/72 = 2.7(7)in, 100pt/72 = 1.3(8)in --
+        # chosen so the scale factor is exactly 1.0 and only the rotation
+        # handling is under test.
+        fake_word = MagicMock(
+            confidence=0.99,
+            content="Hi",
+            # Visual top-left corner region, in inches (top-left origin):
+            # x in [0.1, 0.5], y in [0.1, 0.3].
+            polygon=[0.1, 0.1, 0.5, 0.1, 0.5, 0.3, 0.1, 0.3],
+        )
+        fake_page = MagicMock(
+            page_number=1,
+            unit="inch",
+            width=200.0 / 72.0,
+            height=100.0 / 72.0,
+            words=[fake_word],
+        )
+        fake_result = MagicMock(pages=[fake_page])
+
+        candidate_bytes = _build_searchable_pdf(rotated_pdf_bytes, fake_result)
+
+        with pdfplumber.open(io.BytesIO(candidate_bytes)) as pdf:
+            out_page = pdf.pages[0]
+            # Normalizing the rotation must resize the visible page to the
+            # visual (landscape) dimensions Azure measured.
+            assert out_page.width == pytest.approx(200.0, abs=1.0)
+            assert out_page.height == pytest.approx(100.0, abs=1.0)
+
+            words = out_page.extract_words()
+            assert len(words) == 1
+            word = words[0]
+
+        # Expected visual position: x0 ~= 0.1in*72 = 7.2pt, top ~= 0.1in*72
+        # = 7.2pt from the page's top edge -- i.e. near the top-left corner
+        # of the (now 200x100) visual page. A rotation-handling bug would
+        # instead place this well outside this region (e.g. near the
+        # opposite corner, or outside the page bounds entirely).
+        assert word["x0"] == pytest.approx(7.2, abs=6.0)
+        assert word["top"] == pytest.approx(7.2, abs=8.0)
+        assert 0 <= word["x0"] <= 100.0
+        assert 0 <= word["top"] <= 50.0
