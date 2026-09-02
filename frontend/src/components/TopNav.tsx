@@ -25,6 +25,7 @@ const NAV_ENTRIES: NavEntry[] = [
       { to: '/eob', label: 'EOB Matching' },
       { to: '/eob/benchmarks', label: 'Benchmarks' },
       { to: '/orphans', label: 'Orphans & Dupes' },
+      { to: '/ocr-quality', label: 'OCR Quality' },
     ],
   },
   {

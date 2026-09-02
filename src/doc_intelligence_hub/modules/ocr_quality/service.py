@@ -40,6 +40,8 @@ from .models import (
 )
 from .pdf_profiling import PdfProfilingError, profile_pdf
 from .sampling import SampleCandidate, select_stratified_sample
+from .scorer import assess_document as run_quality_scorer
+from .scoring_models import AssessmentStatus
 from .signals import compute_text_signals
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,35 @@ SessionFactory = Callable[[], Session]
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _score_quality(
+    *, document_id: int, text_content: str | None = None, pdf_bytes: bytes | None = None
+) -> dict[str, Any] | None:
+    """Run the issue #29 scorer and return persistable fields, or ``None`` on failure.
+
+    Never raises — a scoring failure must not abort the Stage-1/2 scan. Callers
+    merge the returned dict into a ``DocumentAssessment`` row's fields; ``None``
+    means "leave any existing quality fields unchanged".
+    """
+    try:
+        assessment = run_quality_scorer(text_content=text_content, pdf_bytes=pdf_bytes)
+    except Exception as exc:  # noqa: BLE001 - scoring is best-effort, never fatal
+        logger.warning(
+            "OCR quality scorer (#29) failed for document %s: %s",
+            document_id,
+            type(exc).__name__,
+        )
+        return None
+
+    return {
+        "overlay_score": assessment.overlay_score,
+        "machine_score": assessment.machine_score,
+        "review_status": assessment.review_status.value,
+        "reasons": json.loads(json.dumps([r.model_dump(mode="json") for r in assessment.reasons])),
+        "document_profile": json.loads(assessment.document_profile.model_dump_json()),
+        "quality_scorer_version": assessment.scorer_version,
+    }
 
 
 def _document_version_key(document: dict[str, Any]) -> str:
@@ -269,6 +300,12 @@ class OcrQualityInventoryService:
                 "downstream_outcome": downstream_outcome,
             }
 
+            # Issue #29 machine-only score (no PDF fetched at Stage 1 — overlay
+            # score remains unavailable until Stage 2 profiles the PDF).
+            quality_fields = _score_quality(document_id=document_id, text_content=content)
+            if quality_fields is not None:
+                fields.update(quality_fields)
+
             if existing is not None:
                 for key, value in fields.items():
                     setattr(existing, key, value)
@@ -299,6 +336,33 @@ class OcrQualityInventoryService:
                 )
             )
             return Disposition.FAILED
+
+    def _apply_pdf_quality_score(
+        self, db: Session, run_id: str, document_id: int, pdf_bytes: bytes
+    ) -> None:
+        """Upgrade a document's #29 score to include overlay signals.
+
+        Stage 1 already scored this document machine-only (no PDF). Now that
+        Stage 2 has fetched PDF bytes, re-run the scorer with full page
+        geometry and overwrite the most recent assessment row for this
+        document in place, rather than creating a duplicate row.
+        """
+        quality_fields = _score_quality(document_id=document_id, pdf_bytes=pdf_bytes)
+        if quality_fields is None:
+            return
+
+        row = (
+            db.query(DocumentAssessment)
+            .filter(DocumentAssessment.document_id == document_id)
+            .order_by(DocumentAssessment.id.desc())
+            .first()
+        )
+        if row is None:
+            return
+
+        for key, value in quality_fields.items():
+            setattr(row, key, value)
+        row.run_id = run_id
 
     # ------------------------------------------------------------------
     # Stage 2 — deterministic stratified sample + PDF profiling
@@ -418,6 +482,7 @@ class OcrQualityInventoryService:
                     reason_codes=[r.value for r in result.reason_codes],
                 )
             )
+            self._apply_pdf_quality_score(db, run_id, document_id, pdf_bytes)
             return Disposition.ASSESSED
         except PdfProfilingError as exc:
             db.add(
@@ -531,6 +596,199 @@ class OcrQualityInventoryService:
             return report
         finally:
             db.close()
+
+    # ------------------------------------------------------------------
+    # Read-only query surface for the OWL review UI (issue #115)
+    # ------------------------------------------------------------------
+
+    _RISK_ORDER = {
+        AssessmentStatus.FAILED.value: 0,
+        AssessmentStatus.REVIEW_RECOMMENDED.value: 1,
+        AssessmentStatus.UNCERTAIN.value: 2,
+        AssessmentStatus.GOOD.value: 3,
+    }
+
+    def _latest_assessment_query(self, db: Session):
+        """Base query over only the most recent assessment row per document."""
+        latest_ids = (
+            db.query(func.max(DocumentAssessment.id).label("id"))
+            .group_by(DocumentAssessment.document_id)
+            .subquery()
+        )
+        return db.query(DocumentAssessment).join(
+            latest_ids, DocumentAssessment.id == latest_ids.c.id
+        )
+
+    def _apply_document_filters(
+        self,
+        query,
+        *,
+        review_status: str | None,
+        document_type: str | None,
+        correspondent: str | None,
+        document_profile: str | None,
+        downstream_outcome: str | None,
+        created_after: str | None,
+        created_before: str | None,
+    ):
+        if review_status:
+            query = query.filter(DocumentAssessment.review_status == review_status)
+        if document_type:
+            query = query.filter(DocumentAssessment.document_type == document_type)
+        if correspondent:
+            query = query.filter(DocumentAssessment.correspondent == correspondent)
+        if downstream_outcome:
+            query = query.filter(DocumentAssessment.downstream_outcome == downstream_outcome)
+        if document_profile:
+            query = query.filter(
+                DocumentAssessment.document_profile["dominant_classification"].as_string()
+                == document_profile
+            )
+        if created_after:
+            query = query.filter(DocumentAssessment.document_created >= created_after)
+        if created_before:
+            query = query.filter(DocumentAssessment.document_created <= created_before)
+        return query
+
+    def list_document_assessments(
+        self,
+        *,
+        review_status: str | None = None,
+        document_type: str | None = None,
+        correspondent: str | None = None,
+        document_profile: str | None = None,
+        downstream_outcome: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Paginated, filtered list of the latest per-document #29 assessment.
+
+        Read-only over this module's own SQLite state — never contacts
+        Paperless. Only aggregate-safe/metadata fields are returned; no raw
+        OCR text.
+        """
+        db = self.session_factory()
+        try:
+            base_query = self._apply_document_filters(
+                self._latest_assessment_query(db),
+                review_status=review_status,
+                document_type=document_type,
+                correspondent=correspondent,
+                document_profile=document_profile,
+                downstream_outcome=downstream_outcome,
+                created_after=created_after,
+                created_before=created_before,
+            )
+            total = base_query.count()
+            rows = (
+                base_query.order_by(DocumentAssessment.document_id.desc())
+                .offset(max(offset, 0))
+                .limit(max(1, min(limit, 200)))
+                .all()
+            )
+            rows.sort(
+                key=lambda r: self._RISK_ORDER.get(r.review_status or "", 4)
+            )
+            return {
+                "documents": [_assessment_summary(row) for row in rows],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "redacted": True,
+            }
+        finally:
+            db.close()
+
+    def get_document_assessment(self, document_id: int) -> dict[str, Any] | None:
+        """Full detail for the most recent assessment of one document."""
+        db = self.session_factory()
+        try:
+            row = (
+                db.query(DocumentAssessment)
+                .filter(DocumentAssessment.document_id == document_id)
+                .order_by(DocumentAssessment.id.desc())
+                .first()
+            )
+            if row is None:
+                return None
+            return _assessment_detail(row)
+        finally:
+            db.close()
+
+    def build_corpus_distribution(self) -> dict[str, Any]:
+        """Privacy-safe corpus-wide snapshot across the latest assessment per document."""
+        db = self.session_factory()
+        try:
+            latest = self._latest_assessment_query(db)
+            total = latest.count()
+
+            status_counts = Counter(
+                (row.review_status or "unscored") for row in latest.all()
+            )
+
+            def _decile_distribution(column) -> dict[str, int]:
+                buckets: Counter[str] = Counter()
+                for (value,) in latest.with_entities(column).all():
+                    if value is None:
+                        buckets["unavailable"] += 1
+                        continue
+                    bucket = min(int(value) // 10, 9) * 10
+                    buckets[f"{bucket}-{bucket + 9}"] += 1
+                return dict(buckets)
+
+            scorer_versions = Counter(
+                (row.quality_scorer_version or "unscored") for row in latest.all()
+            )
+            assessed_ats = [row.updated_at for row in latest.all() if row.updated_at]
+
+            return {
+                "total_documents": total,
+                "review_status_distribution": dict(status_counts),
+                "overlay_score_decile_distribution": _decile_distribution(
+                    DocumentAssessment.overlay_score
+                ),
+                "machine_score_decile_distribution": _decile_distribution(
+                    DocumentAssessment.machine_score
+                ),
+                "scorer_version_distribution": dict(scorer_versions),
+                "oldest_assessed_at": min(assessed_ats).isoformat() if assessed_ats else None,
+                "newest_assessed_at": max(assessed_ats).isoformat() if assessed_ats else None,
+                "schema_version": "1.0",
+                "redacted": True,
+            }
+        finally:
+            db.close()
+
+
+def _assessment_summary(row: DocumentAssessment) -> dict[str, Any]:
+    return {
+        "document_id": row.document_id,
+        "document_type": row.document_type,
+        "correspondent": row.correspondent,
+        "document_created": row.document_created,
+        "overlay_score": row.overlay_score,
+        "machine_score": row.machine_score,
+        "review_status": row.review_status,
+        "downstream_outcome": row.downstream_outcome,
+        "dominant_classification": (row.document_profile or {}).get("dominant_classification"),
+        "quality_scorer_version": row.quality_scorer_version,
+        "assessed_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _assessment_detail(row: DocumentAssessment) -> dict[str, Any]:
+    return {
+        **_assessment_summary(row),
+        "run_id": row.run_id,
+        "first_seen_run_id": row.first_seen_run_id,
+        "preliminary_score": row.preliminary_score,
+        "legacy_action_queue_score": row.legacy_action_queue_score,
+        "reasons": row.reasons or [],
+        "document_profile": row.document_profile,
+        "reason_codes": row.reason_codes or [],
+    }
 
 
 __all__ = ["OcrQualityInventoryService"]

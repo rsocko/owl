@@ -321,4 +321,9 @@ export const endpoints = {
     backfill: (body: { document_ids?: number[]; write_to_paperless?: boolean; limit?: number }) =>
       api.post('/api/extraction/account-numbers/backfill', body),
   },
+  ocrQuality: {
+    distribution: () => api.get('/api/ocr-quality/distribution'),
+    documents: (params?: string) => api.get(`/api/ocr-quality/documents${params ? `?${params}` : ''}`),
+    documentDetail: (documentId: number | string) => api.get(`/api/ocr-quality/documents/${documentId}`),
+  },
 };

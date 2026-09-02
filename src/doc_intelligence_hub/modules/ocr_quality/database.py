@@ -85,6 +85,17 @@ class DocumentAssessment(Base):
     legacy_action_queue_score = Column(Integer, nullable=True)
     downstream_outcome = Column(String, nullable=True, index=True)
 
+    # Issue #29 multidimensional scorer output. Populated by
+    # ``assess_document`` — machine-only (text) during Stage 1, then
+    # overwritten with overlay+machine scores once Stage 2 fetches PDF
+    # bytes for a sampled document. Null until scored.
+    overlay_score = Column(Float, nullable=True)
+    machine_score = Column(Float, nullable=True)
+    review_status = Column(String, nullable=True, index=True)
+    reasons = Column(JSON, nullable=True)
+    document_profile = Column(JSON, nullable=True)
+    quality_scorer_version = Column(String, nullable=True, index=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

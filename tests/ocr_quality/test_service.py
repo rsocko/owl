@@ -378,3 +378,144 @@ class TestBuildAggregateReport:
         report = service.build_aggregate_report("sample-run-3")
         assert "pdf_profile_distribution" in report
         assert "sample_size_by_stratum" in report
+
+
+class TestQualityScorerIntegration:
+    """Issue #29's scorer is wired into #25's scan so per-document overlay/
+    machine scores and review status are actually persisted (previously
+    nothing called ``assess_document``)."""
+
+    @pytest.mark.asyncio
+    async def test_stage1_persists_machine_score_without_overlay(self, ocr_db):
+        docs = [_doc(1, content="Some perfectly ordinary extracted document text.")]
+        client = FakeClient(docs)
+        service = OcrQualityInventoryService(client, get_session)
+        await service.run_corpus_scan(batch_size=10, run_id="run-1")
+
+        db = get_session()
+        try:
+            row = db.query(DocumentAssessment).filter_by(document_id=1).one()
+        finally:
+            db.close()
+
+        assert row.machine_score is not None
+        assert row.overlay_score is None
+        assert row.review_status is not None
+        assert row.quality_scorer_version
+        assert isinstance(row.reasons, list)
+        assert isinstance(row.document_profile, dict)
+
+    @pytest.mark.asyncio
+    async def test_stage2_upgrades_existing_row_with_overlay_score(self, ocr_db):
+        docs = [_doc(1)]
+        client = FakeClient(docs, previews={1: _minimal_pdf_bytes()})
+        service = OcrQualityInventoryService(client, get_session)
+        await service.run_corpus_scan(batch_size=10, run_id="src-run")
+        await service.run_stratified_sample(
+            source_run_id="src-run", sample_size=1, seed="s", run_id="sample-run"
+        )
+
+        db = get_session()
+        try:
+            rows = db.query(DocumentAssessment).filter_by(document_id=1).all()
+        finally:
+            db.close()
+
+        # Stage 2 updates the same row in place — it does not duplicate it.
+        assert len(rows) == 1
+        assert rows[0].overlay_score is not None
+        assert rows[0].run_id == "sample-run"
+
+    @pytest.mark.asyncio
+    async def test_scorer_failure_does_not_abort_scan(self, ocr_db, monkeypatch):
+        from doc_intelligence_hub.modules.ocr_quality import service as service_module
+
+        def _boom(**_kwargs):
+            raise RuntimeError("scorer exploded")
+
+        monkeypatch.setattr(service_module, "run_quality_scorer", _boom)
+        docs = [_doc(1)]
+        client = FakeClient(docs)
+        service = OcrQualityInventoryService(client, get_session)
+        result = await service.run_corpus_scan(batch_size=10, run_id="run-1")
+
+        assert result["status"] == RunStatus.COMPLETED.value
+        db = get_session()
+        try:
+            row = db.query(DocumentAssessment).filter_by(document_id=1).one()
+        finally:
+            db.close()
+        assert row.disposition == "assessed"
+        assert row.machine_score is None
+
+
+class TestDocumentQueries:
+    """Read-only per-document query surface for the OWL review UI (#115)."""
+
+    @pytest.mark.asyncio
+    async def test_list_document_assessments_filters_by_review_status(self, ocr_db):
+        docs = [_doc(i, content="normal readable extracted content here") for i in range(1, 4)]
+        docs.append(_doc(4, content=None))
+        client = FakeClient(docs)
+        service = OcrQualityInventoryService(client, get_session)
+        await service.run_corpus_scan(batch_size=10, run_id="run-1")
+
+        all_docs = service.list_document_assessments()
+        assert all_docs["total"] == 4
+        assert len(all_docs["documents"]) == 4
+
+        by_status = {d["review_status"] for d in all_docs["documents"]}
+        one_status = next(iter(by_status))
+        filtered = service.list_document_assessments(review_status=one_status)
+        assert filtered["total"] >= 1
+        assert all(d["review_status"] == one_status for d in filtered["documents"])
+
+    @pytest.mark.asyncio
+    async def test_list_document_assessments_pagination(self, ocr_db):
+        docs = [_doc(i) for i in range(1, 6)]
+        client = FakeClient(docs)
+        service = OcrQualityInventoryService(client, get_session)
+        await service.run_corpus_scan(batch_size=10, run_id="run-1")
+
+        page = service.list_document_assessments(limit=2, offset=0)
+        assert page["total"] == 5
+        assert len(page["documents"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_document_assessment_unknown_returns_none(self, ocr_db):
+        service = OcrQualityInventoryService(None, get_session)
+        assert service.get_document_assessment(999) is None
+
+    @pytest.mark.asyncio
+    async def test_get_document_assessment_returns_detail(self, ocr_db):
+        docs = [_doc(1, content="normal readable content")]
+        client = FakeClient(docs)
+        service = OcrQualityInventoryService(client, get_session)
+        await service.run_corpus_scan(batch_size=10, run_id="run-1")
+
+        detail = service.get_document_assessment(1)
+        assert detail is not None
+        assert detail["document_id"] == 1
+        assert "reasons" in detail
+        assert "document_profile" in detail
+        assert "secret" not in str(detail)
+
+    @pytest.mark.asyncio
+    async def test_build_corpus_distribution_empty(self, ocr_db):
+        service = OcrQualityInventoryService(None, get_session)
+        distribution = service.build_corpus_distribution()
+        assert distribution["total_documents"] == 0
+        assert distribution["redacted"] is True
+
+    @pytest.mark.asyncio
+    async def test_build_corpus_distribution_reflects_latest_assessments(self, ocr_db):
+        docs = [_doc(i, content="normal readable content here") for i in range(1, 4)]
+        client = FakeClient(docs)
+        service = OcrQualityInventoryService(client, get_session)
+        await service.run_corpus_scan(batch_size=10, run_id="run-1")
+
+        distribution = service.build_corpus_distribution()
+        assert distribution["total_documents"] == 3
+        assert sum(distribution["review_status_distribution"].values()) == 3
+        assert "overlay_score_decile_distribution" in distribution
+        assert "machine_score_decile_distribution" in distribution
