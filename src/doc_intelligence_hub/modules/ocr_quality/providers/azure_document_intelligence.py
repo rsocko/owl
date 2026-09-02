@@ -42,7 +42,9 @@ class AzureDocumentIntelligenceProvider(OcrProvider):
     """Direct Azure Document Intelligence ``prebuilt-read`` provider."""
 
     def __init__(self, endpoint: str | None = None, api_key: str | None = None) -> None:
-        self._endpoint = endpoint or ocr_quality_config.settings.azure_document_intelligence_endpoint
+        self._endpoint = (
+            endpoint or ocr_quality_config.settings.azure_document_intelligence_endpoint
+        )
         self._api_key = api_key or ocr_quality_config.settings.azure_document_intelligence_api_key
 
     @property

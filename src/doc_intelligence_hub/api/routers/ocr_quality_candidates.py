@@ -99,10 +99,14 @@ async def request_candidates(
         )
     except (BatchCapExceeded, UnsupportedProvider) as exc:
         await client.aclose()
-        raise HTTPException(status_code=422, detail={"code": "batch_invalid", "message": str(exc)}) from exc
+        raise HTTPException(
+            status_code=422, detail={"code": "batch_invalid", "message": str(exc)}
+        ) from exc
     except ValueError as exc:
         await client.aclose()
-        raise HTTPException(status_code=400, detail={"code": "invalid_request", "message": str(exc)}) from exc
+        raise HTTPException(
+            status_code=400, detail={"code": "invalid_request", "message": str(exc)}
+        ) from exc
 
     for candidate_id in candidate_ids:
         # Each candidate gets its own PaperlessClient/background task so one
@@ -116,7 +120,9 @@ async def request_candidates(
 
 
 @router.get("/candidates")
-async def list_candidates(document_id: int | None = None, state: str | None = None) -> dict[str, Any]:
+async def list_candidates(
+    document_id: int | None = None, state: str | None = None
+) -> dict[str, Any]:
     """List candidates, optionally filtered by document or state."""
     init_ocr_quality_db()
     service = OcrCandidateService(None, get_ocr_quality_session)  # type: ignore[arg-type]
@@ -131,7 +137,8 @@ async def get_candidate(candidate_id: str) -> dict[str, Any]:
     detail = service.get_candidate(candidate_id)
     if detail is None:
         raise HTTPException(
-            status_code=404, detail={"code": "not_found", "message": f"Unknown candidate {candidate_id}"}
+            status_code=404,
+            detail={"code": "not_found", "message": f"Unknown candidate {candidate_id}"},
         )
     return detail
 
@@ -152,13 +159,16 @@ async def get_candidate_text(request: Request, candidate_id: str) -> dict[str, A
         await client.aclose()
     if text is None:
         raise HTTPException(
-            status_code=404, detail={"code": "not_found", "message": f"Unknown candidate {candidate_id}"}
+            status_code=404,
+            detail={"code": "not_found", "message": f"Unknown candidate {candidate_id}"},
         )
     return text
 
 
 @router.post("/candidates/{candidate_id}/decision")
-async def decide_candidate(request: Request, candidate_id: str, body: DecisionBody) -> dict[str, Any]:
+async def decide_candidate(
+    request: Request, candidate_id: str, body: DecisionBody
+) -> dict[str, Any]:
     """Accept or reject a READY candidate.
 
     This endpoint records the decision in OWL's own tables only. It never
@@ -174,7 +184,9 @@ async def decide_candidate(request: Request, candidate_id: str, body: DecisionBo
             candidate_id, decision=body.decision, reason=body.reason, actor=body.actor
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail={"code": "invalid_decision", "message": str(exc)}) from exc
+        raise HTTPException(
+            status_code=400, detail={"code": "invalid_decision", "message": str(exc)}
+        ) from exc
     finally:
         await client.aclose()
 
@@ -187,4 +199,6 @@ async def cancel_candidate(candidate_id: str) -> dict[str, Any]:
     try:
         return service.cancel_candidate(candidate_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail={"code": "invalid_state", "message": str(exc)}) from exc
+        raise HTTPException(
+            status_code=400, detail={"code": "invalid_state", "message": str(exc)}
+        ) from exc

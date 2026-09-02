@@ -110,9 +110,7 @@ class TestRequestCandidates:
     async def test_batch_document_cap_enforced(self, service, monkeypatch):
         monkeypatch.setattr(ocr_quality_config.settings, "candidate_max_documents_per_batch", 1)
         with pytest.raises(BatchCapExceeded):
-            await service.request_candidates(
-                document_ids=[1, 2], engines=["ocrmypdf-tesseract-5"]
-            )
+            await service.request_candidates(document_ids=[1, 2], engines=["ocrmypdf-tesseract-5"])
 
     @pytest.mark.asyncio
     async def test_batch_page_cap_enforced(self, service, monkeypatch):
@@ -120,9 +118,7 @@ class TestRequestCandidates:
         # Both fixture docs are single-page, so a 2-document batch exceeds a
         # 1-page-total cap on the second document.
         with pytest.raises(BatchCapExceeded):
-            await service.request_candidates(
-                document_ids=[1, 2], engines=["ocrmypdf-tesseract-5"]
-            )
+            await service.request_candidates(document_ids=[1, 2], engines=["ocrmypdf-tesseract-5"])
 
     @pytest.mark.asyncio
     async def test_unknown_provider_rejected(self, service):

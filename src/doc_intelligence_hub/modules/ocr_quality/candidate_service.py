@@ -183,8 +183,7 @@ class OcrCandidateService:
                         settings=provider_settings or {},
                         actor=actor,
                         requested_at=now,
-                        expires_at=now
-                        + timedelta(days=settings.candidate_retention_window_days),
+                        expires_at=now + timedelta(days=settings.candidate_retention_window_days),
                         retention_window_days=settings.candidate_retention_window_days,
                     )
                     db.add(row)
@@ -252,7 +251,8 @@ class OcrCandidateService:
                 current_text = await self.client.get_document_content(document_id)
             except Exception:  # noqa: BLE001 - comparison must not fail if this fetch fails
                 logger.exception(
-                    "Failed to fetch current document text for candidate %s comparison", candidate_id
+                    "Failed to fetch current document text for candidate %s comparison",
+                    candidate_id,
                 )
 
         db = self.session_factory()
@@ -288,7 +288,9 @@ class OcrCandidateService:
             try:
                 current_scores = assess_document(pdf_bytes=source_pdf_bytes)
             except Exception:  # noqa: BLE001
-                logger.exception("Scoring the current document failed for candidate %s", candidate_id)
+                logger.exception(
+                    "Scoring the current document failed for candidate %s", candidate_id
+                )
 
             comparison = comparison_module.compare_candidate(
                 current_pdf_bytes=source_pdf_bytes,
@@ -297,8 +299,12 @@ class OcrCandidateService:
                 current_machine_score=current_scores.machine_score if current_scores else None,
                 candidate_pdf_bytes=gen_result.candidate_pdf_bytes,
                 candidate_text=gen_result.candidate_text,
-                candidate_overlay_score=candidate_scores.overlay_score if candidate_scores else None,
-                candidate_machine_score=candidate_scores.machine_score if candidate_scores else None,
+                candidate_overlay_score=candidate_scores.overlay_score
+                if candidate_scores
+                else None,
+                candidate_machine_score=candidate_scores.machine_score
+                if candidate_scores
+                else None,
                 expected_page_count=row.page_count or None,
             )
 
@@ -309,7 +315,9 @@ class OcrCandidateService:
             row.provider_operation_id = gen_result.provider_operation_id
             row.page_count = gen_result.page_count
             row.candidate_pdf_checksum = (
-                _checksum(gen_result.candidate_pdf_bytes) if gen_result.candidate_pdf_bytes else None
+                _checksum(gen_result.candidate_pdf_bytes)
+                if gen_result.candidate_pdf_bytes
+                else None
             )
             row.candidate_text_checksum = (
                 _checksum(gen_result.candidate_text.encode("utf-8"))
@@ -440,7 +448,9 @@ class OcrCandidateService:
         finally:
             db.close()
 
-    def cancel_candidate(self, candidate_id: str, *, reason: str = "cancelled_by_user") -> dict[str, Any]:
+    def cancel_candidate(
+        self, candidate_id: str, *, reason: str = "cancelled_by_user"
+    ) -> dict[str, Any]:
         """Best-effort cancellation of a REQUESTED/RUNNING candidate.
 
         Generation checks the candidate's state before writing results, so a

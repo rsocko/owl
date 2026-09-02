@@ -69,7 +69,9 @@ def _configure_preview(mock_paperless, document_id: int = 1, text: str = "curren
 
 
 class TestRequestCandidates:
-    def test_request_candidates_returns_202_with_ids(self, client, ocr_candidates_db, mock_paperless):
+    def test_request_candidates_returns_202_with_ids(
+        self, client, ocr_candidates_db, mock_paperless
+    ):
         _configure_preview(mock_paperless)
         resp = client.post(
             "/api/ocr-quality/candidates",
@@ -149,7 +151,9 @@ class TestListAndGetCandidates:
         assert resp.status_code == 200
         assert resp.json()["candidates"] == []
 
-    def test_list_and_get_candidate_after_generation(self, client, ocr_candidates_db, mock_paperless):
+    def test_list_and_get_candidate_after_generation(
+        self, client, ocr_candidates_db, mock_paperless
+    ):
         _configure_preview(mock_paperless)
         create_resp = client.post(
             "/api/ocr-quality/candidates",
@@ -194,7 +198,9 @@ class TestCandidateText:
         mock_paperless.update_custom_field.assert_not_called()
         mock_paperless.update_custom_fields.assert_not_called()
 
-    def test_get_candidate_text_unknown_candidate_404(self, client, ocr_candidates_db, mock_paperless):
+    def test_get_candidate_text_unknown_candidate_404(
+        self, client, ocr_candidates_db, mock_paperless
+    ):
         resp = client.get("/api/ocr-quality/candidates/does-not-exist/text")
         assert resp.status_code == 404
 

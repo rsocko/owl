@@ -90,7 +90,9 @@ class TestOcrMyPdfProvider:
             patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=fake_exec)),
         ):
             result = await provider.generate_candidate(
-                make_minimal_pdf_bytes("original"), settings={"language": "eng"}, timeout_seconds=5.0
+                make_minimal_pdf_bytes("original"),
+                settings={"language": "eng"},
+                timeout_seconds=5.0,
             )
 
         assert result.success is True
@@ -185,7 +187,9 @@ class TestAzureDocumentIntelligenceProvider:
                 0.0,
             ),
         ):
-            provider = AzureDocumentIntelligenceProvider(endpoint="https://x.invalid", api_key="key")
+            provider = AzureDocumentIntelligenceProvider(
+                endpoint="https://x.invalid", api_key="key"
+            )
             result = await provider.generate_candidate(
                 make_minimal_pdf_bytes(), settings={}, timeout_seconds=5.0
             )
@@ -213,7 +217,9 @@ class TestAzureDocumentIntelligenceProvider:
                 return_value=(fake_result, "op-123"),
             ),
         ):
-            provider = AzureDocumentIntelligenceProvider(endpoint="https://x.invalid", api_key="key")
+            provider = AzureDocumentIntelligenceProvider(
+                endpoint="https://x.invalid", api_key="key"
+            )
             result = await provider.generate_candidate(
                 _make_real_pdf("original", width=144, height=72),
                 settings={},
@@ -240,7 +246,9 @@ class TestAzureDocumentIntelligenceProvider:
                 side_effect=RuntimeError("network unreachable"),
             ),
         ):
-            provider = AzureDocumentIntelligenceProvider(endpoint="https://x.invalid", api_key="key")
+            provider = AzureDocumentIntelligenceProvider(
+                endpoint="https://x.invalid", api_key="key"
+            )
             result = await provider.generate_candidate(
                 make_minimal_pdf_bytes(), settings={}, timeout_seconds=5.0
             )

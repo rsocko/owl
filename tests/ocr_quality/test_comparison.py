@@ -72,7 +72,9 @@ class TestCompareCandidate:
     def test_not_searchable_pdf_when_candidate_has_no_text_layer(self):
         current = make_minimal_pdf_bytes("Hello World")
         # A valid PDF with no BT/Tj text-showing operator at all.
-        candidate = b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF"
+        candidate = (
+            b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF"
+        )
 
         result = compare_candidate(
             current_pdf_bytes=current,
@@ -182,7 +184,9 @@ class TestCompareCandidate:
         assert result.source_checksum != result.candidate_checksum
 
     def test_reordered_pages_flagged(self):
-        current = _make_multipage_pdf(["Xyzzy quft wobble zark plonk vex", "Corn dunk pib rill snarq humt"])
+        current = _make_multipage_pdf(
+            ["Xyzzy quft wobble zark plonk vex", "Corn dunk pib rill snarq humt"]
+        )
         # Candidate has the same two pages' content, but swapped order.
         candidate = _make_multipage_pdf(
             ["Corn dunk pib rill snarq humt", "Xyzzy quft wobble zark plonk vex"]
@@ -204,7 +208,9 @@ class TestCompareCandidate:
         assert result.page_count_candidate == 2
 
     def test_matching_page_order_not_flagged(self):
-        current = _make_multipage_pdf(["Xyzzy quft wobble zark plonk vex", "Corn dunk pib rill snarq humt"])
+        current = _make_multipage_pdf(
+            ["Xyzzy quft wobble zark plonk vex", "Corn dunk pib rill snarq humt"]
+        )
         candidate = _make_multipage_pdf(
             ["Xyzzy quft wobble zark plonk vex", "Corn dunk pib rill snarq humt"]
         )
@@ -223,7 +229,9 @@ class TestCompareCandidate:
         assert ComparisonBlockingFinding.PAGES_REORDERED not in result.blocking_findings
 
     def test_missing_page_count_mismatch_flagged_without_expected_count(self):
-        current = _make_multipage_pdf(["Xyzzy quft wobble zark plonk vex", "Corn dunk pib rill snarq humt"])
+        current = _make_multipage_pdf(
+            ["Xyzzy quft wobble zark plonk vex", "Corn dunk pib rill snarq humt"]
+        )
         candidate = _make_multipage_pdf(["Xyzzy quft wobble zark plonk vex"])
 
         result = compare_candidate(

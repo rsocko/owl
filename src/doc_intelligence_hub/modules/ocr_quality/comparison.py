@@ -185,8 +185,12 @@ def _text_diff_summary(current_text: str, candidate_text: str) -> dict[str, obje
     diff = list(difflib.unified_diff(current_lines, candidate_lines, lineterm=""))
     return {
         "similarity": round(similarity, 3),
-        "lines_added": sum(1 for line in diff if line.startswith("+") and not line.startswith("+++")),
-        "lines_removed": sum(1 for line in diff if line.startswith("-") and not line.startswith("---")),
+        "lines_added": sum(
+            1 for line in diff if line.startswith("+") and not line.startswith("+++")
+        ),
+        "lines_removed": sum(
+            1 for line in diff if line.startswith("-") and not line.startswith("---")
+        ),
         "current_char_count": len(current_text),
         "candidate_char_count": len(candidate_text),
     }
