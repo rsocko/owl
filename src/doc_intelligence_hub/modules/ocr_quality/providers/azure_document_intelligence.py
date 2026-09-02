@@ -209,38 +209,88 @@ def _build_searchable_pdf(original_pdf_bytes: bytes, result: Any) -> bytes:
     azure_pages_by_number = {getattr(p, "page_number", i + 1): p for i, p in enumerate(azure_pages)}
 
     for index, page in enumerate(reader.pages):
-        page_width = float(page.mediabox.width)
-        page_height = float(page.mediabox.height)
         azure_page = azure_pages_by_number.get(index + 1)
 
+        # Merging/transforming a page not yet assigned to a writer is
+        # deprecated in pypdf, so attach it first.
         writer.add_page(page)
+        added_page = writer.pages[-1]
+
+        # Azure reports word polygons and page width/height in the page's
+        # *visual* (post-rotation) orientation, but ``page.mediabox`` is the
+        # PDF's raw, unrotated box. For any page with a non-zero ``/Rotate``
+        # (common on scanned docs -- e.g. a 90/270 rotation swaps width and
+        # height), leaving that mismatch unresolved badly misplaces/distorts
+        # every overlay word box. Baking the rotation into the content
+        # stream first (pypdf's documented, recommended step "before page
+        # merging") normalizes the page to rotation=0 with a mediabox that
+        # matches the visual orientation Azure measured, so the rest of this
+        # function can work purely in that visual coordinate space.
+        if added_page.rotation % 360 != 0:
+            added_page.transfer_rotation_to_content()
+
+        page_width = float(added_page.mediabox.width)
+        page_height = float(added_page.mediabox.height)
+
         if azure_page is not None:
             overlay_bytes = _render_text_overlay(azure_page, page_width, page_height)
             overlay_reader = PdfReader(io.BytesIO(overlay_bytes))
-            # Merge onto the page once it's attached to the writer (merging
-            # onto a page not yet assigned to a writer is deprecated in pypdf).
-            writer.pages[-1].merge_page(overlay_reader.pages[0])
+            added_page.merge_page(overlay_reader.pages[0])
 
     out = io.BytesIO()
     writer.write(out)
     return out.getvalue()
 
 
+def _compute_overlay_scale(
+    azure_page: Any, page_width_pts: float, page_height_pts: float
+) -> tuple[float, float]:
+    """Derive the Azure-units -> PDF-points scale factors for one page.
+
+    Always derived as ``page_dimension_pts / azure_reported_dimension``,
+    regardless of Azure's declared ``unit`` ("inch" or "pixel"): dividing the
+    PDF's actual point size by Azure's reported size in *its own* unit
+    yields "points per Azure-unit" directly -- exactly the multiplier needed
+    to scale word polygons, which are expressed in that same unit. This
+    self-corrects for any mismatch between Azure's reported page size and
+    the PDF's own mediabox (rounding, a source PDF rasterized at a
+    different DPI before being sent to Azure, etc.), which a fixed
+    points-per-unit constant would otherwise silently get wrong.
+    """
+    az_width = float(getattr(azure_page, "width", 0.0) or 0.0)
+    az_height = float(getattr(azure_page, "height", 0.0) or 0.0)
+
+    if az_width > 0 and az_height > 0:
+        return page_width_pts / az_width, page_height_pts / az_height
+
+    # Azure didn't report page dimensions; fall back to the nominal
+    # inches->points conversion (Azure's default unit for PDFs).
+    return _POINTS_PER_INCH, _POINTS_PER_INCH
+
+
+def _polygon_to_overlay_box(
+    polygon: list[float], scale_x: float, scale_y: float, page_height_pts: float
+) -> tuple[float, float, float]:
+    """Convert one Azure word polygon into an axis-aligned PDF overlay box.
+
+    Returns ``(x0, pdf_y, box_height)`` in PDF points, bottom-left origin,
+    where ``(x0, pdf_y)`` is where the word's baseline should be drawn.
+    """
+    xs = [polygon[i] * scale_x for i in range(0, len(polygon), 2)]
+    ys = [polygon[i] * scale_y for i in range(1, len(polygon), 2)]
+    x0 = min(xs)
+    y0, y1 = min(ys), max(ys)
+    box_height = max(y1 - y0, 1.0)
+    # Azure's origin is top-left; PDF's is bottom-left.
+    pdf_y = page_height_pts - y1
+    return x0, pdf_y, box_height
+
+
 def _render_text_overlay(azure_page: Any, page_width_pts: float, page_height_pts: float) -> bytes:
     """Render one page's invisible text layer as a standalone single-page PDF."""
     from reportlab.pdfgen import canvas
 
-    unit = str(getattr(azure_page, "unit", "inch") or "inch").lower()
-    az_width = float(getattr(azure_page, "width", 0.0) or 0.0)
-    az_height = float(getattr(azure_page, "height", 0.0) or 0.0)
-
-    if unit == "pixel" and az_width and az_height:
-        scale_x = page_width_pts / az_width
-        scale_y = page_height_pts / az_height
-    else:
-        # "inch" (Azure's default for prebuilt-read) maps directly to points.
-        scale_x = _POINTS_PER_INCH
-        scale_y = _POINTS_PER_INCH
+    scale_x, scale_y = _compute_overlay_scale(azure_page, page_width_pts, page_height_pts)
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(page_width_pts, page_height_pts))
@@ -251,13 +301,7 @@ def _render_text_overlay(azure_page: Any, page_width_pts: float, page_height_pts
         text = getattr(word, "content", "") or ""
         if not text or len(polygon) < 8:
             continue
-        xs = [polygon[i] * scale_x for i in range(0, len(polygon), 2)]
-        ys = [polygon[i] * scale_y for i in range(1, len(polygon), 2)]
-        x0 = min(xs)
-        y0, y1 = min(ys), max(ys)
-        box_height = max(y1 - y0, 1.0)
-        # Azure's origin is top-left; PDF's is bottom-left.
-        pdf_y = page_height_pts - y1
+        x0, pdf_y, box_height = _polygon_to_overlay_box(polygon, scale_x, scale_y, page_height_pts)
 
         c.saveState()
         c.setFont("Helvetica", box_height * 0.9)
