@@ -115,6 +115,16 @@ describe('OcrOverlayComparisonPanel', () => {
       expect(boxes[0].className).toContain('diff-removed');
       expect(boxes[1].className).toContain('diff-added');
     });
+
+    expect(screen.getByRole('note', { name: /Difference highlight legend/i })).toBeInTheDocument();
+  });
+
+  it('does not show the diff legend when "Show differences" is off', async () => {
+    const { container } = render(<OcrOverlayComparisonPanel documentId={501} />);
+    await waitFor(() => expect(mocks.candidateRegions).toHaveBeenCalled());
+    loadAllImages(container);
+
+    expect(screen.queryByRole('note', { name: /Difference highlight legend/i })).not.toBeInTheDocument();
   });
 
   it('shows an empty-state note when the document has no candidates with a stored PDF yet', async () => {
