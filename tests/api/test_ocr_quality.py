@@ -531,3 +531,291 @@ class TestStartStratifiedSample:
         resp = client.post("/api/ocr-quality/runs/source-run-2/sample", json={})
         assert resp.status_code == 409
         assert resp.json()["error"]["run_id"] == "existing-sample"
+
+
+# ---------------------------------------------------------------------------
+# Region-level inspection endpoints (issue #134, Part 1)
+# ---------------------------------------------------------------------------
+
+
+def _make_real_pdf_bytes(text: str = "Hello world region test", pages: int = 1) -> bytes:
+    pytest.importorskip("reportlab")
+    from io import BytesIO
+
+    from reportlab.pdfgen import canvas
+
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer)
+    for _ in range(pages):
+        c.drawString(100, 750, text)
+        c.showPage()
+    c.save()
+    return buffer.getvalue()
+
+
+@pytest.fixture()
+def clear_region_cache():
+    from doc_intelligence_hub.modules.ocr_quality import region_inspection
+
+    region_inspection.clear_cache()
+    yield
+    region_inspection.clear_cache()
+
+
+class TestGetDocumentRegions:
+    def test_returns_word_geometry_for_page(
+        self, client, ocr_quality_db, mock_paperless, clear_region_cache
+    ):
+        mock_paperless.get_document_preview.return_value = (
+            _make_real_pdf_bytes("Hello world"),
+            "application/pdf",
+        )
+        resp = client.get("/api/ocr-quality/documents/1/regions?page=1")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["page"] == 1
+        assert body["page_count"] == 1
+        texts = [w["text"] for w in body["words"]]
+        assert "Hello" in texts
+        assert "world" in texts
+        for word in body["words"]:
+            assert word["flagged"] is False
+
+    def test_unknown_page_returns_404(
+        self, client, ocr_quality_db, mock_paperless, clear_region_cache
+    ):
+        mock_paperless.get_document_preview.return_value = (
+            _make_real_pdf_bytes("Only one page"),
+            "application/pdf",
+        )
+        resp = client.get("/api/ocr-quality/documents/1/regions?page=5")
+        assert resp.status_code == 404
+
+    def test_fetches_pdf_only_once_within_cache_window(
+        self, client, ocr_quality_db, mock_paperless, clear_region_cache
+    ):
+        mock_paperless.get_document_preview.return_value = (
+            _make_real_pdf_bytes("Cached document"),
+            "application/pdf",
+        )
+        resp1 = client.get("/api/ocr-quality/documents/1/regions?page=1")
+        resp2 = client.get("/api/ocr-quality/documents/1/regions?page=1")
+        assert resp1.status_code == 200
+        assert resp2.status_code == 200
+        mock_paperless.get_document_preview.assert_called_once_with(1)
+
+    def test_cross_references_matching_document_reasons(
+        self, client, ocr_quality_db, mock_paperless, clear_region_cache
+    ):
+        # Seed a document assessment whose stored reasons include an
+        # alignment reason, then build a page whose text sits outside its
+        # own embedded image (so every word gets flagged "alignment").
+        db = get_session()
+        try:
+            db.add(
+                DocumentAssessment(
+                    run_id="run-1",
+                    first_seen_run_id="run-1",
+                    document_id=1,
+                    document_version_key="checksum:run-1",
+                    scorer_version="ocr-quality-inventory-signals-v1",
+                    reasons=[
+                        {
+                            "code": "overlay.alignment",
+                            "message": "Overlay text does not appear well aligned.",
+                            "severity": "warning",
+                            "component": "overlay",
+                        }
+                    ],
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        from doc_intelligence_hub.modules.ocr_quality import region_inspection
+
+        with patch.object(region_inspection, "build_page_regions") as mock_build:
+            mock_build.return_value = {
+                "page": 1,
+                "page_count": 1,
+                "width": 600.0,
+                "height": 800.0,
+                "error": None,
+                "words": [
+                    {
+                        "text": "Misaligned",
+                        "x0": 0.0,
+                        "top": 0.0,
+                        "x1": 10.0,
+                        "bottom": 10.0,
+                        "confidence": None,
+                        "flagged": True,
+                        "flag_reasons": ["alignment"],
+                        "matched_reasons": [
+                            {
+                                "code": "overlay.alignment",
+                                "message": "Overlay text does not appear well aligned.",
+                                "severity": "warning",
+                                "component": "overlay",
+                            }
+                        ],
+                    }
+                ],
+            }
+            mock_paperless.get_document_preview.return_value = (
+                _make_real_pdf_bytes("Misaligned"),
+                "application/pdf",
+            )
+            resp = client.get("/api/ocr-quality/documents/1/regions?page=1")
+            assert resp.status_code == 200
+            word = resp.json()["words"][0]
+            assert word["flagged"] is True
+            assert word["matched_reasons"][0]["code"] == "overlay.alignment"
+
+
+class TestGetDocumentPageImage:
+    def test_returns_png_image(self, client, ocr_quality_db, mock_paperless, clear_region_cache):
+        mock_paperless.get_document_preview.return_value = (
+            _make_real_pdf_bytes("Image render test"),
+            "application/pdf",
+        )
+        resp = client.get("/api/ocr-quality/documents/1/pages/1/image")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "image/png"
+        assert resp.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_unknown_page_returns_404(
+        self, client, ocr_quality_db, mock_paperless, clear_region_cache
+    ):
+        mock_paperless.get_document_preview.return_value = (
+            _make_real_pdf_bytes("Only one page"),
+            "application/pdf",
+        )
+        resp = client.get("/api/ocr-quality/documents/1/pages/9/image")
+        assert resp.status_code == 404
+
+    def test_invalid_dpi_rejected(self, client, ocr_quality_db, mock_paperless, clear_region_cache):
+        resp = client.get("/api/ocr-quality/documents/1/pages/1/image?dpi=5000")
+        assert resp.status_code == 422
+
+
+class TestPaperlessFetchFailure:
+    def test_paperless_error_returns_502(
+        self, client, ocr_quality_db, mock_paperless, clear_region_cache
+    ):
+        mock_paperless.get_document_preview.side_effect = RuntimeError("connection refused")
+        resp = client.get("/api/ocr-quality/documents/1/regions?page=1")
+        assert resp.status_code == 502
+
+
+# ---------------------------------------------------------------------------
+# Manual annotation endpoints (issue #134, Part 2)
+# ---------------------------------------------------------------------------
+
+
+def _annotation_payload(**overrides):
+    payload = {
+        "page": 1,
+        "x0": 10.0,
+        "top": 20.0,
+        "x1": 100.0,
+        "bottom": 40.0,
+        "label": "key_data",
+        "note": "Account number region",
+        "created_by": "reviewer-1",
+    }
+    payload.update(overrides)
+    return payload
+
+
+class TestAnnotationCrud:
+    def test_create_and_list_annotation(self, client, ocr_quality_db):
+        resp = client.post("/api/ocr-quality/documents/1/annotations", json=_annotation_payload())
+        assert resp.status_code == 201
+        created = resp.json()
+        assert created["id"] is not None
+        assert created["document_id"] == 1
+        assert created["label"] == "key_data"
+        assert created["note"] == "Account number region"
+
+        list_resp = client.get("/api/ocr-quality/documents/1/annotations")
+        assert list_resp.status_code == 200
+        annotations = list_resp.json()["annotations"]
+        assert len(annotations) == 1
+        assert annotations[0]["id"] == created["id"]
+
+    def test_list_filters_by_page(self, client, ocr_quality_db):
+        client.post(
+            "/api/ocr-quality/documents/1/annotations", json=_annotation_payload(page=1)
+        )
+        client.post(
+            "/api/ocr-quality/documents/1/annotations", json=_annotation_payload(page=2)
+        )
+        resp = client.get("/api/ocr-quality/documents/1/annotations?page=2")
+        assert resp.status_code == 200
+        annotations = resp.json()["annotations"]
+        assert len(annotations) == 1
+        assert annotations[0]["page"] == 2
+
+    def test_update_annotation_label_and_note(self, client, ocr_quality_db):
+        created = client.post(
+            "/api/ocr-quality/documents/1/annotations", json=_annotation_payload()
+        ).json()
+        resp = client.patch(
+            f"/api/ocr-quality/documents/1/annotations/{created['id']}",
+            json={"label": "wrong", "note": "Actually incorrect"},
+        )
+        assert resp.status_code == 200
+        updated = resp.json()
+        assert updated["label"] == "wrong"
+        assert updated["note"] == "Actually incorrect"
+        # Untouched fields remain as originally created.
+        assert updated["x0"] == created["x0"]
+
+    def test_update_can_clear_note(self, client, ocr_quality_db):
+        created = client.post(
+            "/api/ocr-quality/documents/1/annotations", json=_annotation_payload()
+        ).json()
+        resp = client.patch(
+            f"/api/ocr-quality/documents/1/annotations/{created['id']}",
+            json={"note": None},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["note"] is None
+
+    def test_update_unknown_annotation_404(self, client, ocr_quality_db):
+        resp = client.patch(
+            "/api/ocr-quality/documents/1/annotations/999",
+            json={"label": "wrong"},
+        )
+        assert resp.status_code == 404
+
+    def test_delete_annotation(self, client, ocr_quality_db):
+        created = client.post(
+            "/api/ocr-quality/documents/1/annotations", json=_annotation_payload()
+        ).json()
+        del_resp = client.delete(f"/api/ocr-quality/documents/1/annotations/{created['id']}")
+        assert del_resp.status_code == 204
+
+        list_resp = client.get("/api/ocr-quality/documents/1/annotations")
+        assert list_resp.json()["annotations"] == []
+
+    def test_delete_unknown_annotation_404(self, client, ocr_quality_db):
+        resp = client.delete("/api/ocr-quality/documents/1/annotations/999")
+        assert resp.status_code == 404
+
+    def test_create_validates_required_label(self, client, ocr_quality_db):
+        payload = _annotation_payload()
+        del payload["label"]
+        resp = client.post("/api/ocr-quality/documents/1/annotations", json=payload)
+        assert resp.status_code == 422
+
+    def test_annotations_scoped_per_document(self, client, ocr_quality_db):
+        client.post("/api/ocr-quality/documents/1/annotations", json=_annotation_payload())
+        client.post("/api/ocr-quality/documents/2/annotations", json=_annotation_payload())
+        doc1 = client.get("/api/ocr-quality/documents/1/annotations").json()["annotations"]
+        doc2 = client.get("/api/ocr-quality/documents/2/annotations").json()["annotations"]
+        assert len(doc1) == 1
+        assert len(doc2) == 1
+        assert doc1[0]["id"] != doc2[0]["id"]

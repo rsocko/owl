@@ -136,6 +136,32 @@ class PdfProfile(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class DocumentAnnotation(Base):
+    """A reviewer-drawn bounding-box annotation on one page of one document.
+
+    OWL-local only (issue #134, Part 2) — never mutates Paperless or the
+    OCR quality assessment tables. ``label`` is free text; the frontend
+    offers a small suggested set ("wrong", "key_data", "table_region",
+    "other") but does not enforce an enum at the API/DB layer so reviewers
+    can record ad hoc categories without a schema change.
+    """
+
+    __tablename__ = "ocr_quality_document_annotations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    document_id = Column(Integer, nullable=False, index=True)
+    page = Column(Integer, nullable=False, default=1)
+    x0 = Column(Float, nullable=False)
+    top = Column(Float, nullable=False)
+    x1 = Column(Float, nullable=False)
+    bottom = Column(Float, nullable=False)
+    label = Column(String, nullable=False)
+    note = Column(String, nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class RunFailure(Base):
     """Per-document failure/skip record — safe reason codes only."""
 
