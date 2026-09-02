@@ -1,0 +1,40 @@
+# OCR Quality Scoring configuration (issue #29)
+#
+# Optional override for the built-in defaults in
+# src/doc_intelligence_hub/modules/ocr_quality/config.py. Any field omitted
+# here falls back to the code default. Bump `config_version` whenever these
+# values change so every assessment's `scorer_version` reflects it.
+#
+# These starting values are NOT calibrated. They must be tuned against
+# explicit human labels once issue #25 produces a representative sample.
+
+config_version: "default-1"
+
+overlay_weights:
+  searchable_text: 20.0
+  page_coverage: 15.0
+  bounds_sanity: 10.0
+  duplicate_overlap: 15.0
+  alignment: 15.0
+  reading_order: 15.0
+  page_integrity: 10.0
+
+machine_weights:
+  char_script_plausibility: 20.0
+  token_whitespace_quality: 15.0
+  repetition_noise: 15.0
+  prose_coherence: 10.0
+  structured_entities: 15.0
+  table_structure: 10.0
+  engine_confidence: 10.0
+  downstream_evidence: 5.0
+
+status_thresholds:
+  good_min: 80.0
+  uncertain_min: 60.0
+  review_recommended_min: 35.0
+
+short_document_char_threshold: 200
+common_word_min_hits: 3
+max_downstream_penalty: 15.0
+max_downstream_bonus: 5.0
