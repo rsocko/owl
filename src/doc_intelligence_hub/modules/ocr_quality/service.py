@@ -49,6 +49,23 @@ logger = logging.getLogger(__name__)
 SessionFactory = Callable[[], Session]
 
 
+class ManualStage2DocumentNotFoundError(Exception):
+    """Raised by ``run_manual_stage2`` when the document has no Stage-1 assessment yet."""
+
+    def __init__(self, document_id: int) -> None:
+        self.document_id = document_id
+        super().__init__(f"No OCR quality assessment for document {document_id}")
+
+
+class ManualStage2ProfilingFailedError(Exception):
+    """Raised by ``run_manual_stage2`` when PDF fetch/profiling failed for the document."""
+
+    def __init__(self, document_id: int, reason_code: str | None) -> None:
+        self.document_id = document_id
+        self.reason_code = reason_code
+        super().__init__(f"Stage-2 profiling failed for document {document_id} ({reason_code})")
+
+
 def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
@@ -521,6 +538,94 @@ class OcrQualityInventoryService:
             )
             return Disposition.FAILED
 
+    async def run_manual_stage2(
+        self,
+        *,
+        document_id: int,
+        max_pages: int = 50,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Force Stage-2 PDF profiling + quality re-score for one arbitrary document.
+
+        Unlike ``run_stratified_sample`` (a corpus-wide random draw), this is
+        an explicit single-document override — e.g. triggered from the
+        document detail page. Requires an existing Stage-1
+        ``DocumentAssessment`` for ``document_id`` (raises
+        ``ManualStage2DocumentNotFoundError`` otherwise); its ``run_id``
+        becomes the new manual run's ``source_run_id`` so it stays traceable
+        back to the corpus scan that first discovered the document, while the
+        resulting ``PdfProfile``/updated ``DocumentAssessment`` are attached
+        to a fresh dedicated manual ``run_id`` (stage
+        ``STAGE_2_MANUAL_SINGLE_DOCUMENT``). Reusing
+        ``_profile_sampled_document`` unchanged means existing per-document
+        detail queries (keyed on the most recent assessment row) pick up the
+        result without any new querying logic. Raises
+        ``ManualStage2ProfilingFailedError`` if the PDF fetch/parse failed.
+        """
+        db = self.session_factory()
+        try:
+            assessment = (
+                db.query(DocumentAssessment)
+                .filter(DocumentAssessment.document_id == document_id)
+                .order_by(DocumentAssessment.id.desc())
+                .first()
+            )
+            if assessment is None:
+                raise ManualStage2DocumentNotFoundError(document_id)
+
+            manual_run_id = run_id or str(uuid4())
+            manual_run = InventoryRun(
+                run_id=manual_run_id,
+                stage=RunStage.STAGE_2_MANUAL_SINGLE_DOCUMENT.value,
+                scope_digest=_digest({"document_id": document_id}),
+                config_digest=_digest({"document_id": document_id, "max_pages": max_pages}),
+                instance_digest=_digest({"manual_stage2": document_id}),
+                signal_version=PDF_PROFILE_VERSION,
+                source_run_id=assessment.run_id,
+                status=RunStatus.RUNNING.value,
+                counts={},
+                started_at=datetime.utcnow(),
+            )
+            db.add(manual_run)
+            db.commit()
+
+            disposition = await self._profile_sampled_document(
+                db, manual_run_id, document_id, max_pages
+            )
+            db.commit()
+
+            manual_run.status = RunStatus.COMPLETED.value
+            manual_run.finished_at = datetime.utcnow()
+            manual_run.counts = {disposition.value: 1}
+            db.commit()
+
+            if disposition == Disposition.FAILED:
+                failure = (
+                    db.query(RunFailure)
+                    .filter(
+                        RunFailure.run_id == manual_run_id,
+                        RunFailure.document_id == document_id,
+                    )
+                    .order_by(RunFailure.id.desc())
+                    .first()
+                )
+                raise ManualStage2ProfilingFailedError(
+                    document_id, failure.reason_code if failure else None
+                )
+
+            refreshed = (
+                db.query(DocumentAssessment)
+                .filter(DocumentAssessment.document_id == document_id)
+                .order_by(DocumentAssessment.id.desc())
+                .first()
+            )
+            return _assessment_detail(
+                refreshed,
+                has_stage2_analysis=_has_stage2_analysis(db, document_id),
+            )
+        finally:
+            db.close()
+
     # ------------------------------------------------------------------
     # Privacy-safe aggregate reporting
     # ------------------------------------------------------------------
@@ -762,7 +867,14 @@ class OcrQualityInventoryService:
             )
             if row is None:
                 return None
-            return _assessment_detail(row)
+            # A PdfProfile row is only ever written when Stage 2 page-aware
+            # profiling has run for this specific document_id (any run), so
+            # its existence is the ground truth for "has this document had
+            # deep Stage 2 analysis" — independent of whether overlay_score
+            # happens to be populated (e.g. profiling could have run but
+            # failed to produce a score).
+            has_stage2_analysis = _has_stage2_analysis(db, document_id)
+            return _assessment_detail(row, has_stage2_analysis=has_stage2_analysis)
         finally:
             db.close()
 
@@ -825,7 +937,11 @@ def _assessment_summary(row: DocumentAssessment) -> dict[str, Any]:
     }
 
 
-def _assessment_detail(row: DocumentAssessment) -> dict[str, Any]:
+def _has_stage2_analysis(db: Session, document_id: int) -> bool:
+    return db.query(PdfProfile.id).filter(PdfProfile.document_id == document_id).first() is not None
+
+
+def _assessment_detail(row: DocumentAssessment, *, has_stage2_analysis: bool) -> dict[str, Any]:
     return {
         **_assessment_summary(row),
         "run_id": row.run_id,
@@ -835,6 +951,10 @@ def _assessment_detail(row: DocumentAssessment) -> dict[str, Any]:
         "reasons": row.reasons or [],
         "document_profile": row.document_profile,
         "reason_codes": row.reason_codes or [],
+        # Whether Stage 2 (deeper per-document PDF profiling / overlay
+        # scoring) has ever run for this document, independent of whether
+        # overlay_score ended up populated. See get_document_assessment.
+        "has_stage2_analysis": has_stage2_analysis,
     }
 
 

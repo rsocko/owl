@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Badge, Button, Card, EmptyState, type Tone } from './ui';
 import { endpoints } from '../lib/api';
+import { formatScore } from '../pages/OcrQualityReviewQueue';
 
 type CandidateSummary = {
   candidate_id: string;
@@ -63,13 +64,87 @@ function stateTone(state: string): Tone {
   }
 }
 
+// Thresholds for non-authoritative "suggested read" hints (issue #18 slice 1
+// clarity follow-up). These never gate or authorize acceptance — they only
+// help a reviewer scan quickly when the two engines' scores diverge. Loosely
+// mirrors comparison.py's blocking machine-regression tolerance (5 points)
+// but intentionally smaller since these are hints, not gates.
+const MACHINE_IMPROVEMENT_HINT_THRESHOLD = 3;
+const OVERLAY_DECLINE_HINT_THRESHOLD = -3;
+
+type SuggestedReadBadge = { tone: Tone; label: string };
+
+type SuggestedReadInput = {
+  blocking_findings: string[];
+  overlay_score_delta?: number | null;
+  machine_score_delta?: number | null;
+};
+
+function suggestedReadBadges(input: SuggestedReadInput | null): SuggestedReadBadge[] {
+  if (!input) return [];
+  const badges: SuggestedReadBadge[] = [];
+  const { blocking_findings, overlay_score_delta, machine_score_delta } = input;
+
+  if (blocking_findings.length > 0) {
+    badges.push({ tone: 'err', label: '⚠ Needs careful review' });
+  }
+  if (machine_score_delta != null && machine_score_delta >= MACHINE_IMPROVEMENT_HINT_THRESHOLD && blocking_findings.length === 0) {
+    badges.push({ tone: 'ok', label: 'Text quality looks improved' });
+  }
+  if (overlay_score_delta != null && overlay_score_delta <= OVERLAY_DECLINE_HINT_THRESHOLD) {
+    badges.push({ tone: 'warn', label: 'Box/highlight placement may be less precise' });
+  }
+  if (badges.length === 0) {
+    if (overlay_score_delta == null && machine_score_delta == null) {
+      badges.push({ tone: 'muted', label: 'No comparison signal available' });
+    } else {
+      badges.push({ tone: 'muted', label: 'No strong signal either way' });
+    }
+  }
+  return badges;
+}
+
+function scoreDelta(current?: number | null, candidate?: number | null): number | null {
+  if (current == null || candidate == null) return null;
+  return candidate - current;
+}
+
+// Inverse of scoreDelta: the comparison endpoint only stores candidate score
+// + delta, so the "current" baseline for the side-by-side line is derived
+// rather than fetched again.
+function currentScoreFromDelta(candidateScore?: number | null, delta?: number | null): number | null {
+  if (candidateScore == null || delta == null) return null;
+  return candidateScore - delta;
+}
+
+function SuggestedReadBadges({ badges }: { badges: SuggestedReadBadge[] }) {
+  if (badges.length === 0) return <span className="text-muted">—</span>;
+  return (
+    <div className="ocr-suggested-read-row">
+      {badges.map((b) => (
+        <Badge key={b.label} tone={b.tone}>{b.label}</Badge>
+      ))}
+    </div>
+  );
+}
+
 function formatScoreDelta(delta?: number | null) {
   if (delta == null) return '—';
   const sign = delta > 0 ? '+' : '';
   return `${sign}${delta}`;
 }
 
-export default function OcrCandidatesPanel({ documentId }: { documentId: number }) {
+export default function OcrCandidatesPanel({
+  documentId,
+  hasStage2Analysis,
+  currentOverlayScore,
+  currentMachineScore,
+}: {
+  documentId: number;
+  hasStage2Analysis?: boolean;
+  currentOverlayScore?: number | null;
+  currentMachineScore?: number | null;
+}) {
   const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -204,35 +279,44 @@ export default function OcrCandidatesPanel({ documentId }: { documentId: number 
               <th>Machine</th>
               <th>Pages</th>
               <th>Decision</th>
+              <th>Suggested read</th>
               <th />
             </tr>
           </thead>
           <tbody>
-            {candidates.map((c) => (
-              <tr key={c.candidate_id} className={selectedId === c.candidate_id ? 'is-selected' : ''}>
-                <td>{ENGINE_LABELS[c.engine] ?? c.engine}</td>
-                <td><Badge tone={stateTone(c.state)}>{c.state}</Badge></td>
-                <td>{c.overlay_score == null ? '—' : c.overlay_score}</td>
-                <td>{c.machine_score == null ? '—' : c.machine_score}</td>
-                <td>{c.page_count || '—'}</td>
-                <td>{c.decision ?? '—'}</td>
-                <td style={{ display: 'flex', gap: 6 }}>
-                  <Button variant="ghost" size="sm" onClick={() => loadDetail(c.candidate_id)}>
-                    View
-                  </Button>
-                  {ACTIVE_STATES.has(c.state) && (
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      onClick={() => cancel(c.candidate_id)}
-                      disabled={cancelling}
-                    >
-                      Cancel
+            {candidates.map((c) => {
+              const rowBadges = suggestedReadBadges({
+                blocking_findings: [],
+                overlay_score_delta: scoreDelta(currentOverlayScore, c.overlay_score),
+                machine_score_delta: scoreDelta(currentMachineScore, c.machine_score),
+              });
+              return (
+                <tr key={c.candidate_id} className={selectedId === c.candidate_id ? 'is-selected' : ''}>
+                  <td>{ENGINE_LABELS[c.engine] ?? c.engine}</td>
+                  <td><Badge tone={stateTone(c.state)}>{c.state}</Badge></td>
+                  <td>{c.overlay_score == null ? '—' : c.overlay_score}</td>
+                  <td>{c.machine_score == null ? '—' : c.machine_score}</td>
+                  <td>{c.page_count || '—'}</td>
+                  <td>{c.decision ?? '—'}</td>
+                  <td>{c.state === 'ready' || c.decision ? <SuggestedReadBadges badges={rowBadges} /> : <span className="text-muted">—</span>}</td>
+                  <td style={{ display: 'flex', gap: 6 }}>
+                    <Button variant="ghost" size="sm" onClick={() => loadDetail(c.candidate_id)}>
+                      View
                     </Button>
-                  )}
-                </td>
-              </tr>
-            ))}
+                    {ACTIVE_STATES.has(c.state) && (
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => cancel(c.candidate_id)}
+                        disabled={cancelling}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -244,6 +328,21 @@ export default function OcrCandidatesPanel({ documentId }: { documentId: number 
 
           {detail.comparison && (
             <div className="ocr-comparison-summary" style={{ marginBottom: 12 }}>
+              {hasStage2Analysis === false && (
+                <div className="ocr-unavailable-note">
+                  <Badge tone="info">Stage 2 not run</Badge> This document hasn't had Stage 2
+                  analysis, so the overlay comparison below may be incomplete or unavailable.
+                </div>
+              )}
+              <div className="ocr-score-compare-row">
+                <span>
+                  Current: overlay {formatScore(currentScoreFromDelta(detail.overlay_score, detail.comparison.overlay_score_delta))} · machine{' '}
+                  {formatScore(currentScoreFromDelta(detail.machine_score, detail.comparison.machine_score_delta))}
+                </span>
+                <span>
+                  Candidate: overlay {formatScore(detail.overlay_score)} · machine {formatScore(detail.machine_score)}
+                </span>
+              </div>
               <div>
                 Overlay Δ: <strong>{formatScoreDelta(detail.comparison.overlay_score_delta)}</strong>{' '}
                 &nbsp;Machine Δ: <strong>{formatScoreDelta(detail.comparison.machine_score_delta)}</strong>
@@ -257,9 +356,13 @@ export default function OcrCandidatesPanel({ documentId }: { documentId: number 
               ) : (
                 <div className="text-muted">No blocking findings.</div>
               )}
+              <div className="ocr-suggested-read-row" style={{ marginTop: 6 }}>
+                <SuggestedReadBadges badges={suggestedReadBadges(detail.comparison)} />
+              </div>
               <div className="ocr-comparison-note text-muted">
-                A higher score is informational only — it does not authorize acceptance. A human
-                reviewer makes the final call.
+                These are suggested reads based on score deltas and comparison findings — not a
+                recommendation. A higher score is informational only — it does not authorize
+                acceptance. A human reviewer makes the final call for each candidate.
               </div>
             </div>
           )}

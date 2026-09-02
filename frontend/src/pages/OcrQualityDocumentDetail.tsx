@@ -58,6 +58,10 @@ export type DocumentDetail = {
   legacy_action_queue_score?: number | null;
   reasons: Reason[];
   document_profile?: DocumentProfile | null;
+  // Whether Stage 2 (deeper per-document PDF profiling / overlay scoring) has
+  // ever run for this document — independent of whether overlay_score ended
+  // up populated (profiling can run without producing a usable score).
+  has_stage2_analysis?: boolean;
 };
 
 const SEVERITY_TONE: Record<string, Tone> = { info: 'info', warning: 'warn', blocking: 'err' };
@@ -126,6 +130,11 @@ export default function OcrQualityDocumentDetail() {
   const [regions, setRegions] = useState<PageRegions | null>(null);
   const [regionsError, setRegionsError] = useState<string | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+
+  // Force Stage-2 analysis (one-off per-document trigger, distinct from the
+  // corpus-wide random stratified sample).
+  const [forcingStage2, setForcingStage2] = useState(false);
+  const [stage2Error, setStage2Error] = useState<string | null>(null);
 
   const load = useCallback(() => {
     if (!documentId) return;
@@ -222,6 +231,17 @@ export default function OcrQualityDocumentDetail() {
 
   const pageAnnotations = annotations.filter((a) => a.page === inspectionPage);
 
+  const handleForceStage2 = useCallback(() => {
+    if (!documentId) return;
+    setForcingStage2(true);
+    setStage2Error(null);
+    endpoints.ocrQuality
+      .forceStage2(documentId)
+      .then((data) => setDetail(data as DocumentDetail))
+      .catch((err) => setStage2Error(err instanceof Error ? err.message : 'Failed to force Stage 2 analysis.'))
+      .finally(() => setForcingStage2(false));
+  }, [documentId]);
+
   return (
     <div className="ocr-quality-document-detail">
       <Breadcrumb items={[{ label: 'OCR Quality', to: '/ocr-quality' }, { label: 'Review queue', to: '/ocr-quality/queue' }, { label: `Document #${documentId}` }]} />
@@ -303,11 +323,24 @@ export default function OcrQualityDocumentDetail() {
                 <span className="text-muted">Stage-1 preliminary heuristic: {detail.preliminary_score}</span>
               )}
             </div>
-            {detail.overlay_score == null && (
+            {!detail.has_stage2_analysis && (
               <div className="ocr-unavailable-note">
-                Overlay score is unavailable — this document has not yet been PDF-profiled by the Stage 2 stratified sample.
+                <Badge tone="info">Stage 2 not run</Badge> This document has not had deep Stage 2
+                analysis yet — overlay/geometry signals below (and in any candidate comparison) may
+                be incomplete or unavailable. Only Stage 1 (corpus-wide machine scoring) has run.
               </div>
             )}
+            {detail.has_stage2_analysis && detail.overlay_score == null && (
+              <div className="ocr-unavailable-note">
+                Stage 2 has run for this document, but no overlay score was produced.
+              </div>
+            )}
+            <div className="ocr-force-stage2">
+              <Button variant="primary" size="sm" onClick={handleForceStage2} disabled={forcingStage2}>
+                {forcingStage2 ? 'Analyzing…' : 'Force Stage 2 analysis'}
+              </Button>
+            </div>
+            {stage2Error && <div className="ocr-unavailable-note">{stage2Error}</div>}
           </Card>
 
           <Card title="Explainable reasons">
@@ -337,7 +370,12 @@ export default function OcrQualityDocumentDetail() {
             </div>
           </Card>
 
-          <OcrCandidatesPanel documentId={detail.document_id} />
+          <OcrCandidatesPanel
+            documentId={detail.document_id}
+            hasStage2Analysis={detail.has_stage2_analysis ?? false}
+            currentOverlayScore={detail.overlay_score}
+            currentMachineScore={detail.machine_score}
+          />
         </>
       )}
     </div>

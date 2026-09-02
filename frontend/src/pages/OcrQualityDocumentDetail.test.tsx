@@ -5,6 +5,7 @@ import OcrQualityDocumentDetail from './OcrQualityDocumentDetail';
 
 const mocks = vi.hoisted(() => ({
   documentDetail: vi.fn(),
+  forceStage2: vi.fn(),
   paperlessUrl: vi.fn(),
   metadata: vi.fn(),
   thumbnailUrl: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('../lib/api', () => ({
   endpoints: {
     ocrQuality: {
       documentDetail: mocks.documentDetail,
+      forceStage2: mocks.forceStage2,
       candidates: {
         list: mocks.candidatesList,
         get: vi.fn(),
@@ -65,6 +67,7 @@ function renderPage(documentId = '501') {
 describe('OcrQualityDocumentDetail', () => {
   beforeEach(() => {
     mocks.documentDetail.mockReset();
+    mocks.forceStage2.mockReset();
     mocks.paperlessUrl.mockReset();
     mocks.metadata.mockReset();
     mocks.thumbnailUrl.mockReset();
@@ -169,7 +172,7 @@ describe('OcrQualityDocumentDetail', () => {
     expect(iframe).toHaveAttribute('src', '/preview/501');
   });
 
-  it('shows an unavailable-signal note when overlay score has not been computed', async () => {
+  it('shows a Stage 2 analysis-gap callout when this document has never had Stage 2 profiling', async () => {
     mocks.paperlessUrl.mockResolvedValue({ paperless_url: null });
     mocks.documentDetail.mockResolvedValue({
       document_id: 502,
@@ -178,9 +181,45 @@ describe('OcrQualityDocumentDetail', () => {
       review_status: 'GOOD',
       reasons: [],
       document_profile: null,
+      has_stage2_analysis: false,
     });
     renderPage('502');
-    await waitFor(() => expect(screen.getByText(/Overlay score is unavailable/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/has not had deep Stage 2 analysis yet/i)).toBeInTheDocument());
+  });
+
+  it('shows a narrower note when Stage 2 ran but produced no overlay score', async () => {
+    mocks.paperlessUrl.mockResolvedValue({ paperless_url: null });
+    mocks.documentDetail.mockResolvedValue({
+      document_id: 503,
+      overlay_score: null,
+      machine_score: 70.0,
+      review_status: 'GOOD',
+      reasons: [],
+      document_profile: null,
+      has_stage2_analysis: true,
+    });
+    renderPage('503');
+    await waitFor(() =>
+      expect(screen.getByText(/Stage 2 has run for this document, but no overlay score was produced/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/has not had deep Stage 2 analysis yet/i)).not.toBeInTheDocument();
+  });
+
+  it('shows no analysis-gap note once Stage 2 has run and produced an overlay score', async () => {
+    mocks.paperlessUrl.mockResolvedValue({ paperless_url: null });
+    mocks.documentDetail.mockResolvedValue({
+      document_id: 504,
+      overlay_score: 88.0,
+      machine_score: 70.0,
+      review_status: 'GOOD',
+      reasons: [],
+      document_profile: null,
+      has_stage2_analysis: true,
+    });
+    renderPage('504');
+    await screen.findByText('88.0');
+    expect(screen.queryByText(/has not had deep Stage 2 analysis yet/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no overlay score was produced/i)).not.toBeInTheDocument();
   });
 
   it('fetches region geometry and saved annotations for the region inspection panel', async () => {
@@ -211,5 +250,64 @@ describe('OcrQualityDocumentDetail', () => {
     await waitFor(() => expect(mocks.regions).toHaveBeenCalledWith('501', 1));
     await waitFor(() => expect(mocks.annotationsList).toHaveBeenCalledWith('501'));
     expect(await screen.findByText('looks off')).toBeInTheDocument();
+  });
+
+  it('forces Stage 2 analysis and refreshes scores/profile in place on success', async () => {
+    mocks.paperlessUrl.mockResolvedValue({ paperless_url: null });
+    mocks.documentDetail.mockResolvedValue({
+      document_id: 501,
+      overlay_score: null,
+      machine_score: 70.0,
+      review_status: 'UNCERTAIN',
+      reasons: [],
+      document_profile: null,
+    });
+    renderPage('501');
+    await waitFor(() => expect(screen.getByText(/Overlay score is unavailable/i)).toBeInTheDocument());
+
+    let resolveForce: (value: unknown) => void = () => {};
+    mocks.forceStage2.mockReturnValue(
+      new Promise((resolve) => {
+        resolveForce = resolve;
+      }),
+    );
+    const button = screen.getByRole('button', { name: /Force Stage 2 analysis/i });
+    fireEvent.click(button);
+
+    expect(mocks.forceStage2).toHaveBeenCalledWith('501');
+    await waitFor(() => expect(screen.getByRole('button', { name: /Analyzing/i })).toBeDisabled());
+
+    resolveForce({
+      document_id: 501,
+      overlay_score: 95.0,
+      machine_score: 88.0,
+      review_status: 'GOOD',
+      reasons: [],
+      document_profile: { page_count: 1, dominant_classification: 'digital_text' },
+    });
+
+    await waitFor(() => expect(screen.getByText('GOOD')).toBeInTheDocument());
+    expect(screen.queryByText(/Overlay score is unavailable/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Force Stage 2 analysis/i })).not.toBeDisabled();
+  });
+
+  it('shows an inline error when forcing Stage 2 analysis fails', async () => {
+    mocks.paperlessUrl.mockResolvedValue({ paperless_url: null });
+    mocks.documentDetail.mockResolvedValue({
+      document_id: 501,
+      review_status: 'UNCERTAIN',
+      reasons: [],
+      document_profile: null,
+    });
+    mocks.forceStage2.mockRejectedValue(new Error('A forced Stage-2 analysis for document 501 is already running.'));
+    renderPage('501');
+
+    const button = await screen.findByRole('button', { name: /Force Stage 2 analysis/i });
+    fireEvent.click(button);
+
+    await waitFor(() =>
+      expect(screen.getByText(/already running/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('button', { name: /Force Stage 2 analysis/i })).not.toBeDisabled();
   });
 });
