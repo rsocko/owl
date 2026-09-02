@@ -27,6 +27,10 @@ Endpoints:
     GET  /api/ocr-quality/documents/{document_id}/regions            — Word boxes + flags for one page
     GET  /api/ocr-quality/documents/{document_id}/pages/{page}/image — Rendered page PNG
 
+    Box-level diffing (connects issue #134's region inspection with issue
+    #18's candidate comparison — read-only, stateless):
+    POST /api/ocr-quality/regions/diff — Diff two word-box lists for the same page
+
     Manual annotations (issue #134, Part 2 — the only mutation endpoints
     added by this feature; they mutate OWL's own local annotation table
     only, never Paperless or the OCR quality assessment tables):
@@ -57,7 +61,7 @@ from sqlalchemy.orm import Session
 from doc_intelligence_hub.api.routers import make_paperless_client
 from doc_intelligence_hub.core.paperless import PaperlessClient
 from doc_intelligence_hub.modules.ocr_quality import annotations as annotations_service
-from doc_intelligence_hub.modules.ocr_quality import region_inspection
+from doc_intelligence_hub.modules.ocr_quality import region_diff, region_inspection
 from doc_intelligence_hub.modules.ocr_quality.config import settings as ocr_quality_settings
 from doc_intelligence_hub.modules.ocr_quality.database import InventoryRun
 from doc_intelligence_hub.modules.ocr_quality.database import get_session as get_ocr_quality_session
@@ -708,6 +712,56 @@ async def get_document_page_image(
         )
     png_bytes, _width_px, _height_px = rendered
     return Response(content=png_bytes, media_type="image/png")
+
+
+# ---------------------------------------------------------------------------
+# Box-level diffing between two word-box lists for the same page (connects
+# issue #134's region inspection with issue #18's candidate comparison) —
+# read-only, stateless, no Paperless or candidate-storage access at all;
+# callers already have both word lists from their own /regions calls.
+# ---------------------------------------------------------------------------
+
+
+class RegionDiffWordRequest(BaseModel):
+    text: str = ""
+    x0: float = 0.0
+    top: float = 0.0
+    x1: float = 0.0
+    bottom: float = 0.0
+
+
+class RegionDiffRequest(BaseModel):
+    words_a: list[RegionDiffWordRequest] = Field(
+        default_factory=list, description="Word boxes from the first ('A') source."
+    )
+    words_b: list[RegionDiffWordRequest] = Field(
+        default_factory=list, description="Word boxes from the second ('B') source."
+    )
+    page_width: float = Field(
+        description="Shared page width (points) both word lists are relative to."
+    )
+    page_height: float = Field(
+        description="Shared page height (points) both word lists are relative to."
+    )
+
+
+@router.post("/regions/diff")
+async def diff_regions(body: RegionDiffRequest) -> dict[str, Any]:
+    """Diff two word-box lists for the same page.
+
+    Single implementation of the box-matching heuristic (greedy nearest
+    neighbor combining text similarity + positional proximity) shared by
+    every comparison the frontend might render — current-vs-candidate or
+    candidate-vs-candidate. See ``region_diff.py`` for the full heuristic
+    write-up.
+    """
+    result = region_diff.diff_word_boxes_from_dicts(
+        [w.model_dump() for w in body.words_a],
+        [w.model_dump() for w in body.words_b],
+        page_width=body.page_width,
+        page_height=body.page_height,
+    )
+    return result.to_dict()
 
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ from doc_intelligence_hub.modules.ocr_quality.candidate_service import (
     BatchCapExceeded,
     OcrCandidateService,
     UnsupportedProvider,
+    _artifact_paths,
 )
 from doc_intelligence_hub.modules.ocr_quality.database import (
     OcrQualityCandidate,
@@ -61,6 +62,18 @@ class FakeClient:
 
 def _doc(doc_id: int, checksum: str = "chk-1") -> dict:
     return {"id": doc_id, "checksum": checksum, "modified": "2024-01-01T00:00:00Z"}
+
+
+class TestArtifactPaths:
+    def test_accepts_safe_candidate_ids(self, candidate_db):
+        pdf_path, text_path = _artifact_paths("cand-123.safe_id")
+        assert pdf_path.name == "cand-123.safe_id.pdf"
+        assert text_path.name == "cand-123.safe_id.txt"
+
+    @pytest.mark.parametrize("candidate_id", ["../escape", r"..\\escape", "bad/slash", "bad space"])
+    def test_rejects_unsafe_candidate_ids(self, candidate_db, candidate_id):
+        with pytest.raises(ValueError, match="Invalid candidate artifact id"):
+            _artifact_paths(candidate_id)
 
 
 @pytest.fixture()

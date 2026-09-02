@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import re
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -48,6 +50,8 @@ logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[[], Session]
 
+_SAFE_CANDIDATE_ARTIFACT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
 
 class BatchCapExceeded(ValueError):
     """Raised when a requested batch violates a configured cap."""
@@ -75,8 +79,25 @@ def _storage_dir() -> Path:
 
 
 def _artifact_paths(candidate_id: str) -> tuple[Path, Path]:
-    base = _storage_dir()
-    return base / f"{candidate_id}.pdf", base / f"{candidate_id}.txt"
+    # `candidate_id` ultimately comes from an API path parameter (e.g.
+    # GET /candidates/{candidate_id}), so it must never be trusted to build
+    # a filesystem path directly (CWE-22 path traversal). Two independent
+    # layers of defense: (1) an allowlist regex rejecting any path
+    # separator or "..", and (2) normalizing the joined path with plain
+    # `os.path` string operations and verifying it still starts with the
+    # storage directory prefix, which is the pattern static analysis (and
+    # CodeQL's py/path-injection check) recognizes as a validated path.
+    if not _SAFE_CANDIDATE_ARTIFACT_ID.fullmatch(candidate_id):
+        raise ValueError(f"Invalid candidate artifact id: {candidate_id!r}")
+
+    base_dir = os.path.normpath(str(_storage_dir()))
+    base_prefix = base_dir + os.sep
+    pdf_path_str = os.path.normpath(os.path.join(base_dir, f"{candidate_id}.pdf"))
+    text_path_str = os.path.normpath(os.path.join(base_dir, f"{candidate_id}.txt"))
+    if not pdf_path_str.startswith(base_prefix) or not text_path_str.startswith(base_prefix):
+        raise ValueError(f"Invalid candidate artifact id: {candidate_id!r}")
+
+    return Path(pdf_path_str), Path(text_path_str)
 
 
 def _save_artifacts(candidate_id: str, pdf_bytes: bytes | None, text: str | None) -> None:
@@ -395,6 +416,25 @@ class OcrCandidateService:
             "current_text": current_text,
             "candidate_text": _load_candidate_text(candidate_id),
         }
+
+    def get_candidate_pdf_bytes(self, candidate_id: str) -> bytes | None:
+        """Return the candidate's own stored PDF artifact bytes, or ``None``.
+
+        ``None`` covers both "unknown candidate" and "candidate exists but
+        has no PDF artifact yet" (e.g. still ``REQUESTED``/``RUNNING``, or
+        generation ``FAILED``) — callers distinguish those via
+        :meth:`get_candidate` if they need a more specific 404 message.
+        Never touches Paperless; reads only the on-disk artifact written by
+        :func:`_save_artifacts` during generation.
+        """
+        db = self.session_factory()
+        try:
+            row = db.query(OcrQualityCandidate).filter_by(candidate_id=candidate_id).one_or_none()
+            if row is None:
+                return None
+        finally:
+            db.close()
+        return _load_candidate_pdf_bytes(candidate_id)
 
     async def decide_candidate(
         self,

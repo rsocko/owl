@@ -37,6 +37,17 @@ logger = logging.getLogger(__name__)
 # per-word alignment — mirrors ``overlay_scoring._ALIGNMENT_PADDING``.
 _ALIGNMENT_PADDING = 5.0
 
+# A page's embedded image(s) must cover at least this fraction of the page
+# area for the per-word alignment check to apply at all — mirrors
+# ``profiling.py``'s ``_SCANNED_IMAGE_COVERAGE_THRESHOLD`` convention for
+# telling a scanned page (the whole page IS an image OCR text should overlay)
+# apart from a digital page with only a small incidental image (a logo,
+# signature line, stamp, ...). Without this guard, a page like a digital
+# lease with a small company logo would have nearly every word — anywhere
+# far from the logo — falsely flagged, since almost no real body text sits
+# inside the logo's bounds.
+_SCANNED_IMAGE_COVERAGE_THRESHOLD = 0.5
+
 # Two word boxes are considered duplicates of each other if their centers
 # are within this many points and the text matches — mirrors
 # ``overlay_scoring._DUPLICATE_DISTANCE_TOLERANCE``.
@@ -113,7 +124,30 @@ def clear_cache() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _word_flags(page: PdfPageData, word: WordBox, *, seen_words: list[WordBox]) -> list[str]:
+def _is_image_dominated_page(page: PdfPageData) -> bool:
+    """Is this page "scanned/image-dominated" — where per-word alignment is meaningful?
+
+    Mirrors ``profiling.py``'s ``_profile_page`` classification: a page is
+    treated as scanned (OCR text overlaying a full-page image) only when its
+    embedded image(s) cover at least ``_SCANNED_IMAGE_COVERAGE_THRESHOLD`` of
+    the page area — as opposed to a digital page with only a small incidental
+    image alongside real digital text.
+    """
+    if page.area <= 0 or not page.images:
+        return False
+    image_area = sum(
+        max(img.x1 - img.x0, 0.0) * max(img.bottom - img.top, 0.0) for img in page.images
+    )
+    return (image_area / page.area) >= _SCANNED_IMAGE_COVERAGE_THRESHOLD
+
+
+def _word_flags(
+    page: PdfPageData,
+    word: WordBox,
+    *,
+    seen_words: list[WordBox],
+    page_is_image_dominated: bool,
+) -> list[str]:
     """Compute which signal categories this single word trips, if any."""
     flags: list[str] = []
 
@@ -135,11 +169,12 @@ def _word_flags(page: PdfPageData, word: WordBox, *, seen_words: list[WordBox]) 
     if is_duplicate:
         flags.append("duplicate_overlap")
 
-    # Alignment is only meaningful on pages with an underlying scanned
-    # image — a purely digital page has no image to misalign against,
-    # mirroring ``overlay_scoring._alignment_signal`` returning ``None``
-    # (rather than a false "misaligned") when there are no images at all.
-    if page.images:
+    # Alignment is only meaningful on scanned/image-dominated pages — a
+    # purely digital page (even one with a small incidental image, e.g. a
+    # logo) has no scanned image to misalign against, mirroring
+    # ``overlay_scoring._alignment_signal`` returning ``None`` (rather than a
+    # false "misaligned") when there is nothing meaningful to check.
+    if page_is_image_dominated:
         padded_images = [
             (
                 img.x0 - _ALIGNMENT_PADDING,
@@ -203,8 +238,11 @@ def build_page_regions_from_pages(
     document_reasons = document_reasons or []
     seen_words: list[WordBox] = []
     words_out: list[dict[str, Any]] = []
+    page_is_image_dominated = _is_image_dominated_page(page)
     for word in page.words:
-        flags = _word_flags(page, word, seen_words=seen_words)
+        flags = _word_flags(
+            page, word, seen_words=seen_words, page_is_image_dominated=page_is_image_dominated
+        )
         seen_words.append(word)
         words_out.append(
             {
