@@ -92,8 +92,12 @@ def simulate_version_change(
     default=None,
     help="Invalidate a named scope of documents.",
 )
-@click.option("--document-id", "document_ids", multiple=True, type=int, help="Specific document ID(s).")
-@click.option("--limit", type=int, default=None, help="Cap on documents affected (bounded regardless).")
+@click.option(
+    "--document-id", "document_ids", multiple=True, type=int, help="Specific document ID(s)."
+)
+@click.option(
+    "--limit", type=int, default=None, help="Cap on documents affected (bounded regardless)."
+)
 def invalidate(
     invalidate_all: bool,
     scope: str | None,
@@ -105,8 +109,10 @@ def invalidate(
     if sum(chosen) != 1:
         raise click.ClickException("Specify exactly one of --all, --scope, or --document-id.")
 
-    effective_limit = min(limit, settings.max_manual_invalidation_batch) if limit else (
-        settings.max_manual_invalidation_batch
+    effective_limit = (
+        min(limit, settings.max_manual_invalidation_batch)
+        if limit
+        else (settings.max_manual_invalidation_batch)
     )
 
     init_db()

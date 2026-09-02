@@ -72,7 +72,12 @@ def db(tmp_path):
 
 
 def _wire_pipeline(
-    monkeypatch, pipeline: Pipeline, docs_by_id: dict[int, dict], *, fail_ids=(), calls: list | None = None
+    monkeypatch,
+    pipeline: Pipeline,
+    docs_by_id: dict[int, dict],
+    *,
+    fail_ids=(),
+    calls: list | None = None,
 ):
     """Point a Pipeline at fake Paperless/analyzer dependencies for these tests."""
 
@@ -97,7 +102,9 @@ def _wire_pipeline(
     monkeypatch.setattr(pipeline.paperless, "list_documents", fake_list_documents)
     monkeypatch.setattr(pipeline.paperless, "get_document_content", fake_get_document_content)
     monkeypatch.setattr(pipeline.analyzer, "health_check", fake_health_check)
-    monkeypatch.setattr(pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION)
+    monkeypatch.setattr(
+        pipeline.fallback_analyzer, "analyze_document", lambda doc: VALID_EXTRACTION
+    )
 
 
 class TestActionQueueFreshnessIntegration:

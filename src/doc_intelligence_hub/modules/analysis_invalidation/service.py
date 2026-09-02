@@ -388,7 +388,9 @@ class AnalysisFreshnessService:
             fingerprints = (
                 db.query(ModuleAnalysisFingerprint)
                 .filter_by(document_id=document_id)
-                .order_by(ModuleAnalysisFingerprint.module_name, ModuleAnalysisFingerprint.id.desc())
+                .order_by(
+                    ModuleAnalysisFingerprint.module_name, ModuleAnalysisFingerprint.id.desc()
+                )
                 .all()
             )
             latest_by_module: dict[str, ModuleAnalysisFingerprint] = {}
@@ -448,7 +450,9 @@ class AnalysisFreshnessService:
         finally:
             db.close()
 
-    def list_events(self, *, document_id: int | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    def list_events(
+        self, *, document_id: int | None = None, limit: int = 50
+    ) -> list[dict[str, Any]]:
         """Redacted, aggregate list of recent invalidation events."""
         db = self._session_factory()
         try:

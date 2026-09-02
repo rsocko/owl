@@ -1116,7 +1116,6 @@ class Pipeline:
                 metadata_fields=_document_metadata_fields(doc),
             )
 
-
     @staticmethod
     def _compute_text_quality(content: str) -> dict:
         """Compute basic text quality heuristics (free data for OCR pipeline)."""
