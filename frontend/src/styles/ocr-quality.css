@@ -129,6 +129,10 @@
   font-size: 13px;
 }
 
+.ocr-force-stage2 {
+  margin-top: 12px;
+}
+
 .ocr-reason-list {
   list-style: none;
   margin: 0;
