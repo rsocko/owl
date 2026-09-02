@@ -21,6 +21,9 @@ import OrphansDupes from './pages/OrphansDupes';
 import Settings from './pages/Settings';
 import NotFound from './pages/NotFound';
 import DocumentViews from './pages/DocumentViews';
+import OcrQualityDashboard from './pages/OcrQualityDashboard';
+import OcrQualityReviewQueue from './pages/OcrQualityReviewQueue';
+import OcrQualityDocumentDetail from './pages/OcrQualityDocumentDetail';
 
 /** Redirect legacy /eob/matches/:matchId to the unified workspace. */
 function EobMatchRedirect() {
@@ -57,6 +60,9 @@ function App() {
             <Route path="/metadata/:docId" element={<MetadataCorrection />} />
             <Route path="/rules" element={<RulesConfig />} />
             <Route path="/insights" element={<Insights />} />
+            <Route path="/ocr-quality" element={<OcrQualityDashboard />} />
+            <Route path="/ocr-quality/queue" element={<OcrQualityReviewQueue />} />
+            <Route path="/ocr-quality/documents/:documentId" element={<OcrQualityDocumentDetail />} />
             <Route path="/history" element={<History />} />
             <Route path="/orphans" element={<OrphansDupes />} />
             <Route path="/settings" element={<Settings />} />
