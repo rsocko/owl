@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -78,14 +79,25 @@ def _storage_dir() -> Path:
 
 
 def _artifact_paths(candidate_id: str) -> tuple[Path, Path]:
+    # `candidate_id` ultimately comes from an API path parameter (e.g.
+    # GET /candidates/{candidate_id}), so it must never be trusted to build
+    # a filesystem path directly (CWE-22 path traversal). Two independent
+    # layers of defense: (1) an allowlist regex rejecting any path
+    # separator or "..", and (2) normalizing the joined path with plain
+    # `os.path` string operations and verifying it still starts with the
+    # storage directory prefix, which is the pattern static analysis (and
+    # CodeQL's py/path-injection check) recognizes as a validated path.
     if not _SAFE_CANDIDATE_ARTIFACT_ID.fullmatch(candidate_id):
         raise ValueError(f"Invalid candidate artifact id: {candidate_id!r}")
-    base = _storage_dir().resolve()
-    pdf_path = (base / f"{candidate_id}.pdf").resolve()
-    text_path = (base / f"{candidate_id}.txt").resolve()
-    pdf_path.relative_to(base)
-    text_path.relative_to(base)
-    return pdf_path, text_path
+
+    base_dir = os.path.normpath(str(_storage_dir()))
+    base_prefix = base_dir + os.sep
+    pdf_path_str = os.path.normpath(os.path.join(base_dir, f"{candidate_id}.pdf"))
+    text_path_str = os.path.normpath(os.path.join(base_dir, f"{candidate_id}.txt"))
+    if not pdf_path_str.startswith(base_prefix) or not text_path_str.startswith(base_prefix):
+        raise ValueError(f"Invalid candidate artifact id: {candidate_id!r}")
+
+    return Path(pdf_path_str), Path(text_path_str)
 
 
 def _save_artifacts(candidate_id: str, pdf_bytes: bytes | None, text: str | None) -> None:
