@@ -69,6 +69,37 @@ def make_scanned_overlay_page(
     )
 
 
+def make_digital_page_with_small_image(
+    page_number: int = 1, width: float = 600.0, height: float = 800.0
+) -> PdfPageData:
+    """A digital-native page with ordinary text plus a small incidental image.
+
+    Mimics a real-world case (e.g. a lease agreement with a small company
+    logo): the image covers a small corner of the page, far below the
+    "scanned/image-dominated" coverage threshold, and none of the body text
+    sits anywhere near it.
+    """
+    logo = ImageBox(x0=20.0, top=20.0, x1=70.0, bottom=50.0)  # 50x30 corner logo
+    words: list[WordBox] = []
+    order = 0
+    for top in (300.0, 320.0, 340.0):
+        line_words = words_for_line(
+            ["Ordinary", "body", "text", "far", "from", "the", "logo."],
+            top=top,
+            order_start=order,
+        )
+        words.extend(line_words)
+        order += len(line_words)
+    return PdfPageData(
+        page_number=page_number,
+        width=width,
+        height=height,
+        words=words,
+        images=[logo],
+        char_count=180,
+    )
+
+
 def make_image_only_page(
     page_number: int = 1, width: float = 600.0, height: float = 800.0
 ) -> PdfPageData:
