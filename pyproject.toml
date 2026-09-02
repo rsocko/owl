@@ -45,6 +45,7 @@ dev = [
   "pytest>=8.3.0",
   "pytest-asyncio>=0.24.0",
   "ruff>=0.8.0",
+  "reportlab>=4.0",
 ]
 dashboard = [
   "streamlit>=1.30",
@@ -56,6 +57,7 @@ doc-hub-serve = "doc_intelligence_hub.api.app:main"
 eob-match = "doc_intelligence_hub.modules.eob_matching.cli:cli"
 paq = "doc_intelligence_hub.modules.action_queue.cli:cli"
 paperless-metadata = "doc_intelligence_hub.modules.metadata_migration.cli:cli"
+ocr-quality = "doc_intelligence_hub.modules.ocr_quality.cli:cli"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
