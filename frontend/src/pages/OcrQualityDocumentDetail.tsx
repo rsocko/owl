@@ -128,6 +128,11 @@ export default function OcrQualityDocumentDetail() {
   const [regionsError, setRegionsError] = useState<string | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
 
+  // Force Stage-2 analysis (one-off per-document trigger, distinct from the
+  // corpus-wide random stratified sample).
+  const [forcingStage2, setForcingStage2] = useState(false);
+  const [stage2Error, setStage2Error] = useState<string | null>(null);
+
   const load = useCallback(() => {
     if (!documentId) return;
     setLoading(true);
@@ -223,6 +228,17 @@ export default function OcrQualityDocumentDetail() {
 
   const pageAnnotations = annotations.filter((a) => a.page === inspectionPage);
 
+  const handleForceStage2 = useCallback(() => {
+    if (!documentId) return;
+    setForcingStage2(true);
+    setStage2Error(null);
+    endpoints.ocrQuality
+      .forceStage2(documentId)
+      .then((data) => setDetail(data as DocumentDetail))
+      .catch((err) => setStage2Error(err instanceof Error ? err.message : 'Failed to force Stage 2 analysis.'))
+      .finally(() => setForcingStage2(false));
+  }, [documentId]);
+
   return (
     <div className="ocr-quality-document-detail">
       <Breadcrumb items={[{ label: 'OCR Quality', to: '/ocr-quality' }, { label: 'Review queue', to: '/ocr-quality/queue' }, { label: `Document #${documentId}` }]} />
@@ -309,6 +325,12 @@ export default function OcrQualityDocumentDetail() {
                 Overlay score is unavailable — this document has not yet been PDF-profiled by the Stage 2 stratified sample.
               </div>
             )}
+            <div className="ocr-force-stage2">
+              <Button variant="primary" size="sm" onClick={handleForceStage2} disabled={forcingStage2}>
+                {forcingStage2 ? 'Analyzing…' : 'Force Stage 2 analysis'}
+              </Button>
+            </div>
+            {stage2Error && <div className="ocr-unavailable-note">{stage2Error}</div>}
           </Card>
 
           <Card title="Explainable reasons">

@@ -20,6 +20,7 @@ Endpoints:
     GET  /api/ocr-quality/distribution            — Corpus-wide review-status/score snapshot
     GET  /api/ocr-quality/documents               — Filterable/paginated/sortable review queue
     GET  /api/ocr-quality/documents/{document_id} — Single document's full assessment detail
+    POST /api/ocr-quality/documents/{document_id}/stage2 — Force Stage-2 for one document (inline)
     GET  /api/ocr-quality/downstream-outcomes     — Distinct downstream_outcome values (filter dropdown)
 
     Region-level inspection (issue #134, Part 1 — read-only, on-demand):
@@ -65,8 +66,10 @@ from doc_intelligence_hub.modules.ocr_quality.config import settings as ocr_qual
 from doc_intelligence_hub.modules.ocr_quality.database import InventoryRun
 from doc_intelligence_hub.modules.ocr_quality.database import get_session as get_ocr_quality_session
 from doc_intelligence_hub.modules.ocr_quality.database import init_db as init_ocr_quality_db
-from doc_intelligence_hub.modules.ocr_quality.models import RunStage, RunStatus
+from doc_intelligence_hub.modules.ocr_quality.models import ReasonCode, RunStage, RunStatus
 from doc_intelligence_hub.modules.ocr_quality.service import (
+    ManualStage2DocumentNotFoundError,
+    ManualStage2ProfilingFailedError,
     OcrQualityInventoryService,
     _digest,
 )
@@ -82,6 +85,11 @@ router = APIRouter(prefix="/api/ocr-quality", tags=["ocr-quality"])
 # best-effort, single-process safeguard (matches the single long-lived OWL
 # container deployment) — not a cross-process lock.
 _active_run_ids: set[str] = set()
+
+# document_ids currently running a forced single-document Stage-2 trigger
+# (see ``force_stage2_analysis``) *in this process* — guards against a second
+# concurrent trigger for the same document while the first is still inline.
+_active_manual_stage2_document_ids: set[int] = set()
 
 
 def _service() -> OcrQualityInventoryService:
@@ -539,6 +547,69 @@ async def get_document(document_id: int) -> dict[str, Any]:
             },
         )
     return detail
+
+
+@router.post("/documents/{document_id}/stage2")
+async def force_stage2_analysis(
+    request: Request, document_id: int, max_pages: int | None = None
+) -> dict[str, Any]:
+    """Force Stage-2 PDF profiling + quality re-score for one document on demand.
+
+    Unlike ``POST /runs/{run_id}/sample`` (a corpus-wide random stratified
+    sample), this targets exactly one ``document_id`` — e.g. triggered from
+    the document detail page. Requires the document to already have a
+    Stage-1 ``DocumentAssessment`` (404 otherwise — the detail page itself
+    can't be open without one). Runs inline, not as a ``BackgroundTasks``
+    job: a single document's PDF fetch + profile is fast, so the request
+    just returns the refreshed document detail payload directly instead of
+    a ``run_id`` to poll. Refuses a second concurrent trigger for the same
+    document — returns 409 instead. Only ever reads from Paperless
+    (``get_document_preview``) — never writes anything back to it.
+    """
+    init_ocr_quality_db()
+    if document_id in _active_manual_stage2_document_ids:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "stage2_already_in_progress",
+                "message": f"A forced Stage-2 analysis for document {document_id} is already running.",
+                "document_id": document_id,
+            },
+        )
+
+    client = make_paperless_client(request, timeout=30.0)
+    service = OcrQualityInventoryService(client, get_ocr_quality_session)
+    _active_manual_stage2_document_ids.add(document_id)
+    try:
+        return await service.run_manual_stage2(
+            document_id=document_id,
+            max_pages=max_pages or ocr_quality_settings.pdf_profile_max_pages,
+        )
+    except ManualStage2DocumentNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": (
+                    f"No OCR quality assessment for document {document_id}; "
+                    "run a Stage-1 corpus scan first."
+                ),
+            },
+        ) from exc
+    except ManualStage2ProfilingFailedError as exc:
+        is_parse_failure = exc.reason_code == ReasonCode.PDF_PARSE_FAILED.value
+        status_code = 422 if is_parse_failure else 502
+        raise HTTPException(
+            status_code=status_code,
+            detail={
+                "code": "pdf_parse_failed" if is_parse_failure else "paperless_fetch_failed",
+                "message": f"Stage-2 profiling failed for document {document_id}.",
+                "reason_code": exc.reason_code,
+            },
+        ) from exc
+    finally:
+        _active_manual_stage2_document_ids.discard(document_id)
+        await client.aclose()
 
 
 # ---------------------------------------------------------------------------
