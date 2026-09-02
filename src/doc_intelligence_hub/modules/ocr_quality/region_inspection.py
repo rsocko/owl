@@ -135,7 +135,9 @@ def _is_image_dominated_page(page: PdfPageData) -> bool:
     """
     if page.area <= 0 or not page.images:
         return False
-    image_area = sum(max(img.x1 - img.x0, 0.0) * max(img.bottom - img.top, 0.0) for img in page.images)
+    image_area = sum(
+        max(img.x1 - img.x0, 0.0) * max(img.bottom - img.top, 0.0) for img in page.images
+    )
     return (image_area / page.area) >= _SCANNED_IMAGE_COVERAGE_THRESHOLD
 
 
