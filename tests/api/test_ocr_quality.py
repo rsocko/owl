@@ -228,6 +228,63 @@ class TestListDocuments:
         resp = client.get("/api/ocr-quality/documents")
         assert "content" not in str(resp.json())
 
+    def test_list_sorts_by_document_id_ascending(self, client, ocr_quality_db):
+        _seed_scored_document(1)
+        _seed_scored_document(2)
+        _seed_scored_document(3)
+        resp = client.get("/api/ocr-quality/documents?sort_by=document_id&sort_dir=asc")
+        assert resp.status_code == 200
+        ids = [d["document_id"] for d in resp.json()["documents"]]
+        assert ids == [1, 2, 3]
+
+    def test_list_sorts_by_overlay_score_descending(self, client, ocr_quality_db):
+        _seed_scored_document(1, overlay_score=50.0)
+        _seed_scored_document(2, overlay_score=90.0)
+        _seed_scored_document(3, overlay_score=70.0)
+        resp = client.get("/api/ocr-quality/documents?sort_by=overlay_score&sort_dir=desc")
+        assert resp.status_code == 200
+        ids = [d["document_id"] for d in resp.json()["documents"]]
+        assert ids == [2, 3, 1]
+
+    def test_list_unknown_sort_by_falls_back_to_default_order(self, client, ocr_quality_db):
+        _seed_scored_document(1)
+        _seed_scored_document(2)
+        resp = client.get("/api/ocr-quality/documents?sort_by=not_a_real_column")
+        assert resp.status_code == 200
+        ids = {d["document_id"] for d in resp.json()["documents"]}
+        assert ids == {1, 2}
+
+    def test_list_invalid_sort_dir_rejected(self, client, ocr_quality_db):
+        resp = client.get("/api/ocr-quality/documents?sort_by=document_id&sort_dir=sideways")
+        assert resp.status_code == 422
+
+
+class TestListDownstreamOutcomes:
+    def test_empty_corpus_returns_empty_list(self, client, ocr_quality_db):
+        resp = client.get("/api/ocr-quality/downstream-outcomes")
+        assert resp.status_code == 200
+        assert resp.json() == {"downstream_outcomes": []}
+
+    def test_returns_distinct_sorted_values(self, client, ocr_quality_db):
+        _seed_scored_document(1, review_status="GOOD")
+        _seed_scored_document(2, review_status="GOOD")
+        _seed_scored_document(3, review_status="GOOD")
+        db = get_session()
+        try:
+            for row in db.query(DocumentAssessment).all():
+                if row.document_id == 1:
+                    row.downstream_outcome = "no_action_needed"
+                elif row.document_id == 2:
+                    row.downstream_outcome = "action_created"
+                else:
+                    row.downstream_outcome = "no_action_needed"
+            db.commit()
+        finally:
+            db.close()
+        resp = client.get("/api/ocr-quality/downstream-outcomes")
+        assert resp.status_code == 200
+        assert resp.json() == {"downstream_outcomes": ["action_created", "no_action_needed"]}
+
 
 class TestGetDocument:
     def test_get_unknown_document_404(self, client, ocr_quality_db):
