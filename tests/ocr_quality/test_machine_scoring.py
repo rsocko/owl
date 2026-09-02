@@ -239,9 +239,10 @@ def test_structured_content_signal_multiplier_is_configurable() -> None:
     tuned = DEFAULT_CONFIG.model_copy(
         update={"structured_content_signal_multiplier": 0.0, "config_version": "test-neutral"}
     )
-    result = score_machine(text_content=text, content_shape=ContentShape.TABLE_OR_FORM, config=tuned)
+    result = score_machine(
+        text_content=text, content_shape=ContentShape.TABLE_OR_FORM, config=tuned
+    )
     assert result.score is not None
     # With weight fully zeroed, neither signal contributes to weighted_total.
     weights = tuned.machine_weights.model_dump()
     assert weights["char_script_plausibility"] > 0  # sanity: config itself unaffected
-

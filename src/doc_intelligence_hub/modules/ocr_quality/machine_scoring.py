@@ -94,7 +94,9 @@ def score_machine(
     reasons: list[Reason] = []
     unavailable: list[str] = []
     signals: dict[str, float | None] = dict.fromkeys(_SIGNAL_NAMES)
-    is_structured_shape = content_shape is not None and content_shape in cfg.structured_content_shapes
+    is_structured_shape = (
+        content_shape is not None and content_shape in cfg.structured_content_shapes
+    )
 
     if text_content is None:
         unavailable.extend(_SIGNAL_NAMES[:6])
