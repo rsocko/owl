@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from doc_intelligence_hub.modules.ocr_quality.config import DEFAULT_CONFIG
 from doc_intelligence_hub.modules.ocr_quality.machine_scoring import score_machine
-from doc_intelligence_hub.modules.ocr_quality.models import DownstreamOutcome
+from doc_intelligence_hub.modules.ocr_quality.scoring_config import DEFAULT_CONFIG
+from doc_intelligence_hub.modules.ocr_quality.scoring_models import DownstreamOutcome
 
 
 def test_none_text_is_fully_unavailable() -> None:

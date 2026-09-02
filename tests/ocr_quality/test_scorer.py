@@ -6,9 +6,12 @@ from __future__ import annotations
 
 import copy
 
-from doc_intelligence_hub.modules.ocr_quality.config import ScoringConfig
-from doc_intelligence_hub.modules.ocr_quality.models import AssessmentStatus, DownstreamOutcome
 from doc_intelligence_hub.modules.ocr_quality.scorer import assess_document
+from doc_intelligence_hub.modules.ocr_quality.scoring_config import ScoringConfig
+from doc_intelligence_hub.modules.ocr_quality.scoring_models import (
+    AssessmentStatus,
+    DownstreamOutcome,
+)
 
 from .conftest import make_digital_page, make_error_page, make_minimal_pdf_bytes
 

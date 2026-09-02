@@ -680,12 +680,19 @@ class PaperlessClient:
         *,
         page_size: int = 100,
         cursor: str | None = None,
+        scope_params: dict[str, Any] | None = None,
     ) -> PaperlessPage:
         """Fetch one deterministically ordered document page.
 
         The cursor is intentionally an opaque string to callers. It currently
         encodes the Paperless page number and can be persisted in protected
         restart state without retaining a deployment URL.
+
+        ``scope_params`` are additional server-side query params (e.g.
+        ``{"tags__id__in": "1,2"}``) applied on every page of a scoped,
+        resumable scan. Pass the same ``scope_params`` on resume as on the
+        original call — callers are responsible for detecting scope changes
+        across a resume (e.g. via a digest of these params).
         """
         if page_size < 1:
             raise ValueError("page_size must be at least 1")
@@ -696,11 +703,11 @@ class PaperlessClient:
         if page < 1:
             raise ValueError("Invalid Paperless pagination cursor")
 
-        resp = await self._request(
-            "GET",
-            "/api/documents/",
-            params={"page": page, "page_size": page_size, "ordering": "id"},
-        )
+        params: dict[str, Any] = {"page": page, "page_size": page_size, "ordering": "id"}
+        if scope_params:
+            params.update(scope_params)
+
+        resp = await self._request("GET", "/api/documents/", params=params)
         resp.raise_for_status()
         payload = resp.json()
         results = tuple(payload.get("results", ()))
@@ -716,11 +723,14 @@ class PaperlessClient:
         *,
         page_size: int = 100,
         cursor: str | None = None,
+        scope_params: dict[str, Any] | None = None,
     ) -> AsyncIterator[PaperlessPage]:
         """Yield bounded document pages from an optional restart cursor."""
         next_cursor = cursor
         while True:
-            page = await self.list_document_page(page_size=page_size, cursor=next_cursor)
+            page = await self.list_document_page(
+                page_size=page_size, cursor=next_cursor, scope_params=scope_params
+            )
             yield page
             if page.next_cursor is None:
                 return

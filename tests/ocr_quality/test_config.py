@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from doc_intelligence_hub.modules.ocr_quality.config import (
+from doc_intelligence_hub.modules.ocr_quality.scoring_config import (
     DEFAULT_CONFIG,
     MachineWeights,
     OverlayWeights,

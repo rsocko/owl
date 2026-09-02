@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from doc_intelligence_hub.modules.ocr_quality.config import DEFAULT_CONFIG
-from doc_intelligence_hub.modules.ocr_quality.models import ContentShape, PageClassification
 from doc_intelligence_hub.modules.ocr_quality.profiling import build_document_profile
+from doc_intelligence_hub.modules.ocr_quality.scoring_config import DEFAULT_CONFIG
+from doc_intelligence_hub.modules.ocr_quality.scoring_models import ContentShape, PageClassification
 
 from .conftest import (
     make_digital_page,

@@ -8,14 +8,23 @@ inventory scanner (or any other caller) owns storing the result.
 
 from __future__ import annotations
 
-from doc_intelligence_hub.modules.ocr_quality.config import (
+from doc_intelligence_hub.modules.ocr_quality.machine_scoring import score_machine
+from doc_intelligence_hub.modules.ocr_quality.overlay_scoring import score_overlay
+from doc_intelligence_hub.modules.ocr_quality.pdf_loader import load_pdf_pages
+from doc_intelligence_hub.modules.ocr_quality.pdf_types import PdfPageData
+from doc_intelligence_hub.modules.ocr_quality.profiling import (
+    build_document_profile,
+    reconstruct_text_from_pages,
+)
+from doc_intelligence_hub.modules.ocr_quality.scoring_config import (
     DEFAULT_CONFIG,
     ScoringConfig,
     load_config,
 )
-from doc_intelligence_hub.modules.ocr_quality.config import scorer_version as _scorer_version
-from doc_intelligence_hub.modules.ocr_quality.machine_scoring import score_machine
-from doc_intelligence_hub.modules.ocr_quality.models import (
+from doc_intelligence_hub.modules.ocr_quality.scoring_config import (
+    scorer_version as _scorer_version,
+)
+from doc_intelligence_hub.modules.ocr_quality.scoring_models import (
     AssessmentStatus,
     DocumentProfile,
     DownstreamOutcome,
@@ -23,13 +32,6 @@ from doc_intelligence_hub.modules.ocr_quality.models import (
     Reason,
     ScoreComponent,
     Severity,
-)
-from doc_intelligence_hub.modules.ocr_quality.overlay_scoring import score_overlay
-from doc_intelligence_hub.modules.ocr_quality.pdf_loader import load_pdf_pages
-from doc_intelligence_hub.modules.ocr_quality.pdf_types import PdfPageData
-from doc_intelligence_hub.modules.ocr_quality.profiling import (
-    build_document_profile,
-    reconstruct_text_from_pages,
 )
 
 

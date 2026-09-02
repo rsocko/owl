@@ -15,8 +15,8 @@ import unicodedata
 from collections import Counter
 
 from doc_intelligence_hub.modules.ocr_quality.common_words import common_word_hit_ratio
-from doc_intelligence_hub.modules.ocr_quality.config import DEFAULT_CONFIG, ScoringConfig
-from doc_intelligence_hub.modules.ocr_quality.models import (
+from doc_intelligence_hub.modules.ocr_quality.scoring_config import DEFAULT_CONFIG, ScoringConfig
+from doc_intelligence_hub.modules.ocr_quality.scoring_models import (
     DownstreamOutcome,
     Reason,
     ScoreComponent,

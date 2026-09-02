@@ -10,14 +10,14 @@ from __future__ import annotations
 
 import re
 
-from doc_intelligence_hub.modules.ocr_quality.config import DEFAULT_CONFIG, ScoringConfig
-from doc_intelligence_hub.modules.ocr_quality.models import (
+from doc_intelligence_hub.modules.ocr_quality.pdf_types import PdfPageData
+from doc_intelligence_hub.modules.ocr_quality.scoring_config import DEFAULT_CONFIG, ScoringConfig
+from doc_intelligence_hub.modules.ocr_quality.scoring_models import (
     ContentShape,
     DocumentProfile,
     PageClassification,
     PageProfile,
 )
-from doc_intelligence_hub.modules.ocr_quality.pdf_types import PdfPageData
 
 # A page image covering more than this fraction of the page area, alongside
 # extractable text, is treated as a scanned page with a text overlay rather

@@ -12,14 +12,14 @@ from __future__ import annotations
 import statistics
 from collections.abc import Iterable
 
-from doc_intelligence_hub.modules.ocr_quality.config import DEFAULT_CONFIG, ScoringConfig
-from doc_intelligence_hub.modules.ocr_quality.models import (
+from doc_intelligence_hub.modules.ocr_quality.pdf_types import PdfPageData, WordBox
+from doc_intelligence_hub.modules.ocr_quality.scoring_config import DEFAULT_CONFIG, ScoringConfig
+from doc_intelligence_hub.modules.ocr_quality.scoring_models import (
     DocumentProfile,
     Reason,
     ScoreComponent,
     Severity,
 )
-from doc_intelligence_hub.modules.ocr_quality.pdf_types import PdfPageData, WordBox
 
 # Average text-ink coverage of a page at/above this fraction earns full
 # credit for the page_coverage signal; sparser (but plausible, e.g. a short

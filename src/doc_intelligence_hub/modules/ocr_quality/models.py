@@ -1,165 +1,147 @@
-"""Data contracts for OCR quality assessment (issue #29).
+"""Versioned contracts for the OCR quality baseline inventory (issue #25).
 
-These models define the versioned, explainable output contract from
-``docs/modules/ocr-quality/ocr-quality-scoring.md``. They are intentionally
-self-contained (no ORM/database coupling) so the scorer can be called
-standalone or embedded in the issue #25 batch inventory scanner, which owns
-the actual persistence schema.
+Schema versions are recorded on every persisted row so re-runs, resumes, and
+the future #29 scorer can tell exactly which logic produced a given result.
 """
 
 from __future__ import annotations
 
+import dataclasses
+from collections import Counter
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import Enum
+from typing import Any
 
-from pydantic import BaseModel, Field
+# Stage-1 preliminary signal/heuristic version. This is deliberately NOT the
+# quality scorer version — issue #29 owns the real overlay/machine-extraction
+# scorer. This version only identifies the *stratification* heuristic so a
+# rerun with a changed heuristic is treated as a new assessment.
+INVENTORY_SIGNAL_VERSION = "ocr-quality-inventory-signals-v1"
+
+# Stage-2 PDF page-profiling logic version.
+PDF_PROFILE_VERSION = "ocr-quality-pdf-profile-v1"
+
+SUMMARY_SCHEMA_VERSION = "1.0"
 
 
-class PageClassification(str, Enum):
-    """Page-aware document profiling classification.
+class RunStage(str, Enum):
+    STAGE_1_CORPUS_SCAN = "stage_1_corpus_scan"
+    STAGE_2_STRATIFIED_SAMPLE = "stage_2_stratified_sample"
 
-    Mixed image/text PDFs must not be treated as wholly digital or wholly
-    scanned — each page gets its own classification.
-    """
+
+class RunStatus(str, Enum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class Disposition(str, Enum):
+    """Per-document outcome of a Stage-1 or Stage-2 attempt."""
+
+    ASSESSED = "assessed"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
+class ReasonCode(str, Enum):
+    """Safe, non-content reason codes for skips/failures and document flags."""
+
+    OK = "ok"
+    EMPTY_CONTENT = "empty_content"
+    MISSING_DOCUMENT_ID = "missing_document_id"
+    FETCH_FAILED = "fetch_failed"
+    PDF_DOWNLOAD_FAILED = "pdf_download_failed"
+    PDF_PARSE_FAILED = "pdf_parse_failed"
+    PDF_ENCRYPTED = "pdf_encrypted"
+    ALREADY_UP_TO_DATE = "already_up_to_date"
+    LEGACY_SCORE_UNAVAILABLE = "legacy_score_unavailable"
+    RESUMED_FROM_CURSOR = "resumed_from_cursor"
+
+
+class DocumentProfile(str, Enum):
+    """Stage-2 page-aware document classification."""
 
     DIGITAL_TEXT = "digital_text"
     SCANNED_WITH_OVERLAY = "scanned_with_overlay"
-    IMAGE_NO_TEXT = "image_no_text"
-    MIXED = "mixed"
-    UNSUPPORTED_ERROR = "unsupported_error"
-
-
-class ContentShape(str, Enum):
-    """Broad shape of a document's content, used to contextualize signals."""
-
-    PROSE = "prose"
-    TABLE_OR_FORM = "table_or_form"
-    CODE_HEAVY = "code_heavy"
+    NO_TEXT = "no_text"
     MIXED = "mixed"
     UNKNOWN = "unknown"
 
 
-class AssessmentStatus(str, Enum):
-    """Operational-risk summary. Never a claim of OCR correctness."""
+@dataclasses.dataclass(frozen=True)
+class DocumentSignals:
+    """Pure, derived Stage-1 signals for one document. No raw OCR text."""
 
-    GOOD = "GOOD"
-    UNCERTAIN = "UNCERTAIN"
-    REVIEW_RECOMMENDED = "REVIEW_RECOMMENDED"
-    FAILED = "FAILED"
-
-
-class Severity(str, Enum):
-    """Severity of an individual explainability reason."""
-
-    INFO = "info"
-    WARNING = "warning"
-    BLOCKING = "blocking"
-
-
-class Reason(BaseModel):
-    """A single explainable contribution to a score or status.
-
-    ``code`` is a stable machine-readable identifier (e.g.
-    ``"overlay.duplicate_text"``); ``message`` is a short human-readable
-    explanation. Reasons with no numeric ``weight``/``value`` are informational
-    (e.g. unavailable-signal markers).
-    """
-
-    code: str
-    message: str
-    severity: Severity = Severity.INFO
-    component: str = Field(description="e.g. 'overlay', 'machine', 'profile'")
-    weight: float | None = Field(
-        default=None, description="Configured weight applied to this signal, if any."
-    )
-    value: float | None = Field(
-        default=None, description="Raw signal value (0-1 unless noted), if computed."
-    )
+    content_length: int
+    word_count: int
+    non_ascii_ratio: float
+    whitespace_ratio: float
+    repetition_ratio: float
+    avg_token_length: float
+    distinct_token_ratio: float
+    table_shape_hint: bool
+    code_shape_hint: bool
+    preliminary_score: int  # 0-100 quality-risk estimate, stratification only
+    reason_codes: tuple[ReasonCode, ...] = ()
 
 
-class PageProfile(BaseModel):
-    """Per-page profiling result."""
+@dataclasses.dataclass(frozen=True)
+class PageSignal:
+    """Whether one PDF page has an embedded text layer and/or images."""
 
-    page_number: int = Field(ge=1)
-    classification: PageClassification
-    text_coverage: float | None = Field(
-        default=None, description="Fraction (0-1) of page area covered by extractable text."
-    )
-    image_coverage: float | None = Field(
-        default=None, description="Fraction (0-1) of page area covered by embedded images."
-    )
-    char_count: int = 0
-    word_count: int = 0
-    rotation: int = 0
-    error: str | None = None
+    has_text: bool
+    has_image: bool
 
 
-class DocumentProfile(BaseModel):
-    """Page-aware document profile.
-
-    Digital-native pages remain assessable even though they are normally
-    exempt from image re-OCR. Short documents are not automatically treated
-    as failures merely because they contain few characters.
-    """
-
-    page_count: int = Field(ge=0)
-    pages: list[PageProfile] = Field(default_factory=list)
-    dominant_classification: PageClassification | None = None
-    content_shape: ContentShape = ContentShape.UNKNOWN
-    language_hint: str | None = None
-    producer: str | None = None
-    is_short_document: bool = False
-    has_pdf_geometry: bool = Field(
-        default=False, description="Whether page geometry (bytes) was available for profiling."
-    )
+@dataclasses.dataclass(frozen=True)
+class DocProfileResult:
+    profile: DocumentProfile
+    page_count: int
+    digital_pages: int
+    scanned_overlay_pages: int
+    no_text_pages: int
+    reason_codes: tuple[ReasonCode, ...] = ()
 
 
-class DownstreamOutcome(BaseModel):
-    """Privacy-safe downstream extraction outcome used as scoring evidence.
+@dataclasses.dataclass
+class RunSummary:
+    run_id: str
+    stage: RunStage
+    started_at: str
+    scope_digest: str
+    config_digest: str
+    instance_digest: str
+    signal_version: str
+    finished_at: str | None = None
+    status: RunStatus = RunStatus.RUNNING
+    counts: Counter[str] = dataclasses.field(default_factory=Counter)
+    throughput_docs_per_second: float | None = None
+    schema_version: str = SUMMARY_SCHEMA_VERSION
+    redacted: bool = True
 
-    Callers (TYRION, EOB matching, Action Queue, statements, Mission Control,
-    OWL Insights) supply these; the scorer never fetches them itself. A
-    failure raises review risk. A success does not prove the whole document
-    is correct, so it is capped/low-weight corroboration only.
-    """
+    def add(self, disposition: Disposition) -> None:
+        self.counts[disposition.value] += 1
 
-    source: str = Field(description="e.g. 'tyrion', 'eob_matching', 'action_queue', 'statements'")
-    success: bool
-    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-    detail: str | None = Field(default=None, description="Short, privacy-safe note. No raw text.")
-
-
-class ScoreComponent(BaseModel):
-    """One scored dimension (overlay or machine) with full explainability."""
-
-    score: float | None = Field(
-        default=None, ge=0.0, le=100.0, description="None when no signals were available at all."
-    )
-    signals: dict[str, float | None] = Field(
-        default_factory=dict, description="Raw computed signal values, keyed by signal name."
-    )
-    reasons: list[Reason] = Field(default_factory=list)
-    unavailable_signals: list[str] = Field(
-        default_factory=list,
-        description="Signal names that could not be computed given the available inputs.",
-    )
+    def finish(self, *, status: RunStatus = RunStatus.COMPLETED) -> None:
+        self.finished_at = datetime.now(UTC).isoformat()
+        self.status = status
 
 
-class OCRQualityAssessment(BaseModel):
-    """The versioned, explainable OCR quality assessment result contract.
-
-    Mirrors the contract in ``docs/modules/ocr-quality/ocr-quality-scoring.md``:
-    overlay score, machine score, review status, reasons, document profile,
-    scorer version, and assessment time. ``overlay_signals``/``machine_signals``
-    provide additional per-signal detail for review UIs and calibration.
-    """
-
-    overlay_score: float | None = Field(default=None, ge=0.0, le=100.0)
-    machine_score: float | None = Field(default=None, ge=0.0, le=100.0)
-    review_status: AssessmentStatus
-    reasons: list[Reason] = Field(default_factory=list)
-    document_profile: DocumentProfile
-    scorer_version: str
-    assessed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    overlay_signals: ScoreComponent
-    machine_signals: ScoreComponent
+def to_json_safe(value: Any) -> Any:
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {
+            field.name: to_json_safe(getattr(value, field.name))
+            for field in dataclasses.fields(value)
+        }
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, Counter):
+        return dict(value)
+    if isinstance(value, dict):
+        return {str(key): to_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_json_safe(item) for item in value]
+    return value

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from doc_intelligence_hub.modules.ocr_quality.config import DEFAULT_CONFIG
-from doc_intelligence_hub.modules.ocr_quality.models import Severity
 from doc_intelligence_hub.modules.ocr_quality.overlay_scoring import score_overlay
 from doc_intelligence_hub.modules.ocr_quality.pdf_types import PdfPageData, WordBox
 from doc_intelligence_hub.modules.ocr_quality.profiling import build_document_profile
+from doc_intelligence_hub.modules.ocr_quality.scoring_config import DEFAULT_CONFIG
+from doc_intelligence_hub.modules.ocr_quality.scoring_models import Severity
 
 from .conftest import make_digital_page, make_error_page, make_scanned_overlay_page
 
