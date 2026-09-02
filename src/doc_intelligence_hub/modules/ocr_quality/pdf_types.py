@@ -1,0 +1,63 @@
+"""Engine-neutral page geometry abstraction.
+
+Scoring logic (``overlay_scoring.py``, ``profiling.py``) depends only on these
+plain dataclasses, never on a specific PDF/OCR library. ``pdf_loader.py``
+adapts ``pdfplumber`` output into this shape today; a future Azure Document
+Intelligence ``prebuilt-read`` adapter (geometry + word confidence) can fill
+the same seam without changing any scoring code.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class WordBox:
+    """A single extracted word with its bounding box (page-relative points)."""
+
+    text: str
+    x0: float
+    top: float
+    x1: float
+    bottom: float
+    confidence: float | None = None
+    order_index: int = 0
+    """Index in native extraction order, used for reading-order checks."""
+
+
+@dataclass(frozen=True)
+class ImageBox:
+    """A single embedded raster image region on a page."""
+
+    x0: float
+    top: float
+    x1: float
+    bottom: float
+
+
+@dataclass
+class PdfPageData:
+    """Parsed geometry for a single PDF page."""
+
+    page_number: int
+    width: float
+    height: float
+    words: list[WordBox] = field(default_factory=list)
+    images: list[ImageBox] = field(default_factory=list)
+    rotation: int = 0
+    char_count: int = 0
+    error: str | None = None
+    """Set when this page could not be parsed; other fields are best-effort."""
+
+    @property
+    def area(self) -> float:
+        return max(self.width, 0.0) * max(self.height, 0.0)
+
+    @property
+    def has_text(self) -> bool:
+        return bool(self.words) or self.char_count > 0
+
+    @property
+    def has_images(self) -> bool:
+        return bool(self.images)
