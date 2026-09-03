@@ -282,9 +282,14 @@ export default function RegionOverlayViewer({
                   top: rect.top,
                   width: rect.width,
                   height: rect.height,
-                  ...(word.angle ? { transform: `rotate(${-word.angle}deg)`, transformOrigin: 'center' } : {}),
                 }}
-                title={diffKind ? `${word.text} (${diffKind})` : word.text}
+                title={
+                  diffKind
+                    ? `${word.text} (${diffKind})`
+                    : word.angle
+                      ? `${word.text} (rotated ${Math.round(word.angle)}°)`
+                      : word.text
+                }
                 onClick={() => setSelectedWord(word)}
                 data-testid="word-box"
               />
