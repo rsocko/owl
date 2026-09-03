@@ -113,7 +113,14 @@ describe('RegionOverlayViewer', () => {
     expect(boxes[1]).toHaveAttribute('title', 'World (shifted)');
   });
 
-  it('renders a rotated box for a word with a non-zero angle, and no transform otherwise', () => {
+  it('does not apply any CSS rotation to a rotated word box (x0/top/x1/bottom are already the true axis-aligned rect)', () => {
+    // Regression test: pdfplumber-derived word boxes already carry the true
+    // axis-aligned bounding rect of the word's member glyphs (including
+    // rotated/vertical text) in x0/top/x1/bottom. `angle` is purely
+    // descriptive metadata and must NOT be applied as an additional CSS
+    // rotate() transform -- doing so double-rotates an already-correctly
+    // shaped/positioned box (this previously turned a narrow/tall vertical
+    // sidebar text box into a wide/short, mispositioned box).
     const regionsWithRotatedWord: PageRegions = {
       ...baseRegions,
       words: [
@@ -125,8 +132,16 @@ describe('RegionOverlayViewer', () => {
     loadImage(container);
     const boxes = screen.getAllByTestId('word-box');
     expect(boxes[0].style.transform).toBe('');
-    expect(boxes[1].style.transform).toBe('rotate(-90deg)');
-    expect(boxes[1].style.transformOrigin).toBe('center');
+    expect(boxes[1].style.transform).toBe('');
+    expect(boxes[1].style.transformOrigin).toBe('');
+    // The rect itself still comes from plain toPixelRect (unrotated) values.
+    expect(boxes[1].style.left).toBe('70px');
+    expect(boxes[1].style.top).toBe('10px');
+    expect(boxes[1].style.width).toBe('50px');
+    expect(boxes[1].style.height).toBe('20px');
+    // The angle is instead surfaced in the tooltip since it's no longer visualized via transform.
+    expect(boxes[1]).toHaveAttribute('title', 'World (rotated 90°)');
+    expect(boxes[0]).toHaveAttribute('title', 'Hello');
   });
 
   it('renders existing annotations as boxes and supports deleting them', () => {
