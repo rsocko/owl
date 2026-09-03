@@ -68,6 +68,54 @@ def _seed_run(
         db.close()
 
 
+def _seed_pre_pr153_runs_table(db_path) -> None:
+    """Build ``ocr_quality_runs`` in its pre-PR-#153/issue-#30 shape.
+
+    Reproduces the production bug directly: a live table that predates the
+    ``actor``/``trigger``/``correlation_id``/``idempotency_key``/
+    ``cancel_requested``/``cancelled_at``/``retry_count``/``max_retries``
+    columns PR #153 added to the ``InventoryRun`` model, which made every
+    query against ``ocr_quality_runs`` (including plain ``GET /runs``) 500
+    with ``sqlite3.OperationalError: no such column: ocr_quality_runs.actor``.
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE ocr_quality_runs (
+                run_id VARCHAR NOT NULL PRIMARY KEY,
+                stage VARCHAR NOT NULL,
+                scope_digest VARCHAR NOT NULL,
+                config_digest VARCHAR NOT NULL,
+                instance_digest VARCHAR NOT NULL,
+                signal_version VARCHAR NOT NULL,
+                seed VARCHAR,
+                source_run_id VARCHAR,
+                cursor VARCHAR,
+                status VARCHAR NOT NULL,
+                counts JSON,
+                throughput_docs_per_second FLOAT,
+                started_at DATETIME,
+                finished_at DATETIME
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO ocr_quality_runs
+                (run_id, stage, scope_digest, config_digest, instance_digest,
+                 signal_version, status, started_at)
+            VALUES ('legacy-run', 'stage_1_corpus_scan', 'scope', 'config',
+                    'instance', 'v1', 'completed', '2026-01-01 00:00:00')
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 class TestListRuns:
     def test_list_runs_empty(self, client, ocr_quality_db):
         resp = client.get("/api/ocr-quality/runs")
@@ -85,6 +133,25 @@ class TestListRuns:
         assert body["runs"][0]["run_id"] == "run-1"
         # No raw content/titles should ever appear in this response.
         assert "content" not in str(body)
+
+    def test_list_runs_survives_pre_pr153_table_shape(self, client, tmp_path):
+        """Regression test: production had a table predating PR #153/#30's
+        new ``InventoryRun`` columns and every ``GET /runs`` 500'd. The
+        startup migration in ``init_db()`` must backfill those columns
+        before this query runs, on a table that already existed.
+        """
+        original = ocr_quality_config.settings.database_url
+        db_path = tmp_path / "legacy_shape_ocr_quality.db"
+        _seed_pre_pr153_runs_table(db_path)
+        ocr_quality_config.settings.database_url = f"sqlite:///{db_path}"
+        try:
+            resp = client.get("/api/ocr-quality/runs")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert len(body["runs"]) == 1
+            assert body["runs"][0]["run_id"] == "legacy-run"
+        finally:
+            ocr_quality_config.settings.database_url = original
 
 
 class TestGetRun:
