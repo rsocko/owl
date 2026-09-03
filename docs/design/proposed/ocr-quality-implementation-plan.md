@@ -115,7 +115,10 @@ inside OWL.
 Implement provider-neutral candidate storage and two providers:
 
 1. OCRmyPDF/Tesseract searchable PDF.
-2. Azure Document Intelligence `prebuilt-read` searchable PDF.
+2. Azure Document Intelligence `prebuilt-layout` searchable PDF, reconstructed
+   from Layout's word-level output (text + bounding polygons) rather than its
+   structured/markdown extraction, for correct reading order on multi-column
+   documents.
 
 Add document-level generation first, followed by capped explicit batches.
 Record cost, runtime, engine versions, settings, geometry/confidence evidence,

@@ -74,11 +74,13 @@ The initial candidate providers are:
 | Provider | Role |
 |---|---|
 | OCRmyPDF + Tesseract 5 | Local, private, free searchable-PDF candidate |
-| Azure Document Intelligence `prebuilt-read` | Cloud candidate with searchable-PDF output, geometry, and word confidence |
+| Azure Document Intelligence `prebuilt-layout` | Cloud candidate with searchable-PDF output, geometry, and word confidence; the searchable PDF is reconstructed from Layout's word-level text/polygon primitives, not its structured/markdown extraction, giving correct reading order on multi-column documents |
 
-Azure Layout may be evaluated separately for table- and structure-aware
-downstream extraction. It is not interchangeable with the canonical
-searchable-PDF candidate.
+Azure Layout's structured/markdown extraction (tables, paragraphs, sections)
+must not be spliced into the searchable-PDF candidate — that output does not
+preserve a reliable word-by-word reading order. Only its word-level text and
+bounding-polygon primitives (the same kind of data `prebuilt-read` exposes)
+may be used to build the candidate PDF.
 
 Multiple engines may produce independent candidates for the same document.
 OWL must never merge text layers, coordinates, or confidence values from

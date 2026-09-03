@@ -85,7 +85,8 @@ when strata remain underrepresented.
 On a smaller 50–100 document set, generate independent candidates with:
 
 - OCRmyPDF/Tesseract; and
-- Azure Document Intelligence `prebuilt-read`.
+- Azure Document Intelligence `prebuilt-layout` (word-level text + bounding
+  polygons, not its structured/markdown extraction).
 
 Include known-good controls, obvious failures, uncertain documents, tables,
 receipts, EOBs, faded scans, handwriting, and identifier/code-heavy documents.
