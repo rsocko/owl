@@ -1,11 +1,14 @@
-"""Data contracts for OCR candidate generation and comparison (issue #18, slice 1).
+"""Data contracts for OCR candidate generation and comparison (issue #18, slice 1),
+plus the apply/rollback state fields added in slice 2.
 
-This slice covers *generation*, *comparison*, and *staging* of alternate OCR
-candidates only. Applying an accepted candidate as the new latest Paperless
-version, version preservation, and rollback are a later slice gated on issue
-#114 (durable downstream-invalidation records). Nothing in this module ever
-writes to Paperless — see ``docs/modules/ocr-quality/ocr-remediation-engine.md``
-for the full design and safety invariants.
+Slice 1 covers *generation*, *comparison*, and *staging* of alternate OCR
+candidates and never writes to Paperless. Slice 2 (``application_service.py``)
+applies an accepted candidate as the new latest Paperless version, preserves
+the prior version, supports rollback, and durably records the issue #114
+downstream-invalidation event — see
+``docs/modules/ocr-quality/ocr-remediation-engine.md`` for the full design
+and safety invariants. Nothing in *this* module or in ``candidate_service.py``
+writes to Paperless; only ``application_service.py`` does.
 """
 
 from __future__ import annotations
@@ -21,15 +24,24 @@ from pydantic import BaseModel, Field
 class CandidateState(str, Enum):
     """The candidate lifecycle state machine (design doc "Candidate state").
 
-    ``REQUESTED -> RUNNING -> READY -> ACCEPTED | REJECTED | EXPIRED | FAILED``
+    ``REQUESTED -> RUNNING -> READY -> APPLYING -> ACCEPTED``, or
+    ``READY -> REJECTED | EXPIRED | FAILED``.
 
-    In this slice, ``ACCEPTED`` means only that a reviewer approved the
-    candidate in OWL's own records — it does NOT mean Paperless was updated.
+    ``APPLYING`` is an OWL-internal addition to the design doc's state
+    diagram: it covers the window between a user's accept decision and
+    Paperless confirming the new version (the coordinated operation in
+    ``application_service.py``). A failed apply returns the candidate to
+    ``READY`` (bounded by ``apply_attempts``/``candidate_max_apply_attempts``)
+    rather than a terminal state, so the same candidate can be retried.
+    ``ACCEPTED`` means what the design doc says: Paperless confirmed the new
+    latest version and content, and the downstream-invalidation record for
+    issue #114 is durable.
     """
 
     REQUESTED = "requested"
     RUNNING = "running"
     READY = "ready"
+    APPLYING = "applying"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     EXPIRED = "expired"
@@ -37,6 +49,9 @@ class CandidateState(str, Enum):
 
 
 # States from which a candidate may still be cancelled (best-effort).
+# APPLYING is deliberately excluded: once a Paperless write may be in
+# flight, cancellation could race the upload — bounded polling/timeout in
+# application_service.py is the only way out of APPLYING.
 CANCELLABLE_STATES = frozenset({CandidateState.REQUESTED, CandidateState.RUNNING})
 
 # Terminal states — no further generation/decision work happens.
@@ -177,3 +192,30 @@ class OcrQualityCandidate(BaseModel):
     retention_window_days: int = 30
 
     failure_reason: str | None = None
+
+    # --- Apply/rollback (slice 2) ---
+    apply_attempts: int = Field(
+        default=0, description="Number of apply attempts made so far (bounded by config)."
+    )
+    apply_last_error: str | None = Field(
+        default=None, description="Error message from the most recent failed apply attempt."
+    )
+    paperless_task_id: str | None = Field(
+        default=None,
+        description=(
+            "Celery task id from the in-flight or most recent update_version call, "
+            "kept so a crash mid-apply can resume/verify instead of re-uploading."
+        ),
+    )
+    applied_paperless_version_id: int | None = Field(
+        default=None, description="Paperless document id of the version this candidate became."
+    )
+    applied_at: datetime | None = None
+    invalidation_recorded: bool = Field(
+        default=False,
+        description=(
+            "Whether AnalysisFreshnessService.record_invalidation() succeeded for this "
+            "candidate's application. A Paperless write is never undone if this is False; "
+            "the candidate is still ACCEPTED but flagged so downstream freshness can be retried."
+        ),
+    )

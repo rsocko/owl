@@ -265,7 +265,10 @@ class TestDecideCandidate:
         )
 
         assert result["decision"] == "accepted"
-        assert result["state"] == CandidateState.ACCEPTED.value
+        # decide_candidate only transitions to APPLYING; the actual Paperless
+        # write (and the ACCEPTED state) happens in application_service.py,
+        # normally dispatched as a background task by the caller.
+        assert result["state"] == CandidateState.APPLYING.value
 
         # The only client calls made are read-only GETs; the fake client has
         # no write/update method at all, so any attempt to call one would

@@ -632,6 +632,77 @@ async def test_string_and_int_id_handling(monkeypatch):
     assert tags[9] == "string-tag"
 
 
+@pytest.mark.asyncio
+async def test_get_task_parses_real_paperless_response_shape(monkeypatch):
+    """``GET /api/tasks/?task_id=`` always returns the paginated envelope.
+
+    Fixture reproduces the exact shape confirmed live against a real
+    Paperless-ngx instance: ``{"count", "next", "previous",
+    "results": [...]}`` (never a bare top-level list), with lowercase
+    ``status``/``status_display`` fields.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/tasks/"
+        assert request.url.params.get("task_id") == "11111111-1111-1111-1111-111111111111"
+        return httpx.Response(
+            200,
+            json={
+                "count": 1,
+                "next": None,
+                "previous": None,
+                "results": [
+                    {
+                        "id": 7,
+                        "task_id": "11111111-1111-1111-1111-111111111111",
+                        "task_type": "auto_task",
+                        "status": "success",
+                        "status_display": "Success",
+                        "date_created": "2026-01-01T00:00:00Z",
+                        "date_started": "2026-01-01T00:00:01Z",
+                        "date_done": "2026-01-01T00:00:02Z",
+                        "result_data": None,
+                        "related_document_ids": [42],
+                    }
+                ],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    client = PaperlessClient(base_url="https://test.local", token="t")
+
+    task = await client.get_task("11111111-1111-1111-1111-111111111111")
+
+    assert task is not None
+    assert task["status"] == "success"
+    assert task["related_document_ids"] == [42]
+
+
+@pytest.mark.asyncio
+async def test_get_task_returns_none_when_no_results(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"count": 0, "next": None, "previous": None, "results": []})
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    client = PaperlessClient(base_url="https://test.local", token="t")
+
+    assert await client.get_task("unknown-task-id") is None
+
+
 def _make_client_with_pages(monkeypatch, num_docs: int, page_size: int = 100):
     """Build a PaperlessClient whose /api/documents/ endpoint is backed by a
     large, paginated result set — used to test limit/early-stop behavior and

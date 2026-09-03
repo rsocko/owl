@@ -1,19 +1,20 @@
-"""OCR candidate generation/comparison/staging API router (issue #18, slice 1).
+"""OCR candidate generation/comparison/staging/apply API router (issue #18).
 
-No endpoint in this router ever writes to Paperless — see
-``doc_intelligence_hub.modules.ocr_quality.candidate_service`` for the
-enforced invariant. Candidate generation is dispatched as a
-``BackgroundTasks`` job, mirroring the existing Stage-1/2 corpus-scan
-endpoints in ``ocr_quality.py``. Applying an accepted candidate as the new
-Paperless version is a later slice (gated on issue #114) and has no endpoint
-here.
+Slice 1 (generation/comparison/staging) never writes to Paperless. Slice 2
+adds the apply/rollback path: accepting a candidate here only transitions it
+to ``APPLYING`` and dispatches
+``OcrCandidateApplicationService.apply_candidate`` as a background task
+(mirroring the existing generation dispatch pattern below) — that service is
+the only place in this package that ever writes to Paperless. Rejecting a
+candidate remains OWL-only and synchronous.
 
 Endpoints:
     POST /api/ocr-quality/candidates                    — Request candidate generation for a batch
     GET  /api/ocr-quality/candidates                     — List/filter candidates
     GET  /api/ocr-quality/candidates/{candidate_id}      — Candidate detail incl. comparison
-    POST /api/ocr-quality/candidates/{candidate_id}/decision — Accept/reject (OWL-only, no Paperless write)
+    POST /api/ocr-quality/candidates/{candidate_id}/decision — Accept (dispatches apply) / reject (OWL-only)
     POST /api/ocr-quality/candidates/{candidate_id}/cancel   — Best-effort cancel of a pending candidate
+    POST /api/ocr-quality/documents/{document_id}/rollback   — Roll back to a prior Paperless version
 
     Region-level inspection for a candidate's own stored PDF (issue #134 x
     issue #18 — connects the region-inspection viewer to candidate
@@ -35,7 +36,14 @@ from pydantic import BaseModel, Field
 from doc_intelligence_hub.api.routers import make_paperless_client
 from doc_intelligence_hub.core.paperless import PaperlessClient
 from doc_intelligence_hub.modules.ocr_quality import region_inspection
-from doc_intelligence_hub.modules.ocr_quality.candidate_models import Decision, EngineName
+from doc_intelligence_hub.modules.ocr_quality.application_service import (
+    OcrCandidateApplicationService,
+)
+from doc_intelligence_hub.modules.ocr_quality.candidate_models import (
+    CandidateState,
+    Decision,
+    EngineName,
+)
 from doc_intelligence_hub.modules.ocr_quality.candidate_service import (
     BatchCapExceeded,
     OcrCandidateService,
@@ -52,6 +60,11 @@ router = APIRouter(prefix="/api/ocr-quality", tags=["ocr-quality-candidates"])
 def _service(client: PaperlessClient) -> OcrCandidateService:
     init_ocr_quality_db()
     return OcrCandidateService(client, get_ocr_quality_session)
+
+
+def _application_service(client: PaperlessClient) -> OcrCandidateApplicationService:
+    init_ocr_quality_db()
+    return OcrCandidateApplicationService(client, get_ocr_quality_session)
 
 
 class RequestCandidatesBody(BaseModel):
@@ -77,12 +90,35 @@ class DecisionBody(BaseModel):
     actor: str = "system"
 
 
+class RollbackBody(BaseModel):
+    target_candidate_id: str | None = Field(
+        default=None,
+        description=(
+            "A previously-accepted candidate's applied version to restore. If omitted, "
+            "rolls back to whatever version was current immediately before the most "
+            "recently accepted candidate for this document (or the Paperless "
+            "root/original if there is no prior accepted candidate)."
+        ),
+    )
+    actor: str = Field(default="system", description="Reviewer identity for audit purposes.")
+
+
 async def _run_candidate_generation(client: PaperlessClient, candidate_id: str) -> None:
     try:
         service = OcrCandidateService(client, get_ocr_quality_session)
         await service.run_generation_for_candidate(candidate_id)
     except Exception:
         logger.exception("Candidate generation %s failed unexpectedly", candidate_id)
+    finally:
+        await client.aclose()
+
+
+async def _run_candidate_apply(client: PaperlessClient, candidate_id: str, actor: str) -> None:
+    try:
+        service = _application_service(client)
+        await service.apply_candidate(candidate_id, actor=actor)
+    except Exception:
+        logger.exception("Candidate apply %s failed unexpectedly", candidate_id)
     finally:
         await client.aclose()
 
@@ -176,20 +212,24 @@ async def get_candidate_text(request: Request, candidate_id: str) -> dict[str, A
 
 @router.post("/candidates/{candidate_id}/decision")
 async def decide_candidate(
-    request: Request, candidate_id: str, body: DecisionBody
+    request: Request, candidate_id: str, body: DecisionBody, background_tasks: BackgroundTasks
 ) -> dict[str, Any]:
     """Accept or reject a READY candidate.
 
-    This endpoint records the decision in OWL's own tables only. It never
-    updates the live Paperless document — applying an accepted candidate as
-    the new Paperless version is a later slice gated on issue #114. Accepting
-    re-checks the document hasn't changed since comparison (a read-only GET)
-    and fails if it has, per the design doc's freshness invariant.
+    Rejecting only records the decision in OWL's own tables — it never
+    touches Paperless. Accepting re-checks the document hasn't changed since
+    comparison (a read-only GET) and fails if it has, per the design doc's
+    freshness invariant; on success the candidate moves to ``APPLYING`` and
+    this endpoint returns immediately — the actual Paperless write happens
+    in a background task (``OcrCandidateApplicationService.apply_candidate``).
+    Poll ``GET /candidates/{candidate_id}`` for the outcome (``ACCEPTED``
+    with ``applied_paperless_version_id`` set, or back to ``READY``/``FAILED``
+    with ``apply_last_error`` on failure).
     """
     client = make_paperless_client(request, timeout=30.0)
     service = _service(client)
     try:
-        return await service.decide_candidate(
+        result = await service.decide_candidate(
             candidate_id, decision=body.decision, reason=body.reason, actor=body.actor
         )
     except ValueError as exc:
@@ -198,6 +238,41 @@ async def decide_candidate(
         ) from exc
     finally:
         await client.aclose()
+
+    if result.get("state") == CandidateState.APPLYING.value:
+        background_tasks.add_task(
+            _run_candidate_apply,
+            make_paperless_client(request, timeout=60.0),
+            candidate_id,
+            body.actor,
+        )
+    return result
+
+
+@router.post("/documents/{document_id}/rollback")
+async def rollback_document(
+    request: Request, document_id: int, body: RollbackBody
+) -> dict[str, Any]:
+    """Roll back a document to a prior Paperless version.
+
+    Synchronous — a rollback is a small, bounded number of ``DELETE`` calls
+    against Paperless's document-version API, not a re-OCR cycle. Restores
+    both the Paperless version and durably re-records downstream
+    invalidation (issue #114) for the restored checksum.
+    """
+    client = make_paperless_client(request, timeout=60.0)
+    service = _application_service(client)
+    try:
+        result = await service.rollback(
+            document_id, actor=body.actor, target_candidate_id=body.target_candidate_id
+        )
+    finally:
+        await client.aclose()
+    if result.get("error"):
+        raise HTTPException(
+            status_code=400, detail={"code": "rollback_failed", "message": result["error"]}
+        )
+    return result
 
 
 @router.post("/candidates/{candidate_id}/cancel")

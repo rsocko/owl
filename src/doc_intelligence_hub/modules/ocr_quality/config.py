@@ -60,6 +60,19 @@ class Settings(BaseSettings):
     azure_cost_per_page_usd: float = Field(default=0.0015, ge=0.0)
     azure_cost_hard_cap_usd: float = Field(default=5.00, ge=0.0)
 
+    # Issue #18 slice 2 — applying an accepted candidate to Paperless
+    # (document-version upload) and rollback. Bounded retries: an apply
+    # attempt that fails never leaves Paperless mid-write, and a candidate
+    # that fails repeatedly moves to a terminal FAILED state rather than
+    # retrying forever.
+    candidate_max_apply_attempts: int = Field(default=3, ge=1, le=10)
+    candidate_apply_task_poll_seconds: float = Field(default=2.0, ge=0.1)
+    candidate_apply_task_poll_timeout_seconds: float = Field(default=120.0, ge=1.0)
+    # How long a document-scoped apply/rollback lock is honored before it is
+    # considered stale (e.g. the process holding it crashed) and reclaimable
+    # by a new request.
+    candidate_apply_lock_ttl_seconds: int = Field(default=300, ge=1)
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

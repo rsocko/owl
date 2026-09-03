@@ -200,15 +200,14 @@ class RunFailure(Base):
 
 
 class OcrQualityCandidate(Base):
-    """Candidate OCR result for a document (issue #18, slice 1).
+    """Candidate OCR result for a document (issue #18, slices 1 and 2).
 
-    Storage-only: no field here ever reflects a Paperless write. The actual
-    candidate PDF/text bytes live on disk under ``settings.candidate_storage_dir``
-    (keyed by ``candidate_id``); only checksums/paths are persisted here,
-    matching the "no raw OCR text in the DB" precedent set by
-    ``DocumentAssessment``. Applying an accepted candidate to Paperless and
-    the accompanying ``InvalidationRecord`` (issue #114) are a later slice —
-    this table intentionally has no such column yet.
+    The candidate PDF/text bytes live on disk under
+    ``settings.candidate_storage_dir`` (keyed by ``candidate_id``); only
+    checksums/paths are persisted here, matching the "no raw OCR text in the
+    DB" precedent set by ``DocumentAssessment``. The ``apply_*``/``applied_*``
+    columns below are written only by ``application_service.py`` — nothing
+    in ``candidate_service.py`` (slice 1) writes to Paperless or sets them.
     """
 
     __tablename__ = "ocr_quality_candidates"
@@ -263,8 +262,62 @@ class OcrQualityCandidate(Base):
     expires_at = Column(DateTime, nullable=False, index=True)
     retention_window_days = Column(Integer, nullable=False, default=30)
 
+    # --- Apply/rollback (slice 2) ---
+    apply_attempts = Column(Integer, nullable=False, default=0)
+    apply_last_error = Column(String, nullable=True)
+    paperless_task_id = Column(String, nullable=True)
+    applied_paperless_version_id = Column(Integer, nullable=True)
+    applied_at = Column(DateTime, nullable=True)
+    invalidation_recorded = Column(Boolean, nullable=False, default=False)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class OcrApplicationLock(Base):
+    """Document-scoped lock so at most one apply/rollback runs at a time.
+
+    Survives process restarts (it's a DB row, not an in-memory lock). A
+    lock older than ``candidate_apply_lock_ttl_seconds`` is considered
+    stale (its holder presumably crashed) and is reclaimable by a new
+    request rather than blocking forever.
+    """
+
+    __tablename__ = "ocr_quality_application_locks"
+
+    document_id = Column(Integer, primary_key=True)
+    locked_by = Column(String, nullable=False)
+    locked_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    # What operation holds the lock, for diagnostics ("apply" | "rollback").
+    operation = Column(String, nullable=False, default="apply")
+    candidate_id = Column(String, nullable=True)
+
+
+class OcrApplicationEvent(Base):
+    """Audit trail for every apply/rollback attempt against Paperless.
+
+    Written regardless of outcome (including failures) so there is always a
+    durable record of what OWL attempted against a document's Paperless
+    version history, independent of the candidate row's own current state.
+    """
+
+    __tablename__ = "ocr_quality_application_events"
+    __table_args__ = (Index("idx_application_event_document", "document_id", "created_at"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    document_id = Column(Integer, nullable=False, index=True)
+    candidate_id = Column(String, nullable=True, index=True)
+    action = Column(String, nullable=False)  # "apply" | "rollback"
+    actor = Column(String, nullable=False)
+    outcome = Column(String, nullable=False)  # "success" | "failure"
+    error_message = Column(String, nullable=True)
+    paperless_task_id = Column(String, nullable=True)
+    previous_version_id = Column(Integer, nullable=True)
+    new_version_id = Column(Integer, nullable=True)
+    invalidation_recorded = Column(Boolean, nullable=False, default=False)
+    details = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 def get_engine():

@@ -199,14 +199,21 @@ export default function OcrCandidatesPanel({
   const [cancelling, setCancelling] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const loadCandidates = useCallback(() => {
-    setLoading(true);
+  // `background` is true for the 3s status polling below — it refreshes rows
+  // in place without dropping back to the full "Loading candidates…" state,
+  // so the table doesn't flash while a generation is in progress.
+  const loadCandidates = useCallback((background = false) => {
+    if (!background) setLoading(true);
     setError(null);
     endpoints.ocrQuality.candidates
       .list({ document_id: documentId })
       .then((data) => setCandidates((data as { candidates: CandidateSummary[] }).candidates))
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load candidates.'))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (!background) setError(err instanceof Error ? err.message : 'Failed to load candidates.');
+      })
+      .finally(() => {
+        if (!background) setLoading(false);
+      });
   }, [documentId]);
 
   useEffect(() => {
@@ -217,7 +224,7 @@ export default function OcrCandidatesPanel({
   // reviewer doesn't have to manually refresh to see it flip to READY/FAILED.
   useEffect(() => {
     if (!candidates.some((c) => ACTIVE_STATES.has(c.state))) return;
-    const timer = setInterval(loadCandidates, 3000);
+    const timer = setInterval(() => loadCandidates(true), 3000);
     return () => clearInterval(timer);
   }, [candidates, loadCandidates]);
 

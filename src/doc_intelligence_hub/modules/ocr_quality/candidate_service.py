@@ -1,16 +1,20 @@
 """Orchestration for OCR candidate generation, comparison, and staging (issue #18, slice 1).
 
-This module intentionally never writes to Paperless. It only:
+This module never writes to Paperless. It only:
 
 - reads the current document's PDF/metadata via ``PaperlessClient`` (GET only);
 - generates candidate PDF/text via a provider (:mod:`providers`);
 - stores candidate artifacts under ``settings.candidate_storage_dir`` and
   metadata in the ``ocr_quality_candidates`` table;
 - compares a READY candidate to the current document (:mod:`comparison`); and
-- records a reviewer's accept/reject decision in that same table.
+- records a reviewer's accept/reject decision in that same table — on
+  accept, transitioning the candidate to ``APPLYING`` so a caller can
+  dispatch the actual Paperless write.
 
 Applying an accepted candidate as the new Paperless version, version
-preservation, and rollback are a later slice gated on issue #114.
+preservation, and rollback live in :mod:`application_service` (issue #18,
+slice 2), which is the only module in this package that ever writes to
+Paperless.
 """
 
 from __future__ import annotations
@@ -452,11 +456,15 @@ class OcrCandidateService:
     ) -> dict[str, Any]:
         """Record a reviewer's accept/reject decision.
 
-        This method makes ZERO Paperless write calls — it only issues a
+        This method makes ZERO Paperless *write* calls — it only issues a
         read-only GET to re-check the current document's checksum (design
         doc invariant #5: "acceptance requires a fresh comparison against the
-        same source checksum"). Applying an accepted candidate to Paperless
-        is out of scope for this slice.
+        same source checksum"). On ``ACCEPTED`` the candidate transitions to
+        ``APPLYING`` (not directly ``ACCEPTED``); the caller is responsible
+        for dispatching ``OcrCandidateApplicationService.apply_candidate``
+        (normally as a background task) to actually write the new Paperless
+        version — that is the only place in this package that ever writes to
+        Paperless. ``REJECTED`` is unchanged: purely an OWL-local record.
         """
         db = self.session_factory()
         try:
@@ -479,13 +487,13 @@ class OcrCandidateService:
                         "compared; regenerate the candidate before accepting "
                         "(design doc invariant: acceptance requires a fresh comparison)."
                     )
-                _ = document  # re-read for parity with future apply-slice checks; unused here
+                _ = document  # re-read for parity with apply's own freshness check; unused here
 
             row.decision = decision.value
             row.decision_reason = reason
             row.decided_at = datetime.utcnow()
             row.state = (
-                CandidateState.ACCEPTED.value
+                CandidateState.APPLYING.value
                 if decision == Decision.ACCEPTED
                 else CandidateState.REJECTED.value
             )
@@ -527,7 +535,15 @@ class OcrCandidateService:
                 .filter(
                     OcrQualityCandidate.expires_at < now,
                     OcrQualityCandidate.state.notin_(
-                        [CandidateState.EXPIRED.value, CandidateState.ACCEPTED.value]
+                        [
+                            CandidateState.EXPIRED.value,
+                            CandidateState.ACCEPTED.value,
+                            # A candidate mid-apply must never have its PDF
+                            # artifact deleted out from under an in-flight
+                            # upload/retry — excluded even if its expires_at
+                            # has passed while APPLYING.
+                            CandidateState.APPLYING.value,
+                        ]
                     ),
                 )
                 .all()
@@ -590,6 +606,12 @@ def _candidate_detail(row: OcrQualityCandidate) -> dict[str, Any]:
         "failure_reason": row.failure_reason,
         "started_at": row.started_at.isoformat() if row.started_at else None,
         "retention_window_days": row.retention_window_days,
+        # --- Apply/rollback (slice 2) ---
+        "apply_attempts": row.apply_attempts,
+        "apply_last_error": row.apply_last_error,
+        "applied_paperless_version_id": row.applied_paperless_version_id,
+        "applied_at": row.applied_at.isoformat() if row.applied_at else None,
+        "invalidation_recorded": row.invalidation_recorded,
     }
 
 
