@@ -68,7 +68,7 @@ class UnsupportedProvider(ValueError):
 def _providers() -> dict[str, OcrProvider]:
     return {
         EngineName.OCRMYPDF_TESSERACT.value: OcrMyPdfProvider(),
-        EngineName.AZURE_PREBUILT_READ.value: AzureDocumentIntelligenceProvider(),
+        EngineName.AZURE_PREBUILT_LAYOUT.value: AzureDocumentIntelligenceProvider(),
     }
 
 
@@ -322,12 +322,16 @@ class OcrCandidateService:
                 current_text=current_text,
                 current_overlay_score=current_scores.overlay_score if current_scores else None,
                 current_machine_score=current_scores.machine_score if current_scores else None,
+                current_content_score=current_scores.content_score if current_scores else None,
                 candidate_pdf_bytes=gen_result.candidate_pdf_bytes,
                 candidate_text=gen_result.candidate_text,
                 candidate_overlay_score=candidate_scores.overlay_score
                 if candidate_scores
                 else None,
                 candidate_machine_score=candidate_scores.machine_score
+                if candidate_scores
+                else None,
+                candidate_content_score=candidate_scores.content_score
                 if candidate_scores
                 else None,
                 expected_page_count=row.page_count or None,
@@ -352,6 +356,7 @@ class OcrCandidateService:
             if candidate_scores is not None:
                 row.overlay_score = candidate_scores.overlay_score
                 row.machine_score = candidate_scores.machine_score
+                row.content_score = candidate_scores.content_score
                 row.scorer_version = candidate_scores.scorer_version
 
             row.comparison_id = comparison.comparison_id
@@ -359,6 +364,7 @@ class OcrCandidateService:
             row.text_diff_summary = comparison.text_diff_summary
             row.overlay_score_delta = comparison.overlay_score_delta
             row.machine_score_delta = comparison.machine_score_delta
+            row.content_score_delta = comparison.content_score_delta
             row.comparison_performed_at = comparison.performed_at
 
             db.commit()
@@ -560,6 +566,7 @@ def _candidate_summary(row: OcrQualityCandidate) -> dict[str, Any]:
         "model_version": row.model_version,
         "overlay_score": row.overlay_score,
         "machine_score": row.machine_score,
+        "content_score": row.content_score,
         "page_count": row.page_count,
         "requested_at": row.requested_at.isoformat() if row.requested_at else None,
         "completed_at": row.completed_at.isoformat() if row.completed_at else None,
@@ -586,6 +593,7 @@ def _candidate_detail(row: OcrQualityCandidate) -> dict[str, Any]:
             "text_diff_summary": dict(row.text_diff_summary or {}),
             "overlay_score_delta": row.overlay_score_delta,
             "machine_score_delta": row.machine_score_delta,
+            "content_score_delta": row.content_score_delta,
             "performed_at": (
                 row.comparison_performed_at.isoformat() if row.comparison_performed_at else None
             ),

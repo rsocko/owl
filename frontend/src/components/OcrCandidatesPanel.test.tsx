@@ -188,11 +188,11 @@ describe('OcrCandidatesPanel', () => {
     expect(screen.queryByRole('button', { name: 'Accept' })).not.toBeInTheDocument();
   });
 
-  it('shows a "Text quality looks improved" suggested read when machine score improves and there are no blocking findings', async () => {
+  it('shows a "Content accuracy looks improved" suggested read when content score improves and there are no blocking findings', async () => {
     mocks.list.mockResolvedValue({ candidates: [readyCandidate] });
     const improved = {
       ...readyCandidateDetail,
-      comparison: { ...readyCandidateDetail.comparison, machine_score_delta: 5.0, overlay_score_delta: 0 },
+      comparison: { ...readyCandidateDetail.comparison, content_score_delta: 5.0, overlay_score_delta: 0 },
     };
     mocks.get.mockResolvedValue(improved);
     mocks.text.mockResolvedValue({ current_text: 'old text', candidate_text: 'new text' });
@@ -201,7 +201,7 @@ describe('OcrCandidatesPanel', () => {
     await waitFor(() => expect(screen.getByText('OCRmyPDF / Tesseract 5')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /View/i }));
 
-    await waitFor(() => expect(screen.getByText(/Text quality looks improved/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Content accuracy looks improved/i)).toBeInTheDocument());
     // Still non-authoritative — never a one-click "accept recommended" action.
     expect(screen.queryByRole('button', { name: /accept recommended/i })).not.toBeInTheDocument();
   });
@@ -210,7 +210,7 @@ describe('OcrCandidatesPanel', () => {
     mocks.list.mockResolvedValue({ candidates: [readyCandidate] });
     const declined = {
       ...readyCandidateDetail,
-      comparison: { ...readyCandidateDetail.comparison, overlay_score_delta: -6.0, machine_score_delta: 0 },
+      comparison: { ...readyCandidateDetail.comparison, overlay_score_delta: -6.0, content_score_delta: 0 },
     };
     mocks.get.mockResolvedValue(declined);
     mocks.text.mockResolvedValue({ current_text: 'old text', candidate_text: 'new text' });
@@ -260,9 +260,10 @@ describe('OcrCandidatesPanel', () => {
     const azureCandidate = {
       ...readyCandidate,
       candidate_id: 'cand-azure01',
-      engine: 'azure-prebuilt-read',
+      engine: 'azure-prebuilt-layout',
       overlay_score: 80.45,
       machine_score: 70.34,
+      content_score: 72.0,
     };
     const ocrmypdfCandidate = {
       ...readyCandidate,
@@ -270,21 +271,22 @@ describe('OcrCandidatesPanel', () => {
       engine: 'ocrmypdf-tesseract-5',
       overlay_score: 99.48,
       machine_score: 68.28,
+      content_score: 69.0,
     };
     mocks.list.mockResolvedValue({ candidates: [azureCandidate, ocrmypdfCandidate] });
 
-    render(<OcrCandidatesPanel documentId={501} currentOverlayScore={69.8} currentMachineScore={62.8} />);
-    await waitFor(() => expect(screen.getByText('Azure Document Intelligence (prebuilt-read)')).toBeInTheDocument());
+    render(<OcrCandidatesPanel documentId={501} currentOverlayScore={69.8} currentContentScore={64.0} />);
+    await waitFor(() => expect(screen.getByText('Azure Document Intelligence (prebuilt-layout)')).toBeInTheDocument());
 
     expect(screen.getByText('Highest overlay score of ready candidates')).toBeInTheDocument();
-    expect(screen.getByText('Highest machine score of ready candidates')).toBeInTheDocument();
+    expect(screen.getByText('Highest content accuracy of ready candidates')).toBeInTheDocument();
   });
 
   it('does not show relative badges when only one candidate is ready', async () => {
     mocks.list.mockResolvedValue({ candidates: [readyCandidate] });
-    render(<OcrCandidatesPanel documentId={501} currentOverlayScore={69.8} currentMachineScore={62.8} />);
+    render(<OcrCandidatesPanel documentId={501} currentOverlayScore={69.8} />);
     await waitFor(() => expect(screen.getByText('OCRmyPDF / Tesseract 5')).toBeInTheDocument());
     expect(screen.queryByText(/Highest overlay score of ready candidates/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Highest machine score of ready candidates/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Highest content accuracy of ready candidates/i)).not.toBeInTheDocument();
   });
 });

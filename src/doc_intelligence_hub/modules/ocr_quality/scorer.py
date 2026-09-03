@@ -103,13 +103,16 @@ def assess_document(
         config=cfg,
     )
 
+    content_score = _compute_content_score(overlay_component, machine_component, cfg)
+
     review_status, status_reasons = _determine_review_status(
-        overlay_component, machine_component, profile, cfg
+        overlay_component, machine_component, content_score, profile, cfg
     )
 
     return OCRQualityAssessment(
         overlay_score=overlay_component.score,
         machine_score=machine_component.score,
+        content_score=content_score,
         review_status=review_status,
         reasons=[*overlay_component.reasons, *machine_component.reasons, *status_reasons],
         document_profile=profile,
@@ -119,31 +122,66 @@ def assess_document(
     )
 
 
+def _compute_content_score(
+    overlay: ScoreComponent, machine: ScoreComponent, config: ScoringConfig
+) -> float | None:
+    """Blend machine/content quality with reading-order correctness.
+
+    Reading order (extracted word sequence vs. visual layout) directly
+    affects whether captured label/value pairs are correct — e.g. an
+    account number split across two out-of-sequence lines is a content
+    error, not a cosmetic layout one. This is deliberately narrower than
+    ``overlay_score``, which also folds in presentation-only signals (page
+    coverage, bounds sanity, duplicate text, page integrity) that don't
+    bear on whether the captured content itself is right. Each half is
+    renormalized when only one is available (e.g. no PDF geometry at all,
+    so reading_order can't be computed) rather than penalizing the document
+    for a signal that was never computable.
+    """
+    reading_order = overlay.signals.get("reading_order")
+    weights = config.content_weights.model_dump()
+
+    weighted_total = 0.0
+    weight_sum = 0.0
+    if machine.score is not None:
+        weighted_total += machine.score * weights["machine"]
+        weight_sum += weights["machine"]
+    if reading_order is not None:
+        weighted_total += reading_order * 100.0 * weights["reading_order"]
+        weight_sum += weights["reading_order"]
+
+    if weight_sum <= 0:
+        return None
+    return round(weighted_total / weight_sum, 2)
+
+
 def _determine_review_status(
     overlay: ScoreComponent,
     machine: ScoreComponent,
+    content_score: float | None,
     profile: DocumentProfile,
     config: ScoringConfig,
 ) -> tuple[AssessmentStatus, list[Reason]]:
-    """Derive the operational-risk status from both score components.
+    """Derive the operational-risk status primarily from ``content_score``.
 
-    The document is only considered as good as its worst assessed
-    dimension: when both scores are available the lower one drives the
-    status. Any blocking-severity reason (e.g. missing/reordered pages,
-    completely empty extracted text) prevents a GOOD or UNCERTAIN status
-    regardless of the numeric score.
+    ``content_score`` (machine/content quality blended with reading-order
+    correctness — see ``_compute_content_score``) drives the status because
+    reading-order errors are content errors: they change which value a
+    captured field actually holds. Overlay signals unrelated to content
+    (page coverage, bounds sanity, duplicate text, page integrity) no
+    longer silently drag the status down via a bare ``min()`` with the full
+    overlay score — but any BLOCKING-severity reason from either component
+    (e.g. missing/reordered pages, completely empty extracted text) still
+    prevents a GOOD or UNCERTAIN status regardless of the numeric score.
     """
     reasons: list[Reason] = []
     thresholds = config.status_thresholds
-
-    available_scores = [s for s in (overlay.score, machine.score) if s is not None]
-    combined_score = min(available_scores) if available_scores else None
 
     has_blocking = any(
         r.severity == Severity.BLOCKING for r in (*overlay.reasons, *machine.reasons)
     )
 
-    if combined_score is None:
+    if content_score is None:
         if profile.page_count == 0:
             reasons.append(
                 Reason(
@@ -159,18 +197,19 @@ def _determine_review_status(
         reasons.append(
             Reason(
                 code="status.no_scorable_signals",
-                message="Neither overlay nor machine signals could be scored for this document.",
+                message="Neither machine content quality nor reading order could be scored for "
+                "this document.",
                 severity=Severity.WARNING,
                 component="profile",
             )
         )
         return AssessmentStatus.UNCERTAIN, reasons
 
-    if combined_score >= thresholds.good_min:
+    if content_score >= thresholds.good_min:
         status = AssessmentStatus.GOOD
-    elif combined_score >= thresholds.uncertain_min:
+    elif content_score >= thresholds.uncertain_min:
         status = AssessmentStatus.UNCERTAIN
-    elif combined_score >= thresholds.review_recommended_min:
+    elif content_score >= thresholds.review_recommended_min:
         status = AssessmentStatus.REVIEW_RECOMMENDED
     else:
         status = AssessmentStatus.FAILED
@@ -188,12 +227,14 @@ def _determine_review_status(
 
     reasons.append(
         Reason(
-            code="status.combined_score",
-            message=f"Derived status from combined score {combined_score:.1f} "
-            f"(overlay={overlay.score}, machine={machine.score}).",
+            code="status.content_score",
+            message=f"Derived status from content score {content_score:.1f} "
+            f"(machine={machine.score}, "
+            f"reading_order={overlay.signals.get('reading_order')}, "
+            f"overlay={overlay.score}).",
             severity=Severity.INFO,
             component="profile",
-            value=round(combined_score, 2),
+            value=round(content_score, 2),
         )
     )
     return status, reasons

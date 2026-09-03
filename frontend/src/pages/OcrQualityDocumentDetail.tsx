@@ -376,7 +376,6 @@ export default function OcrQualityDocumentDetail() {
             documentId={detail.document_id}
             hasStage2Analysis={detail.has_stage2_analysis ?? false}
             currentOverlayScore={detail.overlay_score}
-            currentMachineScore={detail.machine_score}
           />
         </>
       )}

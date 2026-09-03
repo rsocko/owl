@@ -77,6 +77,29 @@ class MachineWeights(BaseModel):
         return self
 
 
+class ContentWeights(BaseModel):
+    """Relative weights for the primary "content accuracy" score.
+
+    ``content_score`` blends machine/content quality with reading-order
+    correctness because a reading-order failure (e.g. a label and its value
+    landing on two non-sequential lines) directly corrupts *what a field
+    actually says* — it is a content-accuracy problem, not merely a
+    presentation one. It deliberately excludes the rest of the overlay
+    signals (page coverage, bounds sanity, duplicate text, general
+    alignment, page integrity), which are about layout/presentation quality
+    rather than whether the captured content itself is correct.
+    """
+
+    machine: float = Field(default=70.0, ge=0.0)
+    reading_order: float = Field(default=30.0, ge=0.0)
+
+    @model_validator(mode="after")
+    def _non_zero_total(self) -> ContentWeights:
+        if sum(self.model_dump().values()) <= 0:
+            raise ValueError("Content weights must sum to a positive value.")
+        return self
+
+
 class StatusThresholds(BaseModel):
     """Score bands (0-100) used to derive :class:`AssessmentStatus`.
 
@@ -108,9 +131,10 @@ class ScoringConfig(BaseModel):
     ``scorer_version`` recorded on every assessment.
     """
 
-    config_version: str = Field(default="default-2")
+    config_version: str = Field(default="default-3")
     overlay_weights: OverlayWeights = Field(default_factory=OverlayWeights)
     machine_weights: MachineWeights = Field(default_factory=MachineWeights)
+    content_weights: ContentWeights = Field(default_factory=ContentWeights)
     status_thresholds: StatusThresholds = Field(default_factory=StatusThresholds)
     short_document_char_threshold: int = Field(
         default=200,

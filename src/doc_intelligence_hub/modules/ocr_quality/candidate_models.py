@@ -87,7 +87,7 @@ class EngineName(str, Enum):
     """Supported candidate-generation engines. One engine owns each candidate."""
 
     OCRMYPDF_TESSERACT = "ocrmypdf-tesseract-5"
-    AZURE_PREBUILT_READ = "azure-prebuilt-read"
+    AZURE_PREBUILT_LAYOUT = "azure-prebuilt-layout"
 
 
 class Decision(str, Enum):
@@ -137,6 +137,11 @@ class ComparisonResult(BaseModel):
     text_diff_summary: dict[str, Any] = Field(default_factory=dict)
     overlay_score_delta: float | None = None
     machine_score_delta: float | None = None
+    content_score_delta: float | None = Field(
+        default=None,
+        description="Delta of the primary content-accuracy score (machine quality blended "
+        "with reading-order correctness) — see scorer.py's content_score.",
+    )
     downstream_regression_note: str = (
         "Downstream extractor regression detection is not implemented in this "
         "slice; tracked in issue #114."

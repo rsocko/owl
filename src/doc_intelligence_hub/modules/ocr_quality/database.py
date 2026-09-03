@@ -238,6 +238,7 @@ class OcrQualityCandidate(Base):
 
     overlay_score = Column(Float, nullable=True)
     machine_score = Column(Float, nullable=True)
+    content_score = Column(Float, nullable=True)
     scorer_version = Column(String, nullable=True)
 
     comparison_id = Column(String, nullable=True, index=True)
@@ -245,6 +246,7 @@ class OcrQualityCandidate(Base):
     text_diff_summary = Column(JSON, nullable=True)
     overlay_score_delta = Column(Float, nullable=True)
     machine_score_delta = Column(Float, nullable=True)
+    content_score_delta = Column(Float, nullable=True)
     comparison_performed_at = Column(DateTime, nullable=True)
 
     actor = Column(String, nullable=False, default="system")

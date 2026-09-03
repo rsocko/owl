@@ -1,16 +1,25 @@
-"""Azure Document Intelligence (``prebuilt-read``) candidate-generation provider.
+"""Azure Document Intelligence (``prebuilt-layout``) candidate-generation provider.
 
-Calls Azure's current ``prebuilt-read`` model directly. No reusable
-Paperless-side remote-OCR integration exists in this codebase to delegate to
-(searched ``core/paperless/client.py`` and the rest of the repo — nothing
-found), so per the design doc's fallback ("Otherwise OWL may invoke Azure
-directly for candidate generation"), this provider calls Azure itself.
+Calls Azure's ``prebuilt-layout`` model directly. ``prebuilt-layout`` (unlike
+the plain ``prebuilt-read`` OCR model previously used here) is structure/
+layout-aware: it detects paragraphs, tables, and column boundaries and
+returns words in genuine visual reading order, instead of a naive raster
+scan that interleaves side-by-side columns. That matters a great deal for
+the bank-statement/EOB-style multi-column documents this corpus is mostly
+made of, where a naive read-order model can split a single label/value pair
+(e.g. "Account Number: 1048182454") across two non-sequential lines. No
+reusable Paperless-side remote-OCR integration exists in this codebase to
+delegate to (searched ``core/paperless/client.py`` and the rest of the
+repo — nothing found), so per the design doc's fallback ("Otherwise OWL may
+invoke Azure directly for candidate generation"), this provider calls Azure
+itself.
 
-Azure DI's ``prebuilt-read`` API returns extracted text/words/geometry, not a
-rendered PDF. To honor the design doc's "request searchable PDF output"
-requirement, this provider builds a searchable candidate PDF by overlaying an
-invisible text layer (from Azure's word geometry) onto the *original* page
-images via ``pypdf``/``reportlab`` — the same technique OCRmyPDF/Tesseract use
+Azure DI's ``prebuilt-layout`` API returns extracted text/words/geometry
+(plus table/paragraph structure we don't yet consume), not a rendered PDF.
+To honor the design doc's "request searchable PDF output" requirement, this
+provider builds a searchable candidate PDF by overlaying an invisible text
+layer (from Azure's word geometry) onto the *original* page images via
+``pypdf``/``reportlab`` — the same technique OCRmyPDF/Tesseract use
 internally. The visual page content is unchanged; only a hidden, selectable
 text layer is added.
 
@@ -50,10 +59,10 @@ class AzureDocumentIntelligenceProvider(OcrProvider):
 
     @property
     def engine_name(self) -> str:
-        return "azure-prebuilt-read"
+        return "azure-prebuilt-layout"
 
     def model_version(self) -> str:
-        return "prebuilt-read"
+        return "prebuilt-layout"
 
     async def is_available(self) -> tuple[bool, str | None]:
         if not ocr_quality_config.settings.azure_document_intelligence_enabled:
@@ -155,7 +164,7 @@ class AzureDocumentIntelligenceProvider(OcrProvider):
             endpoint=self._endpoint, credential=AzureKeyCredential(self._api_key)
         )
         poller = client.begin_analyze_document(
-            "prebuilt-read",
+            "prebuilt-layout",
             AnalyzeDocumentRequest(bytes_source=pdf_bytes),
         )
         result = poller.result()

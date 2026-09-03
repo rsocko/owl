@@ -71,7 +71,7 @@ describe('OcrOverlayComparisonPanel', () => {
     mocks.list.mockResolvedValue({
       candidates: [
         candidate,
-        { candidate_id: 'cand-requested', document_id: 501, state: 'requested', engine: 'azure-prebuilt-read' },
+        { candidate_id: 'cand-requested', document_id: 501, state: 'requested', engine: 'azure-prebuilt-layout' },
       ],
     });
     render(<OcrOverlayComparisonPanel documentId={501} />);

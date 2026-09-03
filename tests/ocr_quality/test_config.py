@@ -17,7 +17,7 @@ from doc_intelligence_hub.modules.ocr_quality.scoring_models import ContentShape
 
 
 def test_default_config_is_valid() -> None:
-    assert DEFAULT_CONFIG.config_version == "default-2"
+    assert DEFAULT_CONFIG.config_version == "default-3"
     assert sum(DEFAULT_CONFIG.overlay_weights.model_dump().values()) > 0
     assert sum(DEFAULT_CONFIG.machine_weights.model_dump().values()) > 0
 
