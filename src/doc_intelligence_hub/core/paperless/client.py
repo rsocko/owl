@@ -903,6 +903,17 @@ class PaperlessClient:
         """Fetch one Paperless task's status by its Celery task id.
 
         Returns ``None`` if Paperless has no record of it (yet, or ever).
+
+        Response shape: confirmed against paperless-ngx's current source
+        (``documents/views.py::TasksViewSet``) — ``DEFAULT_VERSION`` is
+        ``"10"`` and ``TasksViewSet.paginate_queryset`` only returns the
+        legacy bare-list response when the request's API version is below
+        10. This client never sends an ``Accept`` version override, so it
+        always gets the default (10+) behavior: the standard paginated
+        envelope ``{"count", "next", "previous", "results": [...]}``. The
+        ``isinstance(dict)`` branch below handles that (real, expected) case;
+        the plain-list branch is kept only as defense-in-depth for an older
+        (<10, unsupported-by-this-client) Paperless deployment.
         """
         resp = await self._request("GET", "/api/tasks/", params={"task_id": task_id})
         resp.raise_for_status()
