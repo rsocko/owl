@@ -178,13 +178,11 @@ export default function OcrCandidatesPanel({
   documentId,
   hasStage2Analysis,
   currentOverlayScore,
-  currentMachineScore,
   currentContentScore,
 }: {
   documentId: number;
   hasStage2Analysis?: boolean;
   currentOverlayScore?: number | null;
-  currentMachineScore?: number | null;
   currentContentScore?: number | null;
 }) {
   const [candidates, setCandidates] = useState<CandidateSummary[]>([]);

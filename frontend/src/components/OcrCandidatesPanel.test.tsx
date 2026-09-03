@@ -275,7 +275,7 @@ describe('OcrCandidatesPanel', () => {
     };
     mocks.list.mockResolvedValue({ candidates: [azureCandidate, ocrmypdfCandidate] });
 
-    render(<OcrCandidatesPanel documentId={501} currentOverlayScore={69.8} currentMachineScore={62.8} currentContentScore={64.0} />);
+    render(<OcrCandidatesPanel documentId={501} currentOverlayScore={69.8} currentContentScore={64.0} />);
     await waitFor(() => expect(screen.getByText('Azure Document Intelligence (prebuilt-layout)')).toBeInTheDocument());
 
     expect(screen.getByText('Highest overlay score of ready candidates')).toBeInTheDocument();
@@ -284,7 +284,7 @@ describe('OcrCandidatesPanel', () => {
 
   it('does not show relative badges when only one candidate is ready', async () => {
     mocks.list.mockResolvedValue({ candidates: [readyCandidate] });
-    render(<OcrCandidatesPanel documentId={501} currentOverlayScore={69.8} currentMachineScore={62.8} />);
+    render(<OcrCandidatesPanel documentId={501} currentOverlayScore={69.8} />);
     await waitFor(() => expect(screen.getByText('OCRmyPDF / Tesseract 5')).toBeInTheDocument());
     expect(screen.queryByText(/Highest overlay score of ready candidates/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Highest content accuracy of ready candidates/i)).not.toBeInTheDocument();
