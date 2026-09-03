@@ -2,9 +2,11 @@
 
 Scoring logic (``overlay_scoring.py``, ``profiling.py``) depends only on these
 plain dataclasses, never on a specific PDF/OCR library. ``pdf_loader.py``
-adapts ``pdfplumber`` output into this shape today; a future Azure Document
-Intelligence ``prebuilt-read`` adapter (geometry + word confidence) can fill
-the same seam without changing any scoring code.
+adapts ``pdfplumber`` output into this shape today; the Azure Document
+Intelligence ``prebuilt-layout`` adapter (word-level text, geometry, and
+confidence, reconstructed from Layout's word/polygon primitives rather than
+its structured/markdown extraction) fills the same seam without changing any
+scoring code.
 """
 
 from __future__ import annotations

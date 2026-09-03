@@ -47,12 +47,17 @@ complex tables, or patterned backgrounds.
 
 ### Azure Document Intelligence
 
-Use the current `prebuilt-read` API and request searchable PDF output. Record the
-API/model version, page count, word confidence, geometry, and billed usage.
+Use the `prebuilt-layout` API and reconstruct searchable PDF output from its
+word-level text and bounding-polygon primitives (not its structured/markdown
+extraction). This gives correct reading order on multi-column documents
+(bank statements, EOBs) where `prebuilt-read`'s plain top-to-bottom reading
+order splits label/value pairs across columns. Record the API/model version,
+page count, word confidence, geometry, and billed usage.
 
-Azure Layout may be invoked as a separate structured-extraction experiment. Its
-Markdown or layout output must not be spliced into a `prebuilt-read` or
-Tesseract PDF.
+Azure Layout's structured/markdown output (tables, paragraphs, sections) must
+not be spliced into a searchable PDF. Only its word-level text and
+bounding-polygon primitives — the same kind of data `prebuilt-read` exposes —
+may be used to build the candidate PDF or the Tesseract PDF.
 
 Where the deployed Paperless version supports Azure remote OCR, the
 implementation should reuse that integration when it can preserve staging,
