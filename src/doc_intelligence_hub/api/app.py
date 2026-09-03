@@ -22,6 +22,7 @@ from doc_intelligence_hub.api.routers import (
     admin,
     alerts,
     analysis,
+    analysis_invalidation,
     dashboard,
     document_types,
     document_views,
@@ -32,6 +33,7 @@ from doc_intelligence_hub.api.routers import (
     mc_connector,
     metadata,
     ocr_quality,
+    ocr_quality_candidates,
     relationships,
     statements,
     stats,
@@ -245,6 +247,17 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
         except Exception as exc:
             logger.warning("Could not initialize analysis engine: %s", exc)
 
+        # Initialize analysis invalidation / staleness database (issue #114)
+        try:
+            from doc_intelligence_hub.modules.analysis_invalidation.database import (
+                init_db as analysis_invalidation_init_db,
+            )
+
+            analysis_invalidation_init_db()
+            logger.info("Analysis invalidation DB initialized.")
+        except Exception as exc:
+            logger.warning("Could not initialize analysis invalidation DB: %s", exc)
+
         # Start the built-in job scheduler
         scheduler: HubScheduler = app.state.scheduler
         try:
@@ -320,6 +333,13 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
                 "name": "ocr-quality",
                 "description": "Read-only OCR baseline inventory run status and aggregate reports.",
             },
+            {
+                "name": "ocr-quality-candidates",
+                "description": (
+                    "OCR candidate generation, comparison, and review staging (issue #18, "
+                    "slice 1). Never writes to Paperless."
+                ),
+            },
         ],
         lifespan=lifespan,
     )
@@ -377,6 +397,8 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(extraction.router)
     app.include_router(webhooks.router)
     app.include_router(ocr_quality.router)
+    app.include_router(ocr_quality_candidates.router)
+    app.include_router(analysis_invalidation.router)
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:

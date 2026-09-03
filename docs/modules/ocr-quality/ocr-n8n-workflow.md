@@ -140,3 +140,83 @@ POST /api/ocr/documents/{document_id}/rollback
 
 Authorization distinguishes inventory, candidate generation, acceptance, and
 rollback permissions.
+
+## Implementation status (issue #30, first slice)
+
+The run contract above is implemented today for the three run-starting entry
+points that exist in the codebase — Stage-1 corpus scan, Stage-2 stratified
+sample, and Stage-2 manual single-document (`force_stage2_analysis`) — on the
+existing `ocr_quality_runs` table (`InventoryRun` in
+`src/doc_intelligence_hub/modules/ocr_quality/database.py`,
+`RunStage`/`RunStatus`/`RunTrigger` in `models.py`). This is the same table
+the Force-Stage-2 feature (PR #143) introduced
+`RunStage.STAGE_2_MANUAL_SINGLE_DOCUMENT` on; the contract fields below
+extend that table rather than introducing a second run-tracking mechanism.
+
+Implemented per the acceptance criteria:
+
+- **Identity/observability fields**: `run_id`, `actor`, `trigger`
+  (`RunTrigger`: `manual` / `explicit_batch` / `event` / `schedule`),
+  `correlation_id`, `status` (now including `cancelled`), `counts`,
+  `throughput_docs_per_second`, `started_at`/`finished_at`,
+  `retry_count`/`max_retries`, `cancel_requested`/`cancelled_at`.
+- **Idempotency**: `idempotency_key` (indexed) is a digest of stage + scope +
+  configuration (+ document/version for single-document runs). Repeated
+  delivery for `run_manual_stage2` with an unchanged
+  `document_version_key`/`max_pages` returns the prior completed run's
+  result (`idempotent_replay_of_run_id` in the response) instead of
+  re-fetching/re-profiling, unless `force=True`.
+- **Conflict, not silent duplication**: a second request for the same
+  effective work (same `idempotency_key`) while one is `running` raises
+  `RunConflictError` (service layer) → HTTP 409 with the existing run's
+  `run_id` in the body, so a caller can poll instead of guessing. This is
+  defense-in-depth alongside the router's existing in-process active-run
+  guard.
+- **Cancellation**: `POST /runs/{run_id}/cancel` (cooperative — the run's own
+  page/document loop observes `cancel_requested` between units of work and
+  stops cleanly, setting `status=cancelled`; never silently left `running`).
+- **Bounded retries**: transient PDF-fetch failures during Stage-2 profiling
+  are retried up to `run_max_retries` (config, default 2) before being
+  recorded as a terminal per-document failure; each retry increments the
+  owning run's `retry_count`.
+- **Alerts**: terminal `failed`/`cancelled` runs call
+  `service.emit_run_alert()`, a thin wrapper over the existing
+  `core.alerts.emit_alert()` (module `ocr_quality`, reused rather than
+  building new alert infra). A low quality score alone never triggers this —
+  only run-level failure/cancellation, matching the "review signal, not an
+  alert" rule above.
+
+### Explicitly deferred to later slices
+
+- **Candidate generation / acceptance / rejection / rollback runs (issue
+  [#18](https://github.com/rsocko/owl/issues/18))**: `OcrQualityCandidate`
+  (`candidate_models.py`/`candidate_service.py`) currently has its own,
+  disconnected `state`/`actor`/timestamp fields and is **not yet** wired to
+  `ocr_quality_runs`. The extension point for that work: add a nullable
+  `run_id` foreign key to `OcrQualityCandidate` referencing
+  `InventoryRun.run_id`, and adopt the reserved `RunStage` values already
+  documented in `models.py` (`candidate_generation`, `acceptance`,
+  `rejection`, `rollback`) instead of inventing new stage identifiers. An
+  acceptance/rollback operation should get a `run_id` the same way Stage-2
+  manual runs do today (create an `InventoryRun` row, reuse
+  `_compute_idempotency_key`/`RunConflictError`/`request_cancellation`/
+  `emit_run_alert` from `service.py` rather than re-implementing them).
+- **Event-driven (Paperless webhook) and n8n-scheduled entry points**: not
+  built yet. When added, they must call `run_corpus_scan`/a future
+  assessment-only entry point with `trigger=RunTrigger.EVENT` /
+  `RunTrigger.SCHEDULE` and **must not** set `force=True` or call any
+  candidate-generation/acceptance path — new-document/scheduled triggers
+  assess only, per the contract above.
+- **Downstream invalidation wiring (issue
+  [#114](https://github.com/rsocko/owl/issues/114))**: not built yet; an
+  accepted candidate/rollback creating a durable invalidation record is
+  still owned by that issue. The `run_id`/`correlation_id` fields added here
+  are intended to be the join key that invalidation records reference.
+- **Real Alembic migrations**: schema changes remain additive nullable
+  columns picked up via `Base.metadata.create_all` (existing convention, not
+  changed in this slice) — a known limitation for production deployments,
+  not solved here.
+- **Explicit-batch document/page/provider/Azure-cost caps**: not built in
+  this slice (no explicit-batch entry point exists yet); `RunTrigger`
+  reserves `explicit_batch` for when it is.
+

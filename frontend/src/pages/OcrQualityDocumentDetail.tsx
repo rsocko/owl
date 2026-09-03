@@ -2,6 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Badge, Breadcrumb, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, type Tone } from '../components/ui';
 import DocumentPreview from '../components/DocumentPreview';
+import OcrCandidatesPanel from '../components/OcrCandidatesPanel';
+import OcrOverlayComparisonPanel from '../components/OcrOverlayComparisonPanel';
+import RegionOverlayViewer, { type Annotation, type DrawnBox, type PageRegions } from '../components/RegionOverlayViewer';
+import AnnotationListPanel from '../components/AnnotationListPanel';
 import { endpoints } from '../lib/api';
 import { statusTone, formatDate } from './OcrQualityDashboard';
 import { formatScore } from './OcrQualityReviewQueue';
@@ -55,6 +59,10 @@ export type DocumentDetail = {
   legacy_action_queue_score?: number | null;
   reasons: Reason[];
   document_profile?: DocumentProfile | null;
+  // Whether Stage 2 (deeper per-document PDF profiling / overlay scoring) has
+  // ever run for this document — independent of whether overlay_score ended
+  // up populated (profiling can run without producing a usable score).
+  has_stage2_analysis?: boolean;
 };
 
 const SEVERITY_TONE: Record<string, Tone> = { info: 'info', warning: 'warn', blocking: 'err' };
@@ -117,6 +125,18 @@ export default function OcrQualityDocumentDetail() {
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Region-level inspection (issue #134) — fetched on-demand only when this
+  // detail page is open, never pre-computed for the whole corpus.
+  const [inspectionPage, setInspectionPage] = useState(1);
+  const [regions, setRegions] = useState<PageRegions | null>(null);
+  const [regionsError, setRegionsError] = useState<string | null>(null);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+
+  // Force Stage-2 analysis (one-off per-document trigger, distinct from the
+  // corpus-wide random stratified sample).
+  const [forcingStage2, setForcingStage2] = useState(false);
+  const [stage2Error, setStage2Error] = useState<string | null>(null);
+
   const load = useCallback(() => {
     if (!documentId) return;
     setLoading(true);
@@ -143,6 +163,85 @@ export default function OcrQualityDocumentDetail() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Load word-region geometry for the current inspection page on demand.
+  useEffect(() => {
+    if (!documentId) return;
+    let cancelled = false;
+    setRegionsError(null);
+    endpoints.ocrQuality
+      .regions(documentId, inspectionPage)
+      .then((data) => {
+        if (!cancelled) setRegions(data as PageRegions);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setRegions(null);
+          setRegionsError(err instanceof Error ? err.message : 'Failed to load region geometry.');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [documentId, inspectionPage]);
+
+  // Load saved annotations for the whole document (all pages), so the list
+  // panel can show every annotation while the overlay filters to the
+  // currently displayed page.
+  const loadAnnotations = useCallback(() => {
+    if (!documentId) return;
+    endpoints.ocrQuality.annotations
+      .list(documentId)
+      .then((data) => setAnnotations((data as { annotations: Annotation[] }).annotations))
+      .catch(() => setAnnotations([]));
+  }, [documentId]);
+
+  useEffect(() => {
+    loadAnnotations();
+  }, [loadAnnotations]);
+
+  const handleCreateAnnotation = useCallback(
+    async (box: DrawnBox & { label: string; note: string | null }) => {
+      if (!documentId) return;
+      const created = (await endpoints.ocrQuality.annotations.create(documentId, {
+        page: inspectionPage,
+        ...box,
+      })) as Annotation;
+      setAnnotations((prev) => [...prev, created]);
+    },
+    [documentId, inspectionPage],
+  );
+
+  const handleUpdateAnnotation = useCallback(
+    async (annotationId: number, updates: Partial<Pick<Annotation, 'label' | 'note'>>) => {
+      if (!documentId) return;
+      const updated = (await endpoints.ocrQuality.annotations.update(documentId, annotationId, updates)) as Annotation;
+      setAnnotations((prev) => prev.map((a) => (a.id === annotationId ? updated : a)));
+    },
+    [documentId],
+  );
+
+  const handleDeleteAnnotation = useCallback(
+    async (annotationId: number) => {
+      if (!documentId) return;
+      await endpoints.ocrQuality.annotations.remove(documentId, annotationId);
+      setAnnotations((prev) => prev.filter((a) => a.id !== annotationId));
+    },
+    [documentId],
+  );
+
+  const pageAnnotations = annotations.filter((a) => a.page === inspectionPage);
+
+  const handleForceStage2 = useCallback(() => {
+    if (!documentId) return;
+    setForcingStage2(true);
+    setStage2Error(null);
+    endpoints.ocrQuality
+      .forceStage2(documentId)
+      .then((data) => setDetail(data as DocumentDetail))
+      .catch((err) => setStage2Error(err instanceof Error ? err.message : 'Failed to force Stage 2 analysis.'))
+      .finally(() => setForcingStage2(false));
+  }, [documentId]);
 
   return (
     <div className="ocr-quality-document-detail">
@@ -193,6 +292,29 @@ export default function OcrQualityDocumentDetail() {
             />
           </Card>
 
+          <Card title="Region inspection">
+            {regionsError && <ErrorState message={regionsError} />}
+            {!regionsError && (
+              <>
+                <RegionOverlayViewer
+                  imageUrl={endpoints.ocrQuality.pageImageUrl(detail.document_id, inspectionPage)}
+                  regions={regions}
+                  annotations={pageAnnotations}
+                  onCreateAnnotation={handleCreateAnnotation}
+                  onDeleteAnnotation={handleDeleteAnnotation}
+                  onPageChange={setInspectionPage}
+                />
+                <div className="ocr-annotation-panel-heading">Saved annotations</div>
+                <AnnotationListPanel
+                  annotations={annotations}
+                  onUpdate={handleUpdateAnnotation}
+                  onDelete={handleDeleteAnnotation}
+                  onSelectPage={setInspectionPage}
+                />
+              </>
+            )}
+          </Card>
+
           <Card title="Scores">
             <div className="ocr-score-summary">
               <Badge tone={statusTone(detail.review_status ?? 'unscored') as Tone}>{detail.review_status ?? 'unscored'}</Badge>
@@ -202,11 +324,24 @@ export default function OcrQualityDocumentDetail() {
                 <span className="text-muted">Stage-1 preliminary heuristic: {detail.preliminary_score}</span>
               )}
             </div>
-            {detail.overlay_score == null && (
+            {!detail.has_stage2_analysis && (
               <div className="ocr-unavailable-note">
-                Overlay score is unavailable — this document has not yet been PDF-profiled by the Stage 2 stratified sample.
+                <Badge tone="info">Stage 2 not run</Badge> This document has not had deep Stage 2
+                analysis yet — overlay/geometry signals below (and in any candidate comparison) may
+                be incomplete or unavailable. Only Stage 1 (corpus-wide machine scoring) has run.
               </div>
             )}
+            {detail.has_stage2_analysis && detail.overlay_score == null && (
+              <div className="ocr-unavailable-note">
+                Stage 2 has run for this document, but no overlay score was produced.
+              </div>
+            )}
+            <div className="ocr-force-stage2">
+              <Button variant="primary" size="sm" onClick={handleForceStage2} disabled={forcingStage2}>
+                {forcingStage2 ? 'Analyzing…' : 'Force Stage 2 analysis'}
+              </Button>
+            </div>
+            {stage2Error && <div className="ocr-unavailable-note">{stage2Error}</div>}
           </Card>
 
           <Card title="Explainable reasons">
@@ -230,11 +365,18 @@ export default function OcrQualityDocumentDetail() {
 
           <Card title="Candidate comparison">
             <div className="ocr-stub-note">
-              Candidate generation, comparison, and accept/reject/rollback controls are not yet available
-              (blocked on issues #18 and #114). This view will show alternate-OCR candidates once that
-              backend work lands.
+              Applying an accepted candidate as the new Paperless version, version preservation, and
+              rollback are not yet available (blocked on issue #114). Candidate generation and
+              comparison below never modify the live Paperless document.
             </div>
+            <OcrOverlayComparisonPanel documentId={detail.document_id} />
           </Card>
+
+          <OcrCandidatesPanel
+            documentId={detail.document_id}
+            hasStage2Analysis={detail.has_stage2_analysis ?? false}
+            currentOverlayScore={detail.overlay_score}
+          />
         </>
       )}
     </div>

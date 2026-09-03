@@ -156,6 +156,16 @@ class OCRQualityAssessment(BaseModel):
 
     overlay_score: float | None = Field(default=None, ge=0.0, le=100.0)
     machine_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    content_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+        description="Primary accuracy indicator: blends machine/content quality with "
+        "reading-order correctness (see ContentWeights). Drives review_status. Narrower "
+        "than overlay_score, which also folds in presentation-only signals (coverage, "
+        "bounds, duplicate text, page integrity) that don't affect whether captured field "
+        "content itself is correct.",
+    )
     review_status: AssessmentStatus
     reasons: list[Reason] = Field(default_factory=list)
     document_profile: DocumentProfile

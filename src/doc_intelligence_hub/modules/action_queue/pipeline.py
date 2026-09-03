@@ -1,7 +1,9 @@
 """Main processing pipeline — orchestrates fetch → analyze → store → enrich."""
 
 import asyncio
+import hashlib
 import io
+import json
 import logging
 import time
 from datetime import date, datetime
@@ -15,6 +17,11 @@ from doc_intelligence_hub.core.extractors.account_numbers import (
     pick_masked_account_identifier,
 )
 from doc_intelligence_hub.core.paperless import PaperlessClient
+from doc_intelligence_hub.modules.analysis_invalidation.database import (
+    init_db as init_freshness_db,
+)
+from doc_intelligence_hub.modules.analysis_invalidation.models import FreshnessStatus
+from doc_intelligence_hub.modules.analysis_invalidation.service import AnalysisFreshnessService
 
 from .analyzer import OllamaAnalyzer, is_non_actionable_receipt, urgency_to_severity
 from .config import settings
@@ -30,11 +37,52 @@ logger = logging.getLogger(__name__)
 # Use a file-based console to avoid Windows encoding issues when running under uvicorn
 console = Console(file=io.StringIO(), force_terminal=False, highlight=False)
 
+# Analysis-invalidation identity for this module (issue #114 reference
+# integration). Bump the version string whenever a change to the
+# analyzer/fallback-analyzer logic should make previously-computed actions
+# be treated as stale even if the document content hasn't changed.
+ACTION_QUEUE_ANALYSIS_MODULE_NAME = "action_queue"
+ACTION_QUEUE_ANALYSIS_MODULE_VERSION = "action-queue-analyzer-v1"
+
+
+def _document_content_identity(doc: dict[str, Any]) -> str:
+    """Best-effort proxy for detecting a changed document version.
+
+    Mirrors ``ocr_quality.service._document_version_key`` — same field
+    preference order, kept as a separate copy here since this module
+    shouldn't import from ocr_quality for a one-line helper.
+    """
+    for key in ("checksum", "modified", "added"):
+        value = doc.get(key)
+        if value:
+            return f"{key}:{value}"
+    return "unknown"
+
+
+def _document_metadata_fields(doc: dict[str, Any]) -> dict[str, Any]:
+    """Metadata fields Action Queue's analysis actually depends on.
+
+    Deliberately reads the *raw* Paperless fields (``correspondent``,
+    ``document_type``, ``tags`` — ids, not resolved display names) so the
+    fingerprint computed here is identical whether or not
+    ``_resolve_document_metadata`` has already run on this dict.
+    """
+    return {
+        "title": doc.get("title"),
+        "correspondent": doc.get("correspondent"),
+        "document_type": doc.get("document_type"),
+        "tags": sorted(str(t) for t in (doc.get("tags") or [])),
+    }
+
+
+def _analysis_config_hash(model_name: str) -> str:
+    """Digest of the configuration that affects Action Queue's analysis output."""
+    payload = {"confidence_threshold": settings.confidence_threshold, "model": model_name}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
 
 def _serialize_cta(cta: dict | str | None) -> str | None:
     """Serialize a CTA dict to a JSON string for database storage, or None."""
-    import json
-
     if cta is None:
         return None
     if isinstance(cta, str):
@@ -90,6 +138,7 @@ class Pipeline:
         self.analyzer = OllamaAnalyzer()
         self.fallback_analyzer = RuleBasedAnalyzer()
         self.enricher = PaperlessEnricher()
+        self.freshness = AnalysisFreshnessService()
         self._ollama_available: bool | None = None
         self._enrichment_available: bool = True
 
@@ -248,10 +297,19 @@ class Pipeline:
             _set_progress(current_step="complete", progress="0/0 documents processed")
             return {"processed": 0, "skipped": 0, "failed": 0}
 
-        # Filter out already-processed documents (unless force re-scan)
+        # Filter out already-processed documents (unless force re-scan).
+        # "Already processed" now also requires the cached analysis to still
+        # be fresh (issue #114): a document whose checksum, relevant
+        # metadata, the analyzer's config, or the analyzer module version
+        # itself has changed since the last successful run is treated as
+        # new-to-analyze even without --force, so normal runs self-heal
+        # after an accepted OCR version change instead of silently keeping
+        # stale actions forever.
         skipped_count = 0
+        stale_count = 0
         if not force:
             init_db()
+            init_freshness_db()
             db_check = get_session()
             try:
                 processed_ids = {
@@ -262,14 +320,36 @@ class Pipeline:
                 }
             finally:
                 db_check.close()
-            unprocessed = [d for d in documents if d["id"] not in processed_ids]
+
+            config_hash = _analysis_config_hash(self.analyzer.model)
+            unprocessed = []
+            for d in documents:
+                if d["id"] not in processed_ids:
+                    unprocessed.append(d)
+                    continue
+                freshness = self.freshness.check_freshness(
+                    document_id=d["id"],
+                    module_name=ACTION_QUEUE_ANALYSIS_MODULE_NAME,
+                    module_version=ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
+                    config_hash=config_hash,
+                    current_checksum=_document_content_identity(d),
+                    metadata_fields=_document_metadata_fields(d),
+                )
+                if freshness.status == FreshnessStatus.STALE:
+                    stale_count += 1
+                    unprocessed.append(d)
             skipped_count = len(documents) - len(unprocessed)
             documents = unprocessed
-            console.print(f"[dim]  {skipped_count} already processed, {len(documents)} new[/dim]")
+            console.print(
+                f"[dim]  {skipped_count} already processed & fresh, {len(documents)} to analyze "
+                f"({stale_count} stale — reprocessing)[/dim]"
+            )
             logger.info(
-                "Document filter: %d already processed (skipped), %d new to analyze",
+                "Document filter: %d already processed & fresh (skipped), %d to analyze "
+                "(%d stale documents reprocessing)",
                 skipped_count,
                 len(documents),
+                stale_count,
             )
 
         # Apply limit AFTER filtering (limit means "analyze up to N new docs")
@@ -318,6 +398,7 @@ class Pipeline:
 
         # Step 3: Process each document
         init_db()
+        init_freshness_db()
         db = get_session()
         stats: dict[str, Any] = {
             "processed": 0,
@@ -395,6 +476,7 @@ class Pipeline:
                         success=True,
                         disposition="unreadable",
                         text_metrics=text_metrics,
+                        doc=doc,
                     )
                     stats["no_action"] += 1
                     continue
@@ -441,6 +523,7 @@ class Pipeline:
                         error="Ollama returned no result",
                         disposition="low_confidence",
                         text_metrics=text_metrics,
+                        doc=doc,
                     )
                     stats["failed"] += 1
                     stats["errors"].append(
@@ -477,6 +560,7 @@ class Pipeline:
                         success=True,
                         disposition="unreadable",
                         text_metrics=text_metrics,
+                        doc=doc,
                     )
                     stats["no_action"] += 1
                     continue
@@ -526,6 +610,7 @@ class Pipeline:
                         ),
                         error=str(sync_error) if sync_error is not None else None,
                         text_metrics=text_metrics,
+                        doc=doc,
                     )
                     stats["no_action"] += 1
                     continue
@@ -637,6 +722,7 @@ class Pipeline:
                         disposition="low_confidence",
                         error=reason,
                         text_metrics=text_metrics,
+                        doc=doc,
                     )
                     stats["no_action"] += 1
                     continue
@@ -696,6 +782,7 @@ class Pipeline:
                     success=True,
                     disposition="action_created",
                     text_metrics=text_metrics,
+                    doc=doc,
                 )
                 stats["processed"] += 1
 
@@ -983,9 +1070,16 @@ class Pipeline:
         disposition: str = "action_created",
         error: str | None = None,
         text_metrics: dict[str, Any] | None = None,
+        doc: dict[str, Any] | None = None,
     ):
-        """Record processing attempt in history table."""
+        """Record processing attempt in history table.
+
+        When ``doc`` is provided and ``success`` is true, also records a
+        fresh analysis fingerprint (issue #114) so a future run's staleness
+        check can tell whether this document needs reprocessing again.
+        """
         metrics = text_metrics or {}
+        checksum = _document_content_identity(doc) if doc is not None else None
         existing = db.query(ProcessingHistory).filter_by(document_id=document_id).first()
         if existing:
             existing.processed_at = datetime.utcnow()
@@ -996,6 +1090,8 @@ class Pipeline:
             existing.content_length = metrics.get("content_length")
             existing.word_count = metrics.get("word_count")
             existing.text_quality_score = metrics.get("text_quality_score")
+            if checksum is not None:
+                existing.document_checksum = checksum
         else:
             record = ProcessingHistory(
                 document_id=document_id,
@@ -1006,8 +1102,19 @@ class Pipeline:
                 content_length=metrics.get("content_length"),
                 word_count=metrics.get("word_count"),
                 text_quality_score=metrics.get("text_quality_score"),
+                document_checksum=checksum,
             )
             db.add(record)
+
+        if success and doc is not None:
+            self.freshness.record_fingerprint(
+                document_id=document_id,
+                module_name=ACTION_QUEUE_ANALYSIS_MODULE_NAME,
+                module_version=ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
+                config_hash=_analysis_config_hash(self.analyzer.model),
+                current_checksum=checksum,
+                metadata_fields=_document_metadata_fields(doc),
+            )
 
     @staticmethod
     def _compute_text_quality(content: str) -> dict:

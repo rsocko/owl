@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.console import Console
@@ -14,6 +17,11 @@ from rich.panel import Panel
 from rich.table import Table
 
 from doc_intelligence_hub.core.paperless import PaperlessClient
+from doc_intelligence_hub.modules.analysis_invalidation.database import (
+    init_db as init_freshness_db,
+)
+from doc_intelligence_hub.modules.analysis_invalidation.models import FreshnessStatus
+from doc_intelligence_hub.modules.analysis_invalidation.service import AnalysisFreshnessService
 from doc_intelligence_hub.modules.eob_matching.classifier import classify_document
 from doc_intelligence_hub.modules.eob_matching.extractor import extract_bill, extract_eob
 from doc_intelligence_hub.modules.eob_matching.llm_extractor import (
@@ -23,7 +31,42 @@ from doc_intelligence_hub.modules.eob_matching.llm_extractor import (
 from doc_intelligence_hub.modules.eob_matching.matcher import match_documents
 from doc_intelligence_hub.modules.eob_matching.models import DocumentType, MatchConfidence
 
+logger = logging.getLogger(__name__)
 console = Console()
+
+# Analysis-invalidation identity for this module (issue #114 follow-up).
+# Bump the version string whenever a change to the classifier/extractor
+# logic should make previously-extracted EOB/Bill records be treated as
+# stale even if the document content hasn't changed.
+EOB_MATCHING_MODULE_NAME = "eob_matching"
+EOB_MATCHING_MODULE_VERSION = "eob-matching-v1"
+
+
+def _document_content_identity(doc: dict[str, Any]) -> str:
+    """Best-effort proxy for detecting a changed document version.
+
+    Mirrors ``action_queue.pipeline._document_content_identity`` /
+    ``ocr_quality.service._document_version_key`` — same field preference
+    order, kept as a separate copy here since this module shouldn't import
+    from those modules for a one-line helper.
+    """
+    for key in ("checksum", "modified", "added"):
+        value = doc.get(key)
+        if value:
+            return f"{key}:{value}"
+    return "unknown"
+
+
+def _analysis_config_hash(use_llm: bool) -> str:
+    """Digest of the configuration that affects this module's analysis output.
+
+    Classification/extraction only look at document ``content`` — never
+    title/correspondent/tags — so no metadata fingerprint is computed for
+    this module; the only thing that changes the output is which extractor
+    (LLM vs. regex) is used.
+    """
+    payload = {"use_llm": bool(use_llm)}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 def _init_database(db_url: str | None = None) -> None:
@@ -33,6 +76,10 @@ def _init_database(db_url: str | None = None) -> None:
     if db_url:
         database.configure(db_url)
     database.init_db()
+    # Defensive: ensure the analysis-invalidation database also exists so
+    # freshness checks/fingerprint recording work standalone via the CLI,
+    # not just under the FastAPI app (mirrors Action Queue's pattern).
+    init_freshness_db()
 
 
 @click.group()
@@ -695,6 +742,8 @@ async def _run_pipeline(
 
     client = PaperlessClient(base_url=paperless_url, token=paperless_token)
     db = get_db_session()
+    freshness = AnalysisFreshnessService()
+    config_hash = _analysis_config_hash(use_llm)
 
     # Create run record
     run_record = MatchingRun(
@@ -774,31 +823,79 @@ async def _run_pipeline(
     skipped_eobs = 0
     skipped_bills = 0
 
-    # Skip documents already processed in prior runs
+    # Skip documents already processed in a prior run — unless the cached
+    # extraction is now stale (accepted content/checksum, module version, or
+    # analysis config changed since it was recorded). A document whose
+    # checksum changed self-heals here without needing --force (issue #114).
+    stale_eobs = 0
+    stale_bills = 0
     if skip_processed:
         existing_eob_doc_ids = {r.document_id for r in db.query(EOBRecord.document_id).all()}
         existing_bill_doc_ids = {r.document_id for r in db.query(BillRecord.document_id).all()}
 
-        eob_docs = [(doc, cls) for doc, cls in eob_docs if doc["id"] not in existing_eob_doc_ids]
-        bill_docs = [(doc, cls) for doc, cls in bill_docs if doc["id"] not in existing_bill_doc_ids]
+        def _keep(doc: dict, existing_ids: set[int]) -> tuple[bool, bool]:
+            """Return (keep_for_processing, is_stale_reprocess)."""
+            doc_id = doc["id"]
+            if doc_id not in existing_ids:
+                return True, False
+            result = freshness.check_freshness(
+                document_id=doc_id,
+                module_name=EOB_MATCHING_MODULE_NAME,
+                module_version=EOB_MATCHING_MODULE_VERSION,
+                config_hash=config_hash,
+                current_checksum=_document_content_identity(doc),
+            )
+            if result.status == FreshnessStatus.STALE:
+                return True, True
+            return False, False
+
+        kept_eob_docs = []
+        for doc, cls in eob_docs:
+            keep, is_stale = _keep(doc, existing_eob_doc_ids)
+            if keep:
+                kept_eob_docs.append((doc, cls))
+                if is_stale:
+                    stale_eobs += 1
+        eob_docs = kept_eob_docs
+
+        kept_bill_docs = []
+        for doc, cls in bill_docs:
+            keep, is_stale = _keep(doc, existing_bill_doc_ids)
+            if keep:
+                kept_bill_docs.append((doc, cls))
+                if is_stale:
+                    stale_bills += 1
+        bill_docs = kept_bill_docs
 
         skipped_eobs = classified_eob_count - len(eob_docs)
         skipped_bills = classified_bill_count - len(bill_docs)
         if skipped_eobs or skipped_bills:
             console.print(
-                f"  [dim]Skipped {skipped_eobs} EOBs and {skipped_bills} bills (already processed)[/dim]"
+                f"  [dim]Skipped {skipped_eobs} EOBs and {skipped_bills} bills (already processed & fresh)[/dim]"
+            )
+        if stale_eobs or stale_bills:
+            console.print(
+                f"  [dim]  ({stale_eobs} EOBs and {stale_bills} bills stale — reprocessing)[/dim]"
             )
 
     extracted_eobs = []
     extracted_bills = []
+    failed_eobs = 0
+    failed_bills = 0
 
     for doc, classification in eob_docs:
         content = doc.get("content", "")
-        extracted = (
-            extract_eob_llm(content, document_id=str(doc["id"]))
-            if use_llm
-            else extract_eob(content, document_id=str(doc["id"]))
-        )
+        try:
+            extracted = (
+                extract_eob_llm(content, document_id=str(doc["id"]))
+                if use_llm
+                else extract_eob(content, document_id=str(doc["id"]))
+            )
+        except Exception as exc:
+            failed_eobs += 1
+            logger.warning("EOB extraction failed for document #%s: %s", doc["id"], exc)
+            console.print(f"  [red]✗[/red] EOB #{doc['id']} extraction failed: {exc}")
+            continue
         extracted_eobs.append(extracted)
 
         # Persist EOB record
@@ -827,6 +924,13 @@ async def _run_pipeline(
                 last_processed_at=datetime.now(UTC),
             ),
         )
+        freshness.record_fingerprint(
+            document_id=doc["id"],
+            module_name=EOB_MATCHING_MODULE_NAME,
+            module_version=EOB_MATCHING_MODULE_VERSION,
+            config_hash=config_hash,
+            current_checksum=_document_content_identity(doc),
+        )
 
         if verbose:
             console.print(
@@ -838,11 +942,17 @@ async def _run_pipeline(
 
     for doc, classification in bill_docs:
         content = doc.get("content", "")
-        extracted = (
-            extract_bill_llm(content, document_id=str(doc["id"]))
-            if use_llm
-            else extract_bill(content, document_id=str(doc["id"]))
-        )
+        try:
+            extracted = (
+                extract_bill_llm(content, document_id=str(doc["id"]))
+                if use_llm
+                else extract_bill(content, document_id=str(doc["id"]))
+            )
+        except Exception as exc:
+            failed_bills += 1
+            logger.warning("Bill extraction failed for document #%s: %s", doc["id"], exc)
+            console.print(f"  [red]✗[/red] Bill #{doc['id']} extraction failed: {exc}")
+            continue
         extracted_bills.append(extracted)
 
         # Persist Bill record
@@ -869,6 +979,13 @@ async def _run_pipeline(
                 last_processed_at=datetime.now(UTC),
             ),
         )
+        freshness.record_fingerprint(
+            document_id=doc["id"],
+            module_name=EOB_MATCHING_MODULE_NAME,
+            module_version=EOB_MATCHING_MODULE_VERSION,
+            config_hash=config_hash,
+            current_checksum=_document_content_identity(doc),
+        )
 
         if verbose:
             console.print(
@@ -881,6 +998,11 @@ async def _run_pipeline(
     console.print(
         f"  [green]✓[/green] Extracted {len(extracted_eobs)} EOBs, {len(extracted_bills)} bills\n"
     )
+    if failed_eobs or failed_bills:
+        console.print(
+            f"  [red]  {failed_eobs} EOB(s) and {failed_bills} bill(s) failed extraction "
+            "— will be retried on the next run[/red]\n"
+        )
 
     # Step 4: Match
     console.print("[bold]Step 4:[/bold] Running matching engine...")
@@ -1014,11 +1136,12 @@ async def _run_pipeline(
     run_record.low_confidence = low
     run_record.finished_at = datetime.now(UTC)
     db.commit()
+    run_id = run_record.id
     db.close()
 
     console.print(
         Panel(
-            f"[bold]Summary (Run #{run_record.id})[/bold]\n"
+            f"[bold]Summary (Run #{run_id})[/bold]\n"
             f"  Documents scanned: {len(documents)}\n"
             f"  Classified: {classified_eob_count} EOBs, {classified_bill_count} bills, {len(unknown_docs)} unknown\n"
             f"  Extracted: {len(extracted_eobs)} EOBs, {len(extracted_bills)} bills"
@@ -1040,7 +1163,7 @@ async def _run_pipeline(
     # Save output if requested
     if output_path:
         output_data = {
-            "run_id": run_record.id,
+            "run_id": run_id,
             "run_at": datetime.now(UTC).isoformat(),
             "documents_scanned": len(documents),
             "classifications": {

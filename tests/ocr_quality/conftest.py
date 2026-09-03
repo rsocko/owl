@@ -5,8 +5,12 @@ from __future__ import annotations
 from doc_intelligence_hub.modules.ocr_quality.pdf_types import ImageBox, PdfPageData, WordBox
 
 
-def make_word(text: str, x0: float, top: float, x1: float, bottom: float, order: int) -> WordBox:
-    return WordBox(text=text, x0=x0, top=top, x1=x1, bottom=bottom, order_index=order)
+def make_word(
+    text: str, x0: float, top: float, x1: float, bottom: float, order: int, angle: float = 0.0
+) -> WordBox:
+    return WordBox(
+        text=text, x0=x0, top=top, x1=x1, bottom=bottom, order_index=order, angle_degrees=angle
+    )
 
 
 def words_for_line(
@@ -69,6 +73,37 @@ def make_scanned_overlay_page(
     )
 
 
+def make_digital_page_with_small_image(
+    page_number: int = 1, width: float = 600.0, height: float = 800.0
+) -> PdfPageData:
+    """A digital-native page with ordinary text plus a small incidental image.
+
+    Mimics a real-world case (e.g. a lease agreement with a small company
+    logo): the image covers a small corner of the page, far below the
+    "scanned/image-dominated" coverage threshold, and none of the body text
+    sits anywhere near it.
+    """
+    logo = ImageBox(x0=20.0, top=20.0, x1=70.0, bottom=50.0)  # 50x30 corner logo
+    words: list[WordBox] = []
+    order = 0
+    for top in (300.0, 320.0, 340.0):
+        line_words = words_for_line(
+            ["Ordinary", "body", "text", "far", "from", "the", "logo."],
+            top=top,
+            order_start=order,
+        )
+        words.extend(line_words)
+        order += len(line_words)
+    return PdfPageData(
+        page_number=page_number,
+        width=width,
+        height=height,
+        words=words,
+        images=[logo],
+        char_count=180,
+    )
+
+
 def make_image_only_page(
     page_number: int = 1, width: float = 600.0, height: float = 800.0
 ) -> PdfPageData:
@@ -93,6 +128,38 @@ def make_minimal_pdf_bytes(text: str = "Hello World", width: int = 200, height: 
     dependency-free fixture instead of requiring a PDF-writing library.
     """
     stream = f"BT /F1 12 Tf 10 50 Td ({text}) Tj ET".encode()
+    pdf = f"""%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj
+4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj
+5 0 obj << /Length {len(stream)} >>
+stream
+""".encode()
+    pdf += stream + b"\nendstream\nendobj\ntrailer << /Size 6 /Root 1 0 R >>\n%%EOF"
+    return pdf
+
+
+def make_rotated_text_pdf_bytes(
+    text: str = "Vertical",
+    width: int = 200,
+    height: int = 200,
+    angle_degrees: float = 90.0,
+) -> bytes:
+    """A tiny hand-built, single-page PDF whose text is drawn via an explicit
+    ``Tm`` (set text matrix) rotation, instead of the default identity
+    matrix ``make_minimal_pdf_bytes`` uses.
+
+    Mirrors ``make_minimal_pdf_bytes``'s xref-less construction; used to
+    exercise the per-word rotation-angle derivation in ``pdf_loader.py``
+    against a real, pdfplumber-parseable rotated text-rendering matrix.
+    """
+    import math
+
+    theta = math.radians(angle_degrees)
+    a, b = math.cos(theta), math.sin(theta)
+    c, d = -math.sin(theta), math.cos(theta)
+    stream = f"BT /F1 12 Tf {a:.6f} {b:.6f} {c:.6f} {d:.6f} 50 50 Tm ({text}) Tj ET".encode()
     pdf = f"""%PDF-1.4
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj

@@ -13,10 +13,11 @@ from doc_intelligence_hub.modules.ocr_quality.scoring_config import (
     load_config,
     scorer_version,
 )
+from doc_intelligence_hub.modules.ocr_quality.scoring_models import ContentShape
 
 
 def test_default_config_is_valid() -> None:
-    assert DEFAULT_CONFIG.config_version == "default-1"
+    assert DEFAULT_CONFIG.config_version == "default-3"
     assert sum(DEFAULT_CONFIG.overlay_weights.model_dump().values()) > 0
     assert sum(DEFAULT_CONFIG.machine_weights.model_dump().values()) > 0
 
@@ -99,3 +100,35 @@ def test_load_config_merges_partial_override(tmp_path) -> None:
         DEFAULT_CONFIG.machine_weights.char_script_plausibility
     )
     assert config.overlay_weights == DEFAULT_CONFIG.overlay_weights
+
+
+def test_default_structured_content_dampening_covers_table_code_and_mixed() -> None:
+    assert DEFAULT_CONFIG.structured_content_shapes == [
+        ContentShape.TABLE_OR_FORM,
+        ContentShape.CODE_HEAVY,
+        ContentShape.MIXED,
+    ]
+    assert ContentShape.PROSE not in DEFAULT_CONFIG.structured_content_shapes
+    assert ContentShape.UNKNOWN not in DEFAULT_CONFIG.structured_content_shapes
+    assert 0.0 <= DEFAULT_CONFIG.structured_content_signal_multiplier <= 1.0
+    # Must actually dampen (not a no-op default) for the fix to have any effect.
+    assert DEFAULT_CONFIG.structured_content_signal_multiplier < 1.0
+
+
+def test_structured_content_signal_multiplier_bounds_enforced() -> None:
+    with pytest.raises(ValueError):
+        ScoringConfig(structured_content_signal_multiplier=1.5)
+    with pytest.raises(ValueError):
+        ScoringConfig(structured_content_signal_multiplier=-0.1)
+
+
+def test_load_config_merges_structured_content_override(tmp_path) -> None:
+    override_path = tmp_path / "override.yaml"
+    override_path.write_text(
+        "config_version: 'tuned-2'\n"
+        "structured_content_shapes:\n  - table_or_form\n"
+        "structured_content_signal_multiplier: 0.1\n"
+    )
+    config = load_config(override_path)
+    assert config.structured_content_shapes == [ContentShape.TABLE_OR_FORM]
+    assert config.structured_content_signal_multiplier == 0.1

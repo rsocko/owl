@@ -129,6 +129,10 @@
   font-size: 13px;
 }
 
+.ocr-force-stage2 {
+  margin-top: 12px;
+}
+
 .ocr-reason-list {
   list-style: none;
   margin: 0;
@@ -157,6 +161,62 @@
   margin-bottom: 10px;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.ocr-annotation-panel-heading {
+  margin: 14px 0 8px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ocr-annotation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ocr-annotation-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.ocr-annotation-page-link {
+  background: none;
+  border: none;
+  color: var(--text-link, #2563eb);
+  cursor: pointer;
+  padding: 0;
+  font-size: 13px;
+}
+
+.ocr-annotation-note {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.ocr-annotation-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.ocr-annotation-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
 }
 
 .ocr-runs-list {
@@ -192,4 +252,53 @@
   padding-top: 8px;
   border-top: 1px dashed var(--border);
 }
+
+.ocr-candidate-detail {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.ocr-blocking-findings {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 6px 0;
+}
+
+.ocr-comparison-note {
+  font-size: 12.5px;
+  margin-top: 4px;
+}
+
+.ocr-text-pane {
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--surface-hover);
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+tr.is-selected {
+  background: var(--surface-hover);
+}
+
+.ocr-suggested-read-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ocr-score-compare-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
 

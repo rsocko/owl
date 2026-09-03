@@ -17,10 +17,28 @@ Endpoints:
     POST /api/ocr-quality/runs                    — Start a Stage-1 corpus scan (background)
     POST /api/ocr-quality/runs/{run_id}/resume    — Resume an interrupted Stage-1 run (background)
     POST /api/ocr-quality/runs/{run_id}/sample    — Start a Stage-2 stratified sample (background)
+    POST /api/ocr-quality/runs/{run_id}/cancel    — Request cooperative cancellation of a run
     GET  /api/ocr-quality/distribution            — Corpus-wide review-status/score snapshot
     GET  /api/ocr-quality/documents               — Filterable/paginated/sortable review queue
     GET  /api/ocr-quality/documents/{document_id} — Single document's full assessment detail
+    POST /api/ocr-quality/documents/{document_id}/stage2 — Force Stage-2 for one document (inline)
     GET  /api/ocr-quality/downstream-outcomes     — Distinct downstream_outcome values (filter dropdown)
+
+    Region-level inspection (issue #134, Part 1 — read-only, on-demand):
+    GET  /api/ocr-quality/documents/{document_id}/regions            — Word boxes + flags for one page
+    GET  /api/ocr-quality/documents/{document_id}/pages/{page}/image — Rendered page PNG
+
+    Box-level diffing (connects issue #134's region inspection with issue
+    #18's candidate comparison — read-only, stateless):
+    POST /api/ocr-quality/regions/diff — Diff two word-box lists for the same page
+
+    Manual annotations (issue #134, Part 2 — the only mutation endpoints
+    added by this feature; they mutate OWL's own local annotation table
+    only, never Paperless or the OCR quality assessment tables):
+    GET    /api/ocr-quality/documents/{document_id}/annotations                   — List annotations
+    POST   /api/ocr-quality/documents/{document_id}/annotations                   — Create an annotation
+    PATCH  /api/ocr-quality/documents/{document_id}/annotations/{annotation_id}   — Edit an annotation
+    DELETE /api/ocr-quality/documents/{document_id}/annotations/{annotation_id}   — Delete an annotation
 
 All three POST endpoints are fire-and-forget: they validate input, reject
 duplicate concurrently-active runs, and return the ``run_id`` immediately.
@@ -37,20 +55,31 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from doc_intelligence_hub.api.routers import make_paperless_client
 from doc_intelligence_hub.core.paperless import PaperlessClient
+from doc_intelligence_hub.modules.ocr_quality import annotations as annotations_service
+from doc_intelligence_hub.modules.ocr_quality import region_diff, region_inspection
 from doc_intelligence_hub.modules.ocr_quality.config import settings as ocr_quality_settings
 from doc_intelligence_hub.modules.ocr_quality.database import InventoryRun
 from doc_intelligence_hub.modules.ocr_quality.database import get_session as get_ocr_quality_session
 from doc_intelligence_hub.modules.ocr_quality.database import init_db as init_ocr_quality_db
-from doc_intelligence_hub.modules.ocr_quality.models import RunStage, RunStatus
+from doc_intelligence_hub.modules.ocr_quality.models import (
+    ReasonCode,
+    RunStage,
+    RunStatus,
+    RunTrigger,
+)
 from doc_intelligence_hub.modules.ocr_quality.service import (
+    ManualStage2DocumentNotFoundError,
+    ManualStage2ProfilingFailedError,
     OcrQualityInventoryService,
+    RunConflictError,
     _digest,
+    emit_run_alert,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,6 +93,11 @@ router = APIRouter(prefix="/api/ocr-quality", tags=["ocr-quality"])
 # best-effort, single-process safeguard (matches the single long-lived OWL
 # container deployment) — not a cross-process lock.
 _active_run_ids: set[str] = set()
+
+# document_ids currently running a forced single-document Stage-2 trigger
+# (see ``force_stage2_analysis``) *in this process* — guards against a second
+# concurrent trigger for the same document while the first is still inline.
+_active_manual_stage2_document_ids: set[int] = set()
 
 
 def _service() -> OcrQualityInventoryService:
@@ -82,6 +116,13 @@ def _run_to_dict(run: InventoryRun) -> dict[str, Any]:
         "source_run_id": run.source_run_id,
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+        "actor": run.actor,
+        "trigger": run.trigger,
+        "correlation_id": run.correlation_id,
+        "cancel_requested": run.cancel_requested,
+        "cancelled_at": run.cancelled_at.isoformat() if run.cancelled_at else None,
+        "retry_count": run.retry_count,
+        "max_retries": run.max_retries,
     }
 
 
@@ -138,6 +179,10 @@ class StartRunRequest(BaseModel):
     batch_size: int | None = Field(default=None, ge=1, le=1000)
     tags: list[str] = Field(default_factory=list)
     correspondent: str | None = None
+    actor: str = Field(default="system", description="Reviewer/system identity for audit purposes.")
+    correlation_id: str | None = Field(
+        default=None, description="Caller-supplied correlation id, echoed back on every response."
+    )
 
 
 class ResumeRunRequest(BaseModel):
@@ -160,6 +205,10 @@ class StartSampleRequest(BaseModel):
     seed: str | None = None
     min_per_stratum: int | None = Field(default=None, ge=0)
     max_pages: int | None = Field(default=None, ge=1)
+    actor: str = Field(default="system", description="Reviewer/system identity for audit purposes.")
+    correlation_id: str | None = Field(
+        default=None, description="Caller-supplied correlation id, echoed back on every response."
+    )
 
 
 async def _resolve_scope_params(
@@ -220,6 +269,7 @@ def _mark_run_failed(run_id: str) -> None:
             run.status = RunStatus.FAILED.value
             run.finished_at = datetime.utcnow()
             db.commit()
+            emit_run_alert(run, reason="failed")
     finally:
         db.close()
 
@@ -231,6 +281,9 @@ async def _execute_corpus_scan(
     batch_size: int,
     resume: bool,
     scope_params: dict[str, Any] | None,
+    actor: str = "system",
+    trigger: RunTrigger | str = RunTrigger.MANUAL,
+    correlation_id: str | None = None,
 ) -> None:
     _active_run_ids.add(run_id)
     try:
@@ -240,7 +293,12 @@ async def _execute_corpus_scan(
             run_id=run_id,
             resume=resume,
             scope_params=scope_params or None,
+            actor=actor,
+            trigger=trigger,
+            correlation_id=correlation_id,
         )
+    except RunConflictError:
+        logger.info("OCR quality corpus scan %s superseded by conflicting run", run_id)
     except Exception:
         logger.exception("OCR quality corpus scan %s failed", run_id)
         _mark_run_failed(run_id)
@@ -258,6 +316,9 @@ async def _execute_stratified_sample(
     seed: str,
     min_per_stratum: int,
     pdf_profile_max_pages: int,
+    actor: str = "system",
+    trigger: RunTrigger | str = RunTrigger.MANUAL,
+    correlation_id: str | None = None,
 ) -> None:
     _active_run_ids.add(run_id)
     try:
@@ -269,7 +330,12 @@ async def _execute_stratified_sample(
             min_per_stratum=min_per_stratum,
             pdf_profile_max_pages=pdf_profile_max_pages,
             run_id=run_id,
+            actor=actor,
+            trigger=trigger,
+            correlation_id=correlation_id,
         )
+    except RunConflictError:
+        logger.info("OCR quality stratified sample %s superseded by conflicting run", run_id)
     except Exception:
         logger.exception("OCR quality stratified sample %s failed", run_id)
         _mark_run_failed(run_id)
@@ -323,12 +389,17 @@ async def start_corpus_scan(
         batch_size=batch_size,
         resume=False,
         scope_params=scope_params,
+        actor=body.actor,
+        trigger=RunTrigger.MANUAL,
+        correlation_id=body.correlation_id,
     )
     return {
         "run_id": run_id,
         "stage": RunStage.STAGE_1_CORPUS_SCAN.value,
         "status": RunStatus.RUNNING.value,
         "scheduled_at": datetime.utcnow().isoformat(),
+        "actor": body.actor,
+        "correlation_id": body.correlation_id,
     }
 
 
@@ -444,6 +515,9 @@ async def start_stratified_sample(
             else ocr_quality_settings.sample_min_per_stratum
         ),
         pdf_profile_max_pages=body.max_pages or ocr_quality_settings.pdf_profile_max_pages,
+        actor=body.actor,
+        trigger=RunTrigger.MANUAL,
+        correlation_id=body.correlation_id,
     )
     return {
         "run_id": sample_run_id,
@@ -451,7 +525,33 @@ async def start_stratified_sample(
         "stage": RunStage.STAGE_2_STRATIFIED_SAMPLE.value,
         "status": RunStatus.RUNNING.value,
         "scheduled_at": datetime.utcnow().isoformat(),
+        "actor": body.actor,
+        "correlation_id": body.correlation_id,
     }
+
+
+@router.post("/runs/{run_id}/cancel")
+async def cancel_run(run_id: str) -> dict[str, Any]:
+    """Request cooperative cancellation of a running Stage-1/Stage-2 run (issue #30).
+
+    The run's own loop observes ``cancel_requested`` between pages/documents
+    and stops cleanly — cancellation is not instantaneous, but is always
+    observable via ``GET /runs/{run_id}`` afterwards. Returns 404 if the run
+    is unknown, 409 if it's already in a terminal state.
+    """
+    init_ocr_quality_db()
+    service = OcrQualityInventoryService(None, get_ocr_quality_session)  # type: ignore[arg-type]
+    try:
+        return service.request_cancellation(run_id)
+    except ValueError as exc:
+        message = str(exc)
+        if message.startswith("Unknown run"):
+            raise HTTPException(
+                status_code=404, detail={"code": "not_found", "message": message}
+            ) from exc
+        raise HTTPException(
+            status_code=409, detail={"code": "run_not_cancellable", "message": message}
+        ) from exc
 
 
 @router.get("/distribution")
@@ -521,3 +621,343 @@ async def get_document(document_id: int) -> dict[str, Any]:
             },
         )
     return detail
+
+
+@router.post("/documents/{document_id}/stage2")
+async def force_stage2_analysis(
+    request: Request,
+    document_id: int,
+    max_pages: int | None = None,
+    actor: str = "system",
+    correlation_id: str | None = None,
+) -> dict[str, Any]:
+    """Force Stage-2 PDF profiling + quality re-score for one document on demand.
+
+    Unlike ``POST /runs/{run_id}/sample`` (a corpus-wide random stratified
+    sample), this targets exactly one ``document_id`` — e.g. triggered from
+    the document detail page. Requires the document to already have a
+    Stage-1 ``DocumentAssessment`` (404 otherwise — the detail page itself
+    can't be open without one). Runs inline, not as a ``BackgroundTasks``
+    job: a single document's PDF fetch + profile is fast, so the request
+    just returns the refreshed document detail payload directly instead of
+    a ``run_id`` to poll. Refuses a second concurrent trigger for the same
+    document — returns 409 instead. Repeated delivery for an unchanged
+    document version + ``max_pages`` returns the prior result instead of
+    re-fetching (issue #30 idempotency). Only ever reads from Paperless
+    (``get_document_preview``) — never writes anything back to it.
+    """
+    init_ocr_quality_db()
+    if document_id in _active_manual_stage2_document_ids:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "stage2_already_in_progress",
+                "message": f"A forced Stage-2 analysis for document {document_id} is already running.",
+                "document_id": document_id,
+            },
+        )
+
+    client = make_paperless_client(request, timeout=30.0)
+    service = OcrQualityInventoryService(client, get_ocr_quality_session)
+    _active_manual_stage2_document_ids.add(document_id)
+    try:
+        return await service.run_manual_stage2(
+            document_id=document_id,
+            max_pages=max_pages or ocr_quality_settings.pdf_profile_max_pages,
+            actor=actor,
+            trigger=RunTrigger.MANUAL,
+            correlation_id=correlation_id,
+        )
+    except ManualStage2DocumentNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": (
+                    f"No OCR quality assessment for document {document_id}; "
+                    "run a Stage-1 corpus scan first."
+                ),
+            },
+        ) from exc
+    except ManualStage2ProfilingFailedError as exc:
+        is_parse_failure = exc.reason_code == ReasonCode.PDF_PARSE_FAILED.value
+        status_code = 422 if is_parse_failure else 502
+        raise HTTPException(
+            status_code=status_code,
+            detail={
+                "code": "pdf_parse_failed" if is_parse_failure else "paperless_fetch_failed",
+                "message": f"Stage-2 profiling failed for document {document_id}.",
+                "reason_code": exc.reason_code,
+            },
+        ) from exc
+    except RunConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "run_already_in_progress",
+                "message": f"An equivalent Stage-2 run for document {document_id} is already active.",
+                "run_id": exc.run_id,
+            },
+        ) from exc
+    finally:
+        _active_manual_stage2_document_ids.discard(document_id)
+        await client.aclose()
+
+
+# ---------------------------------------------------------------------------
+# Region-level inspection (issue #134, Part 1) — read-only, on-demand
+# ---------------------------------------------------------------------------
+
+
+async def _fetch_pdf_bytes(request: Request, document_id: int) -> bytes:
+    """Get PDF bytes for a document, reusing the short-lived in-process cache.
+
+    Downloads from Paperless (via the existing preview endpoint, same
+    convention as ``DocumentPreview``/``DocumentViewerModal``) only on a
+    cache miss — never precomputed for the whole corpus.
+    """
+    cached = region_inspection.peek_cached_pdf_bytes(document_id)
+    if cached is not None:
+        return cached
+
+    client = make_paperless_client(request, timeout=30.0)
+    try:
+        pdf_bytes, _content_type = await client.get_document_preview(document_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "paperless_fetch_failed",
+                "message": f"Could not fetch document {document_id} from Paperless.",
+            },
+        ) from exc
+    finally:
+        await client.aclose()
+
+    region_inspection.store_pdf_bytes(document_id, pdf_bytes)
+    return pdf_bytes
+
+
+@router.get("/documents/{document_id}/regions")
+async def get_document_regions(
+    request: Request, document_id: int, page: int = Query(1, ge=1)
+) -> dict[str, Any]:
+    """Word-level geometry + heuristic flags for one page of one document.
+
+    Computed on demand: downloads (or reuses a briefly cached copy of) the
+    document's PDF and parses page geometry with the same ``pdf_loader``
+    used by the Stage 2 profiler — nothing here is precomputed for the
+    whole corpus. Each word is flagged ``duplicate_overlap``,
+    ``bounds_sanity``, and/or ``alignment`` using the same heuristics as
+    ``overlay_scoring.py``, evaluated per-word, and cross-referenced against
+    this document's stored scorer ``reasons`` where the flag category
+    matches.
+    """
+    pdf_bytes = await _fetch_pdf_bytes(request, document_id)
+
+    assessment = _service().get_document_assessment(document_id)
+    document_reasons = (assessment or {}).get("reasons") or []
+
+    regions = region_inspection.build_page_regions(
+        pdf_bytes=pdf_bytes, page_number=page, document_reasons=document_reasons
+    )
+    if regions is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "page_not_found",
+                "message": f"Document {document_id} has no page {page} with parseable geometry.",
+            },
+        )
+    return regions
+
+
+@router.get("/documents/{document_id}/pages/{page}/image")
+async def get_document_page_image(
+    request: Request,
+    document_id: int,
+    page: int,
+    dpi: int = Query(
+        region_inspection.DEFAULT_PAGE_IMAGE_DPI,
+        ge=region_inspection.MIN_PAGE_IMAGE_DPI,
+        le=region_inspection.MAX_PAGE_IMAGE_DPI,
+    ),
+) -> Response:
+    """Render one page of a document as a PNG image, for overlay display.
+
+    Fetched/rendered on demand (same short-lived cache as ``/regions``) —
+    never precomputed for the whole corpus.
+    """
+    if page < 1:
+        raise HTTPException(
+            status_code=422, detail={"code": "invalid_page", "message": "page must be >= 1"}
+        )
+    pdf_bytes = await _fetch_pdf_bytes(request, document_id)
+    rendered = region_inspection.render_page_image(pdf_bytes=pdf_bytes, page_number=page, dpi=dpi)
+    if rendered is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "page_not_found",
+                "message": f"Document {document_id} has no renderable page {page}.",
+            },
+        )
+    png_bytes, _width_px, _height_px = rendered
+    return Response(content=png_bytes, media_type="image/png")
+
+
+# ---------------------------------------------------------------------------
+# Box-level diffing between two word-box lists for the same page (connects
+# issue #134's region inspection with issue #18's candidate comparison) —
+# read-only, stateless, no Paperless or candidate-storage access at all;
+# callers already have both word lists from their own /regions calls.
+# ---------------------------------------------------------------------------
+
+
+class RegionDiffWordRequest(BaseModel):
+    text: str = ""
+    x0: float = 0.0
+    top: float = 0.0
+    x1: float = 0.0
+    bottom: float = 0.0
+
+
+class RegionDiffRequest(BaseModel):
+    words_a: list[RegionDiffWordRequest] = Field(
+        default_factory=list, description="Word boxes from the first ('A') source."
+    )
+    words_b: list[RegionDiffWordRequest] = Field(
+        default_factory=list, description="Word boxes from the second ('B') source."
+    )
+    page_width: float = Field(
+        description="Shared page width (points) both word lists are relative to."
+    )
+    page_height: float = Field(
+        description="Shared page height (points) both word lists are relative to."
+    )
+
+
+@router.post("/regions/diff")
+async def diff_regions(body: RegionDiffRequest) -> dict[str, Any]:
+    """Diff two word-box lists for the same page.
+
+    Single implementation of the box-matching heuristic (greedy nearest
+    neighbor combining text similarity + positional proximity) shared by
+    every comparison the frontend might render — current-vs-candidate or
+    candidate-vs-candidate. See ``region_diff.py`` for the full heuristic
+    write-up.
+    """
+    result = region_diff.diff_word_boxes_from_dicts(
+        [w.model_dump() for w in body.words_a],
+        [w.model_dump() for w in body.words_b],
+        page_width=body.page_width,
+        page_height=body.page_height,
+    )
+    return result.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Manual annotations (issue #134, Part 2) — the only mutation endpoints in
+# this router; they mutate OWL's own local annotation table only, never
+# Paperless or the OCR quality assessment tables.
+# ---------------------------------------------------------------------------
+
+
+class AnnotationCreateRequest(BaseModel):
+    page: int = Field(default=1, ge=1)
+    x0: float
+    top: float
+    x1: float
+    bottom: float
+    label: str = Field(min_length=1, max_length=100)
+    note: str | None = Field(default=None, max_length=2000)
+    created_by: str | None = Field(default=None, max_length=200)
+
+
+class AnnotationUpdateRequest(BaseModel):
+    page: int | None = Field(default=None, ge=1)
+    x0: float | None = None
+    top: float | None = None
+    x1: float | None = None
+    bottom: float | None = None
+    label: str | None = Field(default=None, min_length=1, max_length=100)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+def _annotations_session_factory() -> Any:
+    init_ocr_quality_db()
+    return get_ocr_quality_session
+
+
+@router.get("/documents/{document_id}/annotations")
+async def list_document_annotations(
+    document_id: int, page: int | None = Query(default=None, ge=1)
+) -> dict[str, Any]:
+    """List saved manual annotations for a document, optionally filtered by page."""
+    session_factory = _annotations_session_factory()
+    return {
+        "annotations": annotations_service.list_annotations(
+            session_factory, document_id=document_id, page=page
+        )
+    }
+
+
+@router.post("/documents/{document_id}/annotations", status_code=201)
+async def create_document_annotation(
+    document_id: int, body: AnnotationCreateRequest
+) -> dict[str, Any]:
+    """Create a manual bounding-box annotation for a document/page."""
+    session_factory = _annotations_session_factory()
+    return annotations_service.create_annotation(
+        session_factory,
+        document_id=document_id,
+        page=body.page,
+        x0=body.x0,
+        top=body.top,
+        x1=body.x1,
+        bottom=body.bottom,
+        label=body.label,
+        note=body.note,
+        created_by=body.created_by,
+    )
+
+
+@router.patch("/documents/{document_id}/annotations/{annotation_id}")
+async def update_document_annotation(
+    document_id: int, annotation_id: int, body: AnnotationUpdateRequest
+) -> dict[str, Any]:
+    """Edit an existing annotation's bbox, label, or note."""
+    session_factory = _annotations_session_factory()
+    updated = annotations_service.update_annotation(
+        session_factory,
+        document_id=document_id,
+        annotation_id=annotation_id,
+        updates=body.model_dump(exclude_unset=True),
+    )
+    if updated is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"No annotation {annotation_id} for document {document_id}",
+            },
+        )
+    return updated
+
+
+@router.delete("/documents/{document_id}/annotations/{annotation_id}", status_code=204)
+async def delete_document_annotation(document_id: int, annotation_id: int) -> Response:
+    """Delete an annotation."""
+    session_factory = _annotations_session_factory()
+    deleted = annotations_service.delete_annotation(
+        session_factory, document_id=document_id, annotation_id=annotation_id
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"No annotation {annotation_id} for document {document_id}",
+            },
+        )
+    return Response(status_code=204)

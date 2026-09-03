@@ -325,6 +325,7 @@ export const endpoints = {
     distribution: () => api.get('/api/ocr-quality/distribution'),
     documents: (params?: string) => api.get(`/api/ocr-quality/documents${params ? `?${params}` : ''}`),
     documentDetail: (documentId: number | string) => api.get(`/api/ocr-quality/documents/${documentId}`),
+    forceStage2: (documentId: number | string) => api.post(`/api/ocr-quality/documents/${documentId}/stage2`),
     downstreamOutcomes: () => api.get('/api/ocr-quality/downstream-outcomes'),
     runs: (limit?: number) => api.get(`/api/ocr-quality/runs${limit ? `?limit=${limit}` : ''}`),
     run: (runId: string) => api.get(`/api/ocr-quality/runs/${runId}`),
@@ -337,5 +338,73 @@ export const endpoints = {
       runId: string,
       body?: { sample_size?: number; seed?: string; min_per_stratum?: number; max_pages?: number },
     ) => api.post(`/api/ocr-quality/runs/${runId}/sample`, body ?? {}),
+    candidates: {
+      request: (body: { document_ids: number[]; engines?: string[]; settings?: unknown; actor?: string }) =>
+        api.post<{ candidate_ids: string[]; count: number }>('/api/ocr-quality/candidates', body),
+      list: (params?: { document_id?: number; state?: string }) => {
+        const qs = new URLSearchParams();
+        if (params?.document_id != null) qs.set('document_id', String(params.document_id));
+        if (params?.state) qs.set('state', params.state);
+        const query = qs.toString();
+        return api.get(`/api/ocr-quality/candidates${query ? `?${query}` : ''}`);
+      },
+      get: (candidateId: string) => api.get(`/api/ocr-quality/candidates/${candidateId}`),
+      text: (candidateId: string) => api.get(`/api/ocr-quality/candidates/${candidateId}/text`),
+      decide: (candidateId: string, body: { decision: 'accepted' | 'rejected'; reason?: string; actor?: string }) =>
+        api.post(`/api/ocr-quality/candidates/${candidateId}/decision`, body),
+      cancel: (candidateId: string) => api.post(`/api/ocr-quality/candidates/${candidateId}/cancel`),
+      // Region-level inspection for a candidate's own stored PDF (issue
+      // #134 x #18 — connects region inspection to candidate comparison).
+      regions: (candidateId: string, page = 1) =>
+        api.get(`/api/ocr-quality/candidates/${candidateId}/regions?page=${page}`),
+      pageImageUrl: (candidateId: string, page: number, dpi?: number) =>
+        `/api/ocr-quality/candidates/${candidateId}/pages/${page}/image${dpi ? `?dpi=${dpi}` : ''}`,
+    },
+    // Region-level inspection (issue #134, Part 1 — read-only, on-demand).
+    regions: (documentId: number | string, page = 1) =>
+      api.get(`/api/ocr-quality/documents/${documentId}/regions?page=${page}`),
+    pageImageUrl: (documentId: number | string, page: number, dpi?: number) =>
+      `/api/ocr-quality/documents/${documentId}/pages/${page}/image${dpi ? `?dpi=${dpi}` : ''}`,
+    // Box-level diffing between two word-box lists for the same page
+    // (connects region inspection with candidate comparison).
+    regionsDiff: (body: {
+      words_a: { text: string; x0: number; top: number; x1: number; bottom: number }[];
+      words_b: { text: string; x0: number; top: number; x1: number; bottom: number }[];
+      page_width: number;
+      page_height: number;
+    }) => api.post('/api/ocr-quality/regions/diff', body),
+    // Manual annotations (issue #134, Part 2 — the only mutation endpoints here).
+    annotations: {
+      list: (documentId: number | string, page?: number) =>
+        api.get(`/api/ocr-quality/documents/${documentId}/annotations${page ? `?page=${page}` : ''}`),
+      create: (
+        documentId: number | string,
+        body: {
+          page?: number;
+          x0: number;
+          top: number;
+          x1: number;
+          bottom: number;
+          label: string;
+          note?: string | null;
+          created_by?: string | null;
+        },
+      ) => api.post(`/api/ocr-quality/documents/${documentId}/annotations`, body),
+      update: (
+        documentId: number | string,
+        annotationId: number | string,
+        body: Partial<{
+          page: number;
+          x0: number;
+          top: number;
+          x1: number;
+          bottom: number;
+          label: string;
+          note: string | null;
+        }>,
+      ) => api.patch(`/api/ocr-quality/documents/${documentId}/annotations/${annotationId}`, body),
+      remove: (documentId: number | string, annotationId: number | string) =>
+        api.delete(`/api/ocr-quality/documents/${documentId}/annotations/${annotationId}`),
+    },
   },
 };
