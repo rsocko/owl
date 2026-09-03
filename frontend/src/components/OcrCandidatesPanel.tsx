@@ -55,6 +55,7 @@ const ENGINE_LABELS: Record<string, string> = {
 };
 
 const ACTIVE_STATES = new Set(['requested', 'running']);
+const ACCEPTED_STATES = new Set(['accepted', 'accepted_pending_invalidation']);
 
 function stateTone(state: string): Tone {
   switch (state) {
@@ -413,19 +414,26 @@ export default function OcrCandidatesPanel({
             </tr>
           </thead>
           <tbody>
-            {(currentOverlayScore != null || currentMachineScore != null) && (
-              <tr className="ocr-candidate-current-row">
-                <td>Current (Paperless)</td>
-                <td><Badge tone="muted">live</Badge></td>
-                <td>{currentOverlayScore == null ? '—' : currentOverlayScore}</td>
-                <td>{currentMachineScore == null ? '—' : currentMachineScore}</td>
-                <td>{currentContentScore == null ? '—' : currentContentScore}</td>
-                <td>—</td>
-                <td>—</td>
-                <td className="text-muted">Reference baseline — not a candidate</td>
-                <td />
-              </tr>
-            )}
+            {(currentOverlayScore != null || currentMachineScore != null) && (() => {
+              const hasAccepted = candidates.some((c) => ACCEPTED_STATES.has(c.state));
+              return (
+                <tr className="ocr-candidate-current-row">
+                  <td>{hasAccepted ? 'Original (pre-acceptance baseline)' : 'Current (Paperless)'}</td>
+                  <td><Badge tone="muted">{hasAccepted ? 'prior' : 'live'}</Badge></td>
+                  <td>{currentOverlayScore == null ? '—' : currentOverlayScore}</td>
+                  <td>{currentMachineScore == null ? '—' : currentMachineScore}</td>
+                  <td>{currentContentScore == null ? '—' : currentContentScore}</td>
+                  <td>—</td>
+                  <td>—</td>
+                  <td className="text-muted">
+                    {hasAccepted
+                      ? 'Baseline scores from before a candidate was accepted — not refreshed after acceptance'
+                      : 'Reference baseline — not a candidate'}
+                  </td>
+                  <td />
+                </tr>
+              );
+            })()}
             {candidates.map((c) => {
               const readyCandidates = candidates.filter((cand) => cand.state === 'ready');
               const rowBadges = [

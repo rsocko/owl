@@ -339,6 +339,23 @@ describe('OcrCandidatesPanel', () => {
     expect(screen.queryByText('Current (Paperless)')).not.toBeInTheDocument();
   });
 
+  it('relabels the reference row as a prior baseline once a candidate is accepted', async () => {
+    const accepted = { ...readyCandidate, state: 'accepted', decision: 'accepted' };
+    mocks.list.mockResolvedValue({ candidates: [accepted] });
+    render(
+      <OcrCandidatesPanel
+        documentId={501}
+        currentOverlayScore={69.8}
+        currentMachineScore={72.5}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText('OCRmyPDF / Tesseract 5')).toBeInTheDocument());
+
+    expect(screen.queryByText('Current (Paperless)')).not.toBeInTheDocument();
+    expect(screen.getByText('Original (pre-acceptance baseline)')).toBeInTheDocument();
+    expect(screen.getByText(/not refreshed after acceptance/i)).toBeInTheDocument();
+  });
+
   it('shows non-stale apply/rollback messaging', async () => {
     render(<OcrCandidatesPanel documentId={501} />);
     await waitFor(() => expect(screen.getByText(/applies it to the live Paperless document/i)).toBeInTheDocument());
