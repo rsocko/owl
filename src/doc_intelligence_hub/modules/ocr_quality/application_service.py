@@ -840,7 +840,9 @@ class OcrCandidateApplicationService:
             # failed, without overloading the (unrelated) target candidate's
             # lifecycle state — the Paperless version swap here is never
             # rolled back either way.
-            "status": "rolled_back" if invalidation_recorded else "rolled_back_pending_invalidation",
+            "status": "rolled_back"
+            if invalidation_recorded
+            else "rolled_back_pending_invalidation",
         }
 
     # ------------------------------------------------------------------
@@ -879,7 +881,9 @@ class OcrCandidateApplicationService:
             db.close()
 
         try:
-            self._acquire_lock(document_id, operation="retry_invalidation", candidate_id=candidate_id)
+            self._acquire_lock(
+                document_id, operation="retry_invalidation", candidate_id=candidate_id
+            )
         except LockHeldError as exc:
             return {"error": str(exc)}
 
@@ -893,7 +897,9 @@ class OcrCandidateApplicationService:
 
             db = self.session_factory()
             try:
-                row = db.query(OcrQualityCandidate).filter_by(candidate_id=candidate_id).one_or_none()
+                row = (
+                    db.query(OcrQualityCandidate).filter_by(candidate_id=candidate_id).one_or_none()
+                )
                 if row is not None:
                     row.invalidation_recorded = invalidation_recorded
                     if invalidation_recorded:

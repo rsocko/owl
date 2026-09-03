@@ -388,8 +388,12 @@ class TestApplyCandidateContentVerification:
         self, fake_client, app_service, monkeypatch
     ):
         # Speed up the bounded retry loop for this deliberately-exhausted case.
-        monkeypatch.setattr(ocr_quality_config.settings, "candidate_apply_content_verify_attempts", 2)
-        monkeypatch.setattr(ocr_quality_config.settings, "candidate_apply_content_verify_delay_seconds", 0.0)
+        monkeypatch.setattr(
+            ocr_quality_config.settings, "candidate_apply_content_verify_attempts", 2
+        )
+        monkeypatch.setattr(
+            ocr_quality_config.settings, "candidate_apply_content_verify_delay_seconds", 0.0
+        )
 
         candidate_id = await _make_applying_candidate(fake_client)
         fake_client.content_sync_delayed_documents.add(1)
@@ -519,7 +523,9 @@ class TestApplyCandidatePendingInvalidation:
             db.close()
 
     @pytest.mark.asyncio
-    async def test_retry_invalidation_rejects_blank_actor(self, fake_client, app_service, monkeypatch):
+    async def test_retry_invalidation_rejects_blank_actor(
+        self, fake_client, app_service, monkeypatch
+    ):
         monkeypatch.setattr(asyncio, "sleep", AsyncMock())
         monkeypatch.setattr(
             app_service._freshness_service,

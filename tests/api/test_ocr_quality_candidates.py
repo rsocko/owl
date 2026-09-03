@@ -359,9 +359,7 @@ class TestRollbackEndpoint:
         missing_resp = client.post("/api/ocr-quality/documents/1/rollback", json={})
         assert missing_resp.status_code == 422
 
-        blank_resp = client.post(
-            "/api/ocr-quality/documents/1/rollback", json={"actor": "  "}
-        )
+        blank_resp = client.post("/api/ocr-quality/documents/1/rollback", json={"actor": "  "})
         assert blank_resp.status_code == 422
 
     def test_rollback_with_no_resolvable_target_returns_400(
@@ -373,9 +371,7 @@ class TestRollbackEndpoint:
         error-translation path for ``rollback``'s ``{"error": ...}`` result.
         """
         mock_paperless.list_document_versions.return_value = []
-        resp = client.post(
-            "/api/ocr-quality/documents/1/rollback", json={"actor": "reviewer1"}
-        )
+        resp = client.post("/api/ocr-quality/documents/1/rollback", json={"actor": "reviewer1"})
         assert resp.status_code == 400
         assert "rollback" in resp.json()["error"]["message"].lower()
 
