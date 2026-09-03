@@ -542,7 +542,15 @@ class TestAzureTableTextReconstruction:
             _row_joined_table_text,
         )
 
-        header = ["Payment Due Date", "Principal", "Interest", "Escrow", "Late Charge", "Other", "Total"]
+        header = [
+            "Payment Due Date",
+            "Principal",
+            "Interest",
+            "Escrow",
+            "Late Charge",
+            "Other",
+            "Total",
+        ]
         data = ["Jul 12, 2026", "141.97", "0.00", "0.00", "0.00", "0.00", "141.97"]
         table, _ = _make_fake_table([header, data], start_offset=0)
 
@@ -557,7 +565,15 @@ class TestAzureTableTextReconstruction:
             _extract_text_and_confidence,
         )
 
-        header = ["Payment Due Date", "Principal", "Interest", "Escrow", "Late Charge", "Other", "Total"]
+        header = [
+            "Payment Due Date",
+            "Principal",
+            "Interest",
+            "Escrow",
+            "Late Charge",
+            "Other",
+            "Total",
+        ]
         data = ["Jul 12, 2026", "141.97", "0.00", "0.00", "0.00", "0.00", "141.97"]
         before = "Statement Summary"
         after = "Thank you for your business"
