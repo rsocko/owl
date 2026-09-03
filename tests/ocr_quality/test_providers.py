@@ -316,19 +316,94 @@ class TestAzureOverlayPrecision:
         # [1.0, 2.0], y in [1.0, 1.3].
         polygon = [1.0, 1.0, 2.0, 1.0, 2.0, 1.3, 1.0, 1.3]
 
-        x0, pdf_y, box_height = _polygon_to_overlay_box(
+        x0, pdf_y, box_height, box_width = _polygon_to_overlay_box(
             polygon, scale_x, scale_y, page_height_pts=200.0
         )
 
         expected_x0 = 1.0 * scale_x
+        expected_x1 = 2.0 * scale_x
         expected_y1 = 1.3 * scale_y
         expected_y0 = 1.0 * scale_y
         expected_box_height = max(expected_y1 - expected_y0, 1.0)
+        expected_box_width = max(expected_x1 - expected_x0, 0.0)
         expected_pdf_y = 200.0 - expected_y1
 
         assert x0 == pytest.approx(expected_x0, rel=1e-9)
         assert box_height == pytest.approx(expected_box_height, rel=1e-9)
+        assert box_width == pytest.approx(expected_box_width, rel=1e-9)
         assert pdf_y == pytest.approx(expected_pdf_y, rel=1e-9)
+
+    def test_adjacent_words_keep_their_space_when_glyph_run_would_overflow(self):
+        """Regression test: two genuinely-separate adjacent Azure words on
+        the same line, whose polygon width is narrower than Helvetica's
+        rendered glyph-run width at the font size derived from their
+        polygon *height* (a completely realistic case -- Helvetica's advance
+        width has no guaranteed relation to polygon width). Before the fix,
+        the first word's rendered text overflows past its own polygon and
+        overlaps the second word's start; pdfplumber's ``extract_words()``
+        then sees no horizontal gap and merges the two into one garbled
+        token (characters interleaved in x-order, e.g. "AccounNt"/"umber"
+        instead of "Account"/"Number"). After the fix, the glyph run is
+        clipped to the real polygon width, so the true gap between the two
+        words survives and they re-extract as two separate, correctly
+        spelled words.
+        """
+        import io
+
+        import pdfplumber
+        import reportlab.pdfgen.canvas as _canvas
+        from pypdf import PdfReader, PdfWriter
+
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _build_searchable_pdf,
+        )
+
+        raw_buf = io.BytesIO()
+        _c = _canvas.Canvas(raw_buf, pagesize=(300, 100))
+        _c.showPage()
+        _c.save()
+        reader = PdfReader(io.BytesIO(raw_buf.getvalue()))
+        writer = PdfWriter()
+        writer.add_page(reader.pages[0])
+        out_buf = io.BytesIO()
+        writer.write(out_buf)
+        plain_pdf_bytes = out_buf.getvalue()
+
+        # Azure "inch" unit with scale 1.0 (page width/height in inches ==
+        # page width/height in points). "Account" occupies x in [0, 50] and
+        # "Number" starts at x=53 -- a real, positive 3pt gap between the
+        # two words' true polygons. Both polygons are 17.78pt tall, so the
+        # derived font size (17.78 * 0.9 = 16pt) renders "Account" at
+        # ~57.8pt wide (measured: reportlab Helvetica stringWidth) -- well
+        # past its own 50pt-wide polygon and into "Number"'s start.
+        fake_word_1 = MagicMock(
+            confidence=0.98,
+            content="Account",
+            polygon=[0.0, 10.0, 50.0, 10.0, 50.0, 27.78, 0.0, 27.78],
+        )
+        fake_word_2 = MagicMock(
+            confidence=0.98,
+            content="Number",
+            polygon=[53.0, 10.0, 103.0, 10.0, 103.0, 27.78, 53.0, 27.78],
+        )
+        fake_page = MagicMock(
+            page_number=1,
+            unit="inch",
+            width=300.0,
+            height=100.0,
+            words=[fake_word_1, fake_word_2],
+        )
+        fake_result = MagicMock(pages=[fake_page])
+
+        candidate_bytes = _build_searchable_pdf(plain_pdf_bytes, fake_result)
+
+        with pdfplumber.open(io.BytesIO(candidate_bytes)) as pdf:
+            words = pdf.pages[0].extract_words()
+
+        assert len(words) == 2
+        assert [w["text"] for w in words] == ["Account", "Number"]
+        # The two words must not overlap -- a real, positive gap survives.
+        assert words[0]["x1"] <= words[1]["x0"]
 
     def test_build_searchable_pdf_handles_rotated_page(self):
         """A page with PDF ``/Rotate 90`` metadata must place the overlay
@@ -507,3 +582,121 @@ class TestAzureOverlayPrecision:
         assert word["x1"] - word["x0"] < 60.0
         assert 0.0 <= word["x0"] <= 300.0
         assert 0.0 <= word["top"] <= 300.0
+
+
+def _make_fake_table(rows: list[list[str]], start_offset: int) -> tuple[MagicMock, str]:
+    """Build a fake Azure ``DocumentTable`` (MagicMock) plus the per-cell-line
+    text block Azure's plain-``text`` content format would emit for it,
+    positioned as if it started at ``start_offset`` within some larger
+    ``result.content`` string -- mirroring Azure's real one-line-per-cell
+    serialization this fix reconstructs away from.
+    """
+    cells = []
+    cell_lines: list[str] = []
+    for row_index, row in enumerate(rows):
+        for column_index, cell_text in enumerate(row):
+            cells.append(
+                MagicMock(row_index=row_index, column_index=column_index, content=cell_text)
+            )
+            cell_lines.append(cell_text)
+    block = "\n".join(cell_lines)
+    span = MagicMock(offset=start_offset, length=len(block))
+    table = MagicMock(cells=cells, spans=[span])
+    return table, block
+
+
+class TestAzureTableTextReconstruction:
+    """Regression tests: candidate text must row-join table cells the same
+    way the existing Paperless/pdftotext-style comparison text does, instead
+    of Azure's default one-line-per-cell serialization (issue: table text
+    formatting mismatch distorting the human comparison view/diff stats).
+    """
+
+    def test_row_joined_table_text_joins_cells_by_row(self):
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _row_joined_table_text,
+        )
+
+        header = [
+            "Payment Due Date",
+            "Principal",
+            "Interest",
+            "Escrow",
+            "Late Charge",
+            "Other",
+            "Total",
+        ]
+        data = ["Jul 12, 2026", "141.97", "0.00", "0.00", "0.00", "0.00", "141.97"]
+        table, _ = _make_fake_table([header, data], start_offset=0)
+
+        result = _row_joined_table_text(table)
+
+        assert result == f"{' '.join(header)}\n{' '.join(data)}"
+        # 2 rows, not 14 per-cell lines.
+        assert result.count("\n") == 1
+
+    def test_extract_text_reconstructs_table_and_preserves_surrounding_text(self):
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _extract_text_and_confidence,
+        )
+
+        header = [
+            "Payment Due Date",
+            "Principal",
+            "Interest",
+            "Escrow",
+            "Late Charge",
+            "Other",
+            "Total",
+        ]
+        data = ["Jul 12, 2026", "141.97", "0.00", "0.00", "0.00", "0.00", "141.97"]
+        before = "Statement Summary"
+        after = "Thank you for your business"
+
+        table, block = _make_fake_table([header, data], start_offset=len(before) + 1)
+        content = f"{before}\n{block}\n{after}"
+
+        fake_result = MagicMock(content=content, pages=[], tables=[table])
+
+        text, _confidence = _extract_text_and_confidence(fake_result)
+
+        expected_table_block = f"{' '.join(header)}\n{' '.join(data)}"
+        assert text == f"{before}\n{expected_table_block}\n{after}"
+        # Row-joined, not one line per cell.
+        assert "Payment Due Date Principal Interest Escrow Late Charge Other Total" in text
+        assert text.count("Payment Due Date\n") == 0
+
+    def test_extract_text_with_no_tables_is_unchanged(self):
+        """Guards the common non-table document case: byte-for-byte identical
+        to plain ``result.content`` when there are no tables at all."""
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _extract_text_and_confidence,
+        )
+
+        content = "Just a plain paragraph.\nAnother line.\n"
+        fake_result_no_attr = MagicMock(content=content, pages=[])
+        del fake_result_no_attr.tables  # simulate no `tables` attribute at all
+        fake_result_empty = MagicMock(content=content, pages=[], tables=[])
+
+        text_no_attr, _ = _extract_text_and_confidence(fake_result_no_attr)
+        text_empty, _ = _extract_text_and_confidence(fake_result_empty)
+
+        assert text_no_attr == content
+        assert text_empty == content
+
+    def test_reconstruct_multiple_tables_preserves_order(self):
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _extract_text_and_confidence,
+        )
+
+        table1, block1 = _make_fake_table([["A", "B"], ["1", "2"]], start_offset=len("Intro\n"))
+        middle = "Middle paragraph."
+        offset2 = len("Intro\n") + len(block1) + len("\n" + middle + "\n")
+        table2, block2 = _make_fake_table([["X", "Y"], ["9", "8"]], start_offset=offset2)
+        content = f"Intro\n{block1}\n{middle}\n{block2}\nOutro"
+
+        fake_result = MagicMock(content=content, pages=[], tables=[table1, table2])
+
+        text, _ = _extract_text_and_confidence(fake_result)
+
+        assert text == "Intro\nA B\n1 2\nMiddle paragraph.\nX Y\n9 8\nOutro"
