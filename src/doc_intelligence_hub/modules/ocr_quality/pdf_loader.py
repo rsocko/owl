@@ -20,9 +20,10 @@ logger = logging.getLogger(__name__)
 # to exactly 0.0 -- numerical noise from the matrix math, not a real skew.
 _ANGLE_SNAP_TOLERANCE_DEGREES = 0.5
 
-# Bbox-containment tolerance (page-relative points) used when matching a
-# representative character to a word's already-computed bounding box.
-_CHAR_MATCH_TOLERANCE = 0.5
+# Threshold (degrees) used to reclassify a char as "upright" (nearest
+# cardinal direction is 0/180) vs. "rotated" (nearest cardinal is 90/270)
+# for word-clustering purposes -- see ``_is_upright_angle`` below.
+_UPRIGHT_BUCKET_THRESHOLD_DEGREES = 45.0
 
 
 def load_pdf_pages(pdf_bytes: bytes) -> list[PdfPageData]:
@@ -65,7 +66,7 @@ def _load_page(page_number: int, page) -> PdfPageData:
         chars = getattr(page, "chars", None) or []
 
         words: list[WordBox] = []
-        for order_index, w in enumerate(page.extract_words(use_text_flow=False) or []):
+        for order_index, w in enumerate(_extract_words(chars)):
             words.append(
                 WordBox(
                     text=w.get("text", ""),
@@ -74,7 +75,7 @@ def _load_page(page_number: int, page) -> PdfPageData:
                     x1=float(w.get("x1", 0.0)),
                     bottom=float(w.get("bottom", 0.0)),
                     order_index=order_index,
-                    angle_degrees=_word_angle_degrees(w, chars),
+                    angle_degrees=_word_angle_degrees(w),
                 )
             )
 
@@ -110,38 +111,89 @@ def _load_page(page_number: int, page) -> PdfPageData:
         )
 
 
-def _word_angle_degrees(word: dict, chars: list) -> float:
-    """Derive one word's rotation angle from a representative glyph's PDF
-    text-rendering matrix.
+def _extract_words(chars: list) -> list:
+    """Cluster a page's chars into words, correctly handling rotated text.
 
-    ``extract_words()`` only returns each word's aggregate bounding box, not
-    its constituent chars, so a representative character is located by bbox
-    containment against the page's already-parsed ``chars`` list. Reading
-    the angle straight off a glyph's own rendering matrix -- rather than
-    relying on ``extract_words``' own grouping heuristics, which only
-    reliably distinguish upright vs. non-upright (cardinal-rotation) text --
-    lets this support arbitrary skew angles, not just 90 deg multiples.
+    ``pdfplumber``'s own ``page.extract_words()`` already contains working
+    clustering logic for both upright and rotated (e.g. vertical sidebar)
+    text -- it branches per char on pdfminer's ``LTChar.upright`` flag and
+    uses a different clustering axis for each bucket. The problem is that
+    flag itself: it's defined as ``a*d*scaling > 0 and b*c <= 0`` on the
+    char's text matrix, which for a pure rotation reduces to ``cos(angle)**2
+    > 0`` -- i.e. it is ``False`` (non-upright) *only* for a rotation of
+    *exactly* +/-90/270 degrees. Any angle merely close to 90 (89.5, 85, 80
+    deg -- the realistic case for a scanned or slightly skewed vertical
+    sidebar) is still classified ``upright=True`` and run through normal
+    horizontal-line clustering, which fails for chars actually stacked
+    vertically: it either fragments the run into one "word" per character,
+    or occasionally mis-merges chars into an oversized, wrongly-oriented
+    bounding box.
 
-    Returns ``0.0`` (normal/upright) if no matching character is found.
+    This re-derives ``upright`` per char from its own rendering matrix
+    (bucketed by nearest cardinal direction, not pdfminer's cardinal-*exact*
+    check) before delegating to ``pdfplumber``'s own ``WordExtractor`` --
+    reusing its already-correct clustering rather than reimplementing it.
+    For any page where no char's corrected classification differs from
+    pdfminer's own (i.e. every normal upright-text page), this produces
+    byte-for-byte identical output to today's ``page.extract_words()``.
     """
-    x0 = word.get("x0", 0.0)
-    top = word.get("top", 0.0)
-    x1 = word.get("x1", 0.0)
-    bottom = word.get("bottom", 0.0)
+    try:
+        from pdfplumber.utils.text import WordExtractor
+    except ImportError:  # pragma: no cover - pdfplumber is a declared dependency
+        return []
 
+    corrected_chars = []
     for ch in chars:
         matrix = ch.get("matrix")
-        if not matrix:
+        if matrix:
+            ch = {**ch, "upright": _is_upright_angle(_char_angle_degrees(ch))}
+        corrected_chars.append(ch)
+
+    return WordExtractor(use_text_flow=False).extract_words(corrected_chars, return_chars=True) or []
+
+
+def _char_angle_degrees(ch: dict) -> float:
+    """Raw rotation angle (degrees) of one char's own PDF text-rendering matrix."""
+    matrix = ch.get("matrix")
+    if not matrix:
+        return 0.0
+    return math.degrees(math.atan2(matrix[1], matrix[0]))
+
+
+def _is_upright_angle(angle_degrees: float) -> bool:
+    """Is this angle's nearest cardinal direction 0/180 (upright) rather than
+    90/270 (rotated)?
+
+    A 45 deg bucket threshold, applied to the char's *own* matrix-derived
+    angle rather than pdfminer's cardinal-exact ``upright`` flag, correctly
+    classifies "genuinely vertical, but not bit-exact 90 deg" text (the
+    realistic real-world case) as rotated.
+    """
+    normalized = abs(angle_degrees) % 180.0
+    distance_from_horizontal = min(normalized, 180.0 - normalized)
+    return distance_from_horizontal <= _UPRIGHT_BUCKET_THRESHOLD_DEGREES
+
+
+def _word_angle_degrees(word: dict) -> float:
+    """Derive one word's rotation angle from one of its own glyphs' PDF
+    text-rendering matrix.
+
+    ``word["chars"]`` (populated via ``WordExtractor(..., return_chars=True)``
+    in ``_extract_words``) gives direct access to the word's own member
+    chars, so no bbox-matching against the page's separately-parsed char
+    list is needed. Reading the angle straight off a glyph's own rendering
+    matrix -- rather than relying on ``extract_words``' own grouping
+    heuristics -- lets this support arbitrary skew angles, not just 90 deg
+    multiples.
+
+    Returns ``0.0`` (normal/upright) if the word has no chars with a matrix.
+    """
+    for ch in word.get("chars", []) or []:
+        if not ch.get("matrix"):
             continue
-        if (
-            x0 - _CHAR_MATCH_TOLERANCE <= ch.get("x0", 0.0)
-            and ch.get("x1", 0.0) <= x1 + _CHAR_MATCH_TOLERANCE
-            and top - _CHAR_MATCH_TOLERANCE <= ch.get("top", 0.0)
-            and ch.get("bottom", 0.0) <= bottom + _CHAR_MATCH_TOLERANCE
-        ):
-            angle = math.degrees(math.atan2(matrix[1], matrix[0]))
-            if abs(angle) < _ANGLE_SNAP_TOLERANCE_DEGREES:
-                return 0.0
-            return angle
+        angle = _char_angle_degrees(ch)
+        if abs(angle) < _ANGLE_SNAP_TOLERANCE_DEGREES:
+            return 0.0
+        return angle
 
     return 0.0
