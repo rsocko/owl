@@ -15,7 +15,10 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     create_engine,
+    inspect,
+    text,
 )
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import settings
@@ -325,7 +328,78 @@ def get_session() -> Session:
     return session_local()
 
 
+def _literal_default_sql(column: Column) -> str | None:
+    """Render a column's scalar Python-side default as SQL literal, if possible.
+
+    Only handles simple, non-callable defaults (``Column(..., default=<scalar>)``)
+    — which covers every column this module has ever added. Returns ``None``
+    when there's no usable literal (callable default, or no default at all).
+    """
+    default = column.default
+    if default is None or not getattr(default, "is_scalar", False):
+        return None
+    value = default.arg
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return "'" + value.replace("'", "''") + "'"
+    return None
+
+
+def _add_column_ddl(engine: Engine, column: Column) -> str:
+    """Build the ``ADD COLUMN`` clause for one missing column."""
+    column_type = column.type.compile(dialect=engine.dialect)
+    default_sql = _literal_default_sql(column)
+    parts = [f'"{column.name}"', column_type]
+    # SQLite refuses to add a NOT NULL column to a non-empty table unless a
+    # DEFAULT is given. If we can't derive one, fall back to nullable rather
+    # than fail the whole migration (never blocks startup, never loses rows).
+    if not column.nullable and default_sql is not None:
+        parts.append("NOT NULL")
+    if default_sql is not None:
+        parts.append(f"DEFAULT {default_sql}")
+    return " ".join(parts)
+
+
+def _add_missing_columns(engine: Engine) -> None:
+    """Idempotently add model columns missing from already-existing tables.
+
+    This codebase has no migration framework (Alembic or otherwise) —
+    ``Base.metadata.create_all()`` only creates missing *tables*, it never
+    adds columns to a table that already exists. When a change adds columns
+    to an existing model (e.g. issue #30's shared run/state contract fields
+    on ``InventoryRun``), a database whose table predates that change is left
+    without the new columns and every query against it fails with
+    ``OperationalError: no such column`` (this broke the production
+    ``/api/ocr-quality/runs`` list — see PR #153/issue #30 follow-up).
+
+    This is a SQLite-only stopgap (the only backend this module supports):
+    it only ever *adds* columns, never drops/renames/alters existing ones,
+    and is a safe no-op when a table doesn't exist yet (``create_all()``
+    already created it correctly) or already has every column.
+    """
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            existing_columns = {col["name"] for col in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in existing_columns:
+                    continue
+                ddl = _add_column_ddl(engine, column)
+                conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN {ddl}'))
+
+
 def init_db() -> None:
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist, and backfill missing columns.
+
+    Safe to call on every startup/request (as every router already does):
+    creating tables is a no-op once they exist, and ``_add_missing_columns``
+    is a no-op once a table already has every column its model defines.
+    """
     engine = get_engine()
     Base.metadata.create_all(engine)
+    _add_missing_columns(engine)
