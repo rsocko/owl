@@ -223,7 +223,10 @@ class TestDecideCandidate:
         assert resp.status_code == 200
         body = resp.json()
         assert body["decision"] == "accepted"
-        assert body["state"] == CandidateState.ACCEPTED.value
+        # decide_candidate only transitions to APPLYING and returns
+        # immediately; the actual Paperless write is a background task
+        # (application_service.py) that eventually moves it to ACCEPTED.
+        assert body["state"] == CandidateState.APPLYING.value
 
     def test_reject_candidate(self, client, ocr_candidates_db, mock_paperless):
         candidate_id = self._create_ready_candidate(client, mock_paperless)
