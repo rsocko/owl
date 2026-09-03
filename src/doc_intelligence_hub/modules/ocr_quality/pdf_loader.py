@@ -149,7 +149,9 @@ def _extract_words(chars: list) -> list:
             ch = {**ch, "upright": _is_upright_angle(_char_angle_degrees(ch))}
         corrected_chars.append(ch)
 
-    return WordExtractor(use_text_flow=False).extract_words(corrected_chars, return_chars=True) or []
+    return (
+        WordExtractor(use_text_flow=False).extract_words(corrected_chars, return_chars=True) or []
+    )
 
 
 def _char_angle_degrees(ch: dict) -> float:
