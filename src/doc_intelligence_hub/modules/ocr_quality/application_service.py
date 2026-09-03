@@ -18,11 +18,17 @@ It implements the design doc's ("ocr-remediation-engine.md") apply sequence:
    document (``update_version``) — never a duplicate top-level document,
    never a content-only metadata PATCH. Poll the returned Celery task with
    bounded attempts.
-5. Verify the new version is what Paperless now serves as latest.
+5. Verify the new version is what Paperless now serves as latest (preview
+   bytes), *and* that its extracted content/search index reflects the new
+   version too (bounded-retry, since search reindexing can lag the write).
 6. Durably record downstream invalidation via
    ``AnalysisFreshnessService.record_invalidation`` (issue #114) BEFORE
    reporting the operation complete.
-7. Persist the candidate as ACCEPTED with an audit trail row.
+7. Persist the candidate as ACCEPTED with an audit trail row — or, if step 6
+   exhausts its bounded retries, as ACCEPTED_PENDING_INVALIDATION: the
+   Paperless write is never undone for a bookkeeping failure, but the
+   reported status must not claim full success either. Retryable via
+   ``retry_invalidation``.
 
 Rollback reverses this by deleting the version(s) newer than a target,
 which is Paperless's own primitive for "make an older version current
@@ -31,7 +37,8 @@ again" (there is no separate "promote" call).
 Every step that can fail before Paperless is actually mutated fails with
 *zero* writes. Every step after Paperless is mutated is designed so a
 failure never corrupts or removes the newly-current version — at worst it
-leaves ``invalidation_recorded=False`` for a caller/retry to resolve.
+leaves ``invalidation_recorded=False`` (and the candidate in
+``ACCEPTED_PENDING_INVALIDATION``) for a caller/retry to resolve.
 """
 
 from __future__ import annotations
@@ -51,7 +58,7 @@ from doc_intelligence_hub.modules.analysis_invalidation.models import Invalidati
 from doc_intelligence_hub.modules.analysis_invalidation.service import AnalysisFreshnessService
 
 from .candidate_models import CandidateState
-from .candidate_service import _load_candidate_pdf_bytes
+from .candidate_service import _load_candidate_pdf_bytes, _load_candidate_text, _require_actor
 from .config import settings
 from .database import OcrApplicationEvent, OcrApplicationLock, OcrQualityCandidate
 
@@ -186,6 +193,13 @@ class OcrCandidateApplicationService:
         synchronously as part of accept; this method does the actual work,
         normally dispatched as a background task).
         """
+        try:
+            actor = _require_actor(actor)
+        except ValueError as exc:
+            # Defensive only — decide_candidate already validates actor
+            # before dispatching this as a background task.
+            return {"error": str(exc)}
+
         db = self.session_factory()
         try:
             row = db.query(OcrQualityCandidate).filter_by(candidate_id=candidate_id).one_or_none()
@@ -280,6 +294,20 @@ class OcrCandidateApplicationService:
                 error_message="stale_source",
             )
             return {"error": "stale_source"}
+
+        # Baseline for Gap 2's content/search verification below — captured
+        # before any Paperless write, so it reflects the pre-apply content.
+        # Best-effort only: a failure here doesn't block the apply, since the
+        # existing preview-checksum verification (Step 5) is still the
+        # primary check; content verification degrades to "any non-empty
+        # content" if no baseline could be captured.
+        try:
+            baseline_content = await self.client.get_document_content(document_id)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Failed to fetch baseline content for document %s (continuing)", document_id
+            )
+            baseline_content = None
 
         # Step 3: idempotency check against Paperless's actual version history.
         try:
@@ -405,6 +433,34 @@ class OcrCandidateApplicationService:
             )
             return {"error": message}
 
+        # Step 5b (Gap 2): confirm Paperless's *extracted content* (and by
+        # extension search/index state) reflects the new version too — a
+        # matching preview byte checksum alone doesn't guarantee the content
+        # field/search index has caught up with the new version.
+        content_verified = await self._verify_content_updated(
+            document_id=document_id,
+            baseline_content=baseline_content,
+            candidate_text=_load_candidate_text(candidate_id),
+        )
+        if not content_verified:
+            message = (
+                "Paperless has not yet reflected the applied version's extracted "
+                "content/search index (content still matches the pre-apply state "
+                "after bounded verification attempts)."
+            )
+            self._fail_apply(candidate_id, message, failure_reason="content_verification_failed")
+            self._record_event(
+                document_id=document_id,
+                candidate_id=candidate_id,
+                action="apply",
+                actor=actor,
+                outcome="failure",
+                error_message=message,
+                paperless_task_id=task_id,
+                new_version_id=new_version_id,
+            )
+            return {"error": message}
+
         # Best-effort audit label — never fails the apply.
         try:
             await self.client.label_document_version(
@@ -419,8 +475,10 @@ class OcrCandidateApplicationService:
 
         # Step 6: durably record downstream invalidation BEFORE reporting
         # complete (issue #114). The Paperless write is already valid and is
-        # never undone if this fails after retries — the candidate is still
-        # marked ACCEPTED but flagged so freshness can be retried later.
+        # never undone if this fails after retries — the candidate lands in
+        # ACCEPTED_PENDING_INVALIDATION (not ACCEPTED) so a caller can see
+        # and retry it via retry_invalidation() rather than the failure being
+        # silently swallowed behind a falsely-successful ACCEPTED state.
         invalidation_recorded = await self._record_invalidation_with_retries(
             document_id=document_id,
             accepted_checksum=candidate_pdf_checksum,
@@ -445,7 +503,11 @@ class OcrCandidateApplicationService:
         )
         return {
             "candidate_id": candidate_id,
-            "state": CandidateState.ACCEPTED.value,
+            "state": (
+                CandidateState.ACCEPTED.value
+                if invalidation_recorded
+                else CandidateState.ACCEPTED_PENDING_INVALIDATION.value
+            ),
             "applied_paperless_version_id": new_version_id,
             "invalidation_recorded": invalidation_recorded,
         }
@@ -465,6 +527,49 @@ class OcrCandidateApplicationService:
                 return last
             await asyncio.sleep(settings.candidate_apply_task_poll_seconds)
         return last
+
+    async def _verify_content_updated(
+        self,
+        *,
+        document_id: int,
+        baseline_content: str | None,
+        candidate_text: str | None,
+    ) -> bool:
+        """Bounded-retry confirmation that Paperless's extracted content (and
+        by extension its search index) reflects the newly-applied version —
+        not just that the preview PDF bytes match (Gap 2).
+
+        Confirms via whichever signal is available: the candidate's own
+        text appearing in the live content (strongest signal), or the
+        content simply having changed from the pre-apply baseline. If no
+        baseline could be captured (best-effort fetch failed earlier), any
+        non-empty content is treated as sufficient.
+        """
+        marker = (candidate_text or "").strip()[:200] or None
+        max_attempts = settings.candidate_apply_content_verify_attempts
+        for attempt in range(1, max_attempts + 1):
+            try:
+                current_content = await self.client.get_document_content(document_id)
+            except Exception:  # noqa: BLE001 - transient poll error, keep trying until bounded attempts exhausted
+                logger.exception(
+                    "Error fetching document content for %s (attempt %s/%s)",
+                    document_id,
+                    attempt,
+                    max_attempts,
+                )
+                current_content = None
+
+            if current_content:
+                if marker and marker in current_content:
+                    return True
+                if baseline_content is not None and current_content != baseline_content:
+                    return True
+                if baseline_content is None:
+                    return True
+
+            if attempt < max_attempts:
+                await asyncio.sleep(settings.candidate_apply_content_verify_delay_seconds * attempt)
+        return False
 
     async def _record_invalidation_with_retries(
         self,
@@ -563,7 +668,15 @@ class OcrCandidateApplicationService:
             row = db.query(OcrQualityCandidate).filter_by(candidate_id=candidate_id).one_or_none()
             if row is None:
                 return
-            row.state = CandidateState.ACCEPTED.value
+            # The Paperless write already succeeded and is never undone here
+            # (Gap 3): if invalidation didn't durably record after bounded
+            # retries, land in ACCEPTED_PENDING_INVALIDATION rather than a
+            # falsely-clean ACCEPTED — retryable via retry_invalidation().
+            row.state = (
+                CandidateState.ACCEPTED.value
+                if invalidation_recorded
+                else CandidateState.ACCEPTED_PENDING_INVALIDATION.value
+            )
             row.applied_paperless_version_id = new_version_id
             row.applied_at = datetime.utcnow()
             row.invalidation_recorded = invalidation_recorded
@@ -583,6 +696,11 @@ class OcrCandidateApplicationService:
         Synchronous (not backgrounded) — a rollback is a small, bounded
         number of ``DELETE`` calls, not a re-OCR cycle.
         """
+        try:
+            actor = _require_actor(actor)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
         try:
             self._acquire_lock(document_id, operation="rollback", candidate_id=target_candidate_id)
         except LockHeldError as exc:
@@ -607,7 +725,10 @@ class OcrCandidateApplicationService:
                     .filter_by(candidate_id=target_candidate_id, document_id=document_id)
                     .one_or_none()
                 )
-                if target_row is None or target_row.state != CandidateState.ACCEPTED.value:
+                if target_row is None or target_row.state not in {
+                    CandidateState.ACCEPTED.value,
+                    CandidateState.ACCEPTED_PENDING_INVALIDATION.value,
+                }:
                     return {
                         "error": (
                             f"target_candidate_id {target_candidate_id!r} is not an "
@@ -617,10 +738,21 @@ class OcrCandidateApplicationService:
                 target_checksum = target_row.candidate_pdf_checksum
             else:
                 # Default: the version current immediately before the most
-                # recently accepted candidate for this document.
+                # recently accepted candidate for this document. Includes
+                # ACCEPTED_PENDING_INVALIDATION — its Paperless version is
+                # just as valid, only its invalidation bookkeeping is
+                # outstanding.
                 previous = (
                     db.query(OcrQualityCandidate)
-                    .filter_by(document_id=document_id, state=CandidateState.ACCEPTED.value)
+                    .filter(
+                        OcrQualityCandidate.document_id == document_id,
+                        OcrQualityCandidate.state.in_(
+                            [
+                                CandidateState.ACCEPTED.value,
+                                CandidateState.ACCEPTED_PENDING_INVALIDATION.value,
+                            ]
+                        ),
+                    )
                     .order_by(OcrQualityCandidate.applied_at.desc())
                     .first()
                 )
@@ -704,4 +836,94 @@ class OcrCandidateApplicationService:
             "document_id": document_id,
             "current_version_id": target_id,
             "invalidation_recorded": invalidation_recorded,
+            # Gap 3: distinguish a rollback whose own invalidation-record
+            # failed, without overloading the (unrelated) target candidate's
+            # lifecycle state — the Paperless version swap here is never
+            # rolled back either way.
+            "status": "rolled_back"
+            if invalidation_recorded
+            else "rolled_back_pending_invalidation",
         }
+
+    # ------------------------------------------------------------------
+    # Retry invalidation (Gap 3 recovery path)
+    # ------------------------------------------------------------------
+
+    async def retry_invalidation(self, candidate_id: str, *, actor: str) -> dict[str, Any]:
+        """Retry recording downstream invalidation for a candidate stuck in
+        ``ACCEPTED_PENDING_INVALIDATION``.
+
+        The Paperless version this candidate applied was already durably
+        written and is never touched here — only the invalidation
+        bookkeeping is retried. On success the candidate becomes
+        ``ACCEPTED``; on failure it stays ``ACCEPTED_PENDING_INVALIDATION``
+        (retryable, not an error condition by itself).
+        """
+        try:
+            actor = _require_actor(actor)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+        db = self.session_factory()
+        try:
+            row = db.query(OcrQualityCandidate).filter_by(candidate_id=candidate_id).one_or_none()
+            if row is None:
+                raise ValueError(f"Unknown candidate {candidate_id}")
+            if row.state != CandidateState.ACCEPTED_PENDING_INVALIDATION.value:
+                raise ValueError(
+                    f"Candidate {candidate_id} is in state {row.state}; only "
+                    f"{CandidateState.ACCEPTED_PENDING_INVALIDATION.value} candidates "
+                    "can retry invalidation"
+                )
+            document_id = row.document_id
+            candidate_pdf_checksum = row.candidate_pdf_checksum
+        finally:
+            db.close()
+
+        try:
+            self._acquire_lock(
+                document_id, operation="retry_invalidation", candidate_id=candidate_id
+            )
+        except LockHeldError as exc:
+            return {"error": str(exc)}
+
+        try:
+            invalidation_recorded = await self._record_invalidation_with_retries(
+                document_id=document_id,
+                accepted_checksum=candidate_pdf_checksum,
+                reason=InvalidationReason.VERSION_CHANGED,
+                actor=actor,
+            )
+
+            db = self.session_factory()
+            try:
+                row = (
+                    db.query(OcrQualityCandidate).filter_by(candidate_id=candidate_id).one_or_none()
+                )
+                if row is not None:
+                    row.invalidation_recorded = invalidation_recorded
+                    if invalidation_recorded:
+                        row.state = CandidateState.ACCEPTED.value
+                    db.commit()
+            finally:
+                db.close()
+
+            self._record_event(
+                document_id=document_id,
+                candidate_id=candidate_id,
+                action="retry_invalidation",
+                actor=actor,
+                outcome="success" if invalidation_recorded else "failure",
+                invalidation_recorded=invalidation_recorded,
+            )
+            return {
+                "candidate_id": candidate_id,
+                "state": (
+                    CandidateState.ACCEPTED.value
+                    if invalidation_recorded
+                    else CandidateState.ACCEPTED_PENDING_INVALIDATION.value
+                ),
+                "invalidation_recorded": invalidation_recorded,
+            }
+        finally:
+            self._release_lock(document_id)

@@ -18,6 +18,7 @@ genuinely exercised end-to-end.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
@@ -62,6 +63,19 @@ def _checksum(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _extract_pdf_text(data: bytes) -> str:
+    """Pull the literal ``(...) Tj`` text-showing operands out of a PDF built
+    by :func:`make_minimal_pdf_bytes`, mimicking real content extraction
+    closely enough for Gap 2's content/search-sync verification tests —
+    i.e. Paperless's ``get_document_content`` genuinely reflects whatever
+    text was actually in the uploaded PDF, not a synthetic placeholder.
+    """
+    import re
+
+    matches = re.findall(rb"\((.*?)\)\s*Tj", data)
+    return " ".join(m.decode(errors="replace") for m in matches)
+
+
 class FakePaperlessVersioningClient:
     """Duck-typed fake reproducing Paperless-ngx's document-version API.
 
@@ -100,8 +114,16 @@ class FakePaperlessVersioningClient:
         self.raise_on_upload: Exception | None = None
         self.upload_calls: list[int] = []
         self.get_document_preview_calls: list[int] = []
+        self.get_document_content_calls: list[int] = []
         self.delete_calls: list[tuple[int, int]] = []
         self.label_calls: list[tuple[int, int, str]] = []
+        # Gap 2 testing hook: documents in this set report *stale* content
+        # (frozen at the value captured the first time this doc's content was
+        # read) for every subsequent read, simulating Paperless's search
+        # index/content extraction lagging behind an already-applied version
+        # write, regardless of how many times content-verification retries.
+        self.content_sync_delayed_documents: set[int] = set()
+        self._frozen_content: dict[int, str] = {}
 
     @property
     def previews(self) -> dict[int, bytes]:
@@ -134,7 +156,16 @@ class FakePaperlessVersioningClient:
         return self.previews[document_id], "application/pdf"
 
     async def get_document_content(self, document_id: int) -> str:
-        return "current live document text"
+        self.get_document_content_calls.append(document_id)
+        latest = self.versions[document_id][-1]
+        live_content = _extract_pdf_text(self._version_content[latest["id"]]) or (
+            f"content for checksum {latest['checksum']}"
+        )
+        if document_id in self.content_sync_delayed_documents:
+            # First read freezes what "search" reports; later Paperless
+            # writes never show up in subsequent reads for this document.
+            return self._frozen_content.setdefault(document_id, live_content)
+        return live_content
 
     async def list_document_versions(self, document_id: int) -> list[dict]:
         return [dict(v) for v in self.versions[document_id]]
@@ -332,6 +363,231 @@ class TestApplyCandidateSuccess:
             assert events[0].outcome == "success"
         finally:
             db.close()
+
+
+class TestApplyCandidateContentVerification:
+    """Gap 2: a matching preview-byte checksum alone must not be enough —
+    Paperless's extracted content/search index must also reflect the new
+    version before the apply is reported successful.
+    """
+
+    @pytest.mark.asyncio
+    async def test_content_change_confirmed_on_first_check_no_extra_delay(
+        self, fake_client, app_service
+    ):
+        candidate_id = await _make_applying_candidate(fake_client)
+        result = await app_service.apply_candidate(candidate_id, actor="reviewer1")
+
+        assert result["state"] == CandidateState.ACCEPTED.value
+        # Content was actually read as part of verification (plus the
+        # best-effort baseline read before upload).
+        assert fake_client.get_document_content_calls.count(1) >= 2
+
+    @pytest.mark.asyncio
+    async def test_content_never_reflects_new_version_fails_apply_without_corrupting_version(
+        self, fake_client, app_service, monkeypatch
+    ):
+        # Speed up the bounded retry loop for this deliberately-exhausted case.
+        monkeypatch.setattr(
+            ocr_quality_config.settings, "candidate_apply_content_verify_attempts", 2
+        )
+        monkeypatch.setattr(
+            ocr_quality_config.settings, "candidate_apply_content_verify_delay_seconds", 0.0
+        )
+
+        candidate_id = await _make_applying_candidate(fake_client)
+        fake_client.content_sync_delayed_documents.add(1)
+
+        result = await app_service.apply_candidate(candidate_id, actor="reviewer1")
+
+        assert "error" in result
+        assert "content" in result["error"].lower()
+
+        row = _row(candidate_id)
+        # Same bounded-retry shape as the existing preview-checksum failure
+        # path: not yet terminal on the first failed attempt.
+        assert row.state == CandidateState.READY.value
+        assert row.apply_attempts == 1
+        assert row.apply_last_error
+
+        # The Paperless write itself was NOT rolled back or corrupted — the
+        # new version is still Paperless's latest, even though the candidate
+        # row is back in READY for a retry.
+        assert len(fake_client.versions[1]) == 2
+        latest_bytes, _ = await fake_client.get_document_preview(1)
+        assert _checksum(latest_bytes) == row.candidate_pdf_checksum
+
+
+class TestApplyCandidatePendingInvalidation:
+    """Gap 3: a candidate must never be reported/persisted as ACCEPTED if
+    downstream invalidation didn't durably record after bounded retries —
+    it lands in ACCEPTED_PENDING_INVALIDATION instead, without undoing the
+    already-successful Paperless version write.
+    """
+
+    @pytest.mark.asyncio
+    async def test_invalidation_eventually_succeeds_after_retry_reports_accepted(
+        self, fake_client, app_service, monkeypatch
+    ):
+        monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+        real_record = app_service._freshness_service.record_invalidation
+        calls = {"n": 0}
+
+        def flaky_record_invalidation(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] < 2:
+                raise RuntimeError("transient invalidation failure")
+            return real_record(*args, **kwargs)
+
+        monkeypatch.setattr(
+            app_service._freshness_service, "record_invalidation", flaky_record_invalidation
+        )
+
+        candidate_id = await _make_applying_candidate(fake_client)
+        result = await app_service.apply_candidate(candidate_id, actor="reviewer1")
+
+        assert result["state"] == CandidateState.ACCEPTED.value
+        assert result["invalidation_recorded"] is True
+        row = _row(candidate_id)
+        assert row.state == CandidateState.ACCEPTED.value
+        assert row.invalidation_recorded is True
+        # The Paperless version write always succeeded, independent of the
+        # invalidation retries.
+        assert len(fake_client.versions[1]) == 2
+
+    @pytest.mark.asyncio
+    async def test_invalidation_retries_exhausted_lands_in_pending_state_without_rollback(
+        self, fake_client, app_service, monkeypatch
+    ):
+        monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+        monkeypatch.setattr(
+            app_service._freshness_service,
+            "record_invalidation",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("invalidation backend down")),
+        )
+
+        candidate_id = await _make_applying_candidate(fake_client)
+        result = await app_service.apply_candidate(candidate_id, actor="reviewer1")
+
+        # Not a failure response — the apply itself (Paperless write) DID
+        # succeed. Only the reported state reflects the outstanding
+        # bookkeeping.
+        assert "error" not in result
+        assert result["state"] == CandidateState.ACCEPTED_PENDING_INVALIDATION.value
+        assert result["invalidation_recorded"] is False
+
+        row = _row(candidate_id)
+        assert row.state == CandidateState.ACCEPTED_PENDING_INVALIDATION.value
+        assert row.invalidation_recorded is False
+        assert row.applied_paperless_version_id is not None
+
+        # The Paperless version swap is never rolled back for a bookkeeping
+        # failure — it's still latest.
+        assert len(fake_client.versions[1]) == 2
+        latest_bytes, _ = await fake_client.get_document_preview(1)
+        assert _checksum(latest_bytes) == row.candidate_pdf_checksum
+
+    @pytest.mark.asyncio
+    async def test_retry_invalidation_succeeds_transitions_to_accepted(
+        self, fake_client, app_service, monkeypatch
+    ):
+        monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+        monkeypatch.setattr(
+            app_service._freshness_service,
+            "record_invalidation",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")),
+        )
+        candidate_id = await _make_applying_candidate(fake_client)
+        pending_result = await app_service.apply_candidate(candidate_id, actor="reviewer1")
+        assert pending_result["state"] == CandidateState.ACCEPTED_PENDING_INVALIDATION.value
+
+        monkeypatch.undo()
+        monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+
+        retry_result = await app_service.retry_invalidation(candidate_id, actor="reviewer2")
+
+        assert "error" not in retry_result
+        assert retry_result["state"] == CandidateState.ACCEPTED.value
+        assert retry_result["invalidation_recorded"] is True
+
+        row = _row(candidate_id)
+        assert row.state == CandidateState.ACCEPTED.value
+        assert row.invalidation_recorded is True
+
+        db = get_ai_session()
+        try:
+            events = db.query(InvalidationEvent).filter_by(document_id=1).all()
+            assert len(events) == 1
+            assert events[0].reason == "version_changed"
+        finally:
+            db.close()
+
+    @pytest.mark.asyncio
+    async def test_retry_invalidation_rejects_blank_actor(
+        self, fake_client, app_service, monkeypatch
+    ):
+        monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+        monkeypatch.setattr(
+            app_service._freshness_service,
+            "record_invalidation",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")),
+        )
+        candidate_id = await _make_applying_candidate(fake_client)
+        await app_service.apply_candidate(candidate_id, actor="reviewer1")
+
+        result = await app_service.retry_invalidation(candidate_id, actor="   ")
+        assert "error" in result
+        row = _row(candidate_id)
+        assert row.state == CandidateState.ACCEPTED_PENDING_INVALIDATION.value
+
+    @pytest.mark.asyncio
+    async def test_retry_invalidation_rejects_wrong_state(self, fake_client, app_service):
+        candidate_id = await _make_applying_candidate(fake_client)
+        await app_service.apply_candidate(candidate_id, actor="reviewer1")
+        # This candidate is already fully ACCEPTED (default happy path) —
+        # matches the existing convention (e.g. decide_candidate) of raising
+        # ValueError for a wrong-state call, which the router translates to
+        # a 400.
+        with pytest.raises(ValueError, match="accepted_pending_invalidation"):
+            await app_service.retry_invalidation(candidate_id, actor="reviewer2")
+
+    @pytest.mark.asyncio
+    async def test_rollback_target_accepts_pending_invalidation_candidate(
+        self, fake_client, app_service, monkeypatch
+    ):
+        monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+        monkeypatch.setattr(
+            app_service._freshness_service,
+            "record_invalidation",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")),
+        )
+        candidate_id = await _make_applying_candidate(fake_client)
+        apply_result = await app_service.apply_candidate(candidate_id, actor="reviewer1")
+        assert apply_result["state"] == CandidateState.ACCEPTED_PENDING_INVALIDATION.value
+
+        monkeypatch.undo()
+        monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+
+        rollback_result = await app_service.rollback(1, actor="reviewer1", target_candidate_id=None)
+        assert "error" not in rollback_result
+        assert len(fake_client.versions[1]) == 1  # rolled back to root
+
+
+class TestApplyCandidateActorRequired:
+    @pytest.mark.asyncio
+    async def test_apply_rejects_blank_actor(self, fake_client, app_service):
+        candidate_id = await _make_applying_candidate(fake_client)
+        result = await app_service.apply_candidate(candidate_id, actor="   ")
+        assert "error" in result
+        assert not fake_client.upload_calls
+
+    @pytest.mark.asyncio
+    async def test_rollback_rejects_blank_actor(self, fake_client, app_service):
+        candidate_id = await _make_applying_candidate(fake_client)
+        await app_service.apply_candidate(candidate_id, actor="reviewer1")
+        result = await app_service.rollback(1, actor="", target_candidate_id=candidate_id)
+        assert "error" in result
+        assert not fake_client.delete_calls
 
 
 class TestApplyCandidateRejection:

@@ -139,7 +139,7 @@ describe('OcrQualityDocumentDetail', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Document #501' })).toBeInTheDocument());
     expect(screen.getByText('UNCERTAIN')).toBeInTheDocument();
     expect(screen.getByText(/Some pages had low OCR confidence/)).toBeInTheDocument();
-    expect(screen.getByText(/not yet available/i)).toBeInTheDocument();
+    expect(screen.getByText(/rolled back from the candidate detail panel/i)).toBeInTheDocument();
     expect(screen.getByText(/Open in Paperless/i).closest('a')).toHaveAttribute(
       'href',
       'https://paperless.test/documents/501/details',

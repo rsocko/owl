@@ -76,6 +76,20 @@ def _checksum(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _require_actor(actor: str) -> str:
+    """Validate a reviewer identity for a mutating accept/reject/rollback action.
+
+    There is no real auth system yet (issue #22, separate) — this is a
+    lightweight guard, not authentication. It exists so every audit-trail
+    row records who made the call rather than silently defaulting to
+    ``"system"`` (design doc: "Every candidate and decision records: ...
+    actor and timestamps").
+    """
+    if not actor or not actor.strip():
+        raise ValueError("actor is required and must not be blank")
+    return actor.strip()
+
+
 def _storage_dir() -> Path:
     path = Path(settings.candidate_storage_dir)
     path.mkdir(parents=True, exist_ok=True)
@@ -466,6 +480,7 @@ class OcrCandidateService:
         version — that is the only place in this package that ever writes to
         Paperless. ``REJECTED`` is unchanged: purely an OWL-local record.
         """
+        actor = _require_actor(actor)
         db = self.session_factory()
         try:
             row = db.query(OcrQualityCandidate).filter_by(candidate_id=candidate_id).one_or_none()
@@ -492,6 +507,9 @@ class OcrCandidateService:
             row.decision = decision.value
             row.decision_reason = reason
             row.decided_at = datetime.utcnow()
+            # Record who made *this* decision — not who requested generation
+            # (which is what `actor` held before, defeating the audit trail).
+            row.actor = actor
             row.state = (
                 CandidateState.APPLYING.value
                 if decision == Decision.ACCEPTED
@@ -538,6 +556,10 @@ class OcrCandidateService:
                         [
                             CandidateState.EXPIRED.value,
                             CandidateState.ACCEPTED.value,
+                            # Applied but invalidation not yet durable — same
+                            # protection as ACCEPTED, since its PDF artifact
+                            # and Paperless version are both still valid.
+                            CandidateState.ACCEPTED_PENDING_INVALIDATION.value,
                             # A candidate mid-apply must never have its PDF
                             # artifact deleted out from under an in-flight
                             # upload/retry — excluded even if its expires_at
