@@ -42,9 +42,7 @@ class OcrCalibrationService:
         db = self.session_factory()
         try:
             rows = (
-                db.query(OcrQualityCandidate)
-                .filter(OcrQualityCandidate.decision.isnot(None))
-                .all()
+                db.query(OcrQualityCandidate).filter(OcrQualityCandidate.decision.isnot(None)).all()
             )
         finally:
             db.close()
