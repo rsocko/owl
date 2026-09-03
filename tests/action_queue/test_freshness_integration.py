@@ -201,3 +201,33 @@ class TestActionQueueFreshnessIntegration:
 
         assert after_change["processed"] == 1
         assert after_change["skipped"] == 0
+
+    @pytest.mark.asyncio
+    async def test_rollback_to_earlier_checksum_is_reprocessed_without_force(self, db, monkeypatch):
+        """A -> B -> A (an OCR candidate rollback) is treated as stale again,
+        not silently skipped as "already seen this value" (mirrors the
+        equivalent EOB matching and analysis_invalidation rollback tests).
+        """
+        docs_a = {1: {"id": 1, "title": "Doc 1", "checksum": "chk-A", "tag_names": ["Inbox"]}}
+        pipeline_a = Pipeline()
+        _wire_pipeline(monkeypatch, pipeline_a, docs_a)
+        first = await pipeline_a.run(force=False, dry_run=False)
+        assert first["processed"] == 1
+        assert first["skipped"] == 0
+
+        # Accept a new OCR candidate: checksum moves to "chk-B".
+        docs_b = {1: {**docs_a[1], "checksum": "chk-B"}}
+        pipeline_b = Pipeline()
+        _wire_pipeline(monkeypatch, pipeline_b, docs_b)
+        after_accept = await pipeline_b.run(force=False, dry_run=False)
+        assert after_accept["processed"] == 1
+        assert after_accept["skipped"] == 0
+
+        # Roll back the OCR candidate: checksum returns to "chk-A" — must be
+        # treated as stale (a new cycle), not skipped as previously seen.
+        docs_rollback = {1: {**docs_a[1], "checksum": "chk-A"}}
+        pipeline_rollback = Pipeline()
+        _wire_pipeline(monkeypatch, pipeline_rollback, docs_rollback)
+        after_rollback = await pipeline_rollback.run(force=False, dry_run=False)
+        assert after_rollback["processed"] == 1
+        assert after_rollback["skipped"] == 0
