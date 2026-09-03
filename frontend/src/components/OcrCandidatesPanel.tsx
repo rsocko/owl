@@ -178,11 +178,13 @@ export default function OcrCandidatesPanel({
   documentId,
   hasStage2Analysis,
   currentOverlayScore,
+  currentMachineScore,
   currentContentScore,
 }: {
   documentId: number;
   hasStage2Analysis?: boolean;
   currentOverlayScore?: number | null;
+  currentMachineScore?: number | null;
   currentContentScore?: number | null;
 }) {
   const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
@@ -332,6 +334,19 @@ export default function OcrCandidatesPanel({
             </tr>
           </thead>
           <tbody>
+            {(currentOverlayScore != null || currentMachineScore != null) && (
+              <tr className="ocr-candidate-current-row">
+                <td>Current (Paperless)</td>
+                <td><Badge tone="muted">live</Badge></td>
+                <td>{currentOverlayScore == null ? '—' : currentOverlayScore}</td>
+                <td>{currentMachineScore == null ? '—' : currentMachineScore}</td>
+                <td>{currentContentScore == null ? '—' : currentContentScore}</td>
+                <td>—</td>
+                <td>—</td>
+                <td className="text-muted">Reference baseline — not a candidate</td>
+                <td />
+              </tr>
+            )}
             {candidates.map((c) => {
               const readyCandidates = candidates.filter((cand) => cand.state === 'ready');
               const rowBadges = [
