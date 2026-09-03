@@ -203,9 +203,7 @@ class TestActionQueueFreshnessIntegration:
         assert after_change["skipped"] == 0
 
     @pytest.mark.asyncio
-    async def test_rollback_to_earlier_checksum_is_reprocessed_without_force(
-        self, db, monkeypatch
-    ):
+    async def test_rollback_to_earlier_checksum_is_reprocessed_without_force(self, db, monkeypatch):
         """A -> B -> A (an OCR candidate rollback) is treated as stale again,
         not silently skipped as "already seen this value" (mirrors the
         equivalent EOB matching and analysis_invalidation rollback tests).
