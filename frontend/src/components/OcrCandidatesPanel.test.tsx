@@ -289,4 +289,27 @@ describe('OcrCandidatesPanel', () => {
     expect(screen.queryByText(/Highest overlay score of ready candidates/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Highest content accuracy of ready candidates/i)).not.toBeInTheDocument();
   });
+
+  it('pins a "Current (Paperless)" reference row showing the live scores', async () => {
+    mocks.list.mockResolvedValue({ candidates: [readyCandidate] });
+    render(
+      <OcrCandidatesPanel
+        documentId={501}
+        currentOverlayScore={69.8}
+        currentMachineScore={72.5}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText('OCRmyPDF / Tesseract 5')).toBeInTheDocument());
+
+    expect(screen.getByText('Current (Paperless)')).toBeInTheDocument();
+    expect(screen.getByText('69.8')).toBeInTheDocument();
+    expect(screen.getByText('72.5')).toBeInTheDocument();
+  });
+
+  it('omits the current-value reference row when no live scores are available', async () => {
+    mocks.list.mockResolvedValue({ candidates: [readyCandidate] });
+    render(<OcrCandidatesPanel documentId={501} />);
+    await waitFor(() => expect(screen.getByText('OCRmyPDF / Tesseract 5')).toBeInTheDocument());
+    expect(screen.queryByText('Current (Paperless)')).not.toBeInTheDocument();
+  });
 });
