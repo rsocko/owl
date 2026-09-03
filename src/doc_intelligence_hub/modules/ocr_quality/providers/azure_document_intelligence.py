@@ -280,20 +280,25 @@ def _compute_overlay_scale(
 
 def _polygon_to_overlay_box(
     polygon: list[float], scale_x: float, scale_y: float, page_height_pts: float
-) -> tuple[float, float, float]:
+) -> tuple[float, float, float, float]:
     """Convert one Azure word polygon into an axis-aligned PDF overlay box.
 
-    Returns ``(x0, pdf_y, box_height)`` in PDF points, bottom-left origin,
-    where ``(x0, pdf_y)`` is where the word's baseline should be drawn.
+    Returns ``(x0, pdf_y, box_height, box_width)`` in PDF points, bottom-left
+    origin, where ``(x0, pdf_y)`` is where the word's baseline should be
+    drawn. ``box_width`` is the polygon's real horizontal extent -- used by
+    ``_render_text_overlay`` to clip the rendered glyph run so it never
+    extends past this word's own footprint into the next word's (see issue:
+    invisible-text-layer words losing their separating space).
     """
     xs = [polygon[i] * scale_x for i in range(0, len(polygon), 2)]
     ys = [polygon[i] * scale_y for i in range(1, len(polygon), 2)]
-    x0 = min(xs)
+    x0, x1 = min(xs), max(xs)
     y0, y1 = min(ys), max(ys)
     box_height = max(y1 - y0, 1.0)
+    box_width = max(x1 - x0, 0.0)
     # Azure's origin is top-left; PDF's is bottom-left.
     pdf_y = page_height_pts - y1
-    return x0, pdf_y, box_height
+    return x0, pdf_y, box_height, box_width
 
 
 # Word polygons whose reading-direction edge is within this many degrees of
@@ -332,16 +337,19 @@ def _is_near_horizontal(angle_degrees: float) -> bool:
 
 def _polygon_to_rotated_overlay(
     polygon: list[float], scale_x: float, scale_y: float, page_height_pts: float
-) -> tuple[float, float, float, float]:
+) -> tuple[float, float, float, float, float]:
     """Convert one rotated Azure word polygon into rotated-overlay draw parameters.
 
-    Returns ``(anchor_x, anchor_y, angle_degrees, text_height)`` in PDF
-    points (bottom-left origin). ``(anchor_x, anchor_y)`` is where the
+    Returns ``(anchor_x, anchor_y, angle_degrees, text_height, reading_width)``
+    in PDF points (bottom-left origin). ``(anchor_x, anchor_y)`` is where the
     word's baseline should start *before* rotating the canvas by
     ``angle_degrees`` (reportlab's ``rotate``, counter-clockwise-positive)
     around it, and ``text_height`` is the font size to use so the drawn
     word's perpendicular extent matches the polygon's -- mirroring
-    ``_polygon_to_overlay_box``'s axis-aligned ``box_height``.
+    ``_polygon_to_overlay_box``'s axis-aligned ``box_height``. ``reading_width``
+    is the polygon's real extent along its own reading direction (the
+    ``p0 -> p1`` edge) -- mirroring ``box_width`` -- used to clip the
+    rendered glyph run so it never extends past this word's own footprint.
 
     Non-uniform ``scale_x``/``scale_y`` (only possible when Azure's
     reported page size doesn't match the PDF's aspect ratio) is a known,
@@ -360,7 +368,35 @@ def _polygon_to_rotated_overlay(
     anchor_y = page_height_pts - ys[3]
 
     text_height = max(math.hypot(xs[3] - xs[0], ys[3] - ys[0]), 1.0)
-    return anchor_x, anchor_y, angle_degrees, text_height
+    reading_width = max(math.hypot(xs[1] - xs[0], ys[1] - ys[0]), 0.0)
+    return anchor_x, anchor_y, angle_degrees, text_height, reading_width
+
+
+def _draw_string_clipped_to_width(
+    canvas_obj: Any, text: str, font_size: float, real_width: float
+) -> None:
+    """Draw ``text`` at the current origin, clipped to ``real_width``.
+
+    ``font_size`` is chosen (elsewhere) purely to match the word's polygon
+    *height* -- Helvetica's glyph advance width at that size has no
+    guaranteed relation to the polygon's actual *width* Azure reported. For
+    longer words, or lines with tight true spacing, that mismatch can make
+    the rendered glyph run extend past this word's own polygon footprint
+    and overlap the start of the next word, which erases the separating gap
+    a downstream text-extractor (e.g. ``pdfplumber``) relies on to tell the
+    two words apart -- silently merging them (and, since the two words'
+    characters then interleave in extraction x-order, garbling the text,
+    not just losing a space).
+
+    Only ever *shrinks* the glyph run (via ``canvas.scale``, applied only to
+    the horizontal/reading-direction axis) when it would otherwise overflow
+    ``real_width`` -- never stretches an already-narrower run -- so already-
+    correct placements are left untouched.
+    """
+    text_width = canvas_obj.stringWidth(text, "Helvetica", font_size)
+    if text_width > real_width > 0:
+        canvas_obj.scale(real_width / text_width, 1.0)
+    canvas_obj.drawString(0, 0, text)
 
 
 def _render_text_overlay(azure_page: Any, page_width_pts: float, page_height_pts: float) -> bytes:
@@ -382,20 +418,22 @@ def _render_text_overlay(azure_page: Any, page_width_pts: float, page_height_pts
         c.saveState()
         angle_degrees = _polygon_edge_angle_degrees(polygon, scale_x, scale_y)
         if _is_near_horizontal(angle_degrees):
-            x0, pdf_y, box_height = _polygon_to_overlay_box(
+            x0, pdf_y, box_height, box_width = _polygon_to_overlay_box(
                 polygon, scale_x, scale_y, page_height_pts
             )
-            c.setFont("Helvetica", box_height * 0.9)
+            font_size = box_height * 0.9
+            c.setFont("Helvetica", font_size)
             c.translate(x0, pdf_y)
-            c.drawString(0, 0, text)
+            _draw_string_clipped_to_width(c, text, font_size, box_width)
         else:
-            anchor_x, anchor_y, rotate_angle, text_height = _polygon_to_rotated_overlay(
-                polygon, scale_x, scale_y, page_height_pts
+            anchor_x, anchor_y, rotate_angle, text_height, reading_width = (
+                _polygon_to_rotated_overlay(polygon, scale_x, scale_y, page_height_pts)
             )
-            c.setFont("Helvetica", text_height * 0.9)
+            font_size = text_height * 0.9
+            c.setFont("Helvetica", font_size)
             c.translate(anchor_x, anchor_y)
             c.rotate(rotate_angle)
-            c.drawString(0, 0, text)
+            _draw_string_clipped_to_width(c, text, font_size, reading_width)
         c.restoreState()
 
     c.showPage()
