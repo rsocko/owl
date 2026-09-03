@@ -70,10 +70,13 @@ class FakePaperlessVersioningClient:
       ``{id, checksum, is_root, version_label}`` — the last entry is always
       "latest" (mirrors ``version_index`` ordering), and ``documents[doc_id]``
       is kept in sync with the last entry's bytes.
-    - ``upload_document_version`` enqueues a task that starts ``PENDING`` and
-      becomes ``SUCCESS`` after ``task_success_after_polls`` calls to
+    - ``upload_document_version`` enqueues a task that starts ``"pending"``
+      and becomes ``"success"`` after ``task_success_after_polls`` calls to
       ``get_task`` (default 1, i.e. succeeds on first poll) unless
-      ``fail_tasks`` is set, in which case it becomes ``FAILURE``.
+      ``fail_tasks`` is set, in which case it becomes ``"failure"``. These
+      are the exact lowercase status strings confirmed live against a real
+      Paperless-ngx instance (``GET /api/tasks/?task_id=...`` -> paginated
+      ``{"results": [{"status": "success", ...}]}``).
     """
 
     base_url = "https://paperless.private.invalid"
@@ -144,7 +147,7 @@ class FakePaperlessVersioningClient:
         self._next_task_id += 1
         self._tasks[task_id] = {
             "task_id": task_id,
-            "status": "PENDING",
+            "status": "pending",
             "_polls": 0,
             "_document_id": root_document_id,
             "_content": content,
@@ -159,9 +162,9 @@ class FakePaperlessVersioningClient:
         task["_polls"] += 1
         if task["_polls"] >= self.task_success_after_polls:
             if self.fail_tasks:
-                task["status"] = "FAILURE"
-            elif task["status"] != "SUCCESS":
-                task["status"] = "SUCCESS"
+                task["status"] = "failure"
+            elif task["status"] != "success":
+                task["status"] = "success"
                 document_id = task["_document_id"]
                 new_id = self._next_version_id
                 self._next_version_id += 1

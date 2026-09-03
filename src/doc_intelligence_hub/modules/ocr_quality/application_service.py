@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[[], Session]
 
-_TERMINAL_TASK_STATUSES = frozenset({"SUCCESS", "FAILURE"})
+_TERMINAL_TASK_STATUSES = frozenset({"success", "failure"})
 
 
 class ApplicationError(RuntimeError):
@@ -334,9 +334,11 @@ class OcrCandidateApplicationService:
                     return {"error": str(exc)}
                 self._persist_task_id(candidate_id, task_id)
 
-            # Poll the task with bounded attempts/backoff.
+            # Poll the task with bounded attempts/backoff. Paperless-ngx's
+            # task status values are lowercase strings ("pending", "success",
+            # "failure", ...) — confirmed live against a real instance.
             outcome = await self._poll_task(task_id)
-            if outcome is None or outcome.get("status") != "SUCCESS":
+            if outcome is None or outcome.get("status") != "success":
                 message = (
                     f"Paperless task {task_id} did not complete successfully: "
                     f"{outcome.get('status') if outcome else 'timed out'}"

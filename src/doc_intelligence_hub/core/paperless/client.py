@@ -904,22 +904,19 @@ class PaperlessClient:
 
         Returns ``None`` if Paperless has no record of it (yet, or ever).
 
-        Response shape: confirmed against paperless-ngx's current source
-        (``documents/views.py::TasksViewSet``) — ``DEFAULT_VERSION`` is
-        ``"10"`` and ``TasksViewSet.paginate_queryset`` only returns the
-        legacy bare-list response when the request's API version is below
-        10. This client never sends an ``Accept`` version override, so it
-        always gets the default (10+) behavior: the standard paginated
-        envelope ``{"count", "next", "previous", "results": [...]}``. The
-        ``isinstance(dict)`` branch below handles that (real, expected) case;
-        the plain-list branch is kept only as defense-in-depth for an older
-        (<10, unsupported-by-this-client) Paperless deployment.
+        Response shape: confirmed live against a real Paperless-ngx instance
+        (``GET /api/tasks/?task_id=<uuid>`` returns
+        ``{"count", "next", "previous", "results": [...]}`` — the standard
+        paginated envelope, never a bare top-level list, matching this
+        client's default API version 10+ behavior per paperless-ngx's
+        source). Each result dict's ``status`` field is a lowercase string
+        (``"pending"``, ``"success"``, ``"failure"``, ...) — see
+        ``_TERMINAL_TASK_STATUSES`` in ``application_service.py``, which
+        compares against these exact values.
         """
         resp = await self._request("GET", "/api/tasks/", params={"task_id": task_id})
         resp.raise_for_status()
-        results = resp.json()
-        if isinstance(results, dict):
-            results = results.get("results", [])
+        results = resp.json().get("results", [])
         if not results:
             return None
         return results[0]
