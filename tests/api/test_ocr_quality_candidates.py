@@ -139,7 +139,8 @@ class TestRequestCandidates:
         assert resp.status_code in (404, 405)
 
         resp = client.post(
-            "/api/ocr-quality/candidates/all/decision", json={"decision": "accepted"}
+            "/api/ocr-quality/candidates/all/decision",
+            json={"decision": "accepted", "actor": "reviewer1"},
         )
         assert resp.status_code == 400
         assert "Unknown candidate" in resp.json()["error"]["message"]
@@ -232,10 +233,40 @@ class TestDecideCandidate:
         candidate_id = self._create_ready_candidate(client, mock_paperless)
         resp = client.post(
             f"/api/ocr-quality/candidates/{candidate_id}/decision",
-            json={"decision": "rejected", "reason": "bad text"},
+            json={"decision": "rejected", "reason": "bad text", "actor": "reviewer1"},
         )
         assert resp.status_code == 200
         assert resp.json()["decision"] == "rejected"
+
+    def test_decide_candidate_requires_a_non_blank_actor(
+        self, client, ocr_candidates_db, mock_paperless
+    ):
+        """Gap 1: actor is no longer optional/defaulted to "system" — a
+        missing or blank actor must be rejected clearly rather than silently
+        attributed to a placeholder.
+        """
+        candidate_id = self._create_ready_candidate(client, mock_paperless)
+
+        missing_resp = client.post(
+            f"/api/ocr-quality/candidates/{candidate_id}/decision",
+            json={"decision": "accepted"},
+        )
+        assert missing_resp.status_code == 422
+
+        blank_resp = client.post(
+            f"/api/ocr-quality/candidates/{candidate_id}/decision",
+            json={"decision": "accepted", "actor": "   "},
+        )
+        assert blank_resp.status_code == 422
+
+        # The candidate must still be untouched/READY — a rejected request
+        # never reaches decide_candidate.
+        db = get_session()
+        try:
+            row = db.query(OcrQualityCandidate).filter_by(candidate_id=candidate_id).one()
+            assert row.state == CandidateState.READY.value
+        finally:
+            db.close()
 
     def test_decide_candidate_makes_zero_paperless_write_calls(
         self, client, ocr_candidates_db, mock_paperless
@@ -249,7 +280,7 @@ class TestDecideCandidate:
 
         accept_resp = client.post(
             f"/api/ocr-quality/candidates/{candidate_id}/decision",
-            json={"decision": "accepted"},
+            json={"decision": "accepted", "actor": "reviewer1"},
         )
         assert accept_resp.status_code == 200
 
@@ -259,7 +290,7 @@ class TestDecideCandidate:
         ).json()["candidate_ids"]
         reject_resp = client.post(
             f"/api/ocr-quality/candidates/{candidate_id_2}/decision",
-            json={"decision": "rejected"},
+            json={"decision": "rejected", "actor": "reviewer1"},
         )
         assert reject_resp.status_code == 200
 
@@ -279,14 +310,14 @@ class TestDecideCandidate:
         )
         resp = client.post(
             f"/api/ocr-quality/candidates/{candidate_id}/decision",
-            json={"decision": "accepted"},
+            json={"decision": "accepted", "actor": "reviewer1"},
         )
         assert resp.status_code == 400
 
     def test_decide_unknown_candidate_400(self, client, ocr_candidates_db, mock_paperless):
         resp = client.post(
             "/api/ocr-quality/candidates/does-not-exist/decision",
-            json={"decision": "accepted"},
+            json={"decision": "accepted", "actor": "reviewer1"},
         )
         assert resp.status_code == 400
 
@@ -321,3 +352,55 @@ class TestCancelCandidate:
     def test_cancel_unknown_candidate_400(self, client, ocr_candidates_db, mock_paperless):
         resp = client.post("/api/ocr-quality/candidates/does-not-exist/cancel")
         assert resp.status_code == 400
+
+
+class TestRollbackEndpoint:
+    def test_rollback_requires_a_non_blank_actor(self, client, ocr_candidates_db, mock_paperless):
+        missing_resp = client.post("/api/ocr-quality/documents/1/rollback", json={})
+        assert missing_resp.status_code == 422
+
+        blank_resp = client.post(
+            "/api/ocr-quality/documents/1/rollback", json={"actor": "  "}
+        )
+        assert blank_resp.status_code == 422
+
+    def test_rollback_with_no_resolvable_target_returns_400(
+        self, client, ocr_candidates_db, mock_paperless
+    ):
+        """With actor validated, an unresolvable target (no prior accepted
+        candidate and no root version in the mock's version list) surfaces
+        as a clean 400 rather than a raw 500 — the router's existing
+        error-translation path for ``rollback``'s ``{"error": ...}`` result.
+        """
+        mock_paperless.list_document_versions.return_value = []
+        resp = client.post(
+            "/api/ocr-quality/documents/1/rollback", json={"actor": "reviewer1"}
+        )
+        assert resp.status_code == 400
+        assert "rollback" in resp.json()["error"]["message"].lower()
+
+
+class TestRetryInvalidationEndpoint:
+    def test_retry_invalidation_requires_a_non_blank_actor(
+        self, client, ocr_candidates_db, mock_paperless
+    ):
+        missing_resp = client.post(
+            "/api/ocr-quality/candidates/does-not-exist/retry-invalidation", json={}
+        )
+        assert missing_resp.status_code == 422
+
+        blank_resp = client.post(
+            "/api/ocr-quality/candidates/does-not-exist/retry-invalidation",
+            json={"actor": "   "},
+        )
+        assert blank_resp.status_code == 422
+
+    def test_retry_invalidation_unknown_candidate_400(
+        self, client, ocr_candidates_db, mock_paperless
+    ):
+        resp = client.post(
+            "/api/ocr-quality/candidates/does-not-exist/retry-invalidation",
+            json={"actor": "reviewer1"},
+        )
+        assert resp.status_code == 400
+        assert "Unknown candidate" in resp.json()["error"]["message"]

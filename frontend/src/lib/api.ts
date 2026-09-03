@@ -332,6 +332,8 @@ export const endpoints = {
     runReport: (runId: string) => api.get(`/api/ocr-quality/runs/${runId}/report`),
     startRun: (body?: { batch_size?: number; tags?: string[]; correspondent?: string }) =>
       api.post('/api/ocr-quality/runs', body ?? {}),
+    rollback: (documentId: number | string, body: { target_candidate_id?: string; actor: string }) =>
+      api.post(`/api/ocr-quality/documents/${documentId}/rollback`, body),
     resumeRun: (runId: string, body?: { batch_size?: number; tags?: string[]; correspondent?: string }) =>
       api.post(`/api/ocr-quality/runs/${runId}/resume`, body ?? {}),
     sampleRun: (
@@ -350,9 +352,11 @@ export const endpoints = {
       },
       get: (candidateId: string) => api.get(`/api/ocr-quality/candidates/${candidateId}`),
       text: (candidateId: string) => api.get(`/api/ocr-quality/candidates/${candidateId}/text`),
-      decide: (candidateId: string, body: { decision: 'accepted' | 'rejected'; reason?: string; actor?: string }) =>
+      decide: (candidateId: string, body: { decision: 'accepted' | 'rejected'; reason?: string; actor: string }) =>
         api.post(`/api/ocr-quality/candidates/${candidateId}/decision`, body),
       cancel: (candidateId: string) => api.post(`/api/ocr-quality/candidates/${candidateId}/cancel`),
+      retryInvalidation: (candidateId: string, body: { actor: string }) =>
+        api.post(`/api/ocr-quality/candidates/${candidateId}/retry-invalidation`, body),
       // Region-level inspection for a candidate's own stored PDF (issue
       // #134 x #18 — connects region inspection to candidate comparison).
       regions: (candidateId: string, page = 1) =>

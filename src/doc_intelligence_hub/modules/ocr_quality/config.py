@@ -68,6 +68,12 @@ class Settings(BaseSettings):
     candidate_max_apply_attempts: int = Field(default=3, ge=1, le=10)
     candidate_apply_task_poll_seconds: float = Field(default=2.0, ge=0.1)
     candidate_apply_task_poll_timeout_seconds: float = Field(default=120.0, ge=1.0)
+    # Bounded retry for confirming Paperless's *extracted content* (and by
+    # extension search/index state) reflects the newly-applied version —
+    # not just that the preview bytes match (issue #18 audit gap: a
+    # successful-looking apply could leave stale search results).
+    candidate_apply_content_verify_attempts: int = Field(default=5, ge=1, le=20)
+    candidate_apply_content_verify_delay_seconds: float = Field(default=1.0, ge=0.0)
     # How long a document-scoped apply/rollback lock is honored before it is
     # considered stale (e.g. the process holding it crashed) and reclaimable
     # by a new request.

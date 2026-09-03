@@ -9,11 +9,14 @@ const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   decide: vi.fn(),
   cancel: vi.fn(),
+  rollback: vi.fn(),
+  retryInvalidation: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
   endpoints: {
     ocrQuality: {
+      rollback: mocks.rollback,
       candidates: {
         list: mocks.list,
         get: mocks.get,
@@ -21,6 +24,7 @@ vi.mock('../lib/api', () => ({
         request: mocks.request,
         decide: mocks.decide,
         cancel: mocks.cancel,
+        retryInvalidation: mocks.retryInvalidation,
       },
     },
   },
@@ -61,7 +65,13 @@ describe('OcrCandidatesPanel', () => {
   beforeEach(() => {
     Object.values(mocks).forEach((m) => m.mockReset());
     mocks.list.mockResolvedValue({ candidates: [] });
+    window.localStorage.clear();
   });
+
+  function setActorName(name: string) {
+    const input = screen.getByPlaceholderText(/e\.g\. jsmith/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: name } });
+  }
 
   it('shows an empty state and a generation control when there are no candidates', async () => {
     render(<OcrCandidatesPanel documentId={501} />);
@@ -107,7 +117,7 @@ describe('OcrCandidatesPanel', () => {
     expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
   });
 
-  it('records an accept decision without ever writing to Paperless', async () => {
+  it('requires an actor name before recording an accept decision, then sends it', async () => {
     mocks.list.mockResolvedValue({ candidates: [readyCandidate] });
     mocks.get.mockResolvedValue(readyCandidateDetail);
     mocks.text.mockResolvedValue({ current_text: 'old', candidate_text: 'new' });
@@ -118,14 +128,30 @@ describe('OcrCandidatesPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /View/i }));
     await waitFor(() => screen.getByRole('button', { name: 'Accept' }));
 
+    // Without a name entered, accepting must not call the API at all.
+    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    await waitFor(() => expect(screen.getByText(/enter your name/i)).toBeInTheDocument());
+    expect(mocks.decide).not.toHaveBeenCalled();
+
+    setActorName('jsmith');
     fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
 
     await waitFor(() =>
-      expect(mocks.decide).toHaveBeenCalledWith('cand-123456', { decision: 'accepted' }),
+      expect(mocks.decide).toHaveBeenCalledWith('cand-123456', { decision: 'accepted', actor: 'jsmith' }),
     );
-    // The panel's own API surface has no update/writeback call at all — the
-    // only side effect of accepting is the decision request itself.
-    expect(Object.keys(mocks)).not.toContain('updateDocument');
+  });
+
+  it('remembers the actor name across remounts via localStorage', async () => {
+    mocks.list.mockResolvedValue({ candidates: [] });
+    const { unmount } = render(<OcrCandidatesPanel documentId={501} />);
+    await waitFor(() => screen.getByPlaceholderText(/e\.g\. jsmith/i));
+    setActorName('adoe');
+    unmount();
+
+    render(<OcrCandidatesPanel documentId={501} />);
+    await waitFor(() =>
+      expect((screen.getByPlaceholderText(/e\.g\. jsmith/i) as HTMLInputElement).value).toBe('adoe'),
+    );
   });
 
   it('shows blocking findings prominently and never treats a higher score as authorization', async () => {
@@ -311,5 +337,90 @@ describe('OcrCandidatesPanel', () => {
     render(<OcrCandidatesPanel documentId={501} />);
     await waitFor(() => expect(screen.getByText('OCRmyPDF / Tesseract 5')).toBeInTheDocument());
     expect(screen.queryByText('Current (Paperless)')).not.toBeInTheDocument();
+  });
+
+  it('shows non-stale apply/rollback messaging', async () => {
+    render(<OcrCandidatesPanel documentId={501} />);
+    await waitFor(() => expect(screen.getByText(/applies it to the live Paperless document/i)).toBeInTheDocument());
+    expect(screen.queryByText(/never modifies Paperless/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/not yet built/i)).not.toBeInTheDocument();
+  });
+
+  it('shows a Roll back button for an ACCEPTED candidate, confirms, and requires+sends an actor', async () => {
+    const accepted = { ...readyCandidate, state: 'accepted', decision: 'accepted' };
+    const acceptedDetail = { ...readyCandidateDetail, state: 'accepted', decision: 'accepted', actor: 'jsmith' };
+    mocks.list.mockResolvedValue({ candidates: [accepted] });
+    mocks.get.mockResolvedValue(acceptedDetail);
+    mocks.text.mockResolvedValue({ current_text: 'old', candidate_text: 'new' });
+    mocks.rollback.mockResolvedValue({ document_id: 501, current_version_id: 9, invalidation_recorded: true, status: 'rolled_back' });
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<OcrCandidatesPanel documentId={501} />);
+    await waitFor(() => screen.getByRole('button', { name: /View/i }));
+    fireEvent.click(screen.getByRole('button', { name: /View/i }));
+    await waitFor(() => screen.getByRole('button', { name: 'Roll back' }));
+
+    // No actor yet — must not call rollback.
+    fireEvent.click(screen.getByRole('button', { name: 'Roll back' }));
+    await waitFor(() => expect(screen.getByText(/enter your name/i)).toBeInTheDocument());
+    expect(mocks.rollback).not.toHaveBeenCalled();
+
+    setActorName('jsmith');
+    fireEvent.click(screen.getByRole('button', { name: 'Roll back' }));
+
+    expect(confirmSpy).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(mocks.rollback).toHaveBeenCalledWith(501, { target_candidate_id: 'cand-123456', actor: 'jsmith' }),
+    );
+    confirmSpy.mockRestore();
+  });
+
+  it('does not roll back when the confirmation dialog is dismissed', async () => {
+    const accepted = { ...readyCandidate, state: 'accepted', decision: 'accepted' };
+    const acceptedDetail = { ...readyCandidateDetail, state: 'accepted', decision: 'accepted', actor: 'jsmith' };
+    mocks.list.mockResolvedValue({ candidates: [accepted] });
+    mocks.get.mockResolvedValue(acceptedDetail);
+    mocks.text.mockResolvedValue({ current_text: 'old', candidate_text: 'new' });
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(<OcrCandidatesPanel documentId={501} />);
+    await waitFor(() => screen.getByRole('button', { name: /View/i }));
+    fireEvent.click(screen.getByRole('button', { name: /View/i }));
+    await waitFor(() => screen.getByRole('button', { name: 'Roll back' }));
+    setActorName('jsmith');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Roll back' }));
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(mocks.rollback).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it('shows a distinct pending-invalidation badge and a Retry invalidation action for ACCEPTED_PENDING_INVALIDATION', async () => {
+    const pending = { ...readyCandidate, state: 'accepted_pending_invalidation', decision: 'accepted' };
+    const pendingDetail = {
+      ...readyCandidateDetail,
+      state: 'accepted_pending_invalidation',
+      decision: 'accepted',
+      actor: 'jsmith',
+    };
+    mocks.list.mockResolvedValue({ candidates: [pending] });
+    mocks.get.mockResolvedValue(pendingDetail);
+    mocks.text.mockResolvedValue({ current_text: 'old', candidate_text: 'new' });
+    mocks.retryInvalidation.mockResolvedValue({ candidate_id: 'cand-123456', state: 'accepted', invalidation_recorded: true });
+
+    render(<OcrCandidatesPanel documentId={501} />);
+    await waitFor(() => screen.getByRole('button', { name: /View/i }));
+    fireEvent.click(screen.getByRole('button', { name: /View/i }));
+
+    await waitFor(() => expect(screen.getByText(/downstream refresh pending/i)).toBeInTheDocument());
+    expect(screen.getByText(/downstream search\/analysis/i)).toBeInTheDocument();
+
+    setActorName('jsmith');
+    fireEvent.click(screen.getByRole('button', { name: /Retry invalidation/i }));
+
+    await waitFor(() => expect(mocks.retryInvalidation).toHaveBeenCalledWith('cand-123456', { actor: 'jsmith' }));
   });
 });

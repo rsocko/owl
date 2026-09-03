@@ -1,12 +1,14 @@
 /**
- * OCR candidate generation, comparison, and accept/reject UI (issue #18, slice 1).
+ * OCR candidate generation, comparison, accept/reject, and apply/rollback UI
+ * (issue #18, slices 1 and 2).
  *
- * Everything here is read-only-to-Paperless: generation stages candidates in
- * OWL's own tables, and accepting/rejecting a candidate only records a
- * decision in those same tables. Nothing on this page ever changes the live
- * Paperless document — applying an accepted candidate as a new Paperless
- * version, version preservation, and rollback are a later slice gated on
- * issue #114.
+ * Generation and comparison stage candidates in OWL's own tables only.
+ * Accepting a candidate applies it to the live Paperless document as a new
+ * version (after freshness/idempotency/preview/content safety checks) and
+ * durably records downstream invalidation (issue #114) before reporting
+ * success; rejecting only records a decision and never touches Paperless.
+ * Applied candidates can be rolled back, which restores the Paperless
+ * version that was current before the candidate was applied.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Badge, Button, Card, EmptyState, type Tone } from './ui';
@@ -58,6 +60,7 @@ function stateTone(state: string): Tone {
   switch (state) {
     case 'ready': return 'info';
     case 'accepted': return 'ok';
+    case 'accepted_pending_invalidation': return 'warn';
     case 'rejected': return 'muted';
     case 'expired': return 'muted';
     case 'failed': return 'err';
@@ -174,6 +177,8 @@ function formatScoreDelta(delta?: number | null) {
   return `${sign}${delta}`;
 }
 
+const ACTOR_STORAGE_KEY = 'owl_ocr_actor_name';
+
 export default function OcrCandidatesPanel({
   documentId,
   hasStage2Analysis,
@@ -197,7 +202,18 @@ export default function OcrCandidatesPanel({
   const [text, setText] = useState<{ current_text: string | null; candidate_text: string | null } | null>(null);
   const [deciding, setDeciding] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [rollingBack, setRollingBack] = useState(false);
+  const [retryingInvalidation, setRetryingInvalidation] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actorName, setActorName] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return window.localStorage.getItem(ACTOR_STORAGE_KEY) ?? '';
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(ACTOR_STORAGE_KEY, actorName);
+  }, [actorName]);
 
   // `background` is true for the 3s status polling below — it refreshes rows
   // in place without dropping back to the full "Loading candidates…" state,
@@ -260,10 +276,15 @@ export default function OcrCandidatesPanel({
 
   const decide = (decision: 'accepted' | 'rejected') => {
     if (!selectedId) return;
+    const actor = actorName.trim();
+    if (!actor) {
+      setActionError('Enter your name above before recording a decision.');
+      return;
+    }
     setDeciding(true);
     setActionError(null);
     endpoints.ocrQuality.candidates
-      .decide(selectedId, { decision })
+      .decide(selectedId, { decision, actor })
       .then(() => {
         loadCandidates();
         loadDetail(selectedId);
@@ -285,12 +306,70 @@ export default function OcrCandidatesPanel({
       .finally(() => setCancelling(false));
   };
 
+  const rollback = (candidateId: string) => {
+    const actor = actorName.trim();
+    if (!actor) {
+      setActionError('Enter your name above before rolling back.');
+      return;
+    }
+    if (typeof window !== 'undefined' && !window.confirm(
+      'Roll back this document to the Paperless version that was current before this candidate was applied? This deletes newer Paperless versions.'
+    )) {
+      return;
+    }
+    setRollingBack(true);
+    setActionError(null);
+    endpoints.ocrQuality
+      .rollback(documentId, { target_candidate_id: candidateId, actor })
+      .then(() => {
+        loadCandidates();
+        loadDetail(candidateId);
+      })
+      .catch((err) => setActionError(err instanceof Error ? err.message : 'Failed to roll back.'))
+      .finally(() => setRollingBack(false));
+  };
+
+  const retryInvalidation = (candidateId: string) => {
+    const actor = actorName.trim();
+    if (!actor) {
+      setActionError('Enter your name above before retrying.');
+      return;
+    }
+    setRetryingInvalidation(true);
+    setActionError(null);
+    endpoints.ocrQuality.candidates
+      .retryInvalidation(candidateId, { actor })
+      .then(() => {
+        loadCandidates();
+        loadDetail(candidateId);
+      })
+      .catch((err) => setActionError(err instanceof Error ? err.message : 'Failed to retry invalidation.'))
+      .finally(() => setRetryingInvalidation(false));
+  };
+
   return (
     <Card title="OCR candidates">
       <div className="ocr-stub-note">
-        Generating and comparing candidates never changes the live Paperless document. Accepting a
-        candidate only records a decision in OWL's own records — applying it as the new Paperless
-        version is a later step, not yet built (tracked in issues #18/#114).
+        Accepting a candidate applies it to the live Paperless document as a new version (after
+        freshness/idempotency/preview/content safety checks) and records downstream invalidation.
+        Rejecting only records a decision and never touches Paperless. Applied candidates can be
+        rolled back, which restores the previous Paperless version.
+      </div>
+
+      <div style={{ marginTop: 12, marginBottom: 4 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>Your name</span>
+          <input
+            type="text"
+            value={actorName}
+            onChange={(e) => setActorName(e.target.value)}
+            placeholder="e.g. jsmith"
+            style={{ maxWidth: 220 }}
+          />
+        </label>
+        <div className="text-muted" style={{ fontSize: 12 }}>
+          Recorded as the actor on every accept/reject/rollback/retry decision (remembered on this device).
+        </div>
       </div>
 
       <div className="ocr-candidate-generate" style={{ marginTop: 12, marginBottom: 16 }}>
@@ -476,10 +555,29 @@ export default function OcrCandidatesPanel({
               </Button>
             </div>
           )}
+          {(detail.state === 'accepted' || detail.state === 'accepted_pending_invalidation') && (
+            <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+              {detail.state === 'accepted_pending_invalidation' && (
+                <>
+                  <Badge tone="warn">Applied — downstream refresh pending</Badge>
+                  <Button onClick={() => retryInvalidation(detail.candidate_id)} disabled={retryingInvalidation}>
+                    {retryingInvalidation ? 'Retrying…' : 'Retry invalidation'}
+                  </Button>
+                </>
+              )}
+              <Button variant="danger" onClick={() => rollback(detail.candidate_id)} disabled={rollingBack}>
+                {rollingBack ? 'Rolling back…' : 'Roll back'}
+              </Button>
+            </div>
+          )}
           {detail.decision && (
             <div className="text-muted" style={{ marginTop: 8 }}>
-              Decision recorded: <strong>{detail.decision}</strong> by {detail.actor ?? 'unknown'} — this has
-              not modified the live Paperless document.
+              Decision recorded: <strong>{detail.decision}</strong> by {detail.actor ?? 'unknown'}.
+              {detail.state === 'accepted' && ' Applied to the live Paperless document as a new version.'}
+              {detail.state === 'accepted_pending_invalidation' &&
+                ' Applied to the live Paperless document as a new version, but downstream search/analysis ' +
+                  'invalidation has not yet recorded — other views may show stale data until it does (retry above).'}
+              {detail.decision === 'rejected' && ' This never modified the live Paperless document.'}
             </div>
           )}
         </div>

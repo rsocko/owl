@@ -289,6 +289,48 @@ class TestDecideCandidate:
         assert result["state"] == CandidateState.REJECTED.value
 
     @pytest.mark.asyncio
+    async def test_decide_candidate_records_the_deciding_actor_not_the_requester(self, service):
+        """Gap 1 regression: the candidate row's ``actor`` must reflect who
+        actually made the accept/reject decision, not whoever originally
+        requested generation (previously ``decide_candidate`` never updated
+        ``row.actor`` at all).
+        """
+        candidate_id = await self._make_ready_candidate(service)
+
+        result = await service.decide_candidate(
+            candidate_id, decision=Decision.REJECTED, reason="bad OCR", actor="the-real-reviewer"
+        )
+        assert result["actor"] == "the-real-reviewer"
+
+        db = get_session()
+        try:
+            row = db.query(OcrQualityCandidate).filter_by(candidate_id=candidate_id).one()
+            assert row.actor == "the-real-reviewer"
+        finally:
+            db.close()
+
+    @pytest.mark.asyncio
+    async def test_decide_candidate_rejects_missing_or_blank_actor(self, service):
+        candidate_id = await self._make_ready_candidate(service)
+
+        with pytest.raises(ValueError, match="[Aa]ctor"):
+            await service.decide_candidate(
+                candidate_id, decision=Decision.ACCEPTED, reason=None, actor=""
+            )
+        with pytest.raises(ValueError, match="[Aa]ctor"):
+            await service.decide_candidate(
+                candidate_id, decision=Decision.ACCEPTED, reason=None, actor="   "
+            )
+
+        # A rejected/invalid actor must never move the candidate off READY.
+        db = get_session()
+        try:
+            row = db.query(OcrQualityCandidate).filter_by(candidate_id=candidate_id).one()
+            assert row.state == CandidateState.READY.value
+        finally:
+            db.close()
+
+    @pytest.mark.asyncio
     async def test_accept_fails_if_source_document_changed(self, service):
         candidate_id = await self._make_ready_candidate(service)
         # Simulate the live Paperless document changing after the candidate

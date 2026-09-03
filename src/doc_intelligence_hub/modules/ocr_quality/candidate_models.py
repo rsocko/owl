@@ -36,6 +36,16 @@ class CandidateState(str, Enum):
     ``ACCEPTED`` means what the design doc says: Paperless confirmed the new
     latest version and content, and the downstream-invalidation record for
     issue #114 is durable.
+
+    ``ACCEPTED_PENDING_INVALIDATION`` is another OWL-internal addition: the
+    Paperless version swap itself succeeded (and is never rolled back just
+    because bookkeeping failed — a valid Paperless version must never be
+    undone), but ``AnalysisFreshnessService.record_invalidation()`` exhausted
+    its bounded retries. It is visibly distinct from ``ACCEPTED`` in the API
+    and frontend ("applied, but downstream systems may show stale data,
+    retry needed") and can be resolved via
+    ``OcrCandidateApplicationService.retry_invalidation`` without ever
+    re-touching the Paperless write.
     """
 
     REQUESTED = "requested"
@@ -43,6 +53,7 @@ class CandidateState(str, Enum):
     READY = "ready"
     APPLYING = "applying"
     ACCEPTED = "accepted"
+    ACCEPTED_PENDING_INVALIDATION = "accepted_pending_invalidation"
     REJECTED = "rejected"
     EXPIRED = "expired"
     FAILED = "failed"
@@ -55,9 +66,14 @@ class CandidateState(str, Enum):
 CANCELLABLE_STATES = frozenset({CandidateState.REQUESTED, CandidateState.RUNNING})
 
 # Terminal states — no further generation/decision work happens.
+# ACCEPTED_PENDING_INVALIDATION is terminal for the generate/decide state
+# machine (it never regenerates or re-decides), but is not a dead end: it is
+# resolved via OcrCandidateApplicationService.retry_invalidation, not via
+# anything in candidate_service.py.
 TERMINAL_STATES = frozenset(
     {
         CandidateState.ACCEPTED,
+        CandidateState.ACCEPTED_PENDING_INVALIDATION,
         CandidateState.REJECTED,
         CandidateState.EXPIRED,
         CandidateState.FAILED,
@@ -216,6 +232,7 @@ class OcrQualityCandidate(BaseModel):
         description=(
             "Whether AnalysisFreshnessService.record_invalidation() succeeded for this "
             "candidate's application. A Paperless write is never undone if this is False; "
-            "the candidate is still ACCEPTED but flagged so downstream freshness can be retried."
+            "the candidate lands in ACCEPTED_PENDING_INVALIDATION (not ACCEPTED) so a "
+            "caller can see and retry it via retry_invalidation()."
         ),
     )

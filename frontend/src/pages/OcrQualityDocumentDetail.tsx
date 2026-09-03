@@ -365,9 +365,9 @@ export default function OcrQualityDocumentDetail() {
 
           <Card title="Candidate comparison">
             <div className="ocr-stub-note">
-              Applying an accepted candidate as the new Paperless version, version preservation, and
-              rollback are not yet available (blocked on issue #114). Candidate generation and
-              comparison below never modify the live Paperless document.
+              Candidate generation and comparison below never modify the live Paperless document.
+              Accepting a candidate applies it as a new Paperless version and can be rolled back
+              from the candidate detail panel below.
             </div>
             <OcrOverlayComparisonPanel documentId={detail.document_id} />
           </Card>
