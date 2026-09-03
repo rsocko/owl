@@ -21,6 +21,7 @@ type CandidateSummary = {
   model_version?: string | null;
   overlay_score?: number | null;
   machine_score?: number | null;
+  content_score?: number | null;
   page_count: number;
   requested_at?: string | null;
   completed_at?: string | null;
@@ -34,6 +35,7 @@ type ComparisonSummary = {
   text_diff_summary: Record<string, unknown>;
   overlay_score_delta?: number | null;
   machine_score_delta?: number | null;
+  content_score_delta?: number | null;
   performed_at?: string | null;
 };
 
@@ -47,7 +49,7 @@ type CandidateDetail = CandidateSummary & {
 
 const ENGINE_LABELS: Record<string, string> = {
   'ocrmypdf-tesseract-5': 'OCRmyPDF / Tesseract 5',
-  'azure-prebuilt-read': 'Azure Document Intelligence (prebuilt-read)',
+  'azure-prebuilt-layout': 'Azure Document Intelligence (prebuilt-layout)',
 };
 
 const ACTIVE_STATES = new Set(['requested', 'running']);
@@ -69,7 +71,7 @@ function stateTone(state: string): Tone {
 // help a reviewer scan quickly when the two engines' scores diverge. Loosely
 // mirrors comparison.py's blocking machine-regression tolerance (5 points)
 // but intentionally smaller since these are hints, not gates.
-const MACHINE_IMPROVEMENT_HINT_THRESHOLD = 3;
+const CONTENT_IMPROVEMENT_HINT_THRESHOLD = 3;
 const OVERLAY_DECLINE_HINT_THRESHOLD = -3;
 
 type SuggestedReadBadge = { tone: Tone; label: string };
@@ -77,25 +79,25 @@ type SuggestedReadBadge = { tone: Tone; label: string };
 type SuggestedReadInput = {
   blocking_findings: string[];
   overlay_score_delta?: number | null;
-  machine_score_delta?: number | null;
+  content_score_delta?: number | null;
 };
 
 function suggestedReadBadges(input: SuggestedReadInput | null): SuggestedReadBadge[] {
   if (!input) return [];
   const badges: SuggestedReadBadge[] = [];
-  const { blocking_findings, overlay_score_delta, machine_score_delta } = input;
+  const { blocking_findings, overlay_score_delta, content_score_delta } = input;
 
   if (blocking_findings.length > 0) {
     badges.push({ tone: 'err', label: '⚠ Needs careful review' });
   }
-  if (machine_score_delta != null && machine_score_delta >= MACHINE_IMPROVEMENT_HINT_THRESHOLD && blocking_findings.length === 0) {
-    badges.push({ tone: 'ok', label: 'Text quality looks improved' });
+  if (content_score_delta != null && content_score_delta >= CONTENT_IMPROVEMENT_HINT_THRESHOLD && blocking_findings.length === 0) {
+    badges.push({ tone: 'ok', label: 'Content accuracy looks improved' });
   }
   if (overlay_score_delta != null && overlay_score_delta <= OVERLAY_DECLINE_HINT_THRESHOLD) {
     badges.push({ tone: 'warn', label: 'Box/highlight placement may be less precise' });
   }
   if (badges.length === 0) {
-    if (overlay_score_delta == null && machine_score_delta == null) {
+    if (overlay_score_delta == null && content_score_delta == null) {
       badges.push({ tone: 'muted', label: 'No comparison signal available' });
     } else {
       badges.push({ tone: 'muted', label: 'No strong signal either way' });
@@ -136,11 +138,11 @@ function relativeBadges(
     }
   }
 
-  const machineScores = readyCandidates.map((c) => c.machine_score).filter((v): v is number => v != null);
-  if (machineScores.length >= 2 && candidate.machine_score != null) {
-    const maxMachine = Math.max(...machineScores);
-    if (maxMachine - candidate.machine_score <= RELATIVE_SCORE_TIE_EPSILON) {
-      badges.push({ tone: 'info', label: 'Highest machine score of ready candidates' });
+  const contentScores = readyCandidates.map((c) => c.content_score).filter((v): v is number => v != null);
+  if (contentScores.length >= 2 && candidate.content_score != null) {
+    const maxContent = Math.max(...contentScores);
+    if (maxContent - candidate.content_score <= RELATIVE_SCORE_TIE_EPSILON) {
+      badges.push({ tone: 'info', label: 'Highest content accuracy of ready candidates' });
     }
   }
 
@@ -177,11 +179,13 @@ export default function OcrCandidatesPanel({
   hasStage2Analysis,
   currentOverlayScore,
   currentMachineScore,
+  currentContentScore,
 }: {
   documentId: number;
   hasStage2Analysis?: boolean;
   currentOverlayScore?: number | null;
   currentMachineScore?: number | null;
+  currentContentScore?: number | null;
 }) {
   const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -315,6 +319,7 @@ export default function OcrCandidatesPanel({
               <th>State</th>
               <th>Overlay</th>
               <th>Machine</th>
+              <th>Content</th>
               <th>Pages</th>
               <th>Decision</th>
               <th>Suggested read</th>
@@ -328,7 +333,7 @@ export default function OcrCandidatesPanel({
                 ...suggestedReadBadges({
                   blocking_findings: [],
                   overlay_score_delta: scoreDelta(currentOverlayScore, c.overlay_score),
-                  machine_score_delta: scoreDelta(currentMachineScore, c.machine_score),
+                  content_score_delta: scoreDelta(currentContentScore, c.content_score),
                 }),
                 ...(c.state === 'ready' ? relativeBadges(c, readyCandidates) : []),
               ];
@@ -338,6 +343,7 @@ export default function OcrCandidatesPanel({
                   <td><Badge tone={stateTone(c.state)}>{c.state}</Badge></td>
                   <td>{c.overlay_score == null ? '—' : c.overlay_score}</td>
                   <td>{c.machine_score == null ? '—' : c.machine_score}</td>
+                  <td>{c.content_score == null ? '—' : c.content_score}</td>
                   <td>{c.page_count || '—'}</td>
                   <td>{c.decision ?? '—'}</td>
                   <td>{c.state === 'ready' || c.decision ? <SuggestedReadBadges badges={rowBadges} /> : <span className="text-muted">—</span>}</td>
@@ -379,15 +385,18 @@ export default function OcrCandidatesPanel({
               <div className="ocr-score-compare-row">
                 <span>
                   Current: overlay {formatScore(currentScoreFromDelta(detail.overlay_score, detail.comparison.overlay_score_delta))} · machine{' '}
-                  {formatScore(currentScoreFromDelta(detail.machine_score, detail.comparison.machine_score_delta))}
+                  {formatScore(currentScoreFromDelta(detail.machine_score, detail.comparison.machine_score_delta))} · content{' '}
+                  {formatScore(currentScoreFromDelta(detail.content_score, detail.comparison.content_score_delta))}
                 </span>
                 <span>
-                  Candidate: overlay {formatScore(detail.overlay_score)} · machine {formatScore(detail.machine_score)}
+                  Candidate: overlay {formatScore(detail.overlay_score)} · machine {formatScore(detail.machine_score)} · content{' '}
+                  {formatScore(detail.content_score)}
                 </span>
               </div>
               <div>
                 Overlay Δ: <strong>{formatScoreDelta(detail.comparison.overlay_score_delta)}</strong>{' '}
-                &nbsp;Machine Δ: <strong>{formatScoreDelta(detail.comparison.machine_score_delta)}</strong>
+                &nbsp;Machine Δ: <strong>{formatScoreDelta(detail.comparison.machine_score_delta)}</strong>{' '}
+                &nbsp;Content Δ: <strong>{formatScoreDelta(detail.comparison.content_score_delta)}</strong>
               </div>
               {detail.comparison.blocking_findings.length > 0 ? (
                 <div className="ocr-blocking-findings">

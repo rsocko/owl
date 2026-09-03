@@ -39,10 +39,12 @@ def compare_candidate(
     current_text: str | None,
     current_overlay_score: float | None,
     current_machine_score: float | None,
+    current_content_score: float | None = None,
     candidate_pdf_bytes: bytes | None,
     candidate_text: str | None,
     candidate_overlay_score: float | None,
     candidate_machine_score: float | None,
+    candidate_content_score: float | None = None,
     expected_page_count: int | None = None,
 ) -> ComparisonResult:
     """Run all comparison checks and return a :class:`ComparisonResult`.
@@ -79,6 +81,7 @@ def compare_candidate(
 
         overlay_delta = _score_delta(current_overlay_score, candidate_overlay_score)
         machine_delta = _score_delta(current_machine_score, candidate_machine_score)
+        content_delta = _score_delta(current_content_score, candidate_content_score)
         if machine_delta is not None and machine_delta < -_MACHINE_REGRESSION_TOLERANCE:
             findings.append(ComparisonBlockingFinding.MACHINE_REGRESSION)
 
@@ -93,6 +96,7 @@ def compare_candidate(
             text_diff_summary=text_diff,
             overlay_score_delta=overlay_delta,
             machine_score_delta=machine_delta,
+            content_score_delta=content_delta,
         )
     except Exception as exc:  # noqa: BLE001 - comparison failure must not crash the caller
         return ComparisonResult(

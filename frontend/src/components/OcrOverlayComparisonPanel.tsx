@@ -59,7 +59,7 @@ function pageImageUrlFor(source: string, documentId: number, page: number): stri
 
 const ENGINE_LABELS: Record<string, string> = {
   'ocrmypdf-tesseract-5': 'OCRmyPDF / Tesseract 5',
-  'azure-prebuilt-read': 'Azure Document Intelligence (prebuilt-read)',
+  'azure-prebuilt-layout': 'Azure Document Intelligence (prebuilt-layout)',
 };
 
 function SourceSelect({

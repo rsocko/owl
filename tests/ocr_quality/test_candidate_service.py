@@ -144,7 +144,7 @@ class TestRequestCandidates:
             ocr_quality_config.settings, "candidate_provider_allowlist", ["ocrmypdf-tesseract-5"]
         )
         with pytest.raises(UnsupportedProvider):
-            await service.request_candidates(document_ids=[1], engines=["azure-prebuilt-read"])
+            await service.request_candidates(document_ids=[1], engines=["azure-prebuilt-layout"])
 
 
 class TestRunGenerationForCandidate:
