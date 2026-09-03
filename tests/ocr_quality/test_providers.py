@@ -582,3 +582,121 @@ class TestAzureOverlayPrecision:
         assert word["x1"] - word["x0"] < 60.0
         assert 0.0 <= word["x0"] <= 300.0
         assert 0.0 <= word["top"] <= 300.0
+
+
+def _make_fake_table(rows: list[list[str]], start_offset: int) -> tuple[MagicMock, str]:
+    """Build a fake Azure ``DocumentTable`` (MagicMock) plus the per-cell-line
+    text block Azure's plain-``text`` content format would emit for it,
+    positioned as if it started at ``start_offset`` within some larger
+    ``result.content`` string -- mirroring Azure's real one-line-per-cell
+    serialization this fix reconstructs away from.
+    """
+    cells = []
+    cell_lines: list[str] = []
+    for row_index, row in enumerate(rows):
+        for column_index, cell_text in enumerate(row):
+            cells.append(
+                MagicMock(row_index=row_index, column_index=column_index, content=cell_text)
+            )
+            cell_lines.append(cell_text)
+    block = "\n".join(cell_lines)
+    span = MagicMock(offset=start_offset, length=len(block))
+    table = MagicMock(cells=cells, spans=[span])
+    return table, block
+
+
+class TestAzureTableTextReconstruction:
+    """Regression tests: candidate text must row-join table cells the same
+    way the existing Paperless/pdftotext-style comparison text does, instead
+    of Azure's default one-line-per-cell serialization (issue: table text
+    formatting mismatch distorting the human comparison view/diff stats).
+    """
+
+    def test_row_joined_table_text_joins_cells_by_row(self):
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _row_joined_table_text,
+        )
+
+        header = [
+            "Payment Due Date",
+            "Principal",
+            "Interest",
+            "Escrow",
+            "Late Charge",
+            "Other",
+            "Total",
+        ]
+        data = ["Jul 12, 2026", "141.97", "0.00", "0.00", "0.00", "0.00", "141.97"]
+        table, _ = _make_fake_table([header, data], start_offset=0)
+
+        result = _row_joined_table_text(table)
+
+        assert result == f"{' '.join(header)}\n{' '.join(data)}"
+        # 2 rows, not 14 per-cell lines.
+        assert result.count("\n") == 1
+
+    def test_extract_text_reconstructs_table_and_preserves_surrounding_text(self):
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _extract_text_and_confidence,
+        )
+
+        header = [
+            "Payment Due Date",
+            "Principal",
+            "Interest",
+            "Escrow",
+            "Late Charge",
+            "Other",
+            "Total",
+        ]
+        data = ["Jul 12, 2026", "141.97", "0.00", "0.00", "0.00", "0.00", "141.97"]
+        before = "Statement Summary"
+        after = "Thank you for your business"
+
+        table, block = _make_fake_table([header, data], start_offset=len(before) + 1)
+        content = f"{before}\n{block}\n{after}"
+
+        fake_result = MagicMock(content=content, pages=[], tables=[table])
+
+        text, _confidence = _extract_text_and_confidence(fake_result)
+
+        expected_table_block = f"{' '.join(header)}\n{' '.join(data)}"
+        assert text == f"{before}\n{expected_table_block}\n{after}"
+        # Row-joined, not one line per cell.
+        assert "Payment Due Date Principal Interest Escrow Late Charge Other Total" in text
+        assert text.count("Payment Due Date\n") == 0
+
+    def test_extract_text_with_no_tables_is_unchanged(self):
+        """Guards the common non-table document case: byte-for-byte identical
+        to plain ``result.content`` when there are no tables at all."""
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _extract_text_and_confidence,
+        )
+
+        content = "Just a plain paragraph.\nAnother line.\n"
+        fake_result_no_attr = MagicMock(content=content, pages=[])
+        del fake_result_no_attr.tables  # simulate no `tables` attribute at all
+        fake_result_empty = MagicMock(content=content, pages=[], tables=[])
+
+        text_no_attr, _ = _extract_text_and_confidence(fake_result_no_attr)
+        text_empty, _ = _extract_text_and_confidence(fake_result_empty)
+
+        assert text_no_attr == content
+        assert text_empty == content
+
+    def test_reconstruct_multiple_tables_preserves_order(self):
+        from doc_intelligence_hub.modules.ocr_quality.providers.azure_document_intelligence import (
+            _extract_text_and_confidence,
+        )
+
+        table1, block1 = _make_fake_table([["A", "B"], ["1", "2"]], start_offset=len("Intro\n"))
+        middle = "Middle paragraph."
+        offset2 = len("Intro\n") + len(block1) + len("\n" + middle + "\n")
+        table2, block2 = _make_fake_table([["X", "Y"], ["9", "8"]], start_offset=offset2)
+        content = f"Intro\n{block1}\n{middle}\n{block2}\nOutro"
+
+        fake_result = MagicMock(content=content, pages=[], tables=[table1, table2])
+
+        text, _ = _extract_text_and_confidence(fake_result)
+
+        assert text == "Intro\nA B\n1 2\nMiddle paragraph.\nX Y\n9 8\nOutro"
