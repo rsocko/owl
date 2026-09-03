@@ -26,8 +26,10 @@ from uuid import uuid4
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from doc_intelligence_hub.core import alerts
 from doc_intelligence_hub.core.paperless import PaperlessClient
 
+from .config import settings as ocr_quality_settings
 from .database import DocumentAssessment, InventoryRun, PdfProfile, RunFailure, SampleSelection
 from .models import (
     INVENTORY_SIGNAL_VERSION,
@@ -37,6 +39,7 @@ from .models import (
     ReasonCode,
     RunStage,
     RunStatus,
+    RunTrigger,
 )
 from .pdf_profiling import PdfProfilingError, profile_pdf
 from .sampling import SampleCandidate, select_stratified_sample
@@ -64,6 +67,69 @@ class ManualStage2ProfilingFailedError(Exception):
         self.document_id = document_id
         self.reason_code = reason_code
         super().__init__(f"Stage-2 profiling failed for document {document_id} ({reason_code})")
+
+
+class RunConflictError(Exception):
+    """Raised when an equivalent run is already active (issue #30 conflict contract).
+
+    Concurrent requests for the same effective work must coalesce or return
+    an explicit conflict rather than starting duplicate work. Callers (e.g.
+    the API router) should map this to HTTP 409, including ``run_id`` so the
+    client can poll the existing run instead of guessing.
+    """
+
+    def __init__(self, run_id: str, message: str | None = None) -> None:
+        self.run_id = run_id
+        super().__init__(message or f"An equivalent run is already active: {run_id}")
+
+
+def _compute_idempotency_key(
+    stage: str, *, scope_digest: str, config_digest: str, extra: dict[str, Any] | None = None
+) -> str:
+    """Digest identifying "the same effective request" for a given stage.
+
+    Used to coalesce repeated delivery / concurrent equivalent requests
+    (issue #30). ``extra`` lets a single-document trigger fold in the
+    document id and/or document version checksum so idempotency is scoped
+    per-document rather than per-scope.
+    """
+    return _digest(
+        {
+            "stage": stage,
+            "scope_digest": scope_digest,
+            "config_digest": config_digest,
+            "extra": extra or {},
+        }
+    )
+
+
+def emit_run_alert(run: InventoryRun, *, reason: str) -> None:
+    """Emit a shared-alerts entry for a terminally failed/cancelled run.
+
+    A low quality score is explicitly NOT alert-worthy on its own (design
+    contract) — this is only called from the FAILED/CANCELLED terminal
+    transitions below, never from per-document scoring outcomes.
+    """
+    try:
+        alerts.emit_alert(
+            alert_type=f"ocr_run_{reason}",
+            severity="high",
+            module="ocr_quality",
+            title=f"OCR {run.stage} run {reason}",
+            description=(
+                f"Run {run.run_id} (trigger={run.trigger or 'manual'}, "
+                f"actor={run.actor or 'system'}) ended as {reason}."
+            ),
+            action_url=f"/api/ocr-quality/runs/{run.run_id}",
+            metadata={
+                "run_id": run.run_id,
+                "stage": run.stage,
+                "trigger": run.trigger,
+                "correlation_id": run.correlation_id,
+            },
+        )
+    except Exception:  # pragma: no cover - alerting must never break a run
+        logger.warning("Failed to emit OCR run alert for %s", run.run_id, exc_info=True)
 
 
 def _digest(value: Any) -> str:
@@ -178,6 +244,9 @@ class OcrQualityInventoryService:
         run_id: str | None = None,
         resume: bool = False,
         scope_params: dict[str, Any] | None = None,
+        actor: str = "system",
+        trigger: RunTrigger | str = RunTrigger.MANUAL,
+        correlation_id: str | None = None,
     ) -> dict[str, Any]:
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
@@ -187,6 +256,12 @@ class OcrQualityInventoryService:
             {"batch_size": batch_size, "signal_version": INVENTORY_SIGNAL_VERSION}
         )
         instance_digest = _digest(self.client.base_url)
+        idempotency_key = _compute_idempotency_key(
+            RunStage.STAGE_1_CORPUS_SCAN.value,
+            scope_digest=scope_digest,
+            config_digest=config_digest,
+        )
+        trigger_value = trigger.value if isinstance(trigger, RunTrigger) else trigger
 
         db = self.session_factory()
         try:
@@ -209,6 +284,20 @@ class OcrQualityInventoryService:
                     )
                 cursor = run.cursor
             else:
+                # Defense-in-depth idempotency: refuse a second concurrent
+                # run for the same effective request even across process
+                # restarts (the API router also guards this in-process).
+                conflicting = (
+                    db.query(InventoryRun)
+                    .filter(
+                        InventoryRun.idempotency_key == idempotency_key,
+                        InventoryRun.status == RunStatus.RUNNING.value,
+                    )
+                    .one_or_none()
+                )
+                if conflicting is not None:
+                    raise RunConflictError(conflicting.run_id)
+
                 run_id = run_id or str(uuid4())
                 run = InventoryRun(
                     run_id=run_id,
@@ -220,6 +309,11 @@ class OcrQualityInventoryService:
                     status=RunStatus.RUNNING.value,
                     counts={},
                     started_at=datetime.utcnow(),
+                    actor=actor,
+                    trigger=trigger_value,
+                    correlation_id=correlation_id or str(uuid4()),
+                    idempotency_key=idempotency_key,
+                    max_retries=ocr_quality_settings.run_max_retries,
                 )
                 db.add(run)
                 db.commit()
@@ -227,6 +321,7 @@ class OcrQualityInventoryService:
             counts: Counter[str] = Counter(run.counts or {})
             start_time = time.monotonic()
             processed = 0
+            cancelled = False
 
             async for page in self.client.iter_document_pages(
                 page_size=batch_size, cursor=cursor, scope_params=scope_params
@@ -240,12 +335,21 @@ class OcrQualityInventoryService:
                 run.counts = dict(counts)
                 db.commit()
 
+                db.refresh(run)
+                if run.cancel_requested:
+                    cancelled = True
+                    break
+
             elapsed = max(time.monotonic() - start_time, 1e-9)
-            run.status = RunStatus.COMPLETED.value
+            run.status = RunStatus.CANCELLED.value if cancelled else RunStatus.COMPLETED.value
             run.finished_at = datetime.utcnow()
+            if cancelled:
+                run.cancelled_at = run.finished_at
             run.throughput_docs_per_second = round(processed / elapsed, 4) if processed else 0.0
             run.counts = dict(counts)
             db.commit()
+            if cancelled:
+                emit_run_alert(run, reason="cancelled")
 
             return {
                 "run_id": run_id,
@@ -255,8 +359,37 @@ class OcrQualityInventoryService:
                 "throughput_docs_per_second": run.throughput_docs_per_second,
                 "started_at": run.started_at.isoformat() if run.started_at else None,
                 "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                "actor": run.actor,
+                "trigger": run.trigger,
+                "correlation_id": run.correlation_id,
+                "cancel_requested": run.cancel_requested,
                 "schema_version": "1.0",
                 "redacted": True,
+            }
+        finally:
+            db.close()
+
+    def request_cancellation(self, run_id: str) -> dict[str, Any]:
+        """Request cooperative cancellation of a running run (issue #30).
+
+        Sets ``cancel_requested`` so the run's own loop observes it between
+        documents/pages and stops cleanly (status becomes ``CANCELLED``,
+        never silently left ``RUNNING``). Raises ``ValueError`` if the run
+        is unknown or already in a terminal state.
+        """
+        db = self.session_factory()
+        try:
+            run = db.query(InventoryRun).filter_by(run_id=run_id).one_or_none()
+            if run is None:
+                raise ValueError(f"Unknown run {run_id}")
+            if run.status != RunStatus.RUNNING.value:
+                raise ValueError(f"Run {run_id} is not running (status={run.status})")
+            run.cancel_requested = True
+            db.commit()
+            return {
+                "run_id": run.run_id,
+                "status": run.status,
+                "cancel_requested": run.cancel_requested,
             }
         finally:
             db.close()
@@ -394,6 +527,9 @@ class OcrQualityInventoryService:
         min_per_stratum: int = 2,
         pdf_profile_max_pages: int = 50,
         run_id: str | None = None,
+        actor: str = "system",
+        trigger: RunTrigger | str = RunTrigger.MANUAL,
+        correlation_id: str | None = None,
     ) -> dict[str, Any]:
         db = self.session_factory()
         try:
@@ -401,14 +537,33 @@ class OcrQualityInventoryService:
             if source_run is None:
                 raise ValueError(f"Unknown source inventory run {source_run_id}")
 
+            config_digest = _digest(
+                {"sample_size": sample_size, "min_per_stratum": min_per_stratum}
+            )
+            idempotency_key = _compute_idempotency_key(
+                RunStage.STAGE_2_STRATIFIED_SAMPLE.value,
+                scope_digest=source_run.scope_digest,
+                config_digest=config_digest,
+                extra={"source_run_id": source_run_id},
+            )
+            conflicting = (
+                db.query(InventoryRun)
+                .filter(
+                    InventoryRun.idempotency_key == idempotency_key,
+                    InventoryRun.status == RunStatus.RUNNING.value,
+                )
+                .one_or_none()
+            )
+            if conflicting is not None:
+                raise RunConflictError(conflicting.run_id)
+
+            trigger_value = trigger.value if isinstance(trigger, RunTrigger) else trigger
             run_id = run_id or str(uuid4())
             sample_run = InventoryRun(
                 run_id=run_id,
                 stage=RunStage.STAGE_2_STRATIFIED_SAMPLE.value,
                 scope_digest=source_run.scope_digest,
-                config_digest=_digest(
-                    {"sample_size": sample_size, "min_per_stratum": min_per_stratum}
-                ),
+                config_digest=config_digest,
                 instance_digest=source_run.instance_digest,
                 signal_version=PDF_PROFILE_VERSION,
                 seed=seed,
@@ -416,6 +571,11 @@ class OcrQualityInventoryService:
                 status=RunStatus.RUNNING.value,
                 counts={},
                 started_at=datetime.utcnow(),
+                actor=actor,
+                trigger=trigger_value,
+                correlation_id=correlation_id or str(uuid4()),
+                idempotency_key=idempotency_key,
+                max_retries=ocr_quality_settings.run_max_retries,
             )
             db.add(sample_run)
             db.commit()
@@ -445,6 +605,7 @@ class OcrQualityInventoryService:
             )
 
             counts: Counter[str] = Counter()
+            cancelled = False
             for decision in decisions:
                 db.add(
                     SampleSelection(
@@ -456,15 +617,31 @@ class OcrQualityInventoryService:
                     )
                 )
                 disposition = await self._profile_sampled_document(
-                    db, run_id, decision.document_id, pdf_profile_max_pages
+                    db,
+                    run_id,
+                    decision.document_id,
+                    pdf_profile_max_pages,
+                    max_retries=sample_run.max_retries,
                 )
                 counts[disposition.value] += 1
+                db.commit()
+
+                db.refresh(sample_run)
+                if sample_run.cancel_requested:
+                    cancelled = True
+                    break
             db.commit()
 
-            sample_run.status = RunStatus.COMPLETED.value
+            sample_run.status = (
+                RunStatus.CANCELLED.value if cancelled else RunStatus.COMPLETED.value
+            )
             sample_run.finished_at = datetime.utcnow()
+            if cancelled:
+                sample_run.cancelled_at = sample_run.finished_at
             sample_run.counts = dict(counts)
             db.commit()
+            if cancelled:
+                emit_run_alert(sample_run, reason="cancelled")
 
             return {
                 "run_id": run_id,
@@ -474,6 +651,10 @@ class OcrQualityInventoryService:
                 "sample_size_requested": sample_size,
                 "sample_size_selected": len(decisions),
                 "counts": dict(counts),
+                "actor": sample_run.actor,
+                "trigger": sample_run.trigger,
+                "correlation_id": sample_run.correlation_id,
+                "cancel_requested": sample_run.cancel_requested,
                 "schema_version": "1.0",
                 "redacted": True,
             }
@@ -481,10 +662,52 @@ class OcrQualityInventoryService:
             db.close()
 
     async def _profile_sampled_document(
-        self, db: Session, run_id: str, document_id: int, max_pages: int
+        self, db: Session, run_id: str, document_id: int, max_pages: int, *, max_retries: int = 0
     ) -> Disposition:
+        """Fetch + profile one document's PDF, with a bounded retry budget.
+
+        Only the network fetch is retried (issue #30 "bounded retries") —
+        a ``PdfProfilingError`` means the PDF itself is unreadable and
+        retrying the same bytes cannot help. ``max_retries`` additional
+        attempts are made beyond the first; each attempt increments the
+        owning run's ``retry_count`` so it's observable via ``GET /runs``.
+        """
+        attempt = 0
+        pdf_bytes: bytes | None = None
+        fetch_exc: Exception | None = None
+        while attempt <= max_retries:
+            try:
+                pdf_bytes, _content_type = await self.client.get_document_preview(document_id)
+                fetch_exc = None
+                break
+            except Exception as exc:  # noqa: BLE001 - retried below, recorded if exhausted
+                fetch_exc = exc
+                attempt += 1
+                if attempt <= max_retries:
+                    run = db.query(InventoryRun).filter_by(run_id=run_id).one_or_none()
+                    if run is not None:
+                        run.retry_count = (run.retry_count or 0) + 1
+                        db.commit()
+
+        if fetch_exc is not None or pdf_bytes is None:
+            logger.warning(
+                "OCR quality Stage-2 PDF fetch failed for document %s after %s attempt(s): %s",
+                document_id,
+                attempt,
+                type(fetch_exc).__name__ if fetch_exc else "no bytes returned",
+            )
+            db.add(
+                RunFailure(
+                    run_id=run_id,
+                    document_id=document_id,
+                    stage=RunStage.STAGE_2_STRATIFIED_SAMPLE.value,
+                    reason_code=ReasonCode.PDF_DOWNLOAD_FAILED.value,
+                    error_type=type(fetch_exc).__name__ if fetch_exc else "NoPdfBytes",
+                )
+            )
+            return Disposition.FAILED
+
         try:
-            pdf_bytes, _content_type = await self.client.get_document_preview(document_id)
             result = profile_pdf(pdf_bytes, max_pages=max_pages)
             db.add(
                 PdfProfile(
@@ -544,6 +767,10 @@ class OcrQualityInventoryService:
         document_id: int,
         max_pages: int = 50,
         run_id: str | None = None,
+        actor: str = "system",
+        trigger: RunTrigger | str = RunTrigger.MANUAL,
+        correlation_id: str | None = None,
+        force: bool = False,
     ) -> dict[str, Any]:
         """Force Stage-2 PDF profiling + quality re-score for one arbitrary document.
 
@@ -561,6 +788,13 @@ class OcrQualityInventoryService:
         detail queries (keyed on the most recent assessment row) pick up the
         result without any new querying logic. Raises
         ``ManualStage2ProfilingFailedError`` if the PDF fetch/parse failed.
+
+        Idempotent by document/version checksum + operation configuration
+        (issue #30): repeated delivery for the same document at the same
+        Stage-1 ``document_version_key`` and ``max_pages`` returns the prior
+        successful run's result instead of re-fetching/re-profiling, unless
+        ``force=True``. A concurrent identical request while one is already
+        running raises ``RunConflictError``.
         """
         db = self.session_factory()
         try:
@@ -573,6 +807,51 @@ class OcrQualityInventoryService:
             if assessment is None:
                 raise ManualStage2DocumentNotFoundError(document_id)
 
+            idempotency_key = _compute_idempotency_key(
+                RunStage.STAGE_2_MANUAL_SINGLE_DOCUMENT.value,
+                scope_digest=_digest({"document_id": document_id}),
+                config_digest=_digest({"max_pages": max_pages}),
+                extra={"document_version_key": assessment.document_version_key},
+            )
+
+            conflicting = (
+                db.query(InventoryRun)
+                .filter(
+                    InventoryRun.idempotency_key == idempotency_key,
+                    InventoryRun.status == RunStatus.RUNNING.value,
+                )
+                .one_or_none()
+            )
+            if conflicting is not None:
+                raise RunConflictError(conflicting.run_id)
+
+            if not force:
+                prior_completed = (
+                    db.query(InventoryRun)
+                    .filter(
+                        InventoryRun.idempotency_key == idempotency_key,
+                        InventoryRun.status == RunStatus.COMPLETED.value,
+                    )
+                    .order_by(InventoryRun.finished_at.desc())
+                    .first()
+                )
+                if prior_completed is not None and (prior_completed.counts or {}).get(
+                    Disposition.ASSESSED.value
+                ):
+                    refreshed = (
+                        db.query(DocumentAssessment)
+                        .filter(DocumentAssessment.document_id == document_id)
+                        .order_by(DocumentAssessment.id.desc())
+                        .first()
+                    )
+                    result = _assessment_detail(
+                        refreshed,
+                        has_stage2_analysis=_has_stage2_analysis(db, document_id),
+                    )
+                    result["idempotent_replay_of_run_id"] = prior_completed.run_id
+                    return result
+
+            trigger_value = trigger.value if isinstance(trigger, RunTrigger) else trigger
             manual_run_id = run_id or str(uuid4())
             manual_run = InventoryRun(
                 run_id=manual_run_id,
@@ -585,12 +864,17 @@ class OcrQualityInventoryService:
                 status=RunStatus.RUNNING.value,
                 counts={},
                 started_at=datetime.utcnow(),
+                actor=actor,
+                trigger=trigger_value,
+                correlation_id=correlation_id or str(uuid4()),
+                idempotency_key=idempotency_key,
+                max_retries=ocr_quality_settings.run_max_retries,
             )
             db.add(manual_run)
             db.commit()
 
             disposition = await self._profile_sampled_document(
-                db, manual_run_id, document_id, max_pages
+                db, manual_run_id, document_id, max_pages, max_retries=manual_run.max_retries
             )
             db.commit()
 
@@ -609,6 +893,7 @@ class OcrQualityInventoryService:
                     .order_by(RunFailure.id.desc())
                     .first()
                 )
+                emit_run_alert(manual_run, reason="failed")
                 raise ManualStage2ProfilingFailedError(
                     document_id, failure.reason_code if failure else None
                 )

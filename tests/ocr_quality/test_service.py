@@ -285,6 +285,233 @@ class TestRunCorpusScan:
             await service.run_corpus_scan(batch_size=0)
 
 
+class TestRunContract:
+    """Shared run/state contract behaviors (issue #30): idempotency,
+    conflict detection, cooperative cancellation, bounded retries, and
+    failure/cancellation alerting.
+    """
+
+    @pytest.mark.asyncio
+    async def test_concurrent_equivalent_request_raises_conflict(self, ocr_db):
+        from doc_intelligence_hub.modules.ocr_quality.models import (
+            INVENTORY_SIGNAL_VERSION,
+            RunStage,
+        )
+        from doc_intelligence_hub.modules.ocr_quality.service import (
+            RunConflictError,
+            _compute_idempotency_key,
+            _digest,
+        )
+
+        client = FakeClient([_doc(1)])
+        service = OcrQualityInventoryService(client, get_session)
+
+        # Mirror run_corpus_scan(batch_size=10)'s own digest computation so
+        # this pre-seeded row is recognized as "the same effective request".
+        scope_digest = _digest({})
+        config_digest = _digest({"batch_size": 10, "signal_version": INVENTORY_SIGNAL_VERSION})
+        idempotency_key = _compute_idempotency_key(
+            RunStage.STAGE_1_CORPUS_SCAN.value,
+            scope_digest=scope_digest,
+            config_digest=config_digest,
+        )
+        # Simulate an already-RUNNING run for the exact same effective
+        # request (same scope/config) created by another process/worker.
+        db = get_session()
+        try:
+            db.add(
+                InventoryRun(
+                    run_id="already-running",
+                    stage=RunStage.STAGE_1_CORPUS_SCAN.value,
+                    scope_digest=scope_digest,
+                    config_digest=config_digest,
+                    instance_digest="dummy",
+                    signal_version=INVENTORY_SIGNAL_VERSION,
+                    status=RunStatus.RUNNING.value,
+                    counts={},
+                    idempotency_key=idempotency_key,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        with pytest.raises(RunConflictError) as excinfo:
+            await service.run_corpus_scan(batch_size=10)
+        assert excinfo.value.run_id == "already-running"
+
+    @pytest.mark.asyncio
+    async def test_cancellation_mid_run_stops_cleanly(self, ocr_db):
+        docs = [_doc(i) for i in range(1, 7)]
+
+        class CancellingClient(FakeClient):
+            """Requests cancellation once the first page has been committed.
+
+            Cancellation is requested from a fresh session (mirroring the
+            real ``POST /runs/{id}/cancel`` endpoint, which runs in its own
+            request/session) at a point where the run's own session has no
+            pending writes, matching how this plays out in production.
+            """
+
+            def __init__(self, documents, service, run_id):
+                super().__init__(documents)
+                self._service = service
+                self._run_id = run_id
+                self._pages_yielded = 0
+
+            async def iter_document_pages(self, *, page_size, cursor=None, scope_params=None):
+                async for page in super().iter_document_pages(
+                    page_size=page_size, cursor=cursor, scope_params=scope_params
+                ):
+                    yield page
+                    self._pages_yielded += 1
+                    if self._pages_yielded == 1:
+                        self._service.request_cancellation(self._run_id)
+
+        service = OcrQualityInventoryService(None, get_session)  # client set below
+        client = CancellingClient(docs, service, "cancel-run")
+        service.client = client
+
+        result = await service.run_corpus_scan(batch_size=2, run_id="cancel-run")
+
+        assert result["status"] == RunStatus.CANCELLED.value
+        assert result["cancel_requested"] is True
+        # Only the first two pages (4 documents) were processed before the
+        # cooperative check observed cancellation and stopped the loop.
+        assert sum(result["counts"].values()) == 4
+
+        db = get_session()
+        try:
+            run = db.query(InventoryRun).filter_by(run_id="cancel-run").one()
+            assert run.status == RunStatus.CANCELLED.value
+            assert run.cancelled_at is not None
+        finally:
+            db.close()
+
+    @pytest.mark.asyncio
+    async def test_request_cancellation_unknown_run_raises(self, ocr_db):
+        client = FakeClient([])
+        service = OcrQualityInventoryService(client, get_session)
+        with pytest.raises(ValueError, match="Unknown run"):
+            service.request_cancellation("no-such-run")
+
+    @pytest.mark.asyncio
+    async def test_request_cancellation_on_finished_run_raises(self, ocr_db):
+        client = FakeClient([_doc(1)])
+        service = OcrQualityInventoryService(client, get_session)
+        await service.run_corpus_scan(batch_size=10, run_id="finished-run")
+        with pytest.raises(ValueError, match="not running"):
+            service.request_cancellation("finished-run")
+
+    @pytest.mark.asyncio
+    async def test_repeat_manual_stage2_is_idempotent_by_document_version(
+        self, ocr_db, monkeypatch
+    ):
+        docs = [_doc(1)]
+        client = FakeClient(docs, previews={1: b"%PDF-fake-bytes-not-real"})
+        service = OcrQualityInventoryService(client, get_session)
+        await service.run_corpus_scan(batch_size=10, run_id="source-run-manual")
+
+        # Stub out PDF profiling so the test doesn't depend on reportlab
+        # being importable in this environment (unrelated, pre-existing
+        # issue) -- this test only cares about the idempotency contract.
+        from doc_intelligence_hub.modules.ocr_quality.models import Disposition
+
+        async def _fake_profile(self_, db, run_id, document_id, max_pages, *, max_retries=0):
+            return Disposition.ASSESSED
+
+        monkeypatch.setattr(OcrQualityInventoryService, "_profile_sampled_document", _fake_profile)
+
+        first = await service.run_manual_stage2(document_id=1, run_id="manual-run-1")
+        assert "idempotent_replay_of_run_id" not in first
+
+        second = await service.run_manual_stage2(document_id=1, run_id="manual-run-2")
+        assert second["idempotent_replay_of_run_id"] == "manual-run-1"
+
+        db = get_session()
+        try:
+            # The repeat must not create a second manual run row.
+            assert db.query(InventoryRun).filter_by(run_id="manual-run-2").one_or_none() is None
+        finally:
+            db.close()
+
+    @pytest.mark.asyncio
+    async def test_forced_repeat_manual_stage2_bypasses_idempotent_replay(
+        self, ocr_db, monkeypatch
+    ):
+        docs = [_doc(1)]
+        client = FakeClient(docs, previews={1: b"%PDF-fake-bytes-not-real"})
+        service = OcrQualityInventoryService(client, get_session)
+        await service.run_corpus_scan(batch_size=10, run_id="source-run-manual-2")
+
+        from doc_intelligence_hub.modules.ocr_quality.models import Disposition
+
+        async def _fake_profile(self_, db, run_id, document_id, max_pages, *, max_retries=0):
+            return Disposition.ASSESSED
+
+        monkeypatch.setattr(OcrQualityInventoryService, "_profile_sampled_document", _fake_profile)
+
+        await service.run_manual_stage2(document_id=1, run_id="manual-run-a")
+        second = await service.run_manual_stage2(document_id=1, run_id="manual-run-b", force=True)
+        assert "idempotent_replay_of_run_id" not in second
+
+        db = get_session()
+        try:
+            assert db.query(InventoryRun).filter_by(run_id="manual-run-b").one_or_none() is not None
+        finally:
+            db.close()
+
+    @pytest.mark.asyncio
+    async def test_manual_stage2_bounded_retry_then_terminal_failure(self, ocr_db, monkeypatch):
+        from doc_intelligence_hub.modules.ocr_quality.service import (
+            ManualStage2ProfilingFailedError,
+        )
+
+        docs = [_doc(1)]
+        # No preview registered for document 1 -> get_document_preview always raises.
+        client = FakeClient(docs, previews={})
+        service = OcrQualityInventoryService(client, get_session)
+        await service.run_corpus_scan(batch_size=10, run_id="source-run-retry")
+
+        alert_calls: list[dict] = []
+        monkeypatch.setattr(
+            "doc_intelligence_hub.modules.ocr_quality.service.alerts.emit_alert",
+            lambda **kwargs: alert_calls.append(kwargs),
+        )
+
+        with pytest.raises(ManualStage2ProfilingFailedError):
+            await service.run_manual_stage2(document_id=1, run_id="manual-retry-run")
+
+        assert len(client.preview_calls) == 1 + ocr_quality_config.settings.run_max_retries
+
+        db = get_session()
+        try:
+            run = db.query(InventoryRun).filter_by(run_id="manual-retry-run").one()
+            assert run.retry_count == ocr_quality_config.settings.run_max_retries
+            assert run.status == RunStatus.COMPLETED.value  # terminal failure recorded, not stuck
+        finally:
+            db.close()
+
+        assert len(alert_calls) == 1
+        assert alert_calls[0]["alert_type"] == "ocr_run_failed"
+
+    @pytest.mark.asyncio
+    async def test_low_score_alone_does_not_emit_alert(self, ocr_db, monkeypatch):
+        docs = [_doc(1)]
+        client = FakeClient(docs)
+        service = OcrQualityInventoryService(client, get_session)
+
+        alert_calls: list[dict] = []
+        monkeypatch.setattr(
+            "doc_intelligence_hub.modules.ocr_quality.service.alerts.emit_alert",
+            lambda **kwargs: alert_calls.append(kwargs),
+        )
+
+        result = await service.run_corpus_scan(batch_size=10, run_id="low-score-run")
+        assert result["status"] == RunStatus.COMPLETED.value
+        assert alert_calls == []
+
+
 class TestRunStratifiedSample:
     @pytest.mark.asyncio
     async def test_samples_and_profiles_documents(self, ocr_db):
