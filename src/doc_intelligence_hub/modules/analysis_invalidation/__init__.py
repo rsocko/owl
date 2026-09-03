@@ -12,13 +12,17 @@ bus) — it is durable SQLite records plus a small service API, following the
 same ``config.py``/``database.py``/``service.py``/``cli.py`` shape as the
 ``ocr_quality`` and ``action_queue`` modules.
 
-There is no real production trigger yet: issue #18's "apply an accepted OCR
-candidate" step, which will call ``AnalysisFreshnessService.record_invalidation``
-(or the CLI/API's manual-invalidation entry points) whenever a Paperless
-document's accepted version actually changes, does not exist yet. Until then,
-``simulate_version_change`` / the CLI ``simulate-version-change`` command /
-the ``POST /api/analysis-invalidation/simulate-version-change`` endpoint are
-the supported way to exercise and validate this mechanism.
+Issue #18 slice 2 ("apply an accepted OCR candidate to Paperless") is the
+real production trigger: ``modules.ocr_quality.application_service
+.OcrCandidateApplicationService.apply_candidate`` calls
+``AnalysisFreshnessService.record_invalidation`` (with
+``InvalidationReason.VERSION_CHANGED``) once Paperless has actually accepted
+and verified the new document version, and its ``rollback`` calls it again
+with ``InvalidationReason.ROLLBACK``. ``simulate_version_change`` / the CLI
+``simulate-version-change`` command / the
+``POST /api/analysis-invalidation/simulate-version-change`` endpoint remain
+useful for exercising this mechanism in isolation (e.g. without a real
+Paperless instance), but are no longer the only caller.
 """
 
 from __future__ import annotations

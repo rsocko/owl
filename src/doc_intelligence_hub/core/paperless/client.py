@@ -6,6 +6,7 @@ Provides:
 - Correspondent resolution
 - Custom fields (list, create, update)
 - Saved views
+- Document versions (upload/list/delete/label) — issue #18 slice 2
 - Connection health check
 - Fixture loading for tests
 - Automatic retry with exponential backoff for transient errors
@@ -365,8 +366,12 @@ class PaperlessClient:
         return httpx.AsyncClient(
             base_url=self.base_url,
             headers={
+                # No static Content-Type here: httpx computes the right one
+                # per request from `json=`/`files=`/`data=`, but a fixed
+                # client-level header would win over that (httpx applies
+                # explicit headers after auto-encoding request content), which
+                # would silently corrupt multipart uploads (wrong boundary).
                 "Authorization": f"Token {self.token}",
-                "Content-Type": "application/json",
             },
             verify=self.verify_ssl,
             timeout=httpx.Timeout(
@@ -413,12 +418,20 @@ class PaperlessClient:
         Retries on transient errors (timeouts, 429, 5xx) for idempotent
         methods. Non-idempotent methods (POST, PATCH) retry only on
         connection/timeout errors (not on 5xx, to avoid duplicate writes).
+
+        Multipart (``files=``) requests are never retried on a transient
+        server response (only on connection/timeout errors before any bytes
+        were sent) regardless of ``method`` — re-POSTing a multipart upload
+        after Paperless returned e.g. a 503 could otherwise create two
+        upload attempts server-side. GET/HEAD/PUT/DELETE/OPTIONS remain
+        idempotent-retryable as before.
         """
         import asyncio
 
         client = self._get_client()
         breaker = get_circuit_breaker("paperless", failure_threshold=5, recovery_timeout=60.0)
-        is_idempotent = method.upper() in _IDEMPOTENT_METHODS
+        is_multipart = "files" in kwargs
+        is_idempotent = method.upper() in _IDEMPOTENT_METHODS and not is_multipart
 
         if not breaker.allow_request():
             raise CircuitOpenError(breaker)
@@ -837,6 +850,120 @@ class PaperlessClient:
                 status_code=None,
             )
         return verified
+
+    # ------------------------------------------------------------------
+    # Document versions — issue #18 slice 2 (apply/rollback an OCR candidate)
+    #
+    # Paperless's own document-version mechanism: a document can be
+    # "merged in" as a version of another (root) document. The version
+    # with the highest internal ordering is always what preview/download/
+    # content resolve to as "latest" — there is no separate "promote"
+    # call; rollback works by deleting the newer version(s) so the
+    # previous one becomes latest again. Uploading via ``update_version``
+    # with the root id set at consumption time means the result is never
+    # a separate/duplicate top-level document.
+    # ------------------------------------------------------------------
+
+    async def upload_document_version(
+        self,
+        root_document_id: int,
+        filename: str,
+        content: bytes,
+        *,
+        version_label: str | None = None,
+    ) -> str:
+        """Upload ``content`` as a new version of ``root_document_id``.
+
+        POSTs multipart to ``/api/documents/{root_document_id}/update_version/``.
+        Paperless runs this through its normal (async) consume pipeline with
+        the root id fixed at consumption time, so the result is attached as
+        a version directly — never a separate top-level document. Returns
+        the Celery task UUID string; poll it with :meth:`get_task`.
+        """
+        files = {"document": (filename, content, "application/pdf")}
+        data = {"version_label": version_label} if version_label else {}
+        resp = await self._request(
+            "POST",
+            f"/api/documents/{root_document_id}/update_version/",
+            files=files,
+            data=data,
+            max_attempts=1,  # never auto-retry a multipart upload
+        )
+        resp.raise_for_status()
+        task_id = resp.json()
+        if not isinstance(task_id, str) or not task_id:
+            raise PaperlessError(
+                f"Paperless update_version for document {root_document_id} did not "
+                f"return a task id: {task_id!r}",
+                status_code=None,
+            )
+        return task_id
+
+    async def get_task(self, task_id: str) -> dict[str, Any] | None:
+        """Fetch one Paperless task's status by its Celery task id.
+
+        Returns ``None`` if Paperless has no record of it (yet, or ever).
+        """
+        resp = await self._request("GET", "/api/tasks/", params={"task_id": task_id})
+        resp.raise_for_status()
+        results = resp.json()
+        if isinstance(results, dict):
+            results = results.get("results", [])
+        if not results:
+            return None
+        return results[0]
+
+    async def list_document_versions(self, root_document_id: int) -> list[dict[str, Any]]:
+        """Return the root document's own entry plus every merged-in version.
+
+        Each entry has ``id``, ``added``, ``checksum``, ``version_label``,
+        and ``is_root`` (from Paperless's ``DocumentVersionInfoSerializer`).
+        Order is not guaranteed to reflect recency — callers must not assume
+        ``versions[0]`` is latest.
+        """
+        document = await self.get_document(root_document_id)
+        versions = document.get("versions")
+        if not versions:
+            # Older Paperless without version support, or a document that
+            # has never had a version merged in: treat the document itself
+            # as its only "version" so callers have a uniform shape.
+            return [
+                {
+                    "id": root_document_id,
+                    "added": document.get("added"),
+                    "checksum": document.get("checksum"),
+                    "version_label": None,
+                    "is_root": True,
+                }
+            ]
+        return list(versions)
+
+    async def delete_document_version(self, root_document_id: int, version_id: int) -> dict:
+        """Delete one version of ``root_document_id``.
+
+        Paperless rejects deleting the root/original version itself. On
+        success Paperless auto-promotes whatever version now has the
+        highest ordering to "latest" and returns its id as
+        ``current_version_id`` — this is the rollback primitive.
+        """
+        resp = await self._request(
+            "DELETE",
+            f"/api/documents/{root_document_id}/versions/{version_id}/",
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def label_document_version(
+        self, root_document_id: int, version_id: int, label: str
+    ) -> dict:
+        """Set a human-readable label on one version, for audit purposes."""
+        resp = await self._request(
+            "PATCH",
+            f"/api/documents/{root_document_id}/versions/{version_id}/",
+            json={"version_label": label},
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     # ------------------------------------------------------------------
     # Tags
