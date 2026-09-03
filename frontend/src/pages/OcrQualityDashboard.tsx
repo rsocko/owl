@@ -32,6 +32,29 @@ export type InventoryRun = {
   finished_at?: string | null;
 };
 
+export type CalibrationSummary = {
+  decided_count: number;
+  agreement_count: number;
+  agreement_rate: number | null;
+  false_positive_count: number;
+  false_positive_rate: number | null;
+  false_negative_count: number;
+  false_negative_rate: number | null;
+  uncertain_count: number;
+  uncertain_rate: number | null;
+  uncertain_accepted_count: number;
+  uncertain_rejected_count: number;
+};
+
+// Below this many decided candidates, percentages are misleadingly precise
+// for a single-operator corpus (issue #167) — show a plain-language note
+// instead of a rate.
+export const MIN_DECIDED_FOR_RATES = 15;
+
+export function formatRate(rate: number | null): string {
+  return rate == null ? '—' : `${Math.round(rate * 100)}%`;
+}
+
 /* ── Helpers (exported for testing) ── */
 
 export function statusTone(status: string): Tone {
@@ -92,6 +115,52 @@ function DecileHistogram({ title, distribution }: { title: string; distribution:
             <span className="ocr-histogram-count">{count}</span>
           </div>
         ))}
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Calibration measurement summary for issue #17's activation gate (issue
+ * #167). Purely informational — compares the existing deterministic
+ * accept/reject "lean" already shown as suggested-read badges elsewhere in
+ * this app against actual recorded human decisions. Never recommends
+ * building or not building #17 itself.
+ */
+export function CalibrationCard({ summary }: { summary: CalibrationSummary }) {
+  if (summary.decided_count < MIN_DECIDED_FOR_RATES) {
+    return (
+      <Card title="Calibration (issue #17 gate)">
+        <div className="text-muted">
+          Not enough decided candidates yet to draw conclusions ({summary.decided_count} decided so
+          far — at least {MIN_DECIDED_FOR_RATES} recommended before rates are meaningful).
+        </div>
+      </Card>
+    );
+  }
+  return (
+    <Card title="Calibration (issue #17 gate)">
+      <div className="ocr-calibration-summary">
+        <div>
+          <span className="text-muted">Decided candidates:</span> {summary.decided_count}
+        </div>
+        <div>
+          <span className="text-muted">Agreement rate:</span> {formatRate(summary.agreement_rate)}{' '}
+          ({summary.agreement_count} of {summary.decided_count})
+        </div>
+        <div>
+          <span className="text-muted">False positives</span> (deterministic signal favored accept,
+          human rejected): {summary.false_positive_count} ({formatRate(summary.false_positive_rate)})
+        </div>
+        <div>
+          <span className="text-muted">False negatives</span> (deterministic signal favored reject,
+          human accepted anyway): {summary.false_negative_count} ({formatRate(summary.false_negative_rate)})
+        </div>
+        <div>
+          <span className="text-muted">Uncertain (no strong signal):</span> {summary.uncertain_count}{' '}
+          ({formatRate(summary.uncertain_rate)}) — {summary.uncertain_accepted_count} accepted,{' '}
+          {summary.uncertain_rejected_count} rejected
+        </div>
       </div>
     </Card>
   );
@@ -374,6 +443,8 @@ export default function OcrQualityDashboard() {
   const [distribution, setDistribution] = useState<CorpusDistribution | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [calibration, setCalibration] = useState<CalibrationSummary | null>(null);
+  const [calibrationError, setCalibrationError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -389,6 +460,15 @@ export default function OcrQualityDashboard() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    endpoints.ocrQuality
+      .calibrationSummary()
+      .then((data) => setCalibration(data as CalibrationSummary))
+      .catch((err) =>
+        setCalibrationError(err instanceof Error ? err.message : 'Failed to load calibration summary.'),
+      );
+  }, []);
+
   return (
     <div className="ocr-quality-dashboard">
       <PageHeader
@@ -402,6 +482,13 @@ export default function OcrQualityDashboard() {
       />
 
       <RunsPanel />
+
+      {calibration && <CalibrationCard summary={calibration} />}
+      {!calibration && calibrationError && (
+        <Card title="Calibration (issue #17 gate)">
+          <div className="text-muted">{calibrationError}</div>
+        </Card>
+      )}
 
       {loading && <SkeletonLoader variant="stat-grid" />}
       {!loading && error && <ErrorState message={error} onRetry={load} />}

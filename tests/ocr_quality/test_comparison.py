@@ -9,8 +9,14 @@ from __future__ import annotations
 
 import io
 
-from doc_intelligence_hub.modules.ocr_quality.candidate_models import ComparisonBlockingFinding
-from doc_intelligence_hub.modules.ocr_quality.comparison import compare_candidate
+from doc_intelligence_hub.modules.ocr_quality.candidate_models import (
+    ComparisonBlockingFinding,
+    DeterministicLean,
+)
+from doc_intelligence_hub.modules.ocr_quality.comparison import (
+    classify_deterministic_lean,
+    compare_candidate,
+)
 
 from .conftest import make_minimal_pdf_bytes
 
@@ -248,3 +254,88 @@ class TestCompareCandidate:
         assert ComparisonBlockingFinding.PAGES_MISSING in result.blocking_findings
         assert result.page_count_current == 2
         assert result.page_count_candidate == 1
+
+
+class TestClassifyDeterministicLean:
+    """Unit tests for the deterministic accept/reject lean (issue #167).
+
+    Mirrors ``suggestedReadBadges`` in
+    ``frontend/src/components/OcrCandidatesPanel.tsx`` exactly — these
+    thresholds (content delta >= 3, overlay delta <= -3) must stay in sync
+    with that file.
+    """
+
+    def test_no_deltas_and_no_findings_is_no_strong_signal(self):
+        lean = classify_deterministic_lean(
+            blocking_findings=[], overlay_score_delta=None, content_score_delta=None
+        )
+        assert lean is DeterministicLean.NO_STRONG_SIGNAL
+
+    def test_small_deltas_below_threshold_is_no_strong_signal(self):
+        lean = classify_deterministic_lean(
+            blocking_findings=[], overlay_score_delta=-2.9, content_score_delta=2.9
+        )
+        assert lean is DeterministicLean.NO_STRONG_SIGNAL
+
+    def test_content_improvement_at_threshold_favors_accept(self):
+        lean = classify_deterministic_lean(
+            blocking_findings=[], overlay_score_delta=None, content_score_delta=3.0
+        )
+        assert lean is DeterministicLean.FAVORS_ACCEPT
+
+    def test_content_improvement_above_threshold_favors_accept(self):
+        lean = classify_deterministic_lean(
+            blocking_findings=[], overlay_score_delta=0.0, content_score_delta=10.0
+        )
+        assert lean is DeterministicLean.FAVORS_ACCEPT
+
+    def test_overlay_decline_at_threshold_favors_reject(self):
+        lean = classify_deterministic_lean(
+            blocking_findings=[], overlay_score_delta=-3.0, content_score_delta=None
+        )
+        assert lean is DeterministicLean.FAVORS_REJECT
+
+    def test_overlay_decline_beyond_threshold_favors_reject(self):
+        lean = classify_deterministic_lean(
+            blocking_findings=[], overlay_score_delta=-12.0, content_score_delta=None
+        )
+        assert lean is DeterministicLean.FAVORS_REJECT
+
+    def test_blocking_finding_favors_reject_even_with_no_deltas(self):
+        lean = classify_deterministic_lean(
+            blocking_findings=[ComparisonBlockingFinding.PAGES_MISSING],
+            overlay_score_delta=None,
+            content_score_delta=None,
+        )
+        assert lean is DeterministicLean.FAVORS_REJECT
+
+    def test_blocking_finding_overrides_content_improvement(self):
+        """Mirrors the frontend: the content-improvement badge is only shown
+        when there are no blocking findings, so a blocking finding always
+        wins over a positive content delta here too.
+        """
+        lean = classify_deterministic_lean(
+            blocking_findings=["machine_regression"],
+            overlay_score_delta=None,
+            content_score_delta=25.0,
+        )
+        assert lean is DeterministicLean.FAVORS_REJECT
+
+    def test_content_improvement_takes_precedence_over_overlay_decline(self):
+        """Both signals present, no blocking findings: content improvement
+        (an explicit accept-favoring signal) is checked before the overlay
+        decline, matching the badge list's evaluation order.
+        """
+        lean = classify_deterministic_lean(
+            blocking_findings=[], overlay_score_delta=-5.0, content_score_delta=5.0
+        )
+        assert lean is DeterministicLean.FAVORS_ACCEPT
+
+    def test_accepts_plain_string_blocking_findings(self):
+        """Rows loaded back from the DB store blocking findings as plain
+        JSON strings, not enum members — the classifier must accept both.
+        """
+        lean = classify_deterministic_lean(
+            blocking_findings=["pages_missing"], overlay_score_delta=None, content_score_delta=None
+        )
+        assert lean is DeterministicLean.FAVORS_REJECT
