@@ -323,6 +323,7 @@ export const endpoints = {
   },
   ocrQuality: {
     distribution: () => api.get('/api/ocr-quality/distribution'),
+    calibrationSummary: () => api.get('/api/ocr-quality/calibration/summary'),
     documents: (params?: string) => api.get(`/api/ocr-quality/documents${params ? `?${params}` : ''}`),
     documentDetail: (documentId: number | string) => api.get(`/api/ocr-quality/documents/${documentId}`),
     forceStage2: (documentId: number | string) => api.post(`/api/ocr-quality/documents/${documentId}/stage2`),

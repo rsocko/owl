@@ -15,6 +15,7 @@ import hashlib
 from doc_intelligence_hub.modules.ocr_quality.candidate_models import (
     ComparisonBlockingFinding,
     ComparisonResult,
+    DeterministicLean,
 )
 from doc_intelligence_hub.modules.ocr_quality.pdf_loader import load_pdf_pages
 from doc_intelligence_hub.modules.ocr_quality.pdf_types import PdfPageData
@@ -27,6 +28,48 @@ _PAGE_ORDER_SIMILARITY_FLOOR = 0.35
 # A machine-score drop of more than this many points (0-100 scale) is a
 # blocking regression finding.
 _MACHINE_REGRESSION_TOLERANCE = 5.0
+
+# Thresholds for the deterministic accept/reject "lean" (issue #167). These
+# intentionally match the non-authoritative "suggested read" hint thresholds
+# in frontend/src/components/OcrCandidatesPanel.tsx's suggestedReadBadges
+# (CONTENT_IMPROVEMENT_HINT_THRESHOLD / OVERLAY_DECLINE_HINT_THRESHOLD) — this
+# is a Python port of that same signal for bulk calibration measurement, not
+# a new heuristic. Keep the two in sync if either changes.
+_CONTENT_IMPROVEMENT_LEAN_THRESHOLD = 3.0
+_OVERLAY_DECLINE_LEAN_THRESHOLD = -3.0
+
+
+def classify_deterministic_lean(
+    *,
+    blocking_findings: list[ComparisonBlockingFinding] | list[str] | None,
+    overlay_score_delta: float | None,
+    content_score_delta: float | None,
+) -> DeterministicLean:
+    """Classify a candidate's deterministic accept/reject lean.
+
+    Never authorizes or gates acceptance — purely a measurement signal for
+    comparing against actual human decisions (issue #167). Mirrors
+    ``suggestedReadBadges`` exactly:
+
+    - Any blocking finding present is reject-favoring, regardless of score
+      deltas (matching the frontend's badge suppression: a positive content
+      delta badge is only shown when there are no blocking findings).
+    - Otherwise a content-score improvement of at least
+      ``_CONTENT_IMPROVEMENT_LEAN_THRESHOLD`` favors acceptance.
+    - Otherwise an overlay-score decline of at least
+      ``_OVERLAY_DECLINE_LEAN_THRESHOLD`` favors rejection.
+    - Anything else (including missing deltas) has no strong signal.
+    """
+    if blocking_findings:
+        return DeterministicLean.FAVORS_REJECT
+    if (
+        content_score_delta is not None
+        and content_score_delta >= _CONTENT_IMPROVEMENT_LEAN_THRESHOLD
+    ):
+        return DeterministicLean.FAVORS_ACCEPT
+    if overlay_score_delta is not None and overlay_score_delta <= _OVERLAY_DECLINE_LEAN_THRESHOLD:
+        return DeterministicLean.FAVORS_REJECT
+    return DeterministicLean.NO_STRONG_SIGNAL
 
 
 def checksum(data: bytes) -> str:

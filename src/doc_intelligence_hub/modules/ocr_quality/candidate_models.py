@@ -111,6 +111,23 @@ class Decision(str, Enum):
     REJECTED = "rejected"
 
 
+class DeterministicLean(str, Enum):
+    """A candidate's deterministic accept/reject lean (issue #167).
+
+    This collapses the same non-authoritative signal already surfaced to
+    reviewers as the frontend's "suggested read" badges
+    (``frontend/src/components/OcrCandidatesPanel.tsx``'s
+    ``suggestedReadBadges``) into a single ternary classification, so it can
+    be compared in bulk against actual human decisions to measure #17's
+    activation gate. It never gates or authorizes acceptance on its own —
+    see ``comparison.classify_deterministic_lean`` for the exact rule.
+    """
+
+    FAVORS_ACCEPT = "favors_accept"
+    FAVORS_REJECT = "favors_reject"
+    NO_STRONG_SIGNAL = "no_strong_signal"
+
+
 class CandidateGenResult(BaseModel):
     """Result of a single provider's ``generate_candidate`` call.
 

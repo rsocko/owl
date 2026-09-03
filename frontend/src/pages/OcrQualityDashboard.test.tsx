@@ -5,6 +5,7 @@ import OcrQualityDashboard from './OcrQualityDashboard';
 
 const mocks = vi.hoisted(() => ({
   distribution: vi.fn(),
+  calibrationSummary: vi.fn(),
   runs: vi.fn(),
   startRun: vi.fn(),
   resumeRun: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('../lib/api', async () => {
     endpoints: {
       ocrQuality: {
         distribution: mocks.distribution,
+        calibrationSummary: mocks.calibrationSummary,
         runs: mocks.runs,
         startRun: mocks.startRun,
         resumeRun: mocks.resumeRun,
@@ -38,6 +40,19 @@ function renderPage() {
 describe('OcrQualityDashboard', () => {
   beforeEach(() => {
     mocks.distribution.mockReset();
+    mocks.calibrationSummary.mockReset().mockResolvedValue({
+      decided_count: 0,
+      agreement_count: 0,
+      agreement_rate: null,
+      false_positive_count: 0,
+      false_positive_rate: null,
+      false_negative_count: 0,
+      false_negative_rate: null,
+      uncertain_count: 0,
+      uncertain_rate: null,
+      uncertain_accepted_count: 0,
+      uncertain_rejected_count: 0,
+    });
     mocks.runs.mockReset().mockResolvedValue({ runs: [] });
     mocks.startRun.mockReset();
     mocks.resumeRun.mockReset();
@@ -89,6 +104,67 @@ describe('OcrQualityDashboard', () => {
   });
 });
 
+describe('OcrQualityDashboard — Calibration summary (issue #167)', () => {
+  beforeEach(() => {
+    mocks.distribution.mockReset().mockResolvedValue({
+      total_documents: 0,
+      review_status_distribution: {},
+      overlay_score_decile_distribution: {},
+      machine_score_decile_distribution: {},
+      scorer_version_distribution: {},
+      oldest_assessed_at: null,
+      newest_assessed_at: null,
+    });
+    mocks.calibrationSummary.mockReset();
+    mocks.runs.mockReset().mockResolvedValue({ runs: [] });
+    mocks.startRun.mockReset();
+    mocks.resumeRun.mockReset();
+    mocks.sampleRun.mockReset();
+  });
+
+  it('shows a "not enough data" fallback when decided_count is small', async () => {
+    mocks.calibrationSummary.mockResolvedValue({
+      decided_count: 3,
+      agreement_count: 2,
+      agreement_rate: 0.667,
+      false_positive_count: 1,
+      false_positive_rate: 0.333,
+      false_negative_count: 0,
+      false_negative_rate: 0,
+      uncertain_count: 0,
+      uncertain_rate: 0,
+      uncertain_accepted_count: 0,
+      uncertain_rejected_count: 0,
+    });
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText(/Not enough decided candidates yet to draw conclusions/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText('Agreement rate:')).not.toBeInTheDocument();
+  });
+
+  it('renders counts and rates once enough candidates are decided', async () => {
+    mocks.calibrationSummary.mockResolvedValue({
+      decided_count: 20,
+      agreement_count: 15,
+      agreement_rate: 0.75,
+      false_positive_count: 2,
+      false_positive_rate: 0.1,
+      false_negative_count: 1,
+      false_negative_rate: 0.05,
+      uncertain_count: 2,
+      uncertain_rate: 0.1,
+      uncertain_accepted_count: 1,
+      uncertain_rejected_count: 1,
+    });
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Calibration (issue #17 gate)')).toBeInTheDocument());
+    expect(screen.getByText(/Agreement rate:/i)).toBeInTheDocument();
+    expect(screen.getByText(/75%/)).toBeInTheDocument();
+    expect(screen.getByText(/15 of 20/)).toBeInTheDocument();
+  });
+});
+
 describe('OcrQualityDashboard — Runs panel (manual trigger, issue #30)', () => {
   beforeEach(() => {
     mocks.distribution.mockReset().mockResolvedValue({
@@ -99,6 +175,19 @@ describe('OcrQualityDashboard — Runs panel (manual trigger, issue #30)', () =>
       scorer_version_distribution: {},
       oldest_assessed_at: null,
       newest_assessed_at: null,
+    });
+    mocks.calibrationSummary.mockReset().mockResolvedValue({
+      decided_count: 0,
+      agreement_count: 0,
+      agreement_rate: null,
+      false_positive_count: 0,
+      false_positive_rate: null,
+      false_negative_count: 0,
+      false_negative_rate: null,
+      uncertain_count: 0,
+      uncertain_rate: null,
+      uncertain_accepted_count: 0,
+      uncertain_rejected_count: 0,
     });
     mocks.runs.mockReset().mockResolvedValue({ runs: [] });
     mocks.startRun.mockReset();

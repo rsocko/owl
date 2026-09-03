@@ -400,3 +400,75 @@ class TestRetryInvalidationEndpoint:
         )
         assert resp.status_code == 400
         assert "Unknown candidate" in resp.json()["error"]["message"]
+
+
+class TestCalibrationSummaryEndpoint:
+    """API tests for the issue #167 calibration measurement endpoint."""
+
+    def _seed_decided_candidate(
+        self,
+        *,
+        candidate_id: str,
+        decision: str,
+        content_score_delta: float | None = None,
+        overlay_score_delta: float | None = None,
+        blocking_findings: list[str] | None = None,
+    ) -> None:
+        db = get_session()
+        try:
+            db.add(
+                OcrQualityCandidate(
+                    candidate_id=candidate_id,
+                    document_id=1,
+                    source_checksum="chk-1",
+                    state=decision,
+                    engine="ocrmypdf-tesseract-5",
+                    model_version="test",
+                    blocking_findings=blocking_findings,
+                    content_score_delta=content_score_delta,
+                    overlay_score_delta=overlay_score_delta,
+                    decision=decision,
+                    decided_at=datetime.utcnow(),
+                    expires_at=datetime.utcnow(),
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+    def test_no_decided_candidates_returns_null_rates(
+        self, client, ocr_candidates_db, mock_paperless
+    ):
+        resp = client.get("/api/ocr-quality/calibration/summary")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["decided_count"] == 0
+        assert body["agreement_rate"] is None
+        assert body["uncertain_count"] == 0
+
+    def test_reports_agreement_and_disagreement_counts(
+        self, client, ocr_candidates_db, mock_paperless
+    ):
+        self._seed_decided_candidate(
+            candidate_id="cand-agree",
+            decision="accepted",
+            content_score_delta=10.0,
+        )
+        self._seed_decided_candidate(
+            candidate_id="cand-fp",
+            decision="rejected",
+            content_score_delta=10.0,
+        )
+        self._seed_decided_candidate(
+            candidate_id="cand-uncertain",
+            decision="accepted",
+        )
+
+        resp = client.get("/api/ocr-quality/calibration/summary")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["decided_count"] == 3
+        assert body["agreement_count"] == 1
+        assert body["false_positive_count"] == 1
+        assert body["uncertain_count"] == 1
+        assert body["uncertain_accepted_count"] == 1

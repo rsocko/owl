@@ -25,6 +25,10 @@ Endpoints:
     candidate's on-disk artifact instead of a Paperless fetch:
     GET  /api/ocr-quality/candidates/{candidate_id}/regions            — Word boxes + flags for one page
     GET  /api/ocr-quality/candidates/{candidate_id}/pages/{page}/image — Rendered page PNG
+
+    Calibration measurement for issue #17's activation gate (issue #167) —
+    read-only, never writes anything, never calls an LLM:
+    GET  /api/ocr-quality/calibration/summary — Deterministic-lean-vs-human-decision agreement stats
 """
 
 from __future__ import annotations
@@ -41,6 +45,7 @@ from doc_intelligence_hub.modules.ocr_quality import region_inspection
 from doc_intelligence_hub.modules.ocr_quality.application_service import (
     OcrCandidateApplicationService,
 )
+from doc_intelligence_hub.modules.ocr_quality.calibration_service import OcrCalibrationService
 from doc_intelligence_hub.modules.ocr_quality.candidate_models import (
     CandidateState,
     Decision,
@@ -423,3 +428,27 @@ async def get_candidate_page_image(
         )
     png_bytes, _width, _height = rendered
     return Response(content=png_bytes, media_type="image/png")
+
+
+# ---------------------------------------------------------------------------
+# Calibration measurement for issue #17's activation gate (issue #167).
+# Read-only: compares the existing deterministic accept/reject "lean" (the
+# same signal already shown to reviewers as the frontend's non-authoritative
+# "suggested read" badges) against actual recorded human decisions. Never
+# calls an LLM and never gates or changes any candidate's decision.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/calibration/summary")
+async def get_calibration_summary() -> dict[str, Any]:
+    """Deterministic-lean-vs-human-decision calibration summary (issue #167).
+
+    Computed over every candidate with a recorded ``decision`` (accepted or
+    rejected). Used to evaluate #17's activation gate — whether the
+    "uncertain" (no-strong-signal) population is meaningful and whether
+    deterministic false positive/negative rates are already low enough that
+    an LLM secondary review wouldn't be worth its added complexity/cost.
+    """
+    init_ocr_quality_db()
+    service = OcrCalibrationService(get_ocr_quality_session)
+    return service.get_summary()
