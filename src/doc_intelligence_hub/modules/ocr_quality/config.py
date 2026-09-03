@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     sample_min_per_stratum: int = Field(default=2, ge=0)
     pdf_profile_max_pages: int = Field(default=50, ge=1)
 
+    # Issue #30 — shared run contract. Bounded per-document retry budget
+    # applied within a single run before a document is recorded as a
+    # terminal failure (``RunFailure``); the run itself is never retried
+    # automatically.
+    run_max_retries: int = Field(default=2, ge=0, le=10)
+
     # Issue #18 slice 1 — candidate generation/comparison/staging.
     # Candidate PDF/text bytes are never stored in the DB (mirrors the
     # "no raw OCR text" precedent for DocumentAssessment) — only checksums

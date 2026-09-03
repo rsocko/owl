@@ -430,6 +430,70 @@ class TestForceStage2Analysis:
         finally:
             ocr_quality_router._active_manual_stage2_document_ids.discard(1)
 
+    def test_repeat_call_returns_idempotent_replay(self, client, ocr_quality_db, mock_paperless):
+        """Repeated delivery for the same document/version is a no-op (issue #30)."""
+        _seed_scored_document(1, overlay_score=None, review_status="UNCERTAIN")
+        mock_paperless.get_document_preview.return_value = (
+            _make_real_pdf_bytes("Idempotent replay test"),
+            "application/pdf",
+        )
+        first = client.post("/api/ocr-quality/documents/1/stage2")
+        assert first.status_code == 200
+        first_run_id = first.json()["run_id"]
+        assert "idempotent_replay_of_run_id" not in first.json()
+
+        second = client.post("/api/ocr-quality/documents/1/stage2")
+        assert second.status_code == 200
+        assert second.json()["idempotent_replay_of_run_id"] == first_run_id
+        # The PDF was only fetched once -- the repeat did not re-fetch/re-profile.
+        mock_paperless.get_document_preview.assert_called_once_with(1)
+
+    def test_equivalent_concurrent_run_conflict_returns_409(
+        self, client, ocr_quality_db, mock_paperless
+    ):
+        """A same-document/version run already RUNNING maps to 409 (issue #30)."""
+        _seed_scored_document(1)
+        db = get_session()
+        try:
+            from doc_intelligence_hub.modules.ocr_quality.service import _compute_idempotency_key
+
+            assessment = (
+                db.query(DocumentAssessment)
+                .filter_by(document_id=1)
+                .order_by(DocumentAssessment.id.desc())
+                .first()
+            )
+            idempotency_key = _compute_idempotency_key(
+                RunStage.STAGE_2_MANUAL_SINGLE_DOCUMENT.value,
+                scope_digest=_scope_digest({"document_id": 1}),
+                config_digest=_scope_digest(
+                    {"max_pages": ocr_quality_config.settings.pdf_profile_max_pages}
+                ),
+                extra={"document_version_key": assessment.document_version_key},
+            )
+            db.add(
+                InventoryRun(
+                    run_id="already-running-manual",
+                    stage=RunStage.STAGE_2_MANUAL_SINGLE_DOCUMENT.value,
+                    scope_digest="dummy",
+                    config_digest="dummy",
+                    instance_digest="dummy",
+                    signal_version="ocr-quality-pdf-profile-v1",
+                    status=RunStatus.RUNNING.value,
+                    counts={},
+                    idempotency_key=idempotency_key,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        resp = client.post("/api/ocr-quality/documents/1/stage2")
+        assert resp.status_code == 409
+        assert resp.json()["error"]["code"] == "run_already_in_progress"
+        assert resp.json()["error"]["run_id"] == "already-running-manual"
+        mock_paperless.get_document_preview.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Manual trigger endpoints (issue #30, Phase 7 — manual entry points only)
@@ -553,7 +617,7 @@ class TestStartCorpusScan:
     def test_scan_failure_marks_run_failed(self, client, ocr_quality_db):
         from doc_intelligence_hub.modules.ocr_quality.service import OcrQualityInventoryService
 
-        async def _fail(*, batch_size, run_id, resume, scope_params):
+        async def _fail(*, batch_size, run_id, resume, scope_params, **_kwargs):
             db = get_session()
             try:
                 db.add(
@@ -662,6 +726,31 @@ class TestStartStratifiedSample:
         resp = client.post("/api/ocr-quality/runs/source-run-2/sample", json={})
         assert resp.status_code == 409
         assert resp.json()["error"]["run_id"] == "existing-sample"
+
+
+class TestCancelRun:
+    def test_cancel_unknown_run_404(self, client, ocr_quality_db):
+        resp = client.post("/api/ocr-quality/runs/no-such-run/cancel")
+        assert resp.status_code == 404
+
+    def test_cancel_terminal_run_409(self, client, ocr_quality_db):
+        _seed_run("finished-run", status=RunStatus.COMPLETED.value)
+        resp = client.post("/api/ocr-quality/runs/finished-run/cancel")
+        assert resp.status_code == 409
+        assert resp.json()["error"]["code"] == "run_not_cancellable"
+
+    def test_cancel_running_run_sets_cancel_requested(self, client, ocr_quality_db):
+        _seed_run("active-run", status=RunStatus.RUNNING.value)
+        resp = client.post("/api/ocr-quality/runs/active-run/cancel")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["run_id"] == "active-run"
+        assert body["cancel_requested"] is True
+
+        # Observable afterwards via GET, per the issue #30 contract.
+        follow_up = client.get("/api/ocr-quality/runs/active-run")
+        assert follow_up.status_code == 200
+        assert follow_up.json()["cancel_requested"] is True
 
 
 # ---------------------------------------------------------------------------

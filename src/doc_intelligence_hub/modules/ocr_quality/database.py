@@ -45,6 +45,25 @@ class InventoryRun(Base):
     started_at = Column(DateTime, default=datetime.utcnow)
     finished_at = Column(DateTime, nullable=True)
 
+    # --- Issue #30 shared run/state contract fields ---
+    # Who/what asked for this run and how (see ``models.RunTrigger``).
+    actor = Column(String, nullable=True, default="system")
+    trigger = Column(String, nullable=True, default="manual", index=True)
+    # Caller-supplied or auto-generated correlation id, echoed back on every
+    # response so an external caller (e.g. n8n) can trace a request across
+    # retries/logs without OWL ever exposing raw OCR content.
+    correlation_id = Column(String, nullable=True, index=True)
+    # Digest of (stage, scope, config[, document/version]) used to detect
+    # repeated delivery of the same effective request — see
+    # ``service._compute_idempotency_key``.
+    idempotency_key = Column(String, nullable=True, index=True)
+    cancel_requested = Column(Boolean, nullable=False, default=False)
+    cancelled_at = Column(DateTime, nullable=True)
+    # Bounded per-document retry budget for this run (not a run-level
+    # retry — a whole run is never silently retried).
+    retry_count = Column(Integer, nullable=False, default=0)
+    max_retries = Column(Integer, nullable=False, default=3)
+
 
 class DocumentAssessment(Base):
     """Stage-1 per-document signals. No raw OCR text is stored here."""
