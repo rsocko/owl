@@ -41,6 +41,55 @@ def test_rotated_text_reports_nonzero_angle() -> None:
     assert page.words[0].angle_degrees == pytest.approx(90.0, abs=1.0)
 
 
+def test_multi_word_rotated_text_groups_into_words_not_one_per_character() -> None:
+    """Regression test for the reported bug: a vertical sidebar of multiple
+    real words rendered as a stack of one-character boxes (plus, separately,
+    an oversized wrongly-oriented mega-box) instead of being grouped into
+    real words.
+
+    The actual root cause: pdfminer's ``LTChar.upright`` flag is only
+    ``False`` for a rotation of *bit-exact* 90/270 degrees (it reduces to
+    ``cos(angle)**2 > 0``). Realistic vertical text is essentially never
+    bit-exact 90.0 -- 89.5 degrees here reproduces the failure precisely:
+    before the fix, ``page.extract_words()`` fragmented this same string
+    into 19 one-or-two-character "words"; after the fix it must produce
+    exactly 4 real words, matching the exactly-90-degree case.
+    """
+    pdf_bytes = make_rotated_text_pdf_bytes("Vertical text words here", angle_degrees=89.5)
+    pages = load_pdf_pages(pdf_bytes)
+    assert len(pages) == 1
+    page = pages[0]
+    assert page.error is None
+    assert len(page.words) == 4
+    # pdfplumber's rotated char-sort direction reverses each word's char
+    # order (a pre-existing, out-of-scope quirk -- see the single-word test
+    # above) -- only the character set of each word, and word count/order,
+    # matter here.
+    assert [sorted(w.text) for w in page.words] == [
+        sorted(w) for w in ("here", "words", "text", "Vertical")
+    ]
+    for w in page.words:
+        assert w.angle_degrees == pytest.approx(89.5, abs=1.0)
+
+
+def test_multi_word_rotated_text_at_exact_90_degrees_groups_into_words() -> None:
+    """Belt-and-suspenders companion to the 89.5 deg test above: the
+    bit-exact 90 deg case already worked before this fix and must keep
+    working identically.
+    """
+    pdf_bytes = make_rotated_text_pdf_bytes("Vertical text words here", angle_degrees=90.0)
+    pages = load_pdf_pages(pdf_bytes)
+    assert len(pages) == 1
+    page = pages[0]
+    assert page.error is None
+    assert len(page.words) == 4
+    assert [sorted(w.text) for w in page.words] == [
+        sorted(w) for w in ("here", "words", "text", "Vertical")
+    ]
+    for w in page.words:
+        assert w.angle_degrees == pytest.approx(90.0, abs=1.0)
+
+
 def test_multi_page_pdf_parses_each_page() -> None:
     # Build a two-page document by concatenating two independent minimal PDFs'
     # page content is out of scope here; instead verify graceful handling of
