@@ -90,7 +90,9 @@ class FakePaperlessVersioningClient:
                 {"id": root_id, "checksum": _checksum(b), "is_root": True, "version_label": None}
             ]
             self._version_content[root_id] = b
-        self._next_version_id = max((v["id"] for vs in self.versions.values() for v in vs), default=0) + 1
+        self._next_version_id = (
+            max((v["id"] for vs in self.versions.values() for v in vs), default=0) + 1
+        )
         self._tasks: dict[str, dict] = {}
         self._next_task_id = 1
         self.task_success_after_polls = 1
@@ -138,7 +140,12 @@ class FakePaperlessVersioningClient:
         return [dict(v) for v in self.versions[document_id]]
 
     async def upload_document_version(
-        self, root_document_id: int, filename: str, content: bytes, *, version_label: str | None = None
+        self,
+        root_document_id: int,
+        filename: str,
+        content: bytes,
+        *,
+        version_label: str | None = None,
     ) -> str:
         self.upload_calls.append(root_document_id)
         if self.raise_on_upload is not None:
@@ -186,7 +193,9 @@ class FakePaperlessVersioningClient:
         if match is None:
             import httpx
 
-            request = httpx.Request("DELETE", f"/api/documents/{root_document_id}/versions/{version_id}/")
+            request = httpx.Request(
+                "DELETE", f"/api/documents/{root_document_id}/versions/{version_id}/"
+            )
             response = httpx.Response(404, request=request)
             raise httpx.HTTPStatusError("not found", request=request, response=response)
         if match.get("is_root"):
@@ -196,7 +205,9 @@ class FakePaperlessVersioningClient:
         current = versions[-1]
         return {"result": "OK", "current_version_id": current["id"]}
 
-    async def label_document_version(self, root_document_id: int, version_id: int, label: str) -> dict:
+    async def label_document_version(
+        self, root_document_id: int, version_id: int, label: str
+    ) -> dict:
         self.label_calls.append((root_document_id, version_id, label))
         for v in self.versions[root_document_id]:
             if v["id"] == version_id:
@@ -210,7 +221,9 @@ class FakePaperlessVersioningClient:
 @pytest.fixture()
 def ocr_db(tmp_path):
     original = ocr_quality_config.settings.database_url
-    ocr_quality_config.settings.database_url = f"sqlite:///{tmp_path / 'application_service_test.db'}"
+    ocr_quality_config.settings.database_url = (
+        f"sqlite:///{tmp_path / 'application_service_test.db'}"
+    )
     init_db()
     yield
     ocr_quality_config.settings.database_url = original
@@ -351,7 +364,9 @@ class TestApplyCandidateRejection:
 
 class TestApplyCandidateSurfacedFindings:
     @pytest.mark.asyncio
-    async def test_blocking_findings_surfaced_but_do_not_block_apply(self, fake_client, app_service):
+    async def test_blocking_findings_surfaced_but_do_not_block_apply(
+        self, fake_client, app_service
+    ):
         """Missing/reordered pages, overlay regression, downstream regression are
         evidence surfaced in the comparison, never a hard block — a human
         reviewer's explicit accept is still authoritative (design doc:
@@ -435,7 +450,9 @@ class TestApplyCandidateProviderFailure:
         assert row.failure_reason == "apply_attempts_exceeded"
 
     @pytest.mark.asyncio
-    async def test_upload_call_raising_does_not_corrupt_current_version(self, fake_client, app_service):
+    async def test_upload_call_raising_does_not_corrupt_current_version(
+        self, fake_client, app_service
+    ):
         fake_client.raise_on_upload = RuntimeError("connection reset")
         candidate_id = await _make_applying_candidate(fake_client)
         original_checksum = _checksum(fake_client.previews[1])
@@ -541,7 +558,9 @@ class TestApplyCandidateConcurrency:
 
 class TestRollback:
     @pytest.mark.asyncio
-    async def test_rollback_restores_prior_version_and_reinvalidates(self, fake_client, app_service):
+    async def test_rollback_restores_prior_version_and_reinvalidates(
+        self, fake_client, app_service
+    ):
         candidate_id = await _make_applying_candidate(fake_client)
         apply_result = await app_service.apply_candidate(candidate_id, actor="reviewer1")
         assert apply_result["state"] == CandidateState.ACCEPTED.value

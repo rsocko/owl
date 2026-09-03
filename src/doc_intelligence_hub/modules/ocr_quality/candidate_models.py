@@ -65,7 +65,6 @@ TERMINAL_STATES = frozenset(
 )
 
 
-
 class ComparisonBlockingFinding(str, Enum):
     """A blocking-severity finding from comparing a candidate to the current document.
 
@@ -215,4 +214,3 @@ class OcrQualityCandidate(BaseModel):
             "the candidate is still ACCEPTED but flagged so downstream freshness can be retried."
         ),
     )
-

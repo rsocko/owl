@@ -105,15 +105,11 @@ class OcrCandidateApplicationService:
     # Document-scoped lock
     # ------------------------------------------------------------------
 
-    def _acquire_lock(
-        self, document_id: int, *, operation: str, candidate_id: str | None
-    ) -> None:
+    def _acquire_lock(self, document_id: int, *, operation: str, candidate_id: str | None) -> None:
         db = self.session_factory()
         try:
             now = datetime.utcnow()
-            existing = (
-                db.query(OcrApplicationLock).filter_by(document_id=document_id).one_or_none()
-            )
+            existing = db.query(OcrApplicationLock).filter_by(document_id=document_id).one_or_none()
             if existing is not None:
                 if existing.expires_at > now:
                     raise LockHeldError(document_id)
@@ -455,7 +451,9 @@ class OcrCandidateApplicationService:
         }
 
     async def _poll_task(self, task_id: str) -> dict[str, Any] | None:
-        deadline = asyncio.get_event_loop().time() + settings.candidate_apply_task_poll_timeout_seconds
+        deadline = (
+            asyncio.get_event_loop().time() + settings.candidate_apply_task_poll_timeout_seconds
+        )
         last: dict[str, Any] | None = None
         while asyncio.get_event_loop().time() < deadline:
             try:
@@ -586,9 +584,7 @@ class OcrCandidateApplicationService:
         number of ``DELETE`` calls, not a re-OCR cycle.
         """
         try:
-            self._acquire_lock(
-                document_id, operation="rollback", candidate_id=target_candidate_id
-            )
+            self._acquire_lock(document_id, operation="rollback", candidate_id=target_candidate_id)
         except LockHeldError as exc:
             return {"error": str(exc)}
 
