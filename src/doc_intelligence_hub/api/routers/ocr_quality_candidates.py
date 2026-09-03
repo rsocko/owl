@@ -15,6 +15,8 @@ Endpoints:
     POST /api/ocr-quality/candidates/{candidate_id}/decision — Accept (dispatches apply) / reject (OWL-only)
     POST /api/ocr-quality/candidates/{candidate_id}/cancel   — Best-effort cancel of a pending candidate
     POST /api/ocr-quality/documents/{document_id}/rollback   — Roll back to a prior Paperless version
+    POST /api/ocr-quality/candidates/{candidate_id}/retry-invalidation — Retry recording downstream
+        invalidation for a candidate stuck in ACCEPTED_PENDING_INVALIDATION
 
     Region-level inspection for a candidate's own stored PDF (issue #134 x
     issue #18 — connects the region-inspection viewer to candidate
@@ -31,7 +33,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from doc_intelligence_hub.api.routers import make_paperless_client
 from doc_intelligence_hub.core.paperless import PaperlessClient
@@ -84,10 +86,23 @@ class RequestCandidatesBody(BaseModel):
     actor: str = Field(default="system", description="Reviewer identity for audit purposes.")
 
 
+def _validate_actor(value: str) -> str:
+    """Shared validator: there is no auth system yet (issue #22, separate),
+    so this is a lightweight "who did this" guard, not authentication —
+    but it must not be blank, or every audit-trail row silently defaults
+    to an uninformative value.
+    """
+    if not value or not value.strip():
+        raise ValueError("actor is required and must not be blank")
+    return value.strip()
+
+
 class DecisionBody(BaseModel):
     decision: Decision
     reason: str | None = None
-    actor: str = "system"
+    actor: str = Field(description="Reviewer identity for audit purposes; required.")
+
+    _validate_actor = field_validator("actor")(_validate_actor)
 
 
 class RollbackBody(BaseModel):
@@ -100,7 +115,15 @@ class RollbackBody(BaseModel):
             "root/original if there is no prior accepted candidate)."
         ),
     )
-    actor: str = Field(default="system", description="Reviewer identity for audit purposes.")
+    actor: str = Field(description="Reviewer identity for audit purposes; required.")
+
+    _validate_actor = field_validator("actor")(_validate_actor)
+
+
+class RetryInvalidationBody(BaseModel):
+    actor: str = Field(description="Reviewer identity for audit purposes; required.")
+
+    _validate_actor = field_validator("actor")(_validate_actor)
 
 
 async def _run_candidate_generation(client: PaperlessClient, candidate_id: str) -> None:
@@ -271,6 +294,34 @@ async def rollback_document(
     if result.get("error"):
         raise HTTPException(
             status_code=400, detail={"code": "rollback_failed", "message": result["error"]}
+        )
+    return result
+
+
+@router.post("/candidates/{candidate_id}/retry-invalidation")
+async def retry_invalidation(
+    request: Request, candidate_id: str, body: RetryInvalidationBody
+) -> dict[str, Any]:
+    """Retry recording downstream invalidation (issue #114) for a candidate
+    stuck in ``ACCEPTED_PENDING_INVALIDATION``.
+
+    The Paperless version this candidate applied was already durably
+    written and is never touched here — this only retries the bookkeeping
+    step that failed. On success the candidate becomes ``ACCEPTED``.
+    """
+    client = make_paperless_client(request, timeout=30.0)
+    service = _application_service(client)
+    try:
+        result = await service.retry_invalidation(candidate_id, actor=body.actor)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail={"code": "invalid_state", "message": str(exc)}
+        ) from exc
+    finally:
+        await client.aclose()
+    if result.get("error"):
+        raise HTTPException(
+            status_code=400, detail={"code": "retry_failed", "message": result["error"]}
         )
     return result
 
