@@ -62,6 +62,12 @@ _MULTI_SPACE_COLUMNS_RE = re.compile(r"(\t| {2,})\S+(\t| {2,})\S+")
 # as corruption — it must be detected explicitly.
 _CID_ARTIFACT_RE = re.compile(r"\(cid:\d+\)")
 _CID_ARTIFACT_BLOCKING_RATIO = 0.3
+# At/above this density, "(cid:N)" placeholders are effectively the entire
+# document — there is no real text left to measure, so this is treated like
+# the empty-text case rather than left to whichever structural signals
+# happen not to trip (e.g. repetition_noise sees varying glyph IDs as
+# "diverse vocabulary" and would otherwise score a perfect 1.0).
+_CID_ARTIFACT_DOMINANT_RATIO = 0.5
 
 _SIGNAL_NAMES = (
     "char_script_plausibility",
@@ -129,18 +135,17 @@ def score_machine(
             )
         )
     else:
-        tokens = text_content.split()
-        lines = [line.strip() for line in text_content.splitlines() if line.strip()]
-        char_plausibility = _char_script_plausibility(text_content)
-        signals["char_script_plausibility"] = char_plausibility
-        signals["token_whitespace_quality"] = _token_whitespace_quality(tokens)
-        signals["repetition_noise"] = _repetition_noise(
-            text_content, tokens, dampen_structural_noise=is_structured_shape
-        )
-        signals["prose_coherence"] = _prose_coherence(tokens, cfg)
-
         cid_ratio = _cid_artifact_char_count(text_content) / len(text_content)
-        if cid_ratio >= _CID_ARTIFACT_BLOCKING_RATIO:
+
+        if cid_ratio >= _CID_ARTIFACT_DOMINANT_RATIO:
+            # Glyph-ID placeholders dominate the whole document — there is
+            # no real text underneath for token/repetition/prose signals to
+            # meaningfully assess, so treat this the same as empty text: a
+            # strong, computable failure, not an "unavailable" shrug that
+            # lets an incidental structural pass (e.g. high token diversity
+            # because every glyph ID differs) prop the score back up.
+            for name in _SIGNAL_NAMES[:6]:
+                signals[name] = 0.0
             reasons.append(
                 Reason(
                     code="machine.cid_glyph_artifacts",
@@ -154,14 +159,40 @@ def score_machine(
                     value=round(cid_ratio, 3),
                 )
             )
+        else:
+            tokens = text_content.split()
+            lines = [line.strip() for line in text_content.splitlines() if line.strip()]
+            char_plausibility = _char_script_plausibility(text_content)
+            signals["char_script_plausibility"] = char_plausibility
+            signals["token_whitespace_quality"] = _token_whitespace_quality(tokens)
+            signals["repetition_noise"] = _repetition_noise(
+                text_content, tokens, dampen_structural_noise=is_structured_shape
+            )
+            signals["prose_coherence"] = _prose_coherence(tokens, cfg)
 
-        # Structured-entity/table detection is meaningless on text that is
-        # mostly implausible characters to begin with — leave it unavailable
-        # rather than letting a neutral "no entities found" baseline prop up
-        # a score that should be driven by the character-plausibility signal.
-        if char_plausibility >= _MIN_PLAUSIBILITY_FOR_STRUCTURE_SIGNALS:
-            signals["structured_entities"] = _structured_entities(text_content, tokens)
-            signals["table_structure"] = _table_structure(lines)
+            if cid_ratio >= _CID_ARTIFACT_BLOCKING_RATIO:
+                reasons.append(
+                    Reason(
+                        code="machine.cid_glyph_artifacts",
+                        message=(
+                            "Extracted text is dominated by \"(cid:N)\" placeholders — the "
+                            "PDF's font is missing a ToUnicode mapping, so raw glyph IDs "
+                            "leaked through instead of real characters. Re-extraction or "
+                            "re-OCR is required."
+                        ),
+                        severity=Severity.BLOCKING,
+                        component="machine",
+                        value=round(cid_ratio, 3),
+                    )
+                )
+
+            # Structured-entity/table detection is meaningless on text that is
+            # mostly implausible characters to begin with — leave it unavailable
+            # rather than letting a neutral "no entities found" baseline prop up
+            # a score that should be driven by the character-plausibility signal.
+            if char_plausibility >= _MIN_PLAUSIBILITY_FOR_STRUCTURE_SIGNALS:
+                signals["structured_entities"] = _structured_entities(text_content, tokens)
+                signals["table_structure"] = _table_structure(lines)
 
     if confidence_data:
         signals["engine_confidence"] = sum(confidence_data) / len(confidence_data)
