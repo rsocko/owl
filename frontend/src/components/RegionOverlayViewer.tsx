@@ -62,6 +62,15 @@ interface RegionOverlayViewerProps {
   /** Optional page navigation controls (rendered only when page_count > 1). */
   onPageChange?: (page: number) => void;
   /**
+   * Called with a freshly drawn box when the reviewer draws a region to
+   * submit as a metadata correction (issue #172) rather than an OCR-quality
+   * annotation. Rendering the field/value picker for the correction is left
+   * to the caller (e.g. `OcrQualityDocumentDetail`) — this viewer only
+   * reports the drawn geometry and shows the "Correct field" toggle when a
+   * handler is supplied.
+   */
+  onCorrectRegion?: (box: DrawnBox) => void;
+  /**
    * Optional box-diff result (issue #134 x #18 candidate overlay
    * comparison), keyed by this instance's word index in `regions.words`.
    * When present, overrides the normal neutral/passed/flagged styling with
@@ -87,6 +96,7 @@ export default function RegionOverlayViewer({
   onCreateAnnotation,
   onDeleteAnnotation,
   onPageChange,
+  onCorrectRegion,
   diffHighlights,
 }: RegionOverlayViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -97,7 +107,9 @@ export default function RegionOverlayViewer({
   const [pendingBox, setPendingBox] = useState<DrawnBox | null>(null);
   const [label, setLabel] = useState<string>(ANNOTATION_LABELS[0]);
   const [note, setNote] = useState('');
-  const [drawMode, setDrawMode] = useState(false);
+  const [interactionMode, setInteractionMode] = useState<'off' | 'annotate' | 'correct'>('off');
+  const drawMode = interactionMode === 'annotate';
+  const correctMode = interactionMode === 'correct';
 
   const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
@@ -140,14 +152,14 @@ export default function RegionOverlayViewer({
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!drawMode || !containerRef.current) return;
+      if ((!drawMode && !correctMode) || !containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       setDrawing({ startX: x, startY: y, x, y });
       setPendingBox(null);
     },
-    [drawMode],
+    [drawMode, correctMode],
   );
 
   const handleMouseMove = useCallback(
@@ -172,8 +184,13 @@ export default function RegionOverlayViewer({
     setDrawing(null);
     if (pixelBox.x1 - pixelBox.x0 < 4 || pixelBox.bottom - pixelBox.top < 4) return; // ignore accidental clicks
     const pointBox = toPointBox(pixelBox);
-    if (pointBox) setPendingBox(pointBox);
-  }, [drawing, toPointBox]);
+    if (!pointBox) return;
+    if (correctMode) {
+      onCorrectRegion?.(pointBox);
+      return;
+    }
+    setPendingBox(pointBox);
+  }, [drawing, toPointBox, correctMode, onCorrectRegion]);
 
   const submitPendingBox = useCallback(async () => {
     if (!pendingBox || !onCreateAnnotation) return;
@@ -220,10 +237,20 @@ export default function RegionOverlayViewer({
           <Button
             variant={drawMode ? 'primary' : 'ghost'}
             size="sm"
-            onClick={() => setDrawMode((v) => !v)}
+            onClick={() => setInteractionMode((m) => (m === 'annotate' ? 'off' : 'annotate'))}
             aria-pressed={drawMode}
           >
             ✏ {drawMode ? 'Drawing…' : 'Draw annotation'}
+          </Button>
+        )}
+        {onCorrectRegion && (
+          <Button
+            variant={correctMode ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => setInteractionMode((m) => (m === 'correct' ? 'off' : 'correct'))}
+            aria-pressed={correctMode}
+          >
+            🏷 {correctMode ? 'Drawing region…' : 'Correct field'}
           </Button>
         )}
         {regions && regions.page_count > 1 && onPageChange && (
@@ -253,7 +280,7 @@ export default function RegionOverlayViewer({
 
       <div
         ref={containerRef}
-        className={`region-overlay-canvas ${drawMode ? 'draw-mode' : ''}`}
+        className={`region-overlay-canvas ${drawMode || correctMode ? 'draw-mode' : ''}`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}

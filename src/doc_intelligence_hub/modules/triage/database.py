@@ -902,6 +902,29 @@ def get_corrections_for_document(document_id: int) -> list[dict[str, Any]]:
         session.close()
 
 
+def has_correction_for_field(document_id: int, field_name: str) -> bool:
+    """Return True if any correction/confirmation exists for document_id+field_name.
+
+    Used to guard automated writeback pipelines (Paperless enrichment, account
+    number extraction, etc.) from clobbering a user-submitted correction —
+    once a field has been corrected or confirmed it is authoritative and
+    automated passes should skip it.
+    """
+    session = get_session()
+    try:
+        exists = (
+            session.query(ExtractionCorrection.id)
+            .filter(
+                ExtractionCorrection.document_id == document_id,
+                ExtractionCorrection.field_name == field_name,
+            )
+            .first()
+        )
+        return exists is not None
+    finally:
+        session.close()
+
+
 def list_recent_corrections(
     *,
     limit: int = 100,

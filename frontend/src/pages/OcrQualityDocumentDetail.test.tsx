@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import OcrQualityDocumentDetail from './OcrQualityDocumentDetail';
@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   annotationsCreate: vi.fn(),
   annotationsUpdate: vi.fn(),
   annotationsRemove: vi.fn(),
+  metadataGet: vi.fn(),
+  metadataCorrect: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
@@ -56,6 +58,10 @@ vi.mock('../lib/api', () => ({
       thumbnailUrl: mocks.thumbnailUrl,
       downloadUrl: mocks.downloadUrl,
       previewUrl: mocks.previewUrl,
+    },
+    metadata: {
+      get: mocks.metadataGet,
+      correct: mocks.metadataCorrect,
     },
   },
 }));
@@ -98,6 +104,15 @@ describe('OcrQualityDocumentDetail', () => {
     mocks.regions.mockResolvedValue({ page: 1, page_count: 1, width: 600, height: 800, words: [] });
     mocks.pageImageUrl.mockReturnValue('/page-image/501/1');
     mocks.annotationsList.mockResolvedValue({ annotations: [] });
+    mocks.metadataGet.mockReset();
+    mocks.metadataCorrect.mockReset();
+    mocks.metadataGet.mockResolvedValue({
+      extracted_fields: [
+        { field_name: 'document_amount', paperless_field: 'document_amount', value: null },
+        { field_name: 'invoice_number', paperless_field: 'invoice_number', value: null },
+      ],
+    });
+    mocks.metadataCorrect.mockResolvedValue({ status: 'ok' });
   });
 
   it('shows a not-found state for an unknown document', async () => {
@@ -321,5 +336,55 @@ describe('OcrQualityDocumentDetail', () => {
       expect(screen.getByText(/already running/i)).toBeInTheDocument(),
     );
     expect(screen.getByRole('button', { name: /Force Stage 2 analysis/i })).not.toBeDisabled();
+  });
+
+  it('draws a region in "Correct field" mode and submits it as a real metadata correction (issue #172)', async () => {
+    mocks.paperlessUrl.mockResolvedValue({ paperless_url: null });
+    mocks.documentDetail.mockResolvedValue({
+      document_id: 501,
+      review_status: 'UNCERTAIN',
+      reasons: [],
+      document_profile: null,
+    });
+    mocks.regions.mockResolvedValue({
+      page: 1,
+      page_count: 1,
+      width: 600,
+      height: 800,
+      words: [],
+    });
+    renderPage('501');
+
+    await waitFor(() => expect(screen.getByText('Region inspection')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /Correct field/i }));
+    const canvas = document.querySelector('.region-overlay-canvas') as HTMLElement;
+    const img = document.querySelector('img.region-overlay-image') as HTMLImageElement;
+    Object.defineProperty(img, 'clientWidth', { value: 600, configurable: true });
+    Object.defineProperty(img, 'clientHeight', { value: 800, configurable: true });
+    fireEvent.load(img);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, right: 600, bottom: 800, width: 600, height: 800, x: 0, y: 0, toJSON: () => {},
+    });
+    fireEvent.mouseDown(canvas, { clientX: 15, clientY: 25 });
+    fireEvent.mouseMove(canvas, { clientX: 115, clientY: 85 });
+    fireEvent.mouseUp(canvas, { clientX: 115, clientY: 85 });
+
+    // Lazily loads the correctable field list from the live-resolved Paperless schema.
+    await waitFor(() => expect(mocks.metadataGet).toHaveBeenCalledWith('501'));
+    const form = await screen.findByTestId('metadata-correction-form');
+    fireEvent.change(within(form).getByLabelText('Field'), { target: { value: 'document_amount' } });
+    fireEvent.change(within(form).getByLabelText('Corrected value'), { target: { value: '129.99' } });
+    fireEvent.click(within(form).getByRole('button', { name: /Submit correction/i }));
+
+    await waitFor(() => expect(mocks.metadataCorrect).toHaveBeenCalled());
+    expect(mocks.metadataCorrect).toHaveBeenCalledWith('501', {
+      field_name: 'document_amount',
+      corrected_value: '129.99',
+      source_region: { page: 1, x0: 15, top: 25, x1: 115, bottom: 85 },
+      notes: 'Submitted from OCR region viewer',
+    });
+    expect(await screen.findByText(/document_amount corrected from drawn region/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('metadata-correction-form')).not.toBeInTheDocument();
   });
 });

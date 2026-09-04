@@ -19,6 +19,7 @@ from doc_intelligence_hub.core.paperless import (
     build_metadata_update,
     get_metadata_field_spec,
 )
+from doc_intelligence_hub.modules.triage.database import has_correction_for_field
 
 from .config import settings
 
@@ -108,7 +109,7 @@ class PaperlessEnricher:
         account_identifier = normalize_masked_account_identifier(
             extracted_data.get("account_identifier")
         )
-        if account_identifier:
+        if account_identifier and not has_correction_for_field(document_id, "account_identifier"):
             updates.append(
                 build_metadata_update(
                     MetadataFieldKey.ACCOUNT_IDENTIFIER,
@@ -117,7 +118,11 @@ class PaperlessEnricher:
                 )
             )
         reference_number = extracted_data.get("reference_number")
-        if isinstance(reference_number, str) and reference_number.strip():
+        if (
+            isinstance(reference_number, str)
+            and reference_number.strip()
+            and not has_correction_for_field(document_id, "invoice_number")
+        ):
             updates.append(
                 build_metadata_update(
                     MetadataFieldKey.INVOICE_NUMBER,
@@ -125,7 +130,9 @@ class PaperlessEnricher:
                     schema,
                 )
             )
-        if extraction.get("amount") is not None:
+        if extraction.get("amount") is not None and not has_correction_for_field(
+            document_id, "document_amount"
+        ):
             updates.append(
                 build_metadata_update(
                     MetadataFieldKey.DOCUMENT_AMOUNT,
@@ -133,7 +140,9 @@ class PaperlessEnricher:
                     schema,
                 )
             )
-        if extraction.get("document_due_date") is not None:
+        if extraction.get("document_due_date") is not None and not has_correction_for_field(
+            document_id, "document_due_date"
+        ):
             updates.append(
                 build_metadata_update(
                     MetadataFieldKey.DOCUMENT_DUE_DATE,
@@ -172,9 +181,21 @@ class PaperlessEnricher:
         await self.client.update_custom_fields(document_id, updates)
 
     async def sync_document_amount(self, document_id: int, amount: float | None) -> None:
-        """Write or explicitly clear the canonical document amount."""
+        """Write or explicitly clear the canonical document amount.
+
+        Skipped if a user-submitted correction already exists for this field —
+        corrections are authoritative and must not be clobbered by an
+        automated sync.
+        """
         if not settings.write_to_paperless:
             raise PermissionError("Paperless writes are disabled")
+        if has_correction_for_field(document_id, "document_amount"):
+            logger.info(
+                "Skipping automated document_amount sync for document_id=%s: "
+                "an authoritative correction already exists",
+                document_id,
+            )
+            return
         schema = await self.get_schema()
         await self.client.update_custom_fields(
             document_id,
@@ -182,9 +203,21 @@ class PaperlessEnricher:
         )
 
     async def sync_document_due_date(self, document_id: int, due_date: date | None) -> None:
-        """Write or explicitly clear the canonical document due date."""
+        """Write or explicitly clear the canonical document due date.
+
+        Skipped if a user-submitted correction already exists for this field —
+        corrections are authoritative and must not be clobbered by an
+        automated sync.
+        """
         if not settings.write_to_paperless:
             raise PermissionError("Paperless writes are disabled")
+        if has_correction_for_field(document_id, "document_due_date"):
+            logger.info(
+                "Skipping automated document_due_date sync for document_id=%s: "
+                "an authoritative correction already exists",
+                document_id,
+            )
+            return
         schema = await self.get_schema()
         await self.client.update_custom_fields(
             document_id,

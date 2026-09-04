@@ -22,6 +22,7 @@ from doc_intelligence_hub.core.paperless import (
     PaperlessMetadataResolver,
     build_metadata_update,
 )
+from doc_intelligence_hub.modules.triage.database import has_correction_for_field
 
 logger = logging.getLogger(__name__)
 
@@ -263,7 +264,19 @@ async def write_account_to_paperless(
     account_identifier: str,
     paperless_client: object,
 ) -> bool:
-    """Write a masked account identifier to the canonical Paperless field."""
+    """Write a masked account identifier to the canonical Paperless field.
+
+    Skipped if a user-submitted correction already exists for account_identifier
+    on this document — corrections are authoritative and must not be clobbered
+    by an automated write.
+    """
+    if has_correction_for_field(document_id, "account_identifier"):
+        logger.info(
+            "Skipping automated account_identifier write for document %d: "
+            "an authoritative correction already exists",
+            document_id,
+        )
+        return False
     try:
         if getattr(paperless_client, "list_custom_fields", None) is None:
             logger.warning("Paperless client cannot resolve custom-field definitions")

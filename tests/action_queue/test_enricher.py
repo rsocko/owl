@@ -1,5 +1,6 @@
 """Tests for neutral Paperless metadata enrichment."""
 
+from datetime import date
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,6 +14,7 @@ from doc_intelligence_hub.modules.action_queue.enricher import (
     CUSTOM_FIELD_DEFINITIONS,
     PaperlessEnricher,
 )
+from doc_intelligence_hub.modules.action_queue import enricher as enricher_module
 
 _ACTION_KEYS = (
     MetadataFieldKey.ACCOUNT_IDENTIFIER,
@@ -27,6 +29,16 @@ _ACTION_KEYS = (
     MetadataFieldKey.LEGACY_ACTION_SUMMARY,
     MetadataFieldKey.LEGACY_ACTION_COUNT,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_existing_corrections(monkeypatch):
+    """By default, pretend no field has an authoritative correction on file.
+
+    Individual tests override this via monkeypatch to exercise the
+    overwrite-guard behavior.
+    """
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: False)
 
 
 def _prime_schema(enricher: PaperlessEnricher, *, include_legacy: bool = False) -> None:
@@ -360,3 +372,98 @@ async def test_existing_action_amount_field_is_renamed(enricher):
         1,
         {"name": "Document Amount"},
     )
+
+
+# ------------------------------------------------------------------
+# Overwrite guard — authoritative corrections must not be clobbered
+# ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sync_document_amount_skips_write_when_correction_exists(monkeypatch, enricher):
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    _prime_schema(enricher)
+
+    await enricher.sync_document_amount(42, 99.0)
+
+    enricher.client.update_custom_fields.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_document_amount_writes_when_no_correction_exists(monkeypatch, enricher):
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: False)
+    _prime_schema(enricher)
+
+    await enricher.sync_document_amount(42, 99.0)
+
+    enricher.client.update_custom_fields.assert_awaited_once_with(
+        42,
+        [{"field": 1, "value": 99.0}],
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_document_due_date_skips_write_when_correction_exists(monkeypatch, enricher):
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    _prime_schema(enricher)
+
+    await enricher.sync_document_due_date(42, date(2026, 8, 15))
+
+    enricher.client.update_custom_fields.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_enrich_document_skips_fields_with_existing_corrections(monkeypatch, enricher):
+    """Only account_identifier has a correction on file — every other field
+    (invoice_number, document_amount, document_due_date, action_status,
+    action_analyzed) should still be written."""
+    _prime_schema(enricher)
+    monkeypatch.setattr(
+        enricher_module,
+        "has_correction_for_field",
+        lambda document_id, field_name: field_name == "account_identifier",
+    )
+
+    await enricher.enrich_document(
+        42,
+        {
+            "amount": 50.0,
+            "document_due_date": "2026-08-15",
+            "extracted_data": {
+                "account_identifier": "ending 4321",
+                "reference_number": "INV-42",
+            },
+        },
+    )
+
+    fields = enricher.client.update_custom_fields.await_args.args[1]
+    values = {field["field"]: field["value"] for field in fields}
+    assert 10 not in values  # account_identifier withheld
+    assert values[11] == "INV-42"  # invoice_number still written
+    assert values[1] == 50.0  # document_amount still written
+    assert values[4] == "2026-08-15"  # document_due_date still written
+
+
+@pytest.mark.asyncio
+async def test_enrich_document_skips_all_correctable_fields_when_corrected(monkeypatch, enricher):
+    _prime_schema(enricher)
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+
+    await enricher.enrich_document(
+        42,
+        {
+            "amount": 50.0,
+            "document_due_date": "2026-08-15",
+            "extracted_data": {
+                "account_identifier": "ending 4321",
+                "reference_number": "INV-42",
+            },
+        },
+    )
+
+    fields = enricher.client.update_custom_fields.await_args.args[1]
+    values = {field["field"]: field["value"] for field in fields}
+    assert not {1, 4, 10, 11}.intersection(values)
+    # Action-analyzed date is not correctable via the metadata API and is
+    # always written.
+    assert 3 in values
