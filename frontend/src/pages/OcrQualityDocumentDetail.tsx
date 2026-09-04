@@ -77,7 +77,9 @@ export type DocumentDetail = {
 export type CorrectableField = {
   field_name: string;
   paperless_field: string;
-  value: string | null;
+  value: string | number | boolean | null;
+  has_value?: boolean;
+  source_field?: string | null;
 };
 
 const SEVERITY_TONE: Record<string, Tone> = { info: 'info', warning: 'warn', blocking: 'err' };
@@ -131,6 +133,10 @@ function PageProfileTable({ pages }: { pages: PageProfile[] }) {
   );
 }
 
+function fieldLabel(name: string): string {
+  return name.replace(/_/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 export default function OcrQualityDocumentDetail() {
   const { documentId } = useParams();
   const navigate = useNavigate();
@@ -157,6 +163,7 @@ export default function OcrQualityDocumentDetail() {
   // Paperless schema, and submit it as a real correction (with real
   // source_region geometry) through the existing Metadata Correction API.
   const [correctableFields, setCorrectableFields] = useState<CorrectableField[] | null>(null);
+  const [metadataFieldsError, setMetadataFieldsError] = useState<string | null>(null);
   const [pendingCorrectionBox, setPendingCorrectionBox] = useState<DrawnBox | null>(null);
   const [correctionFieldName, setCorrectionFieldName] = useState<string>('');
   const [correctionValue, setCorrectionValue] = useState('');
@@ -258,6 +265,28 @@ export default function OcrQualityDocumentDetail() {
 
   const pageAnnotations = annotations.filter((a) => a.page === inspectionPage);
 
+  const loadCorrectableFields = useCallback(() => {
+    if (!documentId || !detail) return;
+    setMetadataFieldsError(null);
+    endpoints.metadata
+      .get(documentId)
+      .then((res) => {
+        const fields = (res as { extracted_fields?: CorrectableField[] }).extracted_fields;
+        if (!Array.isArray(fields)) {
+          throw new Error('Paperless metadata response did not include document fields.');
+        }
+        setCorrectableFields(fields);
+      })
+      .catch((err) => {
+        setCorrectableFields(null);
+        setMetadataFieldsError(err instanceof Error ? err.message : 'Failed to load current Paperless fields.');
+      });
+  }, [documentId, detail]);
+
+  useEffect(() => {
+    loadCorrectableFields();
+  }, [loadCorrectableFields]);
+
   // Auto-clear the correction submission toast.
   useEffect(() => {
     if (!correctionToast) return undefined;
@@ -271,13 +300,8 @@ export default function OcrQualityDocumentDetail() {
     (box: DrawnBox) => {
       setPendingCorrectionBox(box);
       setCorrectionValue('');
-      if (correctableFields || !documentId) return;
-      endpoints.metadata
-        .get(documentId)
-        .then((res) => setCorrectableFields((res as { extracted_fields: CorrectableField[] }).extracted_fields))
-        .catch(() => setCorrectableFields([]));
     },
-    [documentId, correctableFields],
+    [],
   );
 
   const cancelPendingCorrection = useCallback(() => {
@@ -372,6 +396,46 @@ export default function OcrQualityDocumentDetail() {
             {regionsError && <ErrorState message={regionsError} />}
             {!regionsError && (
               <>
+                <section className="ocr-paperless-fields" aria-labelledby="ocr-paperless-fields-heading">
+                  <div className="ocr-paperless-fields-header">
+                    <div>
+                      <h3 id="ocr-paperless-fields-heading">Current Paperless fields</h3>
+                      <p>
+                        Review these values before marking the document. If a value is wrong or missing, use
+                        Correct metadata and drag over the source value on the page.
+                      </p>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={() => navigate(`/metadata/${documentId}`)}>
+                      Open metadata workspace
+                    </Button>
+                  </div>
+                  {metadataFieldsError && (
+                    <div className="ocr-paperless-fields-error">
+                      <span>Current fields could not be loaded: {metadataFieldsError}</span>
+                      <Button size="sm" variant="ghost" onClick={loadCorrectableFields}>
+                        Retry
+                      </Button>
+                    </div>
+                  )}
+                  {!metadataFieldsError && correctableFields === null && (
+                    <div className="text-muted">Loading current Paperless fields…</div>
+                  )}
+                  {correctableFields && (
+                    <dl className="ocr-paperless-fields-grid">
+                      {correctableFields.map((field) => {
+                        const hasValue = field.has_value ?? field.value !== null;
+                        return (
+                          <div key={field.field_name} className="ocr-paperless-field">
+                            <dt>{fieldLabel(field.field_name)}</dt>
+                            <dd className={hasValue ? '' : 'text-muted'}>
+                              {hasValue ? String(field.value) : 'Missing'}
+                            </dd>
+                          </div>
+                        );
+                      })}
+                    </dl>
+                  )}
+                </section>
                 <RegionOverlayViewer
                   imageUrl={endpoints.ocrQuality.pageImageUrl(detail.document_id, inspectionPage)}
                   regions={regions}
@@ -387,12 +451,18 @@ export default function OcrQualityDocumentDetail() {
                     <select
                       id="correction-field"
                       value={correctionFieldName}
-                      onChange={(e) => setCorrectionFieldName(e.target.value)}
+                      onChange={(e) => {
+                        const fieldName = e.target.value;
+                        setCorrectionFieldName(fieldName);
+                        const field = correctableFields?.find((candidate) => candidate.field_name === fieldName);
+                        setCorrectionValue(field?.value == null ? '' : String(field.value));
+                      }}
+                      autoFocus
                     >
                       <option value="">Select a field…</option>
                       {(correctableFields ?? []).map((field) => (
                         <option key={field.field_name} value={field.field_name}>
-                          {field.field_name} ({field.paperless_field})
+                          {fieldLabel(field.field_name)} — {field.value == null ? 'Missing' : String(field.value)}
                         </option>
                       ))}
                     </select>

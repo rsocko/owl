@@ -150,9 +150,11 @@ export default function RegionOverlayViewer({
     [scale],
   );
 
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
       if ((!drawMode && !correctMode) || !containerRef.current) return;
+      e.preventDefault();
+      e.currentTarget.setPointerCapture?.(e.pointerId);
       const rect = containerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
@@ -162,9 +164,10 @@ export default function RegionOverlayViewer({
     [drawMode, correctMode],
   );
 
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
       if (!drawing || !containerRef.current) return;
+      e.preventDefault();
       const rect = containerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
@@ -173,8 +176,10 @@ export default function RegionOverlayViewer({
     [drawing],
   );
 
-  const handleMouseUp = useCallback(() => {
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (!drawing) return;
+    e.preventDefault();
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
     const pixelBox = {
       x0: Math.min(drawing.startX, drawing.x),
       top: Math.min(drawing.startY, drawing.y),
@@ -185,12 +190,17 @@ export default function RegionOverlayViewer({
     if (pixelBox.x1 - pixelBox.x0 < 4 || pixelBox.bottom - pixelBox.top < 4) return; // ignore accidental clicks
     const pointBox = toPointBox(pixelBox);
     if (!pointBox) return;
+    setInteractionMode('off');
     if (correctMode) {
       onCorrectRegion?.(pointBox);
       return;
     }
     setPendingBox(pointBox);
   }, [drawing, toPointBox, correctMode, onCorrectRegion]);
+
+  const handlePointerCancel = useCallback(() => {
+    setDrawing(null);
+  }, []);
 
   const submitPendingBox = useCallback(async () => {
     if (!pendingBox || !onCreateAnnotation) return;
@@ -239,8 +249,9 @@ export default function RegionOverlayViewer({
             size="sm"
             onClick={() => setInteractionMode((m) => (m === 'annotate' ? 'off' : 'annotate'))}
             aria-pressed={drawMode}
+            aria-describedby="region-overlay-tool-help"
           >
-            ✏ {drawMode ? 'Drawing…' : 'Draw annotation'}
+            {drawMode ? 'Cancel flagging' : 'Flag region'}
           </Button>
         )}
         {onCorrectRegion && (
@@ -249,8 +260,9 @@ export default function RegionOverlayViewer({
             size="sm"
             onClick={() => setInteractionMode((m) => (m === 'correct' ? 'off' : 'correct'))}
             aria-pressed={correctMode}
+            aria-describedby="region-overlay-tool-help"
           >
-            🏷 {correctMode ? 'Drawing region…' : 'Correct field'}
+            {correctMode ? 'Cancel correction' : 'Correct metadata'}
           </Button>
         )}
         {regions && regions.page_count > 1 && onPageChange && (
@@ -278,15 +290,60 @@ export default function RegionOverlayViewer({
         )}
       </div>
 
+      {(onCreateAnnotation || onCorrectRegion) && (
+        <div id="region-overlay-tool-help" className="region-overlay-tool-help" aria-live="polite">
+          {drawMode
+            ? 'Drag across an area to flag it for review. Release to add a label and note.'
+            : correctMode
+              ? 'Drag across the value to correct. Release to choose the document field and enter its value.'
+              : 'Flag region records a reviewer note without changing the document. Correct metadata updates a document field.'}
+        </div>
+      )}
+
+      {pendingBox && (
+        <div className="region-overlay-annotation-form" data-testid="annotation-form">
+          <strong>Flag selected region</strong>
+          <label htmlFor="annotation-label">Label</label>
+          <select id="annotation-label" value={label} onChange={(e) => setLabel(e.target.value)} autoFocus>
+            {ANNOTATION_LABELS.map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="annotation-note">Note (optional)</label>
+          <textarea
+            id="annotation-note"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={2}
+          />
+          <div className="region-overlay-annotation-form-actions">
+            <Button size="sm" onClick={submitPendingBox}>
+              Save flag
+            </Button>
+            <Button size="sm" variant="ghost" onClick={cancelPendingBox}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div
         ref={containerRef}
         className={`region-overlay-canvas ${drawMode || correctMode ? 'draw-mode' : ''}`}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
       >
-        {/* eslint-disable-next-line jsx-a11y/alt-text */}
-        <img src={imageUrl} onLoad={handleImageLoad} className="region-overlay-image" alt="Document page" />
+        <img
+          src={imageUrl}
+          onLoad={handleImageLoad}
+          className="region-overlay-image"
+          alt="Document page"
+          draggable={false}
+        />
 
         {scale &&
           regions?.words.map((word, i) => {
@@ -389,33 +446,6 @@ export default function RegionOverlayViewer({
         </div>
       )}
 
-      {pendingBox && (
-        <div className="region-overlay-annotation-form" data-testid="annotation-form">
-          <label htmlFor="annotation-label">Label</label>
-          <select id="annotation-label" value={label} onChange={(e) => setLabel(e.target.value)}>
-            {ANNOTATION_LABELS.map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
-            ))}
-          </select>
-          <label htmlFor="annotation-note">Note (optional)</label>
-          <textarea
-            id="annotation-note"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            rows={2}
-          />
-          <div className="region-overlay-annotation-form-actions">
-            <Button size="sm" onClick={submitPendingBox}>
-              Save annotation
-            </Button>
-            <Button size="sm" variant="ghost" onClick={cancelPendingBox}>
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

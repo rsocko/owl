@@ -112,6 +112,78 @@
   gap: 10px;
 }
 
+.ocr-paperless-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ocr-paperless-fields-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ocr-paperless-fields-header h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.ocr-paperless-fields-header p {
+  margin: 0;
+  max-width: 70ch;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ocr-paperless-fields-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.ocr-paperless-field {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.ocr-paperless-field dt {
+  margin-bottom: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.ocr-paperless-field dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ocr-paperless-fields-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--danger, #b91c1c);
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .ocr-paperless-fields-header {
+    flex-direction: column;
+  }
+}
+
 .ocr-score-summary {
   display: flex;
   align-items: center;
@@ -308,5 +380,4 @@ tr.is-selected {
   font-size: 13px;
   margin-bottom: 6px;
 }
-
 
