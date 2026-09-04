@@ -76,25 +76,30 @@ class PaperlessEnricher:
 
         Automated passes (``source="automated"``) skip a field once a
         user-submitted correction exists for it — corrections are
-        authoritative and must not be silently clobbered.
+        authoritative and must not be silently clobbered. They never record
+        a correction themselves.
 
         A human-driven Action Queue edit (``source="action_queue"``) is
-        itself an authoritative decision, so it is never skipped. If it
-        supersedes an earlier correction, the caller must record the new
-        value as the latest correction — but only *after* the Paperless
-        write is confirmed to succeed, so a failed write never leaves a
-        correction on file for a value that was never actually persisted.
+        itself an authoritative decision, so it is never skipped, and it
+        always establishes (or supersedes) the authoritative correction for
+        the field — including on a first-time edit with no prior correction
+        on file. Without recording a first edit too, a later automated pass
+        would see no correction on record and silently clobber the human
+        edit, defeating the guard entirely. The caller must only persist
+        this *after* the Paperless write is confirmed to succeed, so a
+        failed write never leaves a correction on file for a value that was
+        never actually persisted.
         """
-        if not has_correction_for_field(document_id, field_name):
-            return False, False
         if source == "automated":
-            logger.info(
-                "Skipping automated %s write for document_id=%s: "
-                "an authoritative correction already exists",
-                field_name,
-                document_id,
-            )
-            return True, False
+            if has_correction_for_field(document_id, field_name):
+                logger.info(
+                    "Skipping automated %s write for document_id=%s: "
+                    "an authoritative correction already exists",
+                    field_name,
+                    document_id,
+                )
+                return True, False
+            return False, False
         return False, True
 
     @staticmethod
@@ -109,7 +114,8 @@ class PaperlessEnricher:
             field_name=field_name,
             corrected_value=new_value,
             correction_type="action_queue_edit",
-            notes="Recorded from an Action Queue edit superseding an earlier correction",
+            notes="Recorded from an Action Queue edit, establishing (or superseding) "
+            "the authoritative value for this field",
         )
 
     async def ensure_custom_fields_exist(self) -> dict[MetadataFieldKey, int]:

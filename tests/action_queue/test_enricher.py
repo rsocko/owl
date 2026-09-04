@@ -441,11 +441,13 @@ async def test_sync_document_amount_action_queue_source_writes_through_existing_
 
 
 @pytest.mark.asyncio
-async def test_sync_document_amount_action_queue_source_no_op_when_no_correction_exists(
+async def test_sync_document_amount_action_queue_source_records_first_time_edit(
     monkeypatch, enricher
 ):
-    """When there's no prior correction, an Action Queue edit writes through
-    without creating a redundant correction record."""
+    """Even with no prior correction on file, an Action Queue edit must
+    still be recorded as the new authoritative correction -- otherwise a
+    later automated pass would see no correction on record and silently
+    clobber this human-entered value, defeating the guard entirely."""
     monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: False)
     recorded = Mock()
     monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
@@ -454,7 +456,11 @@ async def test_sync_document_amount_action_queue_source_no_op_when_no_correction
     await enricher.sync_document_amount(42, 150.0, source="action_queue")
 
     enricher.client.update_custom_fields.assert_awaited_once()
-    recorded.assert_not_called()
+    recorded.assert_called_once()
+    assert recorded.call_args.kwargs["document_id"] == 42
+    assert recorded.call_args.kwargs["field_name"] == "document_amount"
+    assert recorded.call_args.kwargs["corrected_value"] == "150.0"
+    assert recorded.call_args.kwargs["correction_type"] == "action_queue_edit"
 
 
 @pytest.mark.asyncio
@@ -661,6 +667,38 @@ async def test_enrich_document_action_queue_source_writes_through_all_correction
     assert values[11] == "INV-42"
     assert values[1] == 50.0
     assert values[4] == "2026-08-15"
+    assert {call.kwargs["field_name"] for call in recorded.call_args_list} == {
+        "account_identifier",
+        "invoice_number",
+        "document_amount",
+        "document_due_date",
+    }
+
+
+@pytest.mark.asyncio
+async def test_enrich_document_action_queue_source_records_first_time_edits(monkeypatch, enricher):
+    """Even with no prior corrections on file, an Action Queue re-sync must
+    still establish an authoritative correction for every field it writes --
+    otherwise a later automated pass would see no correction on record and
+    silently clobber these human-confirmed values."""
+    _prime_schema(enricher)
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: False)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+
+    await enricher.enrich_document(
+        42,
+        {
+            "amount": 50.0,
+            "document_due_date": "2026-08-15",
+            "extracted_data": {
+                "account_identifier": "ending 4321",
+                "reference_number": "INV-42",
+            },
+        },
+        source="action_queue",
+    )
+
     assert {call.kwargs["field_name"] for call in recorded.call_args_list} == {
         "account_identifier",
         "invoice_number",
