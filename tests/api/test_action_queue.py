@@ -198,7 +198,9 @@ class TestUpdateAction:
                 },
             )
         assert resp.status_code == 200
-        enricher.sync_document_amount.assert_awaited_once_with(action["document_id"], 123.45)
+        enricher.sync_document_amount.assert_awaited_once_with(
+            action["document_id"], 123.45, source="action_queue"
+        )
         data = resp.json()
         assert data["status"] == "pending"
         assert data["action_type"] == "TASK"
@@ -233,7 +235,9 @@ class TestUpdateAction:
                 },
             )
         assert resp.status_code == 200
-        enricher.sync_document_amount.assert_awaited_once_with(action["document_id"], None)
+        enricher.sync_document_amount.assert_awaited_once_with(
+            action["document_id"], None, source="action_queue"
+        )
         data = resp.json()
         assert data["summary"] is None
         assert data["due_date"] is None

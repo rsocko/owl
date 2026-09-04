@@ -313,6 +313,7 @@ class TestListActions:
             "amount",
             "document_amount",
             "document_due_date",
+            "corrected_fields",
             "urgency",
             "severity",
             "confidence",
@@ -397,6 +398,82 @@ class TestListActions:
 
         assert data["total"] == 2
         assert {action["id"] for action in data["actions"]} == {1, 2}
+
+
+class TestCanonicalCorrectionOverlay:
+    """A correction recorded via the Metadata Correction API (including the
+    OCR region viewer) is authoritative -- _serialize_action must surface
+    the corrected value and flag it via `corrected_fields`, rather than
+    exposing the original, possibly-stale extracted value."""
+
+    def test_corrected_document_amount_overrides_extracted_value(
+        self, seeded_client, monkeypatch
+    ):
+        from doc_intelligence_hub.modules.triage import database as triage_db
+
+        monkeypatch.setattr(
+            triage_db,
+            "get_corrections_for_document",
+            lambda document_id: (
+                [
+                    {
+                        "field_name": "document_amount",
+                        "corrected_value": "999.99",
+                    }
+                ]
+                if document_id == 42
+                else []
+            ),
+        )
+
+        resp = seeded_client.get("/api/queue/actions?status=pending")
+        action = resp.json()["actions"][0]
+
+        assert action["document_id"] == 42
+        assert action["document_amount"] == 999.99
+        assert action["corrected_fields"] == {"document_amount": True}
+
+    def test_corrected_account_identifier_is_remasked_and_flagged(
+        self, seeded_client, monkeypatch
+    ):
+        from doc_intelligence_hub.modules.triage import database as triage_db
+
+        monkeypatch.setattr(
+            triage_db,
+            "get_corrections_for_document",
+            lambda document_id: (
+                [
+                    {
+                        "field_name": "account_identifier",
+                        "corrected_value": "1234567890",
+                    }
+                ]
+                if document_id == 42
+                else []
+            ),
+        )
+
+        resp = seeded_client.get("/api/queue/actions?status=pending")
+        action = resp.json()["actions"][0]
+
+        assert action["corrected_fields"] == {"account_identifier": True}
+        # The raw corrected value must never leak unmasked into the API.
+        assert action["extracted_data"]["account_identifier"] != "1234567890"
+
+    def test_no_correction_leaves_original_value_and_empty_flag_map(
+        self, seeded_client, monkeypatch
+    ):
+        from doc_intelligence_hub.modules.triage import database as triage_db
+
+        monkeypatch.setattr(
+            triage_db, "get_corrections_for_document", lambda document_id: []
+        )
+
+        resp = seeded_client.get("/api/queue/actions?status=pending")
+        action = resp.json()["actions"][0]
+
+        assert action["document_amount"] is None
+        assert action["corrected_fields"] == {}
 
 
 class TestUpdateAction:
@@ -728,7 +805,7 @@ class TestUpdateAction:
         assert response.json()["review_state"] == "needs_review"
         projection.assert_awaited_once()
         assert projection.await_args.kwargs["action_status"] is None
-        enricher.sync_document_amount.assert_awaited_once_with(42, None)
+        enricher.sync_document_amount.assert_awaited_once_with(42, None, source="action_queue")
 
     def test_split_creates_stable_sibling_identity(self, seeded_client):
         response = seeded_client.post(

@@ -235,7 +235,7 @@ class TestMcListActions:
 
         assert response.status_code == 200
         assert response.json()["amount"] is None
-        enricher.sync_document_amount.assert_awaited_once_with(42, None)
+        enricher.sync_document_amount.assert_awaited_once_with(42, None, source="action_queue")
 
     def test_connector_preserves_additive_cta_shape_and_file_source_action(self, seeded_client):
         db = get_session()

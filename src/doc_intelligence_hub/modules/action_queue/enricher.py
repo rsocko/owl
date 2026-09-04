@@ -19,7 +19,10 @@ from doc_intelligence_hub.core.paperless import (
     build_metadata_update,
     get_metadata_field_spec,
 )
-from doc_intelligence_hub.modules.triage.database import has_correction_for_field
+from doc_intelligence_hub.modules.triage.database import (
+    create_extraction_correction,
+    has_correction_for_field,
+)
 
 from .config import settings
 
@@ -61,6 +64,42 @@ class PaperlessEnricher:
         self._schema: ResolvedMetadataSchema | None = None
         self._field_id_cache: dict[MetadataFieldKey, int] = {}
 
+    @staticmethod
+    def _skip_field_write(
+        document_id: int, field_name: str, new_value: str, *, source: str
+    ) -> bool:
+        """Return True if a write to ``field_name`` should be skipped.
+
+        Automated passes (``source="automated"``) skip a field once a
+        user-submitted correction exists for it — corrections are
+        authoritative and must not be silently clobbered.
+
+        A human-driven Action Queue edit (``source="action_queue"``) is
+        itself an authoritative decision, so it is never skipped. If it
+        supersedes an earlier correction, that new value is recorded as the
+        latest correction too, so there is a single canonical value: later
+        automated passes and the Metadata Correction UI will both see this
+        newest edit rather than the older one.
+        """
+        if not has_correction_for_field(document_id, field_name):
+            return False
+        if source == "automated":
+            logger.info(
+                "Skipping automated %s write for document_id=%s: "
+                "an authoritative correction already exists",
+                field_name,
+                document_id,
+            )
+            return True
+        create_extraction_correction(
+            document_id=document_id,
+            field_name=field_name,
+            corrected_value=new_value,
+            correction_type="action_queue_edit",
+            notes="Recorded from an Action Queue edit superseding an earlier correction",
+        )
+        return False
+
     async def ensure_custom_fields_exist(self) -> dict[MetadataFieldKey, int]:
         """Ensure owned Action Queue fields exist and validate the deployed schema."""
         schema = await PaperlessMetadataResolver(self.client).ensure(_ALL_ACTION_FIELDS)
@@ -96,8 +135,18 @@ class PaperlessEnricher:
         *,
         action_status: str | None = "pending",
         clear_action_inference: bool = False,
+        source: str = "automated",
     ) -> None:
-        """Write neutral document extraction results to Paperless."""
+        """Write neutral document extraction results to Paperless.
+
+        ``source`` distinguishes an automated pipeline pass (default) from a
+        human-driven Action Queue edit. Automated passes skip any field that
+        already has an authoritative user correction; an Action Queue edit is
+        itself a human decision, so it is always written through and recorded
+        as the new authoritative correction (superseding any earlier one) so
+        later automated passes and the Metadata Correction UI stay in sync
+        with this single canonical value.
+        """
         if not settings.write_to_paperless:
             return
 
@@ -109,7 +158,9 @@ class PaperlessEnricher:
         account_identifier = normalize_masked_account_identifier(
             extracted_data.get("account_identifier")
         )
-        if account_identifier and not has_correction_for_field(document_id, "account_identifier"):
+        if account_identifier and not self._skip_field_write(
+            document_id, "account_identifier", account_identifier, source=source
+        ):
             updates.append(
                 build_metadata_update(
                     MetadataFieldKey.ACCOUNT_IDENTIFIER,
@@ -121,7 +172,9 @@ class PaperlessEnricher:
         if (
             isinstance(reference_number, str)
             and reference_number.strip()
-            and not has_correction_for_field(document_id, "invoice_number")
+            and not self._skip_field_write(
+                document_id, "invoice_number", reference_number.strip(), source=source
+            )
         ):
             updates.append(
                 build_metadata_update(
@@ -130,8 +183,8 @@ class PaperlessEnricher:
                     schema,
                 )
             )
-        if extraction.get("amount") is not None and not has_correction_for_field(
-            document_id, "document_amount"
+        if extraction.get("amount") is not None and not self._skip_field_write(
+            document_id, "document_amount", str(extraction["amount"]), source=source
         ):
             updates.append(
                 build_metadata_update(
@@ -140,8 +193,11 @@ class PaperlessEnricher:
                     schema,
                 )
             )
-        if extraction.get("document_due_date") is not None and not has_correction_for_field(
-            document_id, "document_due_date"
+        if extraction.get("document_due_date") is not None and not self._skip_field_write(
+            document_id,
+            "document_due_date",
+            str(extraction["document_due_date"]),
+            source=source,
         ):
             updates.append(
                 build_metadata_update(
@@ -180,21 +236,22 @@ class PaperlessEnricher:
         )
         await self.client.update_custom_fields(document_id, updates)
 
-    async def sync_document_amount(self, document_id: int, amount: float | None) -> None:
+    async def sync_document_amount(
+        self, document_id: int, amount: float | None, *, source: str = "automated"
+    ) -> None:
         """Write or explicitly clear the canonical document amount.
 
-        Skipped if a user-submitted correction already exists for this field —
-        corrections are authoritative and must not be clobbered by an
-        automated sync.
+        Skipped if a user-submitted correction already exists for this field
+        and ``source="automated"`` — corrections are authoritative and must
+        not be clobbered by an automated sync. A human-driven Action Queue
+        edit (``source="action_queue"``) is always written through and
+        recorded as the new authoritative correction.
         """
         if not settings.write_to_paperless:
             raise PermissionError("Paperless writes are disabled")
-        if has_correction_for_field(document_id, "document_amount"):
-            logger.info(
-                "Skipping automated document_amount sync for document_id=%s: "
-                "an authoritative correction already exists",
-                document_id,
-            )
+        if self._skip_field_write(
+            document_id, "document_amount", "" if amount is None else str(amount), source=source
+        ):
             return
         schema = await self.get_schema()
         await self.client.update_custom_fields(
@@ -202,21 +259,25 @@ class PaperlessEnricher:
             [build_metadata_update(MetadataFieldKey.DOCUMENT_AMOUNT, amount, schema)],
         )
 
-    async def sync_document_due_date(self, document_id: int, due_date: date | None) -> None:
+    async def sync_document_due_date(
+        self, document_id: int, due_date: date | None, *, source: str = "automated"
+    ) -> None:
         """Write or explicitly clear the canonical document due date.
 
-        Skipped if a user-submitted correction already exists for this field —
-        corrections are authoritative and must not be clobbered by an
-        automated sync.
+        Skipped if a user-submitted correction already exists for this field
+        and ``source="automated"`` — corrections are authoritative and must
+        not be clobbered by an automated sync. A human-driven Action Queue
+        edit (``source="action_queue"``) is always written through and
+        recorded as the new authoritative correction.
         """
         if not settings.write_to_paperless:
             raise PermissionError("Paperless writes are disabled")
-        if has_correction_for_field(document_id, "document_due_date"):
-            logger.info(
-                "Skipping automated document_due_date sync for document_id=%s: "
-                "an authoritative correction already exists",
-                document_id,
-            )
+        if self._skip_field_write(
+            document_id,
+            "document_due_date",
+            "" if due_date is None else due_date.isoformat(),
+            source=source,
+        ):
             return
         schema = await self.get_schema()
         await self.client.update_custom_fields(

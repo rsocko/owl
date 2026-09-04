@@ -344,6 +344,7 @@ async def mc_submit_feedback(
                     await PaperlessEnricher().sync_document_amount(
                         action.document_id,
                         body.corrected_amount,
+                        source="action_queue",
                     )
                 except Exception as exc:
                     raise HTTPException(
