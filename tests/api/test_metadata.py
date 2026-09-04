@@ -78,18 +78,21 @@ async def test_document_amount_and_due_date_are_correctable(monkeypatch) -> None
         "create_extraction_correction",
         lambda **kwargs: {"id": "c1", **kwargs},
     )
+    client = AsyncMock()
+    client.get_document.return_value = {"id": 100, "correspondent": None, "content": None}
+    client.list_correspondents.return_value = []
+    monkeypatch.setattr(metadata, "make_paperless_client", lambda request: client)
     correct_result = await metadata.correct_field(
         100,
         metadata.CorrectFieldRequest(field_name="document_amount", corrected_value="125.00"),
+        object(),
     )
     assert correct_result["correction"]["field_name"] == "document_amount"
 
-    client = AsyncMock()
     client.list_custom_fields.return_value = [
         {"id": 30, "name": "Document Amount", "data_type": "float"},
         {"id": 31, "name": "Document Due Date", "data_type": "date"},
     ]
-    monkeypatch.setattr(metadata, "make_paperless_client", lambda request: client)
     monkeypatch.setattr(
         metadata,
         "get_corrections_for_document",

@@ -9,12 +9,12 @@ from doc_intelligence_hub.core.paperless import (
     MetadataFieldKey,
     resolve_metadata_schema,
 )
+from doc_intelligence_hub.modules.action_queue import enricher as enricher_module
 from doc_intelligence_hub.modules.action_queue.config import settings
 from doc_intelligence_hub.modules.action_queue.enricher import (
     CUSTOM_FIELD_DEFINITIONS,
     PaperlessEnricher,
 )
-from doc_intelligence_hub.modules.action_queue import enricher as enricher_module
 
 _ACTION_KEYS = (
     MetadataFieldKey.ACCOUNT_IDENTIFIER,
@@ -570,4 +570,3 @@ async def test_enrich_document_action_queue_source_writes_through_all_correction
         "document_amount",
         "document_due_date",
     }
-

@@ -14,12 +14,14 @@ from doc_intelligence_hub.modules.action_queue.database import (
     get_session,
     init_db,
 )
+from doc_intelligence_hub.modules.triage import database as triage_database
 
 
 @pytest.fixture()
 def client(tmp_path):
     """Create a test client with temp-file database and patched settings."""
     db_path = tmp_path / "test_actions.db"
+    triage_db_path = tmp_path / "test_triage.db"
     hub_settings = HubSettings(
         paperless_url="http://paperless.test",
         paperless_token="test-token",
@@ -28,15 +30,19 @@ def client(tmp_path):
 
     original_db_url = aq_settings.database_url
     original_paperless_url = aq_settings.paperless_url
+    original_triage_db_url = triage_database._db_url
     aq_settings.database_url = f"sqlite:///{db_path}"
     aq_settings.paperless_url = "http://paperless.test"
+    triage_database.configure(f"sqlite:///{triage_db_path}")
 
     init_db()
+    triage_database.init_db()
 
     yield TestClient(app)
 
     aq_settings.database_url = original_db_url
     aq_settings.paperless_url = original_paperless_url
+    triage_database.configure(original_triage_db_url)
 
 
 @pytest.fixture()
@@ -406,9 +412,7 @@ class TestCanonicalCorrectionOverlay:
     the corrected value and flag it via `corrected_fields`, rather than
     exposing the original, possibly-stale extracted value."""
 
-    def test_corrected_document_amount_overrides_extracted_value(
-        self, seeded_client, monkeypatch
-    ):
+    def test_corrected_document_amount_overrides_extracted_value(self, seeded_client, monkeypatch):
         from doc_intelligence_hub.modules.triage import database as triage_db
 
         monkeypatch.setattr(
@@ -433,9 +437,7 @@ class TestCanonicalCorrectionOverlay:
         assert action["document_amount"] == 999.99
         assert action["corrected_fields"] == {"document_amount": True}
 
-    def test_corrected_account_identifier_is_remasked_and_flagged(
-        self, seeded_client, monkeypatch
-    ):
+    def test_corrected_account_identifier_is_remasked_and_flagged(self, seeded_client, monkeypatch):
         from doc_intelligence_hub.modules.triage import database as triage_db
 
         monkeypatch.setattr(
@@ -465,9 +467,7 @@ class TestCanonicalCorrectionOverlay:
     ):
         from doc_intelligence_hub.modules.triage import database as triage_db
 
-        monkeypatch.setattr(
-            triage_db, "get_corrections_for_document", lambda document_id: []
-        )
+        monkeypatch.setattr(triage_db, "get_corrections_for_document", lambda document_id: [])
 
         resp = seeded_client.get("/api/queue/actions?status=pending")
         action = resp.json()["actions"][0]
