@@ -14,7 +14,9 @@ class TestDeriveLabelAnchor:
         assert derive_label_anchor(text, "$142.50") == "Total Due:"
 
     def test_trims_to_max_words(self):
-        text = "Some long preamble that should be trimmed to just the last few words Total Due: $50.00"
+        text = (
+            "Some long preamble that should be trimmed to just the last few words Total Due: $50.00"
+        )
         anchor = derive_label_anchor(text, "$50.00", max_words=3)
         assert anchor == "words Total Due:"
         assert len(anchor.split(" ")) <= 3

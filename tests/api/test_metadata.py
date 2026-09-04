@@ -164,7 +164,9 @@ async def test_correct_field_tolerates_document_fetch_failure(monkeypatch) -> No
 
     monkeypatch.setattr(metadata, "create_extraction_correction", fake_create_extraction_correction)
 
-    body = metadata.CorrectFieldRequest(field_name="account_identifier", corrected_value="ending 1234")
+    body = metadata.CorrectFieldRequest(
+        field_name="account_identifier", corrected_value="ending 1234"
+    )
     result = await metadata.correct_field(300, body, object())
 
     assert captured["correspondent"] is None

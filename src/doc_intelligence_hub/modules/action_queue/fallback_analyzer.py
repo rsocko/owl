@@ -38,6 +38,7 @@ def _get_amount_hint_anchor(correspondent: str) -> str | None:
     except Exception:
         return None
 
+
 # Keyword patterns for action type detection
 _PAY_KEYWORDS = re.compile(
     r"\b(invoice|bill|statement|payment\s*due|balance\s*due|amount\s*due|"

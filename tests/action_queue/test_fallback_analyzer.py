@@ -284,7 +284,9 @@ class TestCorrespondentHintBiasedAmountExtraction:
     """Issue #171: bias amount extraction using stored correspondent+field hints."""
 
     def test_falls_back_to_largest_amount_when_no_hint_exists(self, analyzer, monkeypatch):
-        monkeypatch.setattr(fallback_analyzer, "_get_amount_hint_anchor", lambda correspondent: None)
+        monkeypatch.setattr(
+            fallback_analyzer, "_get_amount_hint_anchor", lambda correspondent: None
+        )
         result = analyzer.analyze_document(
             {
                 "title": "City Utilities Bill",
@@ -295,7 +297,9 @@ class TestCorrespondentHintBiasedAmountExtraction:
         )
         assert result["actions"][0]["amount"] == 42.00
 
-    def test_prefers_anchor_adjacent_amount_over_largest_when_hint_exists(self, analyzer, monkeypatch):
+    def test_prefers_anchor_adjacent_amount_over_largest_when_hint_exists(
+        self, analyzer, monkeypatch
+    ):
         # A prior correction taught us that "Total Due:" is where the true total lives
         # for this correspondent — even though $250.00 (a subtotal) is numerically larger.
         monkeypatch.setattr(

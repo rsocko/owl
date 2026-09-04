@@ -137,9 +137,10 @@ class TestPickBestAccountIdentifier:
         matches = [
             {"pattern": "member_id", "value": "MEM123456", "normalized": "MEM123456", "start": 0},
         ]
-        assert pick_best_account_identifier(
-            matches, text="Member ID: MEM123456", anchor="Member ID:"
-        ) == "MEM123456"
+        assert (
+            pick_best_account_identifier(matches, text="Member ID: MEM123456", anchor="Member ID:")
+            == "MEM123456"
+        )
 
 
 class TestPickMaskedAccountIdentifier:
