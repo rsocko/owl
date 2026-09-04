@@ -29,8 +29,16 @@ from sqlalchemy.orm import Session
 from doc_intelligence_hub.core import alerts
 from doc_intelligence_hub.core.paperless import PaperlessClient
 
+from .candidate_models import CandidateState
 from .config import settings as ocr_quality_settings
-from .database import DocumentAssessment, InventoryRun, PdfProfile, RunFailure, SampleSelection
+from .database import (
+    DocumentAssessment,
+    InventoryRun,
+    OcrQualityCandidate,
+    PdfProfile,
+    RunFailure,
+    SampleSelection,
+)
 from .models import (
     INVENTORY_SIGNAL_VERSION,
     PDF_PROFILE_VERSION,
@@ -998,6 +1006,49 @@ class OcrQualityInventoryService:
         AssessmentStatus.GOOD.value: 3,
     }
 
+    # States meaning "an OCR candidate has been applied to Paperless for this
+    # document" (issue #18 slice 2) — surfaced as a "resolved" indicator on
+    # the review queue/detail so a document a reviewer already acted on is
+    # distinguishable from one that never had a candidate accepted. Deliberately
+    # does NOT change `review_status` itself: the score row is left as the
+    # historical pre-acceptance baseline (see OcrCandidatesPanel) until the
+    # document is actually re-scored.
+    _ACCEPTED_CANDIDATE_STATES = (
+        CandidateState.ACCEPTED.value,
+        CandidateState.ACCEPTED_PENDING_INVALIDATION.value,
+    )
+
+    def _accepted_candidate_info(
+        self, db: Session, document_ids: list[int]
+    ) -> dict[int, dict[str, Any]]:
+        """Latest accepted-candidate acknowledgement per document_id.
+
+        Returns only entries for documents that actually have one — callers
+        should treat a missing key as "no candidate ever accepted".
+        """
+        if not document_ids:
+            return {}
+        rows = (
+            db.query(OcrQualityCandidate)
+            .filter(
+                OcrQualityCandidate.document_id.in_(document_ids),
+                OcrQualityCandidate.state.in_(self._ACCEPTED_CANDIDATE_STATES),
+            )
+            .order_by(OcrQualityCandidate.document_id, OcrQualityCandidate.decided_at.desc())
+            .all()
+        )
+        info: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            if row.document_id in info:
+                continue  # already have the most recent acceptance for this doc
+            info[row.document_id] = {
+                "has_accepted_ocr_candidate": True,
+                "accepted_candidate_at": row.decided_at.isoformat() if row.decided_at else None,
+                "accepted_candidate_pending_invalidation": row.state
+                == CandidateState.ACCEPTED_PENDING_INVALIDATION.value,
+            }
+        return info
+
     def _latest_assessment_query(self, db: Session):
         """Base query over only the most recent assessment row per document."""
         latest_ids = (
@@ -1110,8 +1161,11 @@ class OcrQualityInventoryService:
                     .all()
                 )
                 rows.sort(key=lambda r: self._RISK_ORDER.get(r.review_status or "", 4))
+            accepted_info = self._accepted_candidate_info(db, [row.document_id for row in rows])
             return {
-                "documents": [_assessment_summary(row) for row in rows],
+                "documents": [
+                    _assessment_summary(row, accepted_info.get(row.document_id)) for row in rows
+                ],
                 "total": total,
                 "limit": limit,
                 "offset": offset,
@@ -1159,7 +1213,10 @@ class OcrQualityInventoryService:
             # happens to be populated (e.g. profiling could have run but
             # failed to produce a score).
             has_stage2_analysis = _has_stage2_analysis(db, document_id)
-            return _assessment_detail(row, has_stage2_analysis=has_stage2_analysis)
+            accepted_info = self._accepted_candidate_info(db, [document_id]).get(document_id)
+            return _assessment_detail(
+                row, has_stage2_analysis=has_stage2_analysis, accepted_info=accepted_info
+            )
         finally:
             db.close()
 
@@ -1206,7 +1263,9 @@ class OcrQualityInventoryService:
             db.close()
 
 
-def _assessment_summary(row: DocumentAssessment) -> dict[str, Any]:
+def _assessment_summary(
+    row: DocumentAssessment, accepted_info: dict[str, Any] | None = None
+) -> dict[str, Any]:
     return {
         "document_id": row.document_id,
         "document_type": row.document_type,
@@ -1219,6 +1278,13 @@ def _assessment_summary(row: DocumentAssessment) -> dict[str, Any]:
         "dominant_classification": (row.document_profile or {}).get("dominant_classification"),
         "quality_scorer_version": row.quality_scorer_version,
         "assessed_at": row.updated_at.isoformat() if row.updated_at else None,
+        "has_accepted_ocr_candidate": bool(
+            accepted_info and accepted_info.get("has_accepted_ocr_candidate")
+        ),
+        "accepted_candidate_at": (accepted_info or {}).get("accepted_candidate_at"),
+        "accepted_candidate_pending_invalidation": bool(
+            accepted_info and accepted_info.get("accepted_candidate_pending_invalidation")
+        ),
     }
 
 
@@ -1226,9 +1292,14 @@ def _has_stage2_analysis(db: Session, document_id: int) -> bool:
     return db.query(PdfProfile.id).filter(PdfProfile.document_id == document_id).first() is not None
 
 
-def _assessment_detail(row: DocumentAssessment, *, has_stage2_analysis: bool) -> dict[str, Any]:
+def _assessment_detail(
+    row: DocumentAssessment,
+    *,
+    has_stage2_analysis: bool,
+    accepted_info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
-        **_assessment_summary(row),
+        **_assessment_summary(row, accepted_info),
         "run_id": row.run_id,
         "first_seen_run_id": row.first_seen_run_id,
         "preliminary_score": row.preliminary_score,
