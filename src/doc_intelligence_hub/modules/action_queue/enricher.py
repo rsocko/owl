@@ -383,10 +383,8 @@ class PaperlessEnricher:
             if field_id != resolved.canonical_id:
                 continue
             value = custom_field.get("value")
-            id_to_label = {
-                option_id: label for label, option_id in resolved.select_option_ids.items()
-            }
-            if isinstance(value, int):
-                return id_to_label.get(value)
+            label = resolved.select_label(value)
+            if label is not None:
+                return label
             return str(value).strip() if value is not None else None
         return None

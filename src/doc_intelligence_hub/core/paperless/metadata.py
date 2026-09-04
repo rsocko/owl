@@ -447,7 +447,7 @@ class ResolvedMetadataField:
     canonical_id: int | None
     data_type: PaperlessFieldType | None = None
     alias_ids: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
-    select_option_ids: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
+    select_option_ids: Mapping[str, int | str] = field(default_factory=lambda: MappingProxyType({}))
     diagnostics: tuple[MetadataDiagnostic, ...] = ()
 
     @property
@@ -461,6 +461,19 @@ class ResolvedMetadataField:
         return self.canonical_id is not None and not any(
             diagnostic.code in incompatible_codes for diagnostic in self.diagnostics
         )
+
+    def select_label(self, value: Any) -> str | None:
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            return None
+        label = next(
+            (
+                candidate_label
+                for candidate_label, option_id in self.select_option_ids.items()
+                if option_id == value or str(option_id) == str(value)
+            ),
+            None,
+        )
+        return label
 
 
 class MetadataSchemaError(RuntimeError):
@@ -489,7 +502,7 @@ class ResolvedMetadataSchema:
             )
         return resolved.canonical_id
 
-    def select_value(self, key: MetadataFieldKey | str, label: str) -> int:
+    def select_value(self, key: MetadataFieldKey | str, label: str) -> int | str:
         resolved = self.field(key)
         normalized_label = str(label).strip()
         try:
@@ -506,6 +519,17 @@ def _field_id(field_definition: Mapping[str, Any]) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _select_option_id(option: Mapping[str, Any]) -> int | str | None:
+    value = option.get("id")
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
 
 
 def _field_type(field_definition: Mapping[str, Any]) -> PaperlessFieldType | None:
@@ -568,7 +592,7 @@ def resolve_metadata_schema(
 
         canonical_id = _field_id(canonical) if canonical else None
         actual_type = _field_type(canonical) if canonical else None
-        select_option_ids: dict[str, int] = {}
+        select_option_ids: dict[str, int | str] = {}
         if canonical is not None:
             if actual_type not in spec.compatible_types:
                 expected = ", ".join(field_type.value for field_type in spec.compatible_types)
@@ -592,7 +616,7 @@ def resolve_metadata_schema(
                         continue
                     normalized_label = label.strip()
                     labels_seen.add(normalized_label)
-                    option_id = _field_id(option)
+                    option_id = _select_option_id(option)
                     if option_id is None:
                         diagnostics.append(
                             MetadataDiagnostic(
@@ -600,7 +624,7 @@ def resolve_metadata_schema(
                                 code=MetadataDiagnosticCode.INVALID_SELECT_OPTION,
                                 message=(
                                     f"Select option {normalized_label!r} on "
-                                    f"{spec.canonical_name!r} has no numeric ID"
+                                    f"{spec.canonical_name!r} has no valid ID"
                                 ),
                                 field_name=spec.canonical_name,
                                 field_id=canonical_id,
@@ -866,15 +890,8 @@ def resolve_metadata_value(
 def _normalize_read_value(resolved: ResolvedMetadataField, value: Any) -> tuple[Any, str | None]:
     spec = resolved.spec
     if resolved.data_type is PaperlessFieldType.SELECT and resolved.select_option_ids:
-        id_to_label = {option_id: label for label, option_id in resolved.select_option_ids.items()}
-        try:
-            numeric_value = int(value)
-        except (TypeError, ValueError):
-            numeric_value = None
-        if numeric_value is not None:
-            label = id_to_label.get(numeric_value)
-            if label is None:
-                return value, (f"Unknown deployed select option ID for {spec.canonical_name!r}")
+        label = resolved.select_label(value)
+        if label is not None:
             return label, None
     try:
         normalized = _normalize_value(spec, value)
