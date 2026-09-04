@@ -1263,7 +1263,9 @@ class OcrQualityInventoryService:
             db.close()
 
 
-def _assessment_summary(row: DocumentAssessment, accepted_info: dict[str, Any] | None = None) -> dict[str, Any]:
+def _assessment_summary(
+    row: DocumentAssessment, accepted_info: dict[str, Any] | None = None
+) -> dict[str, Any]:
     return {
         "document_id": row.document_id,
         "document_type": row.document_type,
@@ -1276,7 +1278,9 @@ def _assessment_summary(row: DocumentAssessment, accepted_info: dict[str, Any] |
         "dominant_classification": (row.document_profile or {}).get("dominant_classification"),
         "quality_scorer_version": row.quality_scorer_version,
         "assessed_at": row.updated_at.isoformat() if row.updated_at else None,
-        "has_accepted_ocr_candidate": bool(accepted_info and accepted_info.get("has_accepted_ocr_candidate")),
+        "has_accepted_ocr_candidate": bool(
+            accepted_info and accepted_info.get("has_accepted_ocr_candidate")
+        ),
         "accepted_candidate_at": (accepted_info or {}).get("accepted_candidate_at"),
         "accepted_candidate_pending_invalidation": bool(
             accepted_info and accepted_info.get("accepted_candidate_pending_invalidation")
