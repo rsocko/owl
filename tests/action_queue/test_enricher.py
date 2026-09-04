@@ -476,6 +476,103 @@ async def test_sync_document_due_date_action_queue_source_writes_through_existin
 
 
 @pytest.mark.asyncio
+async def test_sync_document_amount_no_correction_recorded_when_paperless_write_fails(
+    monkeypatch, enricher
+):
+    """If the Paperless write itself fails, no correction record must be
+    persisted — otherwise has_correction_for_field would return True forever
+    for a value that was never actually written to Paperless, silently
+    blocking every future automated write for that field."""
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+    _prime_schema(enricher)
+    enricher.client.update_custom_fields.side_effect = RuntimeError("Paperless unavailable")
+
+    with pytest.raises(RuntimeError):
+        await enricher.sync_document_amount(42, 150.0, source="action_queue")
+
+    recorded.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_document_due_date_no_correction_recorded_when_paperless_write_fails(
+    monkeypatch, enricher
+):
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+    _prime_schema(enricher)
+    enricher.client.update_custom_fields.side_effect = RuntimeError("Paperless unavailable")
+
+    with pytest.raises(RuntimeError):
+        await enricher.sync_document_due_date(42, date(2026, 9, 1), source="action_queue")
+
+    recorded.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_enrich_document_no_corrections_recorded_when_paperless_write_fails(
+    monkeypatch, enricher
+):
+    """The same guarantee applies to enrich_document's batched write: a
+    failed Paperless call must not leave behind any superseding correction
+    records for the fields that would have been written."""
+    _prime_schema(enricher)
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+    enricher.client.update_custom_fields.side_effect = RuntimeError("Paperless unavailable")
+
+    with pytest.raises(RuntimeError):
+        await enricher.enrich_document(
+            42,
+            {
+                "amount": 50.0,
+                "document_due_date": "2026-08-15",
+                "extracted_data": {
+                    "account_identifier": "ending 4321",
+                    "reference_number": "INV-42",
+                },
+            },
+            source="action_queue",
+        )
+
+    recorded.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_document_amount_clear_records_real_none_not_empty_string(monkeypatch, enricher):
+    """Clearing amount=None via an Action Queue edit must record the
+    correction's corrected_value as a real None, not an empty string, so it
+    round-trips consistently through the canonical-value overlay."""
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+    _prime_schema(enricher)
+
+    await enricher.sync_document_amount(42, None, source="action_queue")
+
+    recorded.assert_called_once()
+    assert recorded.call_args.kwargs["corrected_value"] is None
+
+
+@pytest.mark.asyncio
+async def test_sync_document_due_date_clear_records_real_none_not_empty_string(
+    monkeypatch, enricher
+):
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+    _prime_schema(enricher)
+
+    await enricher.sync_document_due_date(42, None, source="action_queue")
+
+    recorded.assert_called_once()
+    assert recorded.call_args.kwargs["corrected_value"] is None
+
+
+@pytest.mark.asyncio
 async def test_enrich_document_skips_fields_with_existing_corrections(monkeypatch, enricher):
     """Only account_identifier has a correction on file — every other field
     (invoice_number, document_amount, document_due_date, action_status,

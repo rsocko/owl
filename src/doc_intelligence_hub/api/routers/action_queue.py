@@ -341,20 +341,35 @@ def _serialize_action(a: Action) -> dict[str, Any]:
     # Metadata Correction UI, rather than a possibly-stale extracted value.
     if a.document_id is not None:
         latest_by_field: dict[str, str | None] = {}
+        seen_fields: set[str] = set()
         for correction in get_corrections_for_document(a.document_id):
             field_name = correction.get("field_name")
-            if field_name not in latest_by_field and correction.get("corrected_value") is not None:
-                latest_by_field[field_name] = correction["corrected_value"]
+            if field_name in seen_fields:
+                continue
+            seen_fields.add(field_name)
+            latest_by_field[field_name] = correction.get("corrected_value")
 
         if "document_amount" in latest_by_field:
-            try:
-                document_amount = float(latest_by_field["document_amount"])
-            except (TypeError, ValueError):
-                pass
-            else:
+            raw_amount = latest_by_field["document_amount"]
+            if raw_amount in (None, ""):
+                # Explicitly cleared via a correction (real None sentinel, or
+                # a legacy empty-string clear recorded before that fix).
+                document_amount = None
                 corrected_fields["document_amount"] = True
+            else:
+                try:
+                    document_amount = float(raw_amount)
+                except (TypeError, ValueError):
+                    logging.getLogger(__name__).warning(
+                        "Ignoring non-numeric document_amount correction for document_id=%s: %r",
+                        a.document_id,
+                        raw_amount,
+                    )
+                else:
+                    corrected_fields["document_amount"] = True
         if "document_due_date" in latest_by_field:
-            document_due_date = latest_by_field["document_due_date"]
+            raw_due_date = latest_by_field["document_due_date"]
+            document_due_date = raw_due_date or None
             corrected_fields["document_due_date"] = True
         if extracted_data is not None:
             if "account_identifier" in latest_by_field:

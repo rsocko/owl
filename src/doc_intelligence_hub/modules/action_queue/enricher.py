@@ -65,10 +65,14 @@ class PaperlessEnricher:
         self._field_id_cache: dict[MetadataFieldKey, int] = {}
 
     @staticmethod
-    def _skip_field_write(
-        document_id: int, field_name: str, new_value: str, *, source: str
-    ) -> bool:
-        """Return True if a write to ``field_name`` should be skipped.
+    def _resolve_field_write(
+        document_id: int, field_name: str, *, source: str
+    ) -> tuple[bool, bool]:
+        """Decide whether to skip a write to ``field_name`` and whether a
+        successful write should be recorded as the new authoritative
+        correction.
+
+        Returns ``(skip, record_after_success)``.
 
         Automated passes (``source="automated"``) skip a field once a
         user-submitted correction exists for it — corrections are
@@ -76,13 +80,13 @@ class PaperlessEnricher:
 
         A human-driven Action Queue edit (``source="action_queue"``) is
         itself an authoritative decision, so it is never skipped. If it
-        supersedes an earlier correction, that new value is recorded as the
-        latest correction too, so there is a single canonical value: later
-        automated passes and the Metadata Correction UI will both see this
-        newest edit rather than the older one.
+        supersedes an earlier correction, the caller must record the new
+        value as the latest correction — but only *after* the Paperless
+        write is confirmed to succeed, so a failed write never leaves a
+        correction on file for a value that was never actually persisted.
         """
         if not has_correction_for_field(document_id, field_name):
-            return False
+            return False, False
         if source == "automated":
             logger.info(
                 "Skipping automated %s write for document_id=%s: "
@@ -90,7 +94,16 @@ class PaperlessEnricher:
                 field_name,
                 document_id,
             )
-            return True
+            return True, False
+        return False, True
+
+    @staticmethod
+    def _record_action_queue_correction(
+        document_id: int, field_name: str, new_value: str | None
+    ) -> None:
+        """Record a human-driven Action Queue edit as the new authoritative
+        correction. Must only be called after the corresponding Paperless
+        write has already succeeded."""
         create_extraction_correction(
             document_id=document_id,
             field_name=field_name,
@@ -98,7 +111,6 @@ class PaperlessEnricher:
             correction_type="action_queue_edit",
             notes="Recorded from an Action Queue edit superseding an earlier correction",
         )
-        return False
 
     async def ensure_custom_fields_exist(self) -> dict[MetadataFieldKey, int]:
         """Ensure owned Action Queue fields exist and validate the deployed schema."""
@@ -152,60 +164,75 @@ class PaperlessEnricher:
 
         schema = await self.get_schema()
         updates: list[dict] = []
+        # Fields to record as new authoritative corrections, but only once the
+        # batched Paperless write below actually succeeds.
+        pending_corrections: list[tuple[str, str | None]] = []
         extracted_data = extraction.get("extracted_data")
         if not isinstance(extracted_data, dict):
             extracted_data = {}
         account_identifier = normalize_masked_account_identifier(
             extracted_data.get("account_identifier")
         )
-        if account_identifier and not self._skip_field_write(
-            document_id, "account_identifier", account_identifier, source=source
-        ):
-            updates.append(
-                build_metadata_update(
-                    MetadataFieldKey.ACCOUNT_IDENTIFIER,
-                    account_identifier,
-                    schema,
-                )
+        if account_identifier:
+            skip, record_after = self._resolve_field_write(
+                document_id, "account_identifier", source=source
             )
+            if not skip:
+                updates.append(
+                    build_metadata_update(
+                        MetadataFieldKey.ACCOUNT_IDENTIFIER,
+                        account_identifier,
+                        schema,
+                    )
+                )
+                if record_after:
+                    pending_corrections.append(("account_identifier", account_identifier))
         reference_number = extracted_data.get("reference_number")
-        if (
-            isinstance(reference_number, str)
-            and reference_number.strip()
-            and not self._skip_field_write(
-                document_id, "invoice_number", reference_number.strip(), source=source
+        if isinstance(reference_number, str) and reference_number.strip():
+            reference_number = reference_number.strip()
+            skip, record_after = self._resolve_field_write(
+                document_id, "invoice_number", source=source
             )
-        ):
-            updates.append(
-                build_metadata_update(
-                    MetadataFieldKey.INVOICE_NUMBER,
-                    reference_number.strip(),
-                    schema,
+            if not skip:
+                updates.append(
+                    build_metadata_update(
+                        MetadataFieldKey.INVOICE_NUMBER,
+                        reference_number,
+                        schema,
+                    )
                 )
+                if record_after:
+                    pending_corrections.append(("invoice_number", reference_number))
+        if extraction.get("amount") is not None:
+            skip, record_after = self._resolve_field_write(
+                document_id, "document_amount", source=source
             )
-        if extraction.get("amount") is not None and not self._skip_field_write(
-            document_id, "document_amount", str(extraction["amount"]), source=source
-        ):
-            updates.append(
-                build_metadata_update(
-                    MetadataFieldKey.DOCUMENT_AMOUNT,
-                    extraction["amount"],
-                    schema,
+            if not skip:
+                updates.append(
+                    build_metadata_update(
+                        MetadataFieldKey.DOCUMENT_AMOUNT,
+                        extraction["amount"],
+                        schema,
+                    )
                 )
+                if record_after:
+                    pending_corrections.append(("document_amount", str(extraction["amount"])))
+        if extraction.get("document_due_date") is not None:
+            skip, record_after = self._resolve_field_write(
+                document_id, "document_due_date", source=source
             )
-        if extraction.get("document_due_date") is not None and not self._skip_field_write(
-            document_id,
-            "document_due_date",
-            str(extraction["document_due_date"]),
-            source=source,
-        ):
-            updates.append(
-                build_metadata_update(
-                    MetadataFieldKey.DOCUMENT_DUE_DATE,
-                    extraction["document_due_date"],
-                    schema,
+            if not skip:
+                updates.append(
+                    build_metadata_update(
+                        MetadataFieldKey.DOCUMENT_DUE_DATE,
+                        extraction["document_due_date"],
+                        schema,
+                    )
                 )
-            )
+                if record_after:
+                    pending_corrections.append(
+                        ("document_due_date", str(extraction["document_due_date"]))
+                    )
         if action_status is not None:
             updates.append(
                 build_metadata_update(MetadataFieldKey.ACTION_STATUS, action_status, schema)
@@ -235,6 +262,10 @@ class PaperlessEnricher:
             [update["field"] for update in updates],
         )
         await self.client.update_custom_fields(document_id, updates)
+        # Only persist superseding corrections once the write above is
+        # confirmed to have succeeded (no exception raised).
+        for field_name, new_value in pending_corrections:
+            self._record_action_queue_correction(document_id, field_name, new_value)
 
     async def sync_document_amount(
         self, document_id: int, amount: float | None, *, source: str = "automated"
@@ -249,15 +280,20 @@ class PaperlessEnricher:
         """
         if not settings.write_to_paperless:
             raise PermissionError("Paperless writes are disabled")
-        if self._skip_field_write(
-            document_id, "document_amount", "" if amount is None else str(amount), source=source
-        ):
+        skip, record_after = self._resolve_field_write(
+            document_id, "document_amount", source=source
+        )
+        if skip:
             return
         schema = await self.get_schema()
         await self.client.update_custom_fields(
             document_id,
             [build_metadata_update(MetadataFieldKey.DOCUMENT_AMOUNT, amount, schema)],
         )
+        if record_after:
+            self._record_action_queue_correction(
+                document_id, "document_amount", None if amount is None else str(amount)
+            )
 
     async def sync_document_due_date(
         self, document_id: int, due_date: date | None, *, source: str = "automated"
@@ -272,18 +308,22 @@ class PaperlessEnricher:
         """
         if not settings.write_to_paperless:
             raise PermissionError("Paperless writes are disabled")
-        if self._skip_field_write(
-            document_id,
-            "document_due_date",
-            "" if due_date is None else due_date.isoformat(),
-            source=source,
-        ):
+        skip, record_after = self._resolve_field_write(
+            document_id, "document_due_date", source=source
+        )
+        if skip:
             return
         schema = await self.get_schema()
         await self.client.update_custom_fields(
             document_id,
             [build_metadata_update(MetadataFieldKey.DOCUMENT_DUE_DATE, due_date, schema)],
         )
+        if record_after:
+            self._record_action_queue_correction(
+                document_id,
+                "document_due_date",
+                None if due_date is None else due_date.isoformat(),
+            )
 
     async def sync_status(self, document_id: int, status: str) -> None:
         """Mirror a status change from the internal database to Paperless."""

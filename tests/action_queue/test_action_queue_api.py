@@ -475,6 +475,79 @@ class TestCanonicalCorrectionOverlay:
         assert action["document_amount"] is None
         assert action["corrected_fields"] == {}
 
+    def test_cleared_document_amount_overlays_as_null_and_flagged(self, seeded_client, monkeypatch):
+        """A correction recording an explicit clear (real None corrected_value,
+        as produced by sync_document_amount(amount=None)) must overlay as a
+        null document_amount with corrected_fields flagged True -- not
+        silently fall back to a stale value with no flag."""
+        from doc_intelligence_hub.modules.triage import database as triage_db
+
+        monkeypatch.setattr(
+            triage_db,
+            "get_corrections_for_document",
+            lambda document_id: (
+                [{"field_name": "document_amount", "corrected_value": None}]
+                if document_id == 42
+                else []
+            ),
+        )
+
+        resp = seeded_client.get("/api/queue/actions?status=pending")
+        action = resp.json()["actions"][0]
+
+        assert action["document_amount"] is None
+        assert action["corrected_fields"] == {"document_amount": True}
+
+    def test_cleared_document_due_date_overlays_as_null_and_flagged(
+        self, seeded_client, monkeypatch
+    ):
+        """Same clearing behavior for document_due_date, kept consistent
+        with the document_amount case above."""
+        from doc_intelligence_hub.modules.triage import database as triage_db
+
+        monkeypatch.setattr(
+            triage_db,
+            "get_corrections_for_document",
+            lambda document_id: (
+                [{"field_name": "document_due_date", "corrected_value": None}]
+                if document_id == 42
+                else []
+            ),
+        )
+
+        resp = seeded_client.get("/api/queue/actions?status=pending")
+        action = resp.json()["actions"][0]
+
+        assert action["document_due_date"] is None
+        assert action["corrected_fields"] == {"document_due_date": True}
+
+    def test_newest_clear_correction_takes_precedence_over_older_value_correction(
+        self, seeded_client, monkeypatch
+    ):
+        """get_corrections_for_document returns newest-first; a later clear
+        must win over an earlier non-null correction rather than being
+        skipped because its corrected_value is None."""
+        from doc_intelligence_hub.modules.triage import database as triage_db
+
+        monkeypatch.setattr(
+            triage_db,
+            "get_corrections_for_document",
+            lambda document_id: (
+                [
+                    {"field_name": "document_amount", "corrected_value": None},
+                    {"field_name": "document_amount", "corrected_value": "50.0"},
+                ]
+                if document_id == 42
+                else []
+            ),
+        )
+
+        resp = seeded_client.get("/api/queue/actions?status=pending")
+        action = resp.json()["actions"][0]
+
+        assert action["document_amount"] is None
+        assert action["corrected_fields"] == {"document_amount": True}
+
 
 class TestUpdateAction:
     def test_update_action_returns_preview_url(self, seeded_client):
