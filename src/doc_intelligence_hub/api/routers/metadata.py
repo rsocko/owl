@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.api.routers import make_paperless_client
+from doc_intelligence_hub.core.extractors.correction_hints import derive_label_anchor
 from doc_intelligence_hub.core.paperless import (
     MetadataFieldKey,
     MetadataSchemaError,
@@ -206,10 +207,51 @@ def _validate_field_name(field_name: str) -> None:
         )
 
 
+async def _resolve_correction_context(
+    client: object, doc_id: int, corrected_value: str | None
+) -> tuple[str | None, str | None]:
+    """Best-effort resolution of correspondent name + label anchor for a correction.
+
+    Fetches the document once to resolve its correspondent (id -> name, via
+    ``list_correspondents``) and to derive a short text anchor from the document's
+    content immediately preceding the corrected value (see issue #171). Failures here
+    should never block saving the correction itself, so any error just yields
+    ``(None, None)``.
+    """
+    try:
+        doc = await client.get_document(doc_id)
+    except Exception as exc:
+        logger.warning("Could not fetch document %d to resolve correction context: %s", doc_id, exc)
+        return None, None
+
+    correspondent_raw = doc.get("correspondent")
+    correspondent_name: str | None = None
+    if isinstance(correspondent_raw, str):
+        correspondent_name = correspondent_raw or None
+    elif correspondent_raw is not None:
+        try:
+            correspondents = await client.list_correspondents()
+        except Exception as exc:
+            logger.warning("Could not resolve correspondent for document %d: %s", doc_id, exc)
+            correspondents = []
+        for correspondent in correspondents:
+            if correspondent.get("id") == correspondent_raw:
+                name = correspondent.get("name")
+                correspondent_name = str(name) if name else None
+                break
+
+    label_anchor = derive_label_anchor(doc.get("content"), corrected_value)
+    return correspondent_name, label_anchor
+
+
 @router.post("/{doc_id}/correct")
-async def correct_field(doc_id: int, body: CorrectFieldRequest) -> dict[str, Any]:
+async def correct_field(doc_id: int, body: CorrectFieldRequest, request: Request) -> dict[str, Any]:
     """Submit a field correction."""
     _validate_field_name(body.field_name)
+    client = make_paperless_client(request)
+    correspondent, label_anchor = await _resolve_correction_context(
+        client, doc_id, body.corrected_value
+    )
     correction = create_extraction_correction(
         document_id=doc_id,
         field_name=body.field_name,
@@ -218,15 +260,21 @@ async def correct_field(doc_id: int, body: CorrectFieldRequest) -> dict[str, Any
         confidence=body.confidence,
         correction_type="corrected",
         source_region=body.source_region,
+        correspondent=correspondent,
+        label_anchor=label_anchor,
         notes=body.notes,
     )
     return {"correction": correction}
 
 
 @router.post("/{doc_id}/confirm")
-async def confirm_field(doc_id: int, body: ConfirmFieldRequest) -> dict[str, Any]:
+async def confirm_field(doc_id: int, body: ConfirmFieldRequest, request: Request) -> dict[str, Any]:
     """Confirm a field extraction is correct (positive training example)."""
     _validate_field_name(body.field_name)
+    client = make_paperless_client(request)
+    correspondent, label_anchor = await _resolve_correction_context(
+        client, doc_id, body.current_value
+    )
     correction = create_extraction_correction(
         document_id=doc_id,
         field_name=body.field_name,
@@ -235,6 +283,8 @@ async def confirm_field(doc_id: int, body: ConfirmFieldRequest) -> dict[str, Any
         confidence=body.confidence,
         correction_type="confirmed",
         source_region=body.source_region,
+        correspondent=correspondent,
+        label_anchor=label_anchor,
     )
     return {"correction": correction}
 

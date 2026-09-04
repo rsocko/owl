@@ -129,3 +129,90 @@ async def test_get_document_metadata_retains_invalid_legacy_value(monkeypatch) -
     assert fields["patient_responsibility"]["value"] == "$125.00"
     assert fields["patient_responsibility"]["validation_error"]
     assert result["metadata_value_diagnostics"][0]["field_name"] == "patient_responsibility"
+
+
+@pytest.mark.asyncio
+async def test_correct_field_resolves_correspondent_and_label_anchor(monkeypatch) -> None:
+    client = AsyncMock()
+    client.get_document.return_value = {
+        "id": 100,
+        "correspondent": 7,
+        "content": "Statement Summary\nTotal Due: $142.50\nThank you.",
+    }
+    client.list_correspondents.return_value = [
+        {"id": 7, "name": "City Utilities"},
+        {"id": 9, "name": "Other Co"},
+    ]
+    monkeypatch.setattr(metadata, "make_paperless_client", lambda request: client)
+
+    captured: dict = {}
+
+    def fake_create_extraction_correction(**kwargs):
+        captured.update(kwargs)
+        return {"id": "abc123", **kwargs}
+
+    monkeypatch.setattr(metadata, "create_extraction_correction", fake_create_extraction_correction)
+
+    body = metadata.CorrectFieldRequest(
+        field_name="account_identifier",
+        corrected_value="$142.50",
+        original_value="$50.00",
+    )
+    await metadata.correct_field(100, body, object())
+
+    assert captured["correspondent"] == "City Utilities"
+    assert captured["label_anchor"] == "Total Due:"
+    assert captured["correction_type"] == "corrected"
+
+
+@pytest.mark.asyncio
+async def test_confirm_field_resolves_correspondent_and_label_anchor(monkeypatch) -> None:
+    client = AsyncMock()
+    client.get_document.return_value = {
+        "id": 200,
+        "correspondent": "Chase Visa",  # Paperless sometimes already resolves to a name
+        "content": "Account Number: ending 4321",
+    }
+    monkeypatch.setattr(metadata, "make_paperless_client", lambda request: client)
+
+    captured: dict = {}
+
+    def fake_create_extraction_correction(**kwargs):
+        captured.update(kwargs)
+        return {"id": "def456", **kwargs}
+
+    monkeypatch.setattr(metadata, "create_extraction_correction", fake_create_extraction_correction)
+
+    body = metadata.ConfirmFieldRequest(
+        field_name="account_identifier",
+        current_value="ending 4321",
+    )
+    await metadata.confirm_field(200, body, object())
+
+    assert captured["correspondent"] == "Chase Visa"
+    assert captured["label_anchor"] == "Account Number:"
+    client.list_correspondents.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_correct_field_tolerates_document_fetch_failure(monkeypatch) -> None:
+    client = AsyncMock()
+    client.get_document.side_effect = RuntimeError("Paperless unavailable")
+    monkeypatch.setattr(metadata, "make_paperless_client", lambda request: client)
+
+    captured: dict = {}
+
+    def fake_create_extraction_correction(**kwargs):
+        captured.update(kwargs)
+        return {"id": "ghi789", **kwargs}
+
+    monkeypatch.setattr(metadata, "create_extraction_correction", fake_create_extraction_correction)
+
+    body = metadata.CorrectFieldRequest(
+        field_name="account_identifier", corrected_value="ending 1234"
+    )
+    result = await metadata.correct_field(300, body, object())
+
+    assert captured["correspondent"] is None
+    assert captured["label_anchor"] is None
+    assert result["correction"]["id"] == "ghi789"

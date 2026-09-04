@@ -543,7 +543,9 @@ class Pipeline:
                 if not isinstance(extracted_data, dict):
                     extracted_data = {}
                 account_identifier = pick_masked_account_identifier(
-                    extract_account_numbers(content)
+                    extract_account_numbers(content),
+                    text=content,
+                    anchor=self._get_account_hint_anchor(doc.get("correspondent_name")),
                 )
                 if account_identifier:
                     extracted_data["account_identifier"] = account_identifier
@@ -1061,6 +1063,21 @@ class Pipeline:
             else:
                 resolved_tags.append(str(tag))
         document["tag_names"] = resolved_tags
+
+    def _get_account_hint_anchor(self, correspondent: str | None) -> str | None:
+        """Best-effort lookup of a stored correspondent+"account_identifier" hint.
+
+        See issue #171. Wrapped in a broad except so a database hiccup never breaks
+        the pipeline's account-number extraction step.
+        """
+        if not correspondent:
+            return None
+        try:
+            from doc_intelligence_hub.modules.triage.database import get_latest_label_anchor
+
+            return get_latest_label_anchor(correspondent, "account_identifier")
+        except Exception:
+            return None
 
     def _record_history(
         self,
