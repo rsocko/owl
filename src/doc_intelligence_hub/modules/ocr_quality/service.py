@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import func
+from sqlalchemy import exists, func
 from sqlalchemy.orm import Session
 
 from doc_intelligence_hub.core import alerts
@@ -1069,6 +1069,7 @@ class OcrQualityInventoryService:
         correspondent: str | None,
         document_profile: str | None,
         downstream_outcome: str | None,
+        resolved: bool | None,
         created_after: str | None,
         created_before: str | None,
     ):
@@ -1080,6 +1081,14 @@ class OcrQualityInventoryService:
             query = query.filter(DocumentAssessment.correspondent == correspondent)
         if downstream_outcome:
             query = query.filter(DocumentAssessment.downstream_outcome == downstream_outcome)
+        if resolved is not None:
+            accepted_candidate_exists = exists().where(
+                OcrQualityCandidate.document_id == DocumentAssessment.document_id,
+                OcrQualityCandidate.state.in_(self._ACCEPTED_CANDIDATE_STATES),
+            )
+            query = query.filter(
+                accepted_candidate_exists if resolved else ~accepted_candidate_exists
+            )
         if document_profile:
             query = query.filter(
                 DocumentAssessment.document_profile["dominant_classification"].as_string()
@@ -1113,6 +1122,7 @@ class OcrQualityInventoryService:
         correspondent: str | None = None,
         document_profile: str | None = None,
         downstream_outcome: str | None = None,
+        resolved: bool | None = None,
         created_after: str | None = None,
         created_before: str | None = None,
         sort_by: str | None = None,
@@ -1140,6 +1150,7 @@ class OcrQualityInventoryService:
                 correspondent=correspondent,
                 document_profile=document_profile,
                 downstream_outcome=downstream_outcome,
+                resolved=resolved,
                 created_after=created_after,
                 created_before=created_before,
             )

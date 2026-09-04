@@ -209,15 +209,56 @@ describe('OcrQualityReviewQueue', () => {
     });
   });
 
-  it('renders a downstream outcome dropdown populated from the API', async () => {
+  it('labels the Action Queue outcome and filters by it', async () => {
     mocks.documents.mockResolvedValue({ documents: [], total: 0, limit: 25, offset: 0 });
     renderPage();
     await waitFor(() => expect(mocks.downstreamOutcomes).toHaveBeenCalled());
-    const select = await screen.findByLabelText('Downstream outcome') as HTMLSelectElement;
+    const select = await screen.findByLabelText('Action Queue outcome') as HTMLSelectElement;
     fireEvent.change(select, { target: { value: 'no_action_needed' } });
     await waitFor(() => {
       const calledWith = mocks.documents.mock.calls.at(-1)?.[0] as string;
       expect(calledWith).toContain('downstream_outcome=no_action_needed');
     });
+  });
+
+  it('filters by OCR resolution status', async () => {
+    mocks.documents.mockResolvedValue({ documents: [], total: 0, limit: 25, offset: 0 });
+    renderPage();
+    const select = await screen.findByLabelText('OCR resolution') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'true' } });
+    await waitFor(() => {
+      const calledWith = mocks.documents.mock.calls.at(-1)?.[0] as string;
+      expect(calledWith).toContain('resolved=true');
+    });
+  });
+
+  it('shows OCR resolution in its own column with the acceptance date', async () => {
+    mocks.documents.mockResolvedValue({
+      documents: [
+        {
+          document_id: 501,
+          review_status: 'FAILED',
+          has_accepted_ocr_candidate: true,
+          accepted_candidate_at: '2026-09-04T15:00:00',
+        },
+        {
+          document_id: 502,
+          review_status: 'FAILED',
+          has_accepted_ocr_candidate: false,
+        },
+      ],
+      total: 2,
+      limit: 25,
+      offset: 0,
+    });
+    renderPage();
+    await waitFor(() => expect(screen.getByText('#501')).toBeInTheDocument());
+
+    expect(screen.getByRole('columnheader', { name: 'OCR resolution' })).toBeInTheDocument();
+    const resolvedRow = screen.getByText('#501').closest('tr')!;
+    expect(within(resolvedRow).getByText('Resolved')).toBeInTheDocument();
+    expect(within(resolvedRow).getByText('2026-09-04')).toBeInTheDocument();
+    const unresolvedRow = screen.getByText('#502').closest('tr')!;
+    expect(within(unresolvedRow).getByText('Unresolved')).toBeInTheDocument();
   });
 });

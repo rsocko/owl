@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -9,6 +10,7 @@ from doc_intelligence_hub.modules.ocr_quality import config as ocr_quality_confi
 from doc_intelligence_hub.modules.ocr_quality.database import (
     DocumentAssessment,
     InventoryRun,
+    OcrQualityCandidate,
     PdfProfile,
     get_session,
     init_db,
@@ -282,6 +284,37 @@ class TestListDocuments:
         resp = client.get("/api/ocr-quality/documents?correspondent=9")
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
+
+    def test_list_filters_by_resolution_status(self, client, ocr_quality_db):
+        _seed_scored_document(1)
+        _seed_scored_document(2)
+        db = get_session()
+        try:
+            db.add(
+                OcrQualityCandidate(
+                    candidate_id="accepted-1",
+                    document_id=1,
+                    source_checksum="source-checksum",
+                    state="accepted",
+                    engine="ocrmypdf_tesseract",
+                    model_version="test",
+                    decided_at=datetime.now(UTC),
+                    expires_at=datetime.now(UTC) + timedelta(days=30),
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        resolved = client.get("/api/ocr-quality/documents?resolved=true")
+        assert resolved.status_code == 200
+        assert resolved.json()["total"] == 1
+        assert resolved.json()["documents"][0]["document_id"] == 1
+
+        unresolved = client.get("/api/ocr-quality/documents?resolved=false")
+        assert unresolved.status_code == 200
+        assert unresolved.json()["total"] == 1
+        assert unresolved.json()["documents"][0]["document_id"] == 2
 
     def test_list_pagination(self, client, ocr_quality_db):
         for i in range(1, 6):
