@@ -40,6 +40,10 @@ export function formatScore(value?: number | null) {
   return value == null ? '—' : value.toFixed(1);
 }
 
+function formatResolvedDate(value?: string | null) {
+  return value ? value.slice(0, 10) : null;
+}
+
 function buildQueryParams(
   filters: Record<string, string>,
   sort: { key: string; dir: SortDir } | null,
@@ -76,6 +80,7 @@ export default function OcrQualityReviewQueue() {
       document_type: searchParams.get('document_type') ?? '',
       correspondent: searchParams.get('correspondent') ?? '',
       downstream_outcome: searchParams.get('downstream_outcome') ?? '',
+      resolved: searchParams.get('resolved') ?? '',
     }),
     [searchParams],
   );
@@ -201,12 +206,20 @@ export default function OcrQualityReviewQueue() {
           />
         </label>
         <label>
-          Downstream outcome
+          Action Queue outcome
           <select value={filters.downstream_outcome} onChange={(e) => updateFilter('downstream_outcome', e.target.value)}>
             <option value="">All</option>
             {downstreamOutcomeOptions.map((outcome) => (
               <option key={outcome} value={outcome}>{outcome}</option>
             ))}
+          </select>
+        </label>
+        <label>
+          OCR resolution
+          <select value={filters.resolved} onChange={(e) => updateFilter('resolved', e.target.value)}>
+            <option value="">All</option>
+            <option value="true">Resolved</option>
+            <option value="false">Unresolved</option>
           </select>
         </label>
       </div>
@@ -251,25 +264,41 @@ export default function OcrQualityReviewQueue() {
                 render: (row) => (
                   <div className="ocr-status-cell">
                     <Badge tone={statusTone(row.review_status ?? 'unscored') as Tone}>{row.review_status ?? 'unscored'}</Badge>
-                    {row.has_accepted_ocr_candidate && (
-                      <span
-                        title={
-                          row.accepted_candidate_at
-                            ? `OCR candidate accepted ${row.accepted_candidate_at}`
-                            : 'OCR candidate accepted'
-                        }
-                      >
+                  </div>
+                ),
+              },
+              {
+                key: 'resolved',
+                header: 'OCR resolution',
+                render: (row) => (
+                  <div
+                    className="ocr-status-cell"
+                    title={
+                      row.has_accepted_ocr_candidate
+                        ? row.accepted_candidate_at
+                          ? `OCR candidate accepted ${row.accepted_candidate_at}`
+                          : 'OCR candidate accepted'
+                        : 'No OCR candidate has been applied to Paperless'
+                    }
+                  >
+                    {row.has_accepted_ocr_candidate ? (
+                      <>
                         <Badge tone={row.accepted_candidate_pending_invalidation ? 'warning' : 'success'}>
                           Resolved
                         </Badge>
-                      </span>
+                        {formatResolvedDate(row.accepted_candidate_at) && (
+                          <span className="text-muted">{formatResolvedDate(row.accepted_candidate_at)}</span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-muted">Unresolved</span>
                     )}
                   </div>
                 ),
               },
               { key: 'overlay_score', header: 'Overlay', sortable: true, render: (row) => formatScore(row.overlay_score) },
               { key: 'machine_score', header: 'Machine', sortable: true, render: (row) => formatScore(row.machine_score) },
-              { key: 'downstream_outcome', header: 'Downstream', sortable: true, render: (row) => row.downstream_outcome ?? '—' },
+              { key: 'downstream_outcome', header: 'Action outcome', sortable: true, render: (row) => row.downstream_outcome ?? '—' },
             ]}
           />
           <div className="ocr-pagination">
