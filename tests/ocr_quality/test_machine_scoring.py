@@ -135,6 +135,42 @@ def test_prose_coherence_unavailable_for_too_few_tokens() -> None:
     assert "prose_coherence" in result.unavailable_signals
 
 
+def test_cid_glyph_artifacts_are_flagged_and_score_poorly() -> None:
+    """Docs #2346/#5483: PDFs whose fonts lack a ToUnicode CMap extract as
+    literal "(cid:N)" glyph-ID placeholders instead of real characters. Every
+    individual character in that placeholder text is ordinary printable
+    ASCII, so this must not be silently treated as clean/plausible text."""
+    text = " ".join(
+        f"(cid:{65 + i % 26})(cid:{97 + i % 26})(cid:{48 + i % 10})" for i in range(60)
+    )
+    clean = score_machine(text_content="This is fine text with no issues at all here.")
+    corrupted = score_machine(text_content=text, config=DEFAULT_CONFIG)
+    assert corrupted.score is not None
+    assert corrupted.score < 60.0
+    assert corrupted.signals["char_script_plausibility"] < clean.signals["char_script_plausibility"]
+    assert any(r.code == "machine.cid_glyph_artifacts" for r in corrupted.reasons)
+    assert any(r.severity == "blocking" for r in corrupted.reasons if r.code == "machine.cid_glyph_artifacts")
+    # Structured/table detection must not be given a neutral pass on text
+    # that is mostly glyph-ID corruption.
+    assert corrupted.signals["structured_entities"] is None
+    assert corrupted.signals["table_structure"] is None
+
+
+def test_cid_glyph_artifacts_below_blocking_ratio_still_lower_plausibility() -> None:
+    """A handful of stray "(cid:N)" placeholders (below the blocking ratio)
+    should still measurably reduce char_script_plausibility even though they
+    don't trigger the dedicated blocking reason."""
+    clean = score_machine(text_content="This is fine text with no issues at all here today.")
+    mostly_clean = score_machine(
+        text_content="This is fine text with (cid:114)(cid:97) issues at all here today."
+    )
+    assert (
+        mostly_clean.signals["char_script_plausibility"]
+        < clean.signals["char_script_plausibility"]
+    )
+    assert not any(r.code == "machine.cid_glyph_artifacts" for r in mostly_clean.reasons)
+
+
 def pytest_approx(value: float, tol: float = 1e-6):
     """Small local helper to avoid importing pytest.approx repeatedly."""
     import pytest
