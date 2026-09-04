@@ -94,6 +94,44 @@ def test_action_status_field_supports_full_lifecycle():
 
 
 @pytest.mark.asyncio
+async def test_string_select_option_id_is_used_for_status_write_and_read(monkeypatch):
+    monkeypatch.setattr(settings, "write_to_paperless", True)
+    enricher = PaperlessEnricher()
+    enricher.client = AsyncMock()
+    definitions = [
+        {
+            "id": 2,
+            "name": "Action Status",
+            "data_type": "select",
+            "extra_data": {
+                "select_options": [
+                    {"id": "status-pending", "label": "pending"},
+                    {"id": "status-acknowledged", "label": "acknowledged"},
+                    {"id": "status-completed", "label": "completed"},
+                    {"id": "status-snoozed", "label": "snoozed"},
+                    {"id": "status-dismissed", "label": "dismissed"},
+                    {"id": "status-not-an-action", "label": "not_an_action"},
+                ]
+            },
+        }
+    ]
+    enricher._set_schema(resolve_metadata_schema(definitions, (MetadataFieldKey.ACTION_STATUS,)))
+
+    await enricher.sync_status(42, "completed")
+
+    enricher.client.update_custom_fields_verified.assert_awaited_once_with(
+        42,
+        [{"field": 2, "value": "status-completed"}],
+        numeric_field_ids=set(),
+    )
+
+    enricher.client.get_document.return_value = {
+        "custom_fields": [{"field": 2, "value": "status-completed"}]
+    }
+    assert await enricher.read_paperless_status(42) == "completed"
+
+
+@pytest.mark.asyncio
 async def test_sync_document_amount_can_explicitly_clear_value(monkeypatch):
     monkeypatch.setattr(settings, "write_to_paperless", True)
     enricher = PaperlessEnricher()

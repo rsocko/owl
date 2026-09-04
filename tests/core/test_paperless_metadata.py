@@ -39,7 +39,7 @@ def _definition(
     *,
     alias: bool = False,
     data_type: str | None = None,
-    options: tuple[tuple[int, str], ...] = (),
+    options: tuple[tuple[int | str, str], ...] = (),
 ) -> dict:
     spec = get_metadata_field_spec(key)
     result = {
@@ -267,6 +267,39 @@ def test_select_options_are_validated_and_resolved_to_ids() -> None:
     }
     with pytest.raises(MetadataValueError):
         build_metadata_update(MetadataFieldKey.ACTION_STATUS, "unknown", schema)
+
+
+def test_string_select_option_ids_are_writable_and_readable() -> None:
+    schema = resolve_metadata_schema(
+        [
+            _definition(
+                71,
+                MetadataFieldKey.ACTION_STATUS,
+                options=(
+                    ("status-pending", "pending"),
+                    ("status-acknowledged", "acknowledged"),
+                    ("status-completed", "completed"),
+                    ("status-snoozed", "snoozed"),
+                    ("status-dismissed", "dismissed"),
+                    ("status-not-an-action", "not_an_action"),
+                ),
+            )
+        ],
+        (MetadataFieldKey.ACTION_STATUS,),
+    )
+
+    assert schema.field(MetadataFieldKey.ACTION_STATUS).is_compatible
+    assert build_metadata_update(MetadataFieldKey.ACTION_STATUS, "completed", schema) == {
+        "field": 71,
+        "value": "status-completed",
+    }
+    result = resolve_metadata_value(
+        MetadataFieldKey.ACTION_STATUS,
+        [{"field": 71, "value": "status-completed"}],
+        schema,
+    )
+    assert result.value == "completed"
+    assert result.validation_error is None
 
 
 def test_missing_select_option_blocks_writes() -> None:
