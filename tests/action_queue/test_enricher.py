@@ -1,6 +1,7 @@
 """Tests for neutral Paperless metadata enrichment."""
 
-from unittest.mock import AsyncMock
+from datetime import date
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -8,6 +9,7 @@ from doc_intelligence_hub.core.paperless import (
     MetadataFieldKey,
     resolve_metadata_schema,
 )
+from doc_intelligence_hub.modules.action_queue import enricher as enricher_module
 from doc_intelligence_hub.modules.action_queue.config import settings
 from doc_intelligence_hub.modules.action_queue.enricher import (
     CUSTOM_FIELD_DEFINITIONS,
@@ -27,6 +29,16 @@ _ACTION_KEYS = (
     MetadataFieldKey.LEGACY_ACTION_SUMMARY,
     MetadataFieldKey.LEGACY_ACTION_COUNT,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_existing_corrections(monkeypatch):
+    """By default, pretend no field has an authoritative correction on file.
+
+    Individual tests override this via monkeypatch to exercise the
+    overwrite-guard behavior.
+    """
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: False)
 
 
 def _prime_schema(enricher: PaperlessEnricher, *, include_legacy: bool = False) -> None:
@@ -361,3 +373,344 @@ async def test_existing_action_amount_field_is_renamed(enricher):
         1,
         {"name": "Document Amount"},
     )
+
+
+# ------------------------------------------------------------------
+# Overwrite guard — authoritative corrections must not be clobbered
+# ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sync_document_amount_skips_write_when_correction_exists(monkeypatch, enricher):
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    _prime_schema(enricher)
+
+    await enricher.sync_document_amount(42, 99.0)
+
+    enricher.client.update_custom_fields_verified.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_document_amount_writes_when_no_correction_exists(monkeypatch, enricher):
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: False)
+    _prime_schema(enricher)
+
+    await enricher.sync_document_amount(42, 99.0)
+
+    enricher.client.update_custom_fields_verified.assert_awaited_once_with(
+        42,
+        [{"field": 1, "value": 99.0}],
+        numeric_field_ids={1},
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_document_due_date_skips_write_when_correction_exists(monkeypatch, enricher):
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    _prime_schema(enricher)
+
+    await enricher.sync_document_due_date(42, date(2026, 8, 15))
+
+    enricher.client.update_custom_fields_verified.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_document_amount_action_queue_source_writes_through_existing_correction(
+    monkeypatch, enricher
+):
+    """A human-driven Action Queue edit (source='action_queue') must never be
+    silently skipped, even if a Metadata Correction API correction already
+    exists for document_amount — unlike an automated pipeline pass."""
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+    _prime_schema(enricher)
+
+    await enricher.sync_document_amount(42, 150.0, source="action_queue")
+
+    enricher.client.update_custom_fields_verified.assert_awaited_once_with(
+        42,
+        [{"field": 1, "value": 150.0}],
+        numeric_field_ids={1},
+    )
+    # The Action Queue edit becomes the new authoritative correction, so
+    # later automated passes and the Metadata Correction UI see this single
+    # canonical value rather than the older, superseded one.
+    recorded.assert_called_once()
+    assert recorded.call_args.kwargs["document_id"] == 42
+    assert recorded.call_args.kwargs["field_name"] == "document_amount"
+    assert recorded.call_args.kwargs["corrected_value"] == "150.0"
+    assert recorded.call_args.kwargs["correction_type"] == "action_queue_edit"
+
+
+@pytest.mark.asyncio
+async def test_sync_document_amount_action_queue_source_records_first_time_edit(
+    monkeypatch, enricher
+):
+    """Even with no prior correction on file, an Action Queue edit must
+    still be recorded as the new authoritative correction -- otherwise a
+    later automated pass would see no correction on record and silently
+    clobber this human-entered value, defeating the guard entirely."""
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: False)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+    _prime_schema(enricher)
+
+    await enricher.sync_document_amount(42, 150.0, source="action_queue")
+
+    enricher.client.update_custom_fields_verified.assert_awaited_once()
+    recorded.assert_called_once()
+    assert recorded.call_args.kwargs["document_id"] == 42
+    assert recorded.call_args.kwargs["field_name"] == "document_amount"
+    assert recorded.call_args.kwargs["corrected_value"] == "150.0"
+    assert recorded.call_args.kwargs["correction_type"] == "action_queue_edit"
+
+
+@pytest.mark.asyncio
+async def test_sync_document_due_date_action_queue_source_writes_through_existing_correction(
+    monkeypatch, enricher
+):
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+    _prime_schema(enricher)
+
+    await enricher.sync_document_due_date(42, date(2026, 9, 1), source="action_queue")
+
+    enricher.client.update_custom_fields_verified.assert_awaited_once()
+    recorded.assert_called_once()
+    assert recorded.call_args.kwargs["field_name"] == "document_due_date"
+    assert recorded.call_args.kwargs["corrected_value"] == "2026-09-01"
+    assert recorded.call_args.kwargs["correction_type"] == "action_queue_edit"
+
+
+@pytest.mark.asyncio
+async def test_sync_document_amount_no_correction_recorded_when_paperless_write_fails(
+    monkeypatch, enricher
+):
+    """If the Paperless write itself fails, no correction record must be
+    persisted — otherwise has_correction_for_field would return True forever
+    for a value that was never actually written to Paperless, silently
+    blocking every future automated write for that field."""
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+    _prime_schema(enricher)
+    enricher.client.update_custom_fields_verified.side_effect = RuntimeError(
+        "Paperless unavailable"
+    )
+
+    with pytest.raises(RuntimeError):
+        await enricher.sync_document_amount(42, 150.0, source="action_queue")
+
+    recorded.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_document_due_date_no_correction_recorded_when_paperless_write_fails(
+    monkeypatch, enricher
+):
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+    _prime_schema(enricher)
+    enricher.client.update_custom_fields_verified.side_effect = RuntimeError(
+        "Paperless unavailable"
+    )
+
+    with pytest.raises(RuntimeError):
+        await enricher.sync_document_due_date(42, date(2026, 9, 1), source="action_queue")
+
+    recorded.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_enrich_document_no_corrections_recorded_when_paperless_write_fails(
+    monkeypatch, enricher
+):
+    """The same guarantee applies to enrich_document's batched write: a
+    failed Paperless call must not leave behind any superseding correction
+    records for the fields that would have been written."""
+    _prime_schema(enricher)
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+    enricher.client.update_custom_fields_verified.side_effect = RuntimeError(
+        "Paperless unavailable"
+    )
+
+    with pytest.raises(RuntimeError):
+        await enricher.enrich_document(
+            42,
+            {
+                "amount": 50.0,
+                "document_due_date": "2026-08-15",
+                "extracted_data": {
+                    "account_identifier": "ending 4321",
+                    "reference_number": "INV-42",
+                },
+            },
+            source="action_queue",
+        )
+
+    recorded.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_document_amount_clear_records_real_none_not_empty_string(monkeypatch, enricher):
+    """Clearing amount=None via an Action Queue edit must record the
+    correction's corrected_value as a real None, not an empty string, so it
+    round-trips consistently through the canonical-value overlay."""
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+    _prime_schema(enricher)
+
+    await enricher.sync_document_amount(42, None, source="action_queue")
+
+    recorded.assert_called_once()
+    assert recorded.call_args.kwargs["corrected_value"] is None
+
+
+@pytest.mark.asyncio
+async def test_sync_document_due_date_clear_records_real_none_not_empty_string(
+    monkeypatch, enricher
+):
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+    _prime_schema(enricher)
+
+    await enricher.sync_document_due_date(42, None, source="action_queue")
+
+    recorded.assert_called_once()
+    assert recorded.call_args.kwargs["corrected_value"] is None
+
+
+@pytest.mark.asyncio
+async def test_enrich_document_skips_fields_with_existing_corrections(monkeypatch, enricher):
+    """Only account_identifier has a correction on file — every other field
+    (invoice_number, document_amount, document_due_date, action_status,
+    action_analyzed) should still be written."""
+    _prime_schema(enricher)
+    monkeypatch.setattr(
+        enricher_module,
+        "has_correction_for_field",
+        lambda document_id, field_name: field_name == "account_identifier",
+    )
+
+    await enricher.enrich_document(
+        42,
+        {
+            "amount": 50.0,
+            "document_due_date": "2026-08-15",
+            "extracted_data": {
+                "account_identifier": "ending 4321",
+                "reference_number": "INV-42",
+            },
+        },
+    )
+
+    fields = enricher.client.update_custom_fields_verified.await_args.args[1]
+    values = {field["field"]: field["value"] for field in fields}
+    assert 10 not in values  # account_identifier withheld
+    assert values[11] == "INV-42"  # invoice_number still written
+    assert values[1] == 50.0  # document_amount still written
+    assert values[4] == "2026-08-15"  # document_due_date still written
+
+
+@pytest.mark.asyncio
+async def test_enrich_document_skips_all_correctable_fields_when_corrected(monkeypatch, enricher):
+    _prime_schema(enricher)
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+
+    await enricher.enrich_document(
+        42,
+        {
+            "amount": 50.0,
+            "document_due_date": "2026-08-15",
+            "extracted_data": {
+                "account_identifier": "ending 4321",
+                "reference_number": "INV-42",
+            },
+        },
+    )
+
+    fields = enricher.client.update_custom_fields_verified.await_args.args[1]
+    values = {field["field"]: field["value"] for field in fields}
+    assert not {1, 4, 10, 11}.intersection(values)
+    # Action-analyzed date is not correctable via the metadata API and is
+    # always written.
+    assert 3 in values
+
+
+@pytest.mark.asyncio
+async def test_enrich_document_action_queue_source_writes_through_all_corrections(
+    monkeypatch, enricher
+):
+    """enrich_document(source='action_queue') represents a human-driven
+    Action Queue re-sync, so it must write through every field even when
+    corrections already exist -- and re-record each as the new authoritative
+    correction."""
+    _prime_schema(enricher)
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+
+    await enricher.enrich_document(
+        42,
+        {
+            "amount": 50.0,
+            "document_due_date": "2026-08-15",
+            "extracted_data": {
+                "account_identifier": "ending 4321",
+                "reference_number": "INV-42",
+            },
+        },
+        source="action_queue",
+    )
+
+    fields = enricher.client.update_custom_fields_verified.await_args.args[1]
+    values = {field["field"]: field["value"] for field in fields}
+    assert values[10] == "ending 4321"
+    assert values[11] == "INV-42"
+    assert values[1] == 50.0
+    assert values[4] == "2026-08-15"
+    assert {call.kwargs["field_name"] for call in recorded.call_args_list} == {
+        "account_identifier",
+        "invoice_number",
+        "document_amount",
+        "document_due_date",
+    }
+
+
+@pytest.mark.asyncio
+async def test_enrich_document_action_queue_source_records_first_time_edits(monkeypatch, enricher):
+    """Even with no prior corrections on file, an Action Queue re-sync must
+    still establish an authoritative correction for every field it writes --
+    otherwise a later automated pass would see no correction on record and
+    silently clobber these human-confirmed values."""
+    _prime_schema(enricher)
+    monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: False)
+    recorded = Mock()
+    monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
+
+    await enricher.enrich_document(
+        42,
+        {
+            "amount": 50.0,
+            "document_due_date": "2026-08-15",
+            "extracted_data": {
+                "account_identifier": "ending 4321",
+                "reference_number": "INV-42",
+            },
+        },
+        source="action_queue",
+    )
+
+    assert {call.kwargs["field_name"] for call in recorded.call_args_list} == {
+        "account_identifier",
+        "invoice_number",
+        "document_amount",
+        "document_due_date",
+    }

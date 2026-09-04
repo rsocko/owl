@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import date, datetime
 from typing import Any
 
@@ -309,6 +310,7 @@ def _serialize_action(a: Action) -> dict[str, Any]:
     from doc_intelligence_hub.core.extractors.account_numbers import (
         normalize_masked_account_identifier,
     )
+    from doc_intelligence_hub.modules.triage.database import get_corrections_for_document
 
     # Deserialize recommended_cta from JSON string if stored as such
     cta = a.recommended_cta
@@ -329,6 +331,64 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         else:
             extracted_data.pop("account_identifier", None)
 
+    document_amount = a.document_amount
+    document_due_date = a.document_due_date.isoformat() if a.document_due_date else None
+    corrected_fields: dict[str, bool] = {}
+
+    # Corrections made via the Metadata Correction API (including the OCR
+    # region viewer) are authoritative — surface the corrected value here too
+    # so there is a single canonical value across the Action Queue and the
+    # Metadata Correction UI, rather than a possibly-stale extracted value.
+    if a.document_id is not None:
+        latest_by_field: dict[str, str | None] = {}
+        seen_fields: set[str] = set()
+        for correction in get_corrections_for_document(a.document_id):
+            field_name = correction.get("field_name")
+            if field_name in seen_fields:
+                continue
+            seen_fields.add(field_name)
+            latest_by_field[field_name] = correction.get("corrected_value")
+
+        if "document_amount" in latest_by_field:
+            raw_amount = latest_by_field["document_amount"]
+            if raw_amount in (None, ""):
+                # Explicitly cleared via a correction (real None sentinel, or
+                # a legacy empty-string clear recorded before that fix).
+                document_amount = None
+                corrected_fields["document_amount"] = True
+            else:
+                try:
+                    document_amount = float(raw_amount)
+                except (TypeError, ValueError):
+                    logging.getLogger(__name__).warning(
+                        "Ignoring non-numeric document_amount correction for document_id=%s: %r",
+                        a.document_id,
+                        raw_amount,
+                    )
+                else:
+                    corrected_fields["document_amount"] = True
+        if "document_due_date" in latest_by_field:
+            raw_due_date = latest_by_field["document_due_date"]
+            document_due_date = raw_due_date or None
+            corrected_fields["document_due_date"] = True
+        if extracted_data is not None:
+            if "account_identifier" in latest_by_field:
+                corrected_identifier = latest_by_field["account_identifier"]
+                masked_correction = normalize_masked_account_identifier(corrected_identifier)
+                if masked_correction is None and corrected_identifier:
+                    # The correction wasn't submitted in an already-masked
+                    # "ending XXXX" form (e.g. a user pasted a raw account
+                    # number) -- re-mask it ourselves so an unmasked value
+                    # never leaks into the API response.
+                    alnum_suffix = re.sub(r"[^A-Za-z0-9]", "", corrected_identifier)[-4:].upper()
+                    masked_correction = f"ending {alnum_suffix}" if alnum_suffix else None
+                if masked_correction:
+                    extracted_data["account_identifier"] = masked_correction
+                    corrected_fields["account_identifier"] = True
+            if "invoice_number" in latest_by_field:
+                extracted_data["reference_number"] = latest_by_field["invoice_number"]
+                corrected_fields["invoice_number"] = True
+
     return {
         "id": a.id,
         "document_id": a.document_id,
@@ -338,8 +398,9 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         "summary": a.summary,
         "due_date": a.due_date.isoformat() if a.due_date else None,
         "amount": a.amount,
-        "document_amount": a.document_amount,
-        "document_due_date": a.document_due_date.isoformat() if a.document_due_date else None,
+        "document_amount": document_amount,
+        "document_due_date": document_due_date,
+        "corrected_fields": corrected_fields,
         "urgency": a.urgency,
         "severity": _urgency_to_severity(a.urgency),
         "confidence": a.confidence,
@@ -1055,10 +1116,12 @@ async def update_action(
 
                 enricher = PaperlessEnricher()
                 if "amount" in supplied_fields:
-                    await enricher.sync_document_amount(action.document_id, body.amount)
+                    await enricher.sync_document_amount(
+                        action.document_id, body.amount, source="action_queue"
+                    )
                 if "document_due_date" in supplied_fields:
                     await enricher.sync_document_due_date(
-                        action.document_id, body.document_due_date
+                        action.document_id, body.document_due_date, source="action_queue"
                     )
             except Exception as exc:
                 from fastapi import HTTPException
@@ -1473,6 +1536,7 @@ async def merge_actions(
                 await PaperlessEnricher().sync_document_amount(
                     survivor.document_id,
                     body.amount,
+                    source="action_queue",
                 )
             except Exception as exc:
                 raise HTTPException(
@@ -2191,6 +2255,7 @@ async def submit_feedback(
                     await PaperlessEnricher().sync_document_amount(
                         action.document_id,
                         body.corrected_amount,
+                        source="action_queue",
                     )
                 except Exception as exc:
                     raise HTTPException(

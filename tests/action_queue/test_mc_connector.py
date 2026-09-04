@@ -15,11 +15,13 @@ from fastapi.testclient import TestClient
 from doc_intelligence_hub.api.app import HubSettings, create_app
 from doc_intelligence_hub.modules.action_queue.config import settings as aq_settings
 from doc_intelligence_hub.modules.action_queue.database import Action, get_session, init_db
+from doc_intelligence_hub.modules.triage import database as triage_database
 
 
 @pytest.fixture()
 def client(tmp_path):
     db_path = tmp_path / "test_mc_actions.db"
+    triage_db_path = tmp_path / "test_mc_triage.db"
     hub_settings = HubSettings(
         paperless_url="http://paperless.test",
         paperless_token="test-token",
@@ -28,15 +30,19 @@ def client(tmp_path):
 
     original_db_url = aq_settings.database_url
     original_paperless_url = aq_settings.paperless_url
+    original_triage_db_url = triage_database._db_url
     aq_settings.database_url = f"sqlite:///{db_path}"
     aq_settings.paperless_url = "http://paperless.test"
+    triage_database.configure(f"sqlite:///{triage_db_path}")
 
     init_db()
+    triage_database.init_db()
 
     yield TestClient(app)
 
     aq_settings.database_url = original_db_url
     aq_settings.paperless_url = original_paperless_url
+    triage_database.configure(original_triage_db_url)
 
 
 @pytest.fixture()
@@ -235,7 +241,7 @@ class TestMcListActions:
 
         assert response.status_code == 200
         assert response.json()["amount"] is None
-        enricher.sync_document_amount.assert_awaited_once_with(42, None)
+        enricher.sync_document_amount.assert_awaited_once_with(42, None, source="action_queue")
 
     def test_connector_preserves_additive_cta_shape_and_file_source_action(self, seeded_client):
         db = get_session()
@@ -264,6 +270,7 @@ class TestMcListActions:
 
     def test_read_only_connector_omits_file_source_action(self, tmp_path):
         db_path = tmp_path / "readonly_mc_actions.db"
+        triage_db_path = tmp_path / "readonly_mc_triage.db"
         app = create_app(
             HubSettings(
                 paperless_url="http://paperless.test",
@@ -272,9 +279,12 @@ class TestMcListActions:
             )
         )
         original_db_url = aq_settings.database_url
+        original_triage_db_url = triage_database._db_url
         aq_settings.database_url = f"sqlite:///{db_path}"
+        triage_database.configure(f"sqlite:///{triage_db_path}")
         try:
             init_db()
+            triage_database.init_db()
             db = get_session()
             try:
                 db.add(
@@ -295,6 +305,7 @@ class TestMcListActions:
             assert {source["id"] for source in action["source_actions"]} == {"send_to_review"}
         finally:
             aq_settings.database_url = original_db_url
+            triage_database.configure(original_triage_db_url)
 
     def test_connector_never_exposes_legacy_raw_account_number(self, seeded_client):
         db = get_session()

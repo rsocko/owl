@@ -46,6 +46,8 @@ _API_FIELD_KEYS: dict[str, MetadataFieldKey] = {
     MetadataFieldKey.CLAIM_NUMBER.value: MetadataFieldKey.CLAIM_NUMBER,
     MetadataFieldKey.INVOICE_NUMBER.value: MetadataFieldKey.INVOICE_NUMBER,
     MetadataFieldKey.ACCOUNT_IDENTIFIER.value: MetadataFieldKey.ACCOUNT_IDENTIFIER,
+    MetadataFieldKey.DOCUMENT_AMOUNT.value: MetadataFieldKey.DOCUMENT_AMOUNT,
+    MetadataFieldKey.DOCUMENT_DUE_DATE.value: MetadataFieldKey.DOCUMENT_DUE_DATE,
     "document_classification": MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE,
 }
 
