@@ -739,6 +739,7 @@ class Pipeline:
 
                 # Enrich Paperless with PRIMARY action's data (only if writes enabled and available)
                 primary_action = primary_action_data
+                enrichment_error: Exception | None = None
                 if settings.write_to_paperless and self._enrichment_available:
                     enrichment_data = {
                         **primary_action,
@@ -762,6 +763,7 @@ class Pipeline:
                         for a in stored_actions:
                             a.last_synced_status = "pending"
                     except Exception as e:
+                        enrichment_error = e
                         console.print(f"  [yellow]⚠[/yellow] Stored but enrichment failed: {e}")
                         logger.warning(
                             "doc_id=%s: stored locally but enrichment to Paperless failed: %s",
@@ -769,6 +771,11 @@ class Pipeline:
                             e,
                         )
                         stats["enrichment_failed"] += 1
+                elif settings.write_to_paperless:
+                    enrichment_error = RuntimeError(
+                        "Paperless custom-field enrichment is unavailable"
+                    )
+                    stats["enrichment_failed"] += 1
 
                 action_summary = f"{primary_action['action_type']} — {primary_action['title'][:50]}"
                 if len(actions) > 1:
@@ -781,8 +788,13 @@ class Pipeline:
                 self._record_history(
                     db,
                     doc_id,
-                    success=True,
-                    disposition="action_created",
+                    success=enrichment_error is None,
+                    disposition=(
+                        "action_created"
+                        if enrichment_error is None
+                        else "action_enrichment_failed"
+                    ),
+                    error=str(enrichment_error) if enrichment_error is not None else None,
                     text_metrics=text_metrics,
                     doc=doc,
                 )

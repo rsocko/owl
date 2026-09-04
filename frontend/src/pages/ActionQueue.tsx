@@ -879,8 +879,14 @@ export default function ActionQueue() {
     setBusyKey(dryRun ? 'dry-run' : 'run');
     runPipelineStream(
       endpoints.actionQueue.runStreamUrl,
-      () => {
-        setToast({ message: dryRun ? 'Dry run completed.' : 'Pipeline run completed.' });
+      (result) => {
+        const enrichmentFailed = Number(result?.enrichment_failed ?? 0);
+        setToast({
+          message: enrichmentFailed > 0
+            ? `Pipeline completed, but ${enrichmentFailed} document${enrichmentFailed === 1 ? '' : 's'} could not be updated in Paperless.`
+            : dryRun ? 'Dry run completed.' : 'Pipeline run completed.',
+          tone: enrichmentFailed > 0 ? 'error' : 'success',
+        });
         setBusyKey(null);
         void loadData();
       },
@@ -903,8 +909,14 @@ export default function ActionQueue() {
     setBusyKey(key);
     runPipelineStream(
       endpoints.actionQueue.runStreamUrl,
-      () => {
-        setToast({ message: `Document #${documentId} analysis completed.`, tone: 'success' });
+      (result) => {
+        const enrichmentFailed = Number(result?.enrichment_failed ?? 0);
+        setToast({
+          message: enrichmentFailed > 0
+            ? `Document #${documentId} was analyzed, but its custom fields could not be updated in Paperless.`
+            : `Document #${documentId} analysis completed.`,
+          tone: enrichmentFailed > 0 ? 'error' : 'success',
+        });
         setBusyKey(null);
         void loadData();
       },
