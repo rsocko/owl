@@ -318,7 +318,9 @@ class TestMCSourceActions:
         assert type_resp.json()["action_type"] == "FILE"
         assert urgency_resp.json()["urgency"] == "LOW"
         assert amount_resp.json()["amount"] == 42.25
-        enricher.sync_document_amount.assert_awaited_once_with(action["document_id"], 42.25)
+        enricher.sync_document_amount.assert_awaited_once_with(
+            action["document_id"], 42.25, source="action_queue"
+        )
         db = get_session()
         try:
             feedback = (

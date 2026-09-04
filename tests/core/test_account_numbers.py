@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from doc_intelligence_hub.core.extractors import account_numbers as account_numbers_module
 from doc_intelligence_hub.core.extractors.account_numbers import (
     ExtractionResult,
     extract_account_numbers,
@@ -14,6 +15,12 @@ from doc_intelligence_hub.core.extractors.account_numbers import (
     pick_masked_account_identifier,
     write_account_to_paperless,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_existing_corrections(monkeypatch):
+    """By default, pretend no field has an authoritative correction on file."""
+    monkeypatch.setattr(account_numbers_module, "has_correction_for_field", lambda *a, **k: False)
 
 
 class TestExtractAccountNumbers:
@@ -212,3 +219,16 @@ async def test_write_account_rejects_unmasked_value() -> None:
 
     assert await write_account_to_paperless(100, "SAMPLE123456789", client) is False
     client.update_custom_fields.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_write_account_skips_write_when_correction_exists(monkeypatch) -> None:
+    monkeypatch.setattr(account_numbers_module, "has_correction_for_field", lambda *a, **k: True)
+    client = AsyncMock()
+    client.list_custom_fields.return_value = [
+        {"id": 42, "name": "Account Identifier", "data_type": "string"}
+    ]
+
+    assert await write_account_to_paperless(100, "ending 4321", client) is False
+    client.update_custom_fields.assert_not_awaited()
+    client.list_custom_fields.assert_not_called()

@@ -97,6 +97,35 @@ describe('RegionOverlayViewer', () => {
     );
   });
 
+  it('supports drawing a region in "Correct field" mode and reports it via onCorrectRegion (issue #172)', () => {
+    const onCreateAnnotation = vi.fn();
+    const onCorrectRegion = vi.fn();
+    const { container } = render(
+      <RegionOverlayViewer
+        imageUrl="/img"
+        regions={baseRegions}
+        onCreateAnnotation={onCreateAnnotation}
+        onCorrectRegion={onCorrectRegion}
+      />,
+    );
+    loadImage(container);
+
+    fireEvent.click(screen.getByRole('button', { name: /Correct field/i }));
+    const canvas = container.querySelector('.region-overlay-canvas') as HTMLElement;
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, right: 600, bottom: 800, width: 600, height: 800, x: 0, y: 0, toJSON: () => {},
+    });
+    fireEvent.mouseDown(canvas, { clientX: 20, clientY: 30 });
+    fireEvent.mouseMove(canvas, { clientX: 120, clientY: 90 });
+    fireEvent.mouseUp(canvas, { clientX: 120, clientY: 90 });
+
+    // Real drawn geometry is reported directly -- no inline annotation form,
+    // and the annotation flow (onCreateAnnotation) is untouched.
+    expect(onCorrectRegion).toHaveBeenCalledWith({ x0: 20, top: 30, x1: 120, bottom: 90 });
+    expect(onCreateAnnotation).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('annotation-form')).not.toBeInTheDocument();
+  });
+
   it('renders diff highlight classes and overrides heatmap styling when diffHighlights is set', () => {
     const diffHighlights = new Map<number, 'added' | 'removed' | 'shifted'>([
       [0, 'removed'],

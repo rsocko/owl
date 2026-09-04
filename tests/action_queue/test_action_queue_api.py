@@ -14,12 +14,14 @@ from doc_intelligence_hub.modules.action_queue.database import (
     get_session,
     init_db,
 )
+from doc_intelligence_hub.modules.triage import database as triage_database
 
 
 @pytest.fixture()
 def client(tmp_path):
     """Create a test client with temp-file database and patched settings."""
     db_path = tmp_path / "test_actions.db"
+    triage_db_path = tmp_path / "test_triage.db"
     hub_settings = HubSettings(
         paperless_url="http://paperless.test",
         paperless_token="test-token",
@@ -28,15 +30,19 @@ def client(tmp_path):
 
     original_db_url = aq_settings.database_url
     original_paperless_url = aq_settings.paperless_url
+    original_triage_db_url = triage_database._db_url
     aq_settings.database_url = f"sqlite:///{db_path}"
     aq_settings.paperless_url = "http://paperless.test"
+    triage_database.configure(f"sqlite:///{triage_db_path}")
 
     init_db()
+    triage_database.init_db()
 
     yield TestClient(app)
 
     aq_settings.database_url = original_db_url
     aq_settings.paperless_url = original_paperless_url
+    triage_database.configure(original_triage_db_url)
 
 
 @pytest.fixture()
@@ -313,6 +319,7 @@ class TestListActions:
             "amount",
             "document_amount",
             "document_due_date",
+            "corrected_fields",
             "urgency",
             "severity",
             "confidence",
@@ -397,6 +404,149 @@ class TestListActions:
 
         assert data["total"] == 2
         assert {action["id"] for action in data["actions"]} == {1, 2}
+
+
+class TestCanonicalCorrectionOverlay:
+    """A correction recorded via the Metadata Correction API (including the
+    OCR region viewer) is authoritative -- _serialize_action must surface
+    the corrected value and flag it via `corrected_fields`, rather than
+    exposing the original, possibly-stale extracted value."""
+
+    def test_corrected_document_amount_overrides_extracted_value(self, seeded_client, monkeypatch):
+        from doc_intelligence_hub.modules.triage import database as triage_db
+
+        monkeypatch.setattr(
+            triage_db,
+            "get_corrections_for_document",
+            lambda document_id: (
+                [
+                    {
+                        "field_name": "document_amount",
+                        "corrected_value": "999.99",
+                    }
+                ]
+                if document_id == 42
+                else []
+            ),
+        )
+
+        resp = seeded_client.get("/api/queue/actions?status=pending")
+        action = resp.json()["actions"][0]
+
+        assert action["document_id"] == 42
+        assert action["document_amount"] == 999.99
+        assert action["corrected_fields"] == {"document_amount": True}
+
+    def test_corrected_account_identifier_is_remasked_and_flagged(self, seeded_client, monkeypatch):
+        from doc_intelligence_hub.modules.triage import database as triage_db
+
+        monkeypatch.setattr(
+            triage_db,
+            "get_corrections_for_document",
+            lambda document_id: (
+                [
+                    {
+                        "field_name": "account_identifier",
+                        "corrected_value": "1234567890",
+                    }
+                ]
+                if document_id == 42
+                else []
+            ),
+        )
+
+        resp = seeded_client.get("/api/queue/actions?status=pending")
+        action = resp.json()["actions"][0]
+
+        assert action["corrected_fields"] == {"account_identifier": True}
+        # The raw corrected value must never leak unmasked into the API.
+        assert action["extracted_data"]["account_identifier"] != "1234567890"
+
+    def test_no_correction_leaves_original_value_and_empty_flag_map(
+        self, seeded_client, monkeypatch
+    ):
+        from doc_intelligence_hub.modules.triage import database as triage_db
+
+        monkeypatch.setattr(triage_db, "get_corrections_for_document", lambda document_id: [])
+
+        resp = seeded_client.get("/api/queue/actions?status=pending")
+        action = resp.json()["actions"][0]
+
+        assert action["document_amount"] is None
+        assert action["corrected_fields"] == {}
+
+    def test_cleared_document_amount_overlays_as_null_and_flagged(self, seeded_client, monkeypatch):
+        """A correction recording an explicit clear (real None corrected_value,
+        as produced by sync_document_amount(amount=None)) must overlay as a
+        null document_amount with corrected_fields flagged True -- not
+        silently fall back to a stale value with no flag."""
+        from doc_intelligence_hub.modules.triage import database as triage_db
+
+        monkeypatch.setattr(
+            triage_db,
+            "get_corrections_for_document",
+            lambda document_id: (
+                [{"field_name": "document_amount", "corrected_value": None}]
+                if document_id == 42
+                else []
+            ),
+        )
+
+        resp = seeded_client.get("/api/queue/actions?status=pending")
+        action = resp.json()["actions"][0]
+
+        assert action["document_amount"] is None
+        assert action["corrected_fields"] == {"document_amount": True}
+
+    def test_cleared_document_due_date_overlays_as_null_and_flagged(
+        self, seeded_client, monkeypatch
+    ):
+        """Same clearing behavior for document_due_date, kept consistent
+        with the document_amount case above."""
+        from doc_intelligence_hub.modules.triage import database as triage_db
+
+        monkeypatch.setattr(
+            triage_db,
+            "get_corrections_for_document",
+            lambda document_id: (
+                [{"field_name": "document_due_date", "corrected_value": None}]
+                if document_id == 42
+                else []
+            ),
+        )
+
+        resp = seeded_client.get("/api/queue/actions?status=pending")
+        action = resp.json()["actions"][0]
+
+        assert action["document_due_date"] is None
+        assert action["corrected_fields"] == {"document_due_date": True}
+
+    def test_newest_clear_correction_takes_precedence_over_older_value_correction(
+        self, seeded_client, monkeypatch
+    ):
+        """get_corrections_for_document returns newest-first; a later clear
+        must win over an earlier non-null correction rather than being
+        skipped because its corrected_value is None."""
+        from doc_intelligence_hub.modules.triage import database as triage_db
+
+        monkeypatch.setattr(
+            triage_db,
+            "get_corrections_for_document",
+            lambda document_id: (
+                [
+                    {"field_name": "document_amount", "corrected_value": None},
+                    {"field_name": "document_amount", "corrected_value": "50.0"},
+                ]
+                if document_id == 42
+                else []
+            ),
+        )
+
+        resp = seeded_client.get("/api/queue/actions?status=pending")
+        action = resp.json()["actions"][0]
+
+        assert action["document_amount"] is None
+        assert action["corrected_fields"] == {"document_amount": True}
 
 
 class TestUpdateAction:
@@ -728,7 +878,7 @@ class TestUpdateAction:
         assert response.json()["review_state"] == "needs_review"
         projection.assert_awaited_once()
         assert projection.await_args.kwargs["action_status"] is None
-        enricher.sync_document_amount.assert_awaited_once_with(42, None)
+        enricher.sync_document_amount.assert_awaited_once_with(42, None, source="action_queue")
 
     def test_split_creates_stable_sibling_identity(self, seeded_client):
         response = seeded_client.post(
@@ -815,6 +965,7 @@ class TestPreviewUrlEdgeCases:
     def test_preview_url_with_empty_paperless_url(self, tmp_path):
         """When both hub and action queue settings have empty paperless_url, preview_url is None."""
         db_path = tmp_path / "test_actions_edge.db"
+        triage_db_path = tmp_path / "test_actions_edge_triage.db"
         hub_settings = HubSettings(
             paperless_url="",
             paperless_token="test-token",
@@ -824,10 +975,13 @@ class TestPreviewUrlEdgeCases:
 
         original_db_url = aq_settings.database_url
         original_paperless_url = aq_settings.paperless_url
+        original_triage_db_url = triage_database._db_url
         aq_settings.database_url = f"sqlite:///{db_path}"
         aq_settings.paperless_url = ""
+        triage_database.configure(f"sqlite:///{triage_db_path}")
 
         init_db()
+        triage_database.init_db()
         db = get_session()
         try:
             db.add(
@@ -851,6 +1005,7 @@ class TestPreviewUrlEdgeCases:
 
         aq_settings.database_url = original_db_url
         aq_settings.paperless_url = original_paperless_url
+        triage_database.configure(original_triage_db_url)
 
     def test_preview_url_strips_trailing_slash(self, seeded_client):
         original = aq_settings.paperless_url

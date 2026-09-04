@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Badge, Breadcrumb, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, type Tone } from '../components/ui';
+import { Badge, Breadcrumb, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonLoader, Toast, type Tone } from '../components/ui';
 import DocumentPreview from '../components/DocumentPreview';
 import OcrCandidatesPanel from '../components/OcrCandidatesPanel';
 import OcrOverlayComparisonPanel from '../components/OcrOverlayComparisonPanel';
 import RegionOverlayViewer, { type Annotation, type DrawnBox, type PageRegions } from '../components/RegionOverlayViewer';
 import AnnotationListPanel from '../components/AnnotationListPanel';
 import { endpoints } from '../lib/api';
+import { getToastDuration } from '../lib/toast';
 import { statusTone, formatDate } from './OcrQualityDashboard';
 import { formatScore } from './OcrQualityReviewQueue';
 import '../styles/ocr-quality.css';
@@ -69,6 +70,14 @@ export type DocumentDetail = {
   has_accepted_ocr_candidate?: boolean;
   accepted_candidate_at?: string | null;
   accepted_candidate_pending_invalidation?: boolean;
+};
+
+// Correctable canonical field, as resolved against the live Paperless
+// custom-field schema — sourced from GET /api/metadata/{doc_id} (issue #172).
+export type CorrectableField = {
+  field_name: string;
+  paperless_field: string;
+  value: string | null;
 };
 
 const SEVERITY_TONE: Record<string, Tone> = { info: 'info', warning: 'warn', blocking: 'err' };
@@ -142,6 +151,17 @@ export default function OcrQualityDocumentDetail() {
   // corpus-wide random stratified sample).
   const [forcingStage2, setForcingStage2] = useState(false);
   const [stage2Error, setStage2Error] = useState<string | null>(null);
+
+  // Region → metadata correction wiring (issue #172): lets a reviewer draw a
+  // region in the viewer, pick a canonical field from the live-resolved
+  // Paperless schema, and submit it as a real correction (with real
+  // source_region geometry) through the existing Metadata Correction API.
+  const [correctableFields, setCorrectableFields] = useState<CorrectableField[] | null>(null);
+  const [pendingCorrectionBox, setPendingCorrectionBox] = useState<DrawnBox | null>(null);
+  const [correctionFieldName, setCorrectionFieldName] = useState<string>('');
+  const [correctionValue, setCorrectionValue] = useState('');
+  const [submittingCorrection, setSubmittingCorrection] = useState(false);
+  const [correctionToast, setCorrectionToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
 
   const load = useCallback(() => {
     if (!documentId) return;
@@ -238,6 +258,56 @@ export default function OcrQualityDocumentDetail() {
 
   const pageAnnotations = annotations.filter((a) => a.page === inspectionPage);
 
+  // Auto-clear the correction submission toast.
+  useEffect(() => {
+    if (!correctionToast) return undefined;
+    const duration = getToastDuration(correctionToast.tone);
+    if (duration <= 0) return undefined;
+    const timeout = window.setTimeout(() => setCorrectionToast(null), duration);
+    return () => window.clearTimeout(timeout);
+  }, [correctionToast]);
+
+  const handleCorrectRegion = useCallback(
+    (box: DrawnBox) => {
+      setPendingCorrectionBox(box);
+      setCorrectionValue('');
+      if (correctableFields || !documentId) return;
+      endpoints.metadata
+        .get(documentId)
+        .then((res) => setCorrectableFields((res as { extracted_fields: CorrectableField[] }).extracted_fields))
+        .catch(() => setCorrectableFields([]));
+    },
+    [documentId, correctableFields],
+  );
+
+  const cancelPendingCorrection = useCallback(() => {
+    setPendingCorrectionBox(null);
+    setCorrectionFieldName('');
+    setCorrectionValue('');
+  }, []);
+
+  const handleSubmitCorrection = useCallback(async () => {
+    if (!documentId || !pendingCorrectionBox || !correctionFieldName || !correctionValue.trim()) return;
+    setSubmittingCorrection(true);
+    try {
+      await endpoints.metadata.correct(documentId, {
+        field_name: correctionFieldName,
+        corrected_value: correctionValue.trim(),
+        source_region: { page: inspectionPage, ...pendingCorrectionBox },
+        notes: 'Submitted from OCR region viewer',
+      });
+      setCorrectionToast({ message: `${correctionFieldName} corrected from drawn region`, tone: 'success' });
+      cancelPendingCorrection();
+    } catch (err) {
+      setCorrectionToast({
+        message: err instanceof Error ? err.message : 'Failed to submit correction',
+        tone: 'error',
+      });
+    } finally {
+      setSubmittingCorrection(false);
+    }
+  }, [documentId, pendingCorrectionBox, correctionFieldName, correctionValue, inspectionPage, cancelPendingCorrection]);
+
   const handleForceStage2 = useCallback(() => {
     if (!documentId) return;
     setForcingStage2(true);
@@ -309,7 +379,51 @@ export default function OcrQualityDocumentDetail() {
                   onCreateAnnotation={handleCreateAnnotation}
                   onDeleteAnnotation={handleDeleteAnnotation}
                   onPageChange={setInspectionPage}
+                  onCorrectRegion={handleCorrectRegion}
                 />
+                {pendingCorrectionBox && (
+                  <div className="region-overlay-annotation-form" data-testid="metadata-correction-form">
+                    <label htmlFor="correction-field">Field</label>
+                    <select
+                      id="correction-field"
+                      value={correctionFieldName}
+                      onChange={(e) => setCorrectionFieldName(e.target.value)}
+                    >
+                      <option value="">Select a field…</option>
+                      {(correctableFields ?? []).map((field) => (
+                        <option key={field.field_name} value={field.field_name}>
+                          {field.field_name} ({field.paperless_field})
+                        </option>
+                      ))}
+                    </select>
+                    <label htmlFor="correction-value">Corrected value</label>
+                    <input
+                      id="correction-value"
+                      type="text"
+                      value={correctionValue}
+                      onChange={(e) => setCorrectionValue(e.target.value)}
+                    />
+                    <div className="region-overlay-annotation-form-actions">
+                      <Button
+                        size="sm"
+                        onClick={handleSubmitCorrection}
+                        disabled={submittingCorrection || !correctionFieldName || !correctionValue.trim()}
+                      >
+                        {submittingCorrection ? 'Submitting…' : 'Submit correction'}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={cancelPendingCorrection}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {correctionToast && (
+                  <Toast
+                    message={correctionToast.message}
+                    tone={correctionToast.tone}
+                    onDismiss={() => setCorrectionToast(null)}
+                  />
+                )}
                 <div className="ocr-annotation-panel-heading">Saved annotations</div>
                 <AnnotationListPanel
                   annotations={annotations}
