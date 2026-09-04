@@ -16,6 +16,12 @@ export interface StreamingActionState {
   error: string | null;
 }
 
+export interface StreamingCompletionResult {
+  enrichment_failed?: number;
+  failed?: number;
+  [key: string]: unknown;
+}
+
 /**
  * Hook that connects to an SSE endpoint and tracks progress events.
  *
@@ -30,7 +36,11 @@ export interface StreamingActionState {
  */
 export function useStreamingAction(): [
   StreamingActionState,
-  (url: string, onComplete?: () => void, fetchInit?: RequestInit) => void,
+  (
+    url: string,
+    onComplete?: (result?: StreamingCompletionResult) => void,
+    fetchInit?: RequestInit,
+  ) => void,
   () => void,
 ] {
   const [running, setRunning] = useState(false);
@@ -46,7 +56,11 @@ export function useStreamingAction(): [
   }, []);
 
   const run = useCallback(
-    (url: string, onComplete?: () => void, fetchInit?: RequestInit) => {
+    (
+      url: string,
+      onComplete?: (result?: StreamingCompletionResult) => void,
+      fetchInit?: RequestInit,
+    ) => {
       // Abort any previous run
       abortRef.current?.abort();
 
@@ -96,7 +110,7 @@ export function useStreamingAction(): [
                 if (event.stage === 'complete') {
                   setRunning(false);
                   setProgress(null);
-                  onComplete?.();
+                  onComplete?.(event.result);
                   return;
                 }
 

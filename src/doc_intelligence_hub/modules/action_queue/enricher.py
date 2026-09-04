@@ -146,6 +146,15 @@ class PaperlessEnricher:
         await self.get_schema()
         return dict(self._field_id_cache)
 
+    async def _write_custom_fields(self, document_id: int, updates: list[dict]) -> None:
+        amount_field_id = self._field_id_cache.get(MetadataFieldKey.DOCUMENT_AMOUNT)
+        numeric_field_ids = {amount_field_id} if amount_field_id is not None else set()
+        await self.client.update_custom_fields_verified(
+            document_id,
+            updates,
+            numeric_field_ids=numeric_field_ids,
+        )
+
     async def enrich_document(
         self,
         document_id: int,
@@ -267,7 +276,7 @@ class PaperlessEnricher:
             document_id,
             [update["field"] for update in updates],
         )
-        await self.client.update_custom_fields(document_id, updates)
+        await self._write_custom_fields(document_id, updates)
         # Only persist superseding corrections once the write above is
         # confirmed to have succeeded (no exception raised).
         for field_name, new_value in pending_corrections:
@@ -292,7 +301,7 @@ class PaperlessEnricher:
         if skip:
             return
         schema = await self.get_schema()
-        await self.client.update_custom_fields(
+        await self._write_custom_fields(
             document_id,
             [build_metadata_update(MetadataFieldKey.DOCUMENT_AMOUNT, amount, schema)],
         )
@@ -320,7 +329,7 @@ class PaperlessEnricher:
         if skip:
             return
         schema = await self.get_schema()
-        await self.client.update_custom_fields(
+        await self._write_custom_fields(
             document_id,
             [build_metadata_update(MetadataFieldKey.DOCUMENT_DUE_DATE, due_date, schema)],
         )
@@ -344,7 +353,7 @@ class PaperlessEnricher:
                 if field_id is not None:
                     updates.append({"field": field_id, "value": None})
 
-        await self.client.update_custom_fields(document_id, updates)
+        await self._write_custom_fields(document_id, updates)
 
         resolved_statuses = {"completed", "dismissed", "not_an_action"}
         if settings.remove_source_tag_on_resolve and status in resolved_statuses:

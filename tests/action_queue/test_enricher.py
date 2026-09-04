@@ -102,9 +102,10 @@ async def test_sync_document_amount_can_explicitly_clear_value(monkeypatch):
 
     await enricher.sync_document_amount(42, None)
 
-    enricher.client.update_custom_fields.assert_awaited_once_with(
+    enricher.client.update_custom_fields_verified.assert_awaited_once_with(
         42,
         [{"field": 1, "value": None}],
+        numeric_field_ids={1},
     )
 
 
@@ -161,7 +162,7 @@ async def test_sync_status_removes_monitored_tags_when_enabled(monkeypatch):
 
     await enricher.sync_status(42, "not_an_action")
 
-    enricher.client.update_custom_fields.assert_awaited_once()
+    enricher.client.update_custom_fields_verified.assert_awaited_once()
     enricher.client.remove_tags_from_document.assert_awaited_once_with(42, ["Inbox"])
 
 
@@ -177,7 +178,7 @@ async def test_sync_status_keeps_monitored_tags_when_disabled(monkeypatch):
 
     await enricher.sync_status(42, "completed")
 
-    enricher.client.update_custom_fields.assert_awaited_once()
+    enricher.client.update_custom_fields_verified.assert_awaited_once()
     enricher.client.remove_tags_from_document.assert_not_awaited()
 
 
@@ -226,7 +227,7 @@ async def test_enrich_document_writes_only_neutral_metadata(enricher):
         },
     )
 
-    fields = enricher.client.update_custom_fields.await_args.args[1]
+    fields = enricher.client.update_custom_fields_verified.await_args.args[1]
     values = {field["field"]: field["value"] for field in fields}
     assert values[1] == 123.45
     assert values[2] == 20
@@ -250,7 +251,7 @@ async def test_enrich_document_projects_only_masked_identifier_and_canonical_ref
         },
     )
 
-    fields = enricher.client.update_custom_fields.await_args.args[1]
+    fields = enricher.client.update_custom_fields_verified.await_args.args[1]
     values = {field["field"]: field["value"] for field in fields}
     assert values[10] == "ending 4321"
     assert values[11] == "INV-42"
@@ -263,7 +264,7 @@ async def test_not_an_action_clears_legacy_inferred_fields_but_keeps_amount(enri
 
     await enricher.sync_status(42, "not_an_action")
 
-    fields = enricher.client.update_custom_fields.await_args.args[1]
+    fields = enricher.client.update_custom_fields_verified.await_args.args[1]
     values = {field["field"]: field["value"] for field in fields}
     assert values == {
         2: 25,
@@ -295,7 +296,7 @@ async def test_uncertain_action_clears_current_and_legacy_inference_but_keeps_du
         clear_action_inference=True,
     )
 
-    fields = enricher.client.update_custom_fields.await_args.args[1]
+    fields = enricher.client.update_custom_fields_verified.await_args.args[1]
     values = {field["field"]: field["value"] for field in fields}
     assert values[1] == 50.0
     assert values[10] == "ending 4321"
@@ -386,7 +387,7 @@ async def test_sync_document_amount_skips_write_when_correction_exists(monkeypat
 
     await enricher.sync_document_amount(42, 99.0)
 
-    enricher.client.update_custom_fields.assert_not_awaited()
+    enricher.client.update_custom_fields_verified.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -396,9 +397,10 @@ async def test_sync_document_amount_writes_when_no_correction_exists(monkeypatch
 
     await enricher.sync_document_amount(42, 99.0)
 
-    enricher.client.update_custom_fields.assert_awaited_once_with(
+    enricher.client.update_custom_fields_verified.assert_awaited_once_with(
         42,
         [{"field": 1, "value": 99.0}],
+        numeric_field_ids={1},
     )
 
 
@@ -409,7 +411,7 @@ async def test_sync_document_due_date_skips_write_when_correction_exists(monkeyp
 
     await enricher.sync_document_due_date(42, date(2026, 8, 15))
 
-    enricher.client.update_custom_fields.assert_not_awaited()
+    enricher.client.update_custom_fields_verified.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -426,9 +428,10 @@ async def test_sync_document_amount_action_queue_source_writes_through_existing_
 
     await enricher.sync_document_amount(42, 150.0, source="action_queue")
 
-    enricher.client.update_custom_fields.assert_awaited_once_with(
+    enricher.client.update_custom_fields_verified.assert_awaited_once_with(
         42,
         [{"field": 1, "value": 150.0}],
+        numeric_field_ids={1},
     )
     # The Action Queue edit becomes the new authoritative correction, so
     # later automated passes and the Metadata Correction UI see this single
@@ -455,7 +458,7 @@ async def test_sync_document_amount_action_queue_source_records_first_time_edit(
 
     await enricher.sync_document_amount(42, 150.0, source="action_queue")
 
-    enricher.client.update_custom_fields.assert_awaited_once()
+    enricher.client.update_custom_fields_verified.assert_awaited_once()
     recorded.assert_called_once()
     assert recorded.call_args.kwargs["document_id"] == 42
     assert recorded.call_args.kwargs["field_name"] == "document_amount"
@@ -474,7 +477,7 @@ async def test_sync_document_due_date_action_queue_source_writes_through_existin
 
     await enricher.sync_document_due_date(42, date(2026, 9, 1), source="action_queue")
 
-    enricher.client.update_custom_fields.assert_awaited_once()
+    enricher.client.update_custom_fields_verified.assert_awaited_once()
     recorded.assert_called_once()
     assert recorded.call_args.kwargs["field_name"] == "document_due_date"
     assert recorded.call_args.kwargs["corrected_value"] == "2026-09-01"
@@ -493,7 +496,9 @@ async def test_sync_document_amount_no_correction_recorded_when_paperless_write_
     recorded = Mock()
     monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
     _prime_schema(enricher)
-    enricher.client.update_custom_fields.side_effect = RuntimeError("Paperless unavailable")
+    enricher.client.update_custom_fields_verified.side_effect = RuntimeError(
+        "Paperless unavailable"
+    )
 
     with pytest.raises(RuntimeError):
         await enricher.sync_document_amount(42, 150.0, source="action_queue")
@@ -509,7 +514,9 @@ async def test_sync_document_due_date_no_correction_recorded_when_paperless_writ
     recorded = Mock()
     monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
     _prime_schema(enricher)
-    enricher.client.update_custom_fields.side_effect = RuntimeError("Paperless unavailable")
+    enricher.client.update_custom_fields_verified.side_effect = RuntimeError(
+        "Paperless unavailable"
+    )
 
     with pytest.raises(RuntimeError):
         await enricher.sync_document_due_date(42, date(2026, 9, 1), source="action_queue")
@@ -528,7 +535,9 @@ async def test_enrich_document_no_corrections_recorded_when_paperless_write_fail
     monkeypatch.setattr(enricher_module, "has_correction_for_field", lambda *a, **k: True)
     recorded = Mock()
     monkeypatch.setattr(enricher_module, "create_extraction_correction", recorded)
-    enricher.client.update_custom_fields.side_effect = RuntimeError("Paperless unavailable")
+    enricher.client.update_custom_fields_verified.side_effect = RuntimeError(
+        "Paperless unavailable"
+    )
 
     with pytest.raises(RuntimeError):
         await enricher.enrich_document(
@@ -602,7 +611,7 @@ async def test_enrich_document_skips_fields_with_existing_corrections(monkeypatc
         },
     )
 
-    fields = enricher.client.update_custom_fields.await_args.args[1]
+    fields = enricher.client.update_custom_fields_verified.await_args.args[1]
     values = {field["field"]: field["value"] for field in fields}
     assert 10 not in values  # account_identifier withheld
     assert values[11] == "INV-42"  # invoice_number still written
@@ -627,7 +636,7 @@ async def test_enrich_document_skips_all_correctable_fields_when_corrected(monke
         },
     )
 
-    fields = enricher.client.update_custom_fields.await_args.args[1]
+    fields = enricher.client.update_custom_fields_verified.await_args.args[1]
     values = {field["field"]: field["value"] for field in fields}
     assert not {1, 4, 10, 11}.intersection(values)
     # Action-analyzed date is not correctable via the metadata API and is
@@ -661,7 +670,7 @@ async def test_enrich_document_action_queue_source_writes_through_all_correction
         source="action_queue",
     )
 
-    fields = enricher.client.update_custom_fields.await_args.args[1]
+    fields = enricher.client.update_custom_fields_verified.await_args.args[1]
     values = {field["field"]: field["value"] for field in fields}
     assert values[10] == "ending 4321"
     assert values[11] == "INV-42"

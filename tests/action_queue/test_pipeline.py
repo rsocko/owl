@@ -216,6 +216,52 @@ class TestPipelineErrorIsolation:
         assert repeated["skipped"] == 1
         assert analyze_calls == 1
 
+    @pytest.mark.asyncio
+    async def test_failed_action_enrichment_remains_retryable(self, db, monkeypatch):
+        from doc_intelligence_hub.modules.action_queue.database import ProcessingHistory
+
+        pipeline = Pipeline()
+        monkeypatch.setattr(aq_settings, "write_to_paperless", True)
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", AsyncMock(return_value=[]))
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "fetch_all_metadata",
+            AsyncMock(return_value=({}, {}, {})),
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "list_documents",
+            AsyncMock(return_value=_make_docs(1)),
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "get_document_content",
+            AsyncMock(return_value="Invoice: payment of $50.00 is due."),
+        )
+        monkeypatch.setattr(pipeline.analyzer, "health_check", AsyncMock(return_value=False))
+        monkeypatch.setattr(
+            pipeline.fallback_analyzer,
+            "analyze_document",
+            lambda doc: VALID_EXTRACTION,
+        )
+        pipeline.enricher.ensure_custom_fields_exist = AsyncMock(return_value={})
+        pipeline.enricher.enrich_document = AsyncMock(
+            side_effect=RuntimeError("Paperless rejected custom fields")
+        )
+
+        stats = await pipeline.run(force=True, dry_run=False)
+
+        session = get_session()
+        try:
+            history = session.query(ProcessingHistory).filter_by(document_id=1).one()
+            assert history.success == 0
+            assert history.disposition == "action_enrichment_failed"
+            assert history.error_message == "Paperless rejected custom fields"
+        finally:
+            session.close()
+        assert stats["processed"] == 1
+        assert stats["enrichment_failed"] == 1
+
     def test_store_action_resolves_numeric_tag_ids(self, db):
         pipeline = Pipeline()
         pipeline._correspondent_cache = {}

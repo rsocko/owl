@@ -497,6 +497,20 @@ describe('ActionQueue', () => {
     });
   });
 
+  it('reports a Paperless enrichment failure after document analysis', async () => {
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /pay electric bill/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Re-run analysis' }));
+
+    const onComplete = runPipelineStreamMock.mock.calls[0][1];
+    onComplete({ processed: 1, enrichment_failed: 1 });
+
+    expect(await screen.findByText(
+      'Document #1 was analyzed, but its custom fields could not be updated in Paperless.',
+    )).toBeTruthy();
+  });
+
   it('persists quick type filters and combines them with search', async () => {
     window.localStorage.removeItem('owl.actionQueue.typeFilter');
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
