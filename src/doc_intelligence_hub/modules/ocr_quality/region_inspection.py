@@ -8,9 +8,12 @@ corpus (that's the ~8,900-document Stage 1/2 scan territory owned by
 
 Reuses ``pdf_loader.py`` (issue #29) for geometry extraction. The per-word
 flag heuristics mirror ``overlay_scoring.py``'s ``bounds_sanity``,
-``duplicate_overlap``, and ``alignment`` signals, but evaluated per-word
-instead of aggregated into a single document-level score, so a reviewer can
-see *which* words tripped a signal rather than only the aggregate.
+``duplicate_overlap``, and ``alignment`` signals, plus a
+``content_plausibility`` flag mirroring ``machine_scoring.py``'s
+character/glyph-corruption checks (e.g. "(cid:N)" placeholders, replacement
+characters) and low per-word OCR confidence — evaluated per-word instead of
+aggregated into a single document-level score, so a reviewer can see *which*
+words tripped a signal rather than only the aggregate.
 
 A tiny in-process TTL cache holds raw PDF bytes per document for a short
 window (default 5 minutes, capped entry count) so that opening the regions
@@ -24,7 +27,9 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 import time
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -52,6 +57,21 @@ _SCANNED_IMAGE_COVERAGE_THRESHOLD = 0.5
 # are within this many points and the text matches — mirrors
 # ``overlay_scoring._DUPLICATE_DISTANCE_TOLERANCE``.
 _DUPLICATE_DISTANCE_TOLERANCE = 1.0
+
+# Mirrors ``machine_scoring._CID_ARTIFACT_RE``: PDF text extractors fall back
+# to literal "(cid:123)" placeholders per glyph when a font's ToUnicode CMap
+# is missing/incomplete. Checked per-word here (rather than importing the
+# private constant from ``machine_scoring.py``) so a reviewer can see exactly
+# *which* words carry the corruption, not just that the document as a whole
+# does.
+_CID_ARTIFACT_RE = re.compile(r"\(cid:\d+\)")
+_REPLACEMENT_CHAR = "\ufffd"
+
+# A word's OCR engine confidence (0-1) below this is considered implausible
+# on its own, independent of its text content. Only meaningful for
+# providers that report per-word confidence (e.g. Azure Document
+# Intelligence) — ``None`` (digitally-extracted PDF text) never trips this.
+_LOW_CONFIDENCE_THRESHOLD = 0.5
 
 DEFAULT_PAGE_IMAGE_DPI = 150
 MIN_PAGE_IMAGE_DPI = 72
@@ -141,6 +161,25 @@ def _is_image_dominated_page(page: PdfPageData) -> bool:
     return (image_area / page.area) >= _SCANNED_IMAGE_COVERAGE_THRESHOLD
 
 
+def _is_implausible_word_text(text: str) -> bool:
+    """Mirrors ``machine_scoring._char_script_plausibility``'s corruption
+    checks, evaluated for a single word instead of the whole document: a
+    "(cid:N)" glyph-ID placeholder, a Unicode replacement character, or a
+    control/surrogate/private-use/unassigned character.
+    """
+    if _CID_ARTIFACT_RE.search(text):
+        return True
+    for ch in text:
+        if ch == _REPLACEMENT_CHAR:
+            return True
+        if ch in "\n\r\t":
+            continue
+        # Cc = control, Cs = surrogate, Co = private use, Cn = unassigned.
+        if unicodedata.category(ch) in ("Cc", "Cs", "Co", "Cn"):
+            return True
+    return False
+
+
 def _word_flags(
     page: PdfPageData,
     word: WordBox,
@@ -189,7 +228,33 @@ def _word_flags(
         if not any(x0 <= cx <= x1 and top <= cy <= bottom for x0, top, x1, bottom in padded_images):
             flags.append("alignment")
 
+    # Content-plausibility: does this specific word's text/confidence look
+    # like real extracted content, independent of where it sits on the page?
+    # Generalizes the "(cid:N)" glyph-ID case (issue: docs #2346/#5483) to
+    # any per-word implausible-character corruption, plus low OCR-engine
+    # confidence when the provider reports one.
+    if _is_implausible_word_text(word.text) or (
+        word.confidence is not None and word.confidence < _LOW_CONFIDENCE_THRESHOLD
+    ):
+        flags.append("content_plausibility")
+
     return flags
+
+
+# Maps a per-word flag category to the document-level scorer reason code(s)
+# it can be cross-referenced against. "content_plausibility" pulls from the
+# *machine* (text-content) component rather than the overlay (geometry)
+# component the other three flags mirror.
+_FLAG_REASON_CODES: dict[str, tuple[str, ...]] = {
+    "bounds_sanity": ("overlay.bounds_sanity",),
+    "duplicate_overlap": ("overlay.duplicate_overlap",),
+    "alignment": ("overlay.alignment",),
+    "content_plausibility": (
+        "machine.cid_glyph_artifacts",
+        "machine.char_script_plausibility",
+        "machine.token_whitespace_quality",
+    ),
+}
 
 
 def _matching_document_reasons(
@@ -198,16 +263,17 @@ def _matching_document_reasons(
     """Cross-reference this word's flags against the document's stored scorer reasons.
 
     ``document_reasons`` is the already-computed ``DocumentAssessment.reasons``
-    list (``overlay.<signal>`` coded entries from ``overlay_scoring.py``).
-    A word is considered to be "referenced" by a document-level reason when
-    its flag category matches that reason's signal code — an approximation,
+    list (combined ``overlay.<signal>``/``machine.<signal>`` coded entries
+    from ``overlay_scoring.py``/``machine_scoring.py``). A word is considered
+    to be "referenced" by a document-level reason when its flag category maps
+    (via ``_FLAG_REASON_CODES``) to that reason's code — an approximation,
     since the stored reasons are page/document-level, not per-word, but it
     surfaces the relevant explanation text next to the specific word that
     likely caused it.
     """
     if not flags or not document_reasons:
         return []
-    codes = {f"overlay.{flag}" for flag in flags}
+    codes = {code for flag in flags for code in _FLAG_REASON_CODES.get(flag, ())}
     return [reason for reason in document_reasons if reason.get("code") in codes]
 
 

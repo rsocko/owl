@@ -748,10 +748,10 @@ async def get_document_regions(
     document's PDF and parses page geometry with the same ``pdf_loader``
     used by the Stage 2 profiler — nothing here is precomputed for the
     whole corpus. Each word is flagged ``duplicate_overlap``,
-    ``bounds_sanity``, and/or ``alignment`` using the same heuristics as
-    ``overlay_scoring.py``, evaluated per-word, and cross-referenced against
-    this document's stored scorer ``reasons`` where the flag category
-    matches.
+    ``bounds_sanity``, ``alignment``, and/or ``content_plausibility`` using
+    the same heuristics as ``overlay_scoring.py``/``machine_scoring.py``,
+    evaluated per-word, and cross-referenced against this document's stored
+    scorer ``reasons`` where the flag category matches.
     """
     pdf_bytes = await _fetch_pdf_bytes(request, document_id)
 
