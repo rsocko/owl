@@ -6,10 +6,24 @@ from doc_intelligence_hub.modules.ocr_quality.pdf_types import ImageBox, PdfPage
 
 
 def make_word(
-    text: str, x0: float, top: float, x1: float, bottom: float, order: int, angle: float = 0.0
+    text: str,
+    x0: float,
+    top: float,
+    x1: float,
+    bottom: float,
+    order: int,
+    angle: float = 0.0,
+    confidence: float | None = None,
 ) -> WordBox:
     return WordBox(
-        text=text, x0=x0, top=top, x1=x1, bottom=bottom, order_index=order, angle_degrees=angle
+        text=text,
+        x0=x0,
+        top=top,
+        x1=x1,
+        bottom=bottom,
+        order_index=order,
+        angle_degrees=angle,
+        confidence=confidence,
     )
 
 

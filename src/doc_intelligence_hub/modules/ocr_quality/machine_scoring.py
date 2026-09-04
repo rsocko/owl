@@ -54,6 +54,21 @@ _IDENTIFIER_RE = re.compile(
 _LABEL_VALUE_RE = re.compile(r"^[\w \-/()#]{1,40}:\s*\S")
 _MULTI_SPACE_COLUMNS_RE = re.compile(r"(\t| {2,})\S+(\t| {2,})\S+")
 
+# PDF text extractors fall back to literal "(cid:123)" placeholders per
+# glyph when a font's embedded ToUnicode CMap is missing/incomplete, so the
+# raw glyph IDs leak into the "extracted text" instead of real characters.
+# Every character is ordinary printable ASCII (digits, letters, parens,
+# colon), so unicodedata-category-based plausibility checks never see this
+# as corruption — it must be detected explicitly.
+_CID_ARTIFACT_RE = re.compile(r"\(cid:\d+\)")
+_CID_ARTIFACT_BLOCKING_RATIO = 0.3
+# At/above this density, "(cid:N)" placeholders are effectively the entire
+# document — there is no real text left to measure, so this is treated like
+# the empty-text case rather than left to whichever structural signals
+# happen not to trip (e.g. repetition_noise sees varying glyph IDs as
+# "diverse vocabulary" and would otherwise score a perfect 1.0).
+_CID_ARTIFACT_DOMINANT_RATIO = 0.5
+
 _SIGNAL_NAMES = (
     "char_script_plausibility",
     "token_whitespace_quality",
@@ -120,23 +135,64 @@ def score_machine(
             )
         )
     else:
-        tokens = text_content.split()
-        lines = [line.strip() for line in text_content.splitlines() if line.strip()]
-        char_plausibility = _char_script_plausibility(text_content)
-        signals["char_script_plausibility"] = char_plausibility
-        signals["token_whitespace_quality"] = _token_whitespace_quality(tokens)
-        signals["repetition_noise"] = _repetition_noise(
-            text_content, tokens, dampen_structural_noise=is_structured_shape
-        )
-        signals["prose_coherence"] = _prose_coherence(tokens, cfg)
+        cid_ratio = _cid_artifact_char_count(text_content) / len(text_content)
 
-        # Structured-entity/table detection is meaningless on text that is
-        # mostly implausible characters to begin with — leave it unavailable
-        # rather than letting a neutral "no entities found" baseline prop up
-        # a score that should be driven by the character-plausibility signal.
-        if char_plausibility >= _MIN_PLAUSIBILITY_FOR_STRUCTURE_SIGNALS:
-            signals["structured_entities"] = _structured_entities(text_content, tokens)
-            signals["table_structure"] = _table_structure(lines)
+        if cid_ratio >= _CID_ARTIFACT_DOMINANT_RATIO:
+            # Glyph-ID placeholders dominate the whole document — there is
+            # no real text underneath for token/repetition/prose signals to
+            # meaningfully assess, so treat this the same as empty text: a
+            # strong, computable failure, not an "unavailable" shrug that
+            # lets an incidental structural pass (e.g. high token diversity
+            # because every glyph ID differs) prop the score back up.
+            for name in _SIGNAL_NAMES[:6]:
+                signals[name] = 0.0
+            reasons.append(
+                Reason(
+                    code="machine.cid_glyph_artifacts",
+                    message=(
+                        'Extracted text is dominated by "(cid:N)" placeholders — the PDF\'s '
+                        "font is missing a ToUnicode mapping, so raw glyph IDs leaked through "
+                        "instead of real characters. Re-extraction or re-OCR is required."
+                    ),
+                    severity=Severity.BLOCKING,
+                    component="machine",
+                    value=round(cid_ratio, 3),
+                )
+            )
+        else:
+            tokens = text_content.split()
+            lines = [line.strip() for line in text_content.splitlines() if line.strip()]
+            char_plausibility = _char_script_plausibility(text_content)
+            signals["char_script_plausibility"] = char_plausibility
+            signals["token_whitespace_quality"] = _token_whitespace_quality(tokens)
+            signals["repetition_noise"] = _repetition_noise(
+                text_content, tokens, dampen_structural_noise=is_structured_shape
+            )
+            signals["prose_coherence"] = _prose_coherence(tokens, cfg)
+
+            if cid_ratio >= _CID_ARTIFACT_BLOCKING_RATIO:
+                reasons.append(
+                    Reason(
+                        code="machine.cid_glyph_artifacts",
+                        message=(
+                            'Extracted text is dominated by "(cid:N)" placeholders — the '
+                            "PDF's font is missing a ToUnicode mapping, so raw glyph IDs "
+                            "leaked through instead of real characters. Re-extraction or "
+                            "re-OCR is required."
+                        ),
+                        severity=Severity.BLOCKING,
+                        component="machine",
+                        value=round(cid_ratio, 3),
+                    )
+                )
+
+            # Structured-entity/table detection is meaningless on text that is
+            # mostly implausible characters to begin with — leave it unavailable
+            # rather than letting a neutral "no entities found" baseline prop up
+            # a score that should be driven by the character-plausibility signal.
+            if char_plausibility >= _MIN_PLAUSIBILITY_FOR_STRUCTURE_SIGNALS:
+                signals["structured_entities"] = _structured_entities(text_content, tokens)
+                signals["table_structure"] = _table_structure(lines)
 
     if confidence_data:
         signals["engine_confidence"] = sum(confidence_data) / len(confidence_data)
@@ -188,21 +244,40 @@ def score_machine(
     )
 
 
+def _cid_artifact_char_count(text: str) -> int:
+    """Total characters covered by "(cid:123)" glyph-ID placeholder runs."""
+    return sum(len(match.group(0)) for match in _CID_ARTIFACT_RE.finditer(text))
+
+
 def _char_script_plausibility(text: str) -> float:
     total = len(text)
     if total == 0:
         return 0.0
     bad = 0
-    for ch in text:
+    # "(cid:123)"-style placeholders are unmapped PDF glyph IDs leaking
+    # through as literal text, not real extracted characters — every
+    # character they occupy counts as implausible, same as a replacement
+    # character, even though each individual character (digits, letters,
+    # parens, colon) is itself ordinary printable ASCII.
+    cid_spans = [match.span() for match in _CID_ARTIFACT_RE.finditer(text)]
+    bad += sum(end - start for start, end in cid_spans)
+    skip_ranges = cid_spans
+    skip_idx = 0
+    idx = 0
+    while idx < total:
+        if skip_idx < len(skip_ranges) and idx == skip_ranges[skip_idx][0]:
+            idx = skip_ranges[skip_idx][1]
+            skip_idx += 1
+            continue
+        ch = text[idx]
         if ch == _REPLACEMENT_CHAR:
             bad += 1
-            continue
-        if ch in "\n\r\t":
-            continue
-        category = unicodedata.category(ch)
-        # Cc = control, Cs = surrogate, Co = private use, Cn = unassigned.
-        if category in ("Cc", "Cs", "Co", "Cn"):
-            bad += 1
+        elif ch not in "\n\r\t":
+            category = unicodedata.category(ch)
+            # Cc = control, Cs = surrogate, Co = private use, Cn = unassigned.
+            if category in ("Cc", "Cs", "Co", "Cn"):
+                bad += 1
+        idx += 1
     return max(0.0, 1.0 - (bad / total))
 
 
@@ -216,7 +291,11 @@ def _token_whitespace_quality(tokens: list[str]) -> float | None:
         return None
     single_char = sum(1 for t in alpha_tokens if len(t) == 1 and t.lower() not in ("a", "i"))
     overlong = sum(1 for t in alpha_tokens if len(t) > 25)
-    penalty = (single_char + overlong) / len(alpha_tokens)
+    # A token containing "(cid:N)" glyph-ID placeholders is not a real word
+    # no matter its length or spacing — it is unmapped-glyph corruption, the
+    # same failure mode this signal exists to catch.
+    cid_broken = sum(1 for t in alpha_tokens if _CID_ARTIFACT_RE.search(t))
+    penalty = (single_char + overlong + cid_broken) / len(alpha_tokens)
     return max(0.0, 1.0 - penalty)
 
 

@@ -135,6 +135,72 @@ def test_prose_coherence_unavailable_for_too_few_tokens() -> None:
     assert "prose_coherence" in result.unavailable_signals
 
 
+def test_cid_glyph_artifacts_are_flagged_and_score_poorly() -> None:
+    """Docs #2346/#5483: PDFs whose fonts lack a ToUnicode CMap extract as
+    literal "(cid:N)" glyph-ID placeholders instead of real characters. Every
+    individual character in that placeholder text is ordinary printable
+    ASCII, so this must not be silently treated as clean/plausible text."""
+    text = " ".join(f"(cid:{65 + i % 26})(cid:{97 + i % 26})(cid:{48 + i % 10})" for i in range(60))
+    clean = score_machine(text_content="This is fine text with no issues at all here.")
+    corrupted = score_machine(text_content=text, config=DEFAULT_CONFIG)
+    assert corrupted.score is not None
+    assert corrupted.score < 60.0
+    assert corrupted.signals["char_script_plausibility"] < clean.signals["char_script_plausibility"]
+    assert any(r.code == "machine.cid_glyph_artifacts" for r in corrupted.reasons)
+    assert any(
+        r.severity == "blocking"
+        for r in corrupted.reasons
+        if r.code == "machine.cid_glyph_artifacts"
+    )
+    # Structured/table detection must not be given a neutral (0.5) pass on
+    # text that is entirely glyph-ID corruption — it should be treated as
+    # the computable failure it is, same as the empty-text case.
+    assert corrupted.signals["structured_entities"] == 0.0
+    assert corrupted.signals["table_structure"] == 0.0
+
+
+def test_cid_glyph_artifacts_below_blocking_ratio_still_lower_plausibility() -> None:
+    """A handful of stray "(cid:N)" placeholders (below the blocking ratio)
+    should still measurably reduce char_script_plausibility even though they
+    don't trigger the dedicated blocking reason."""
+    clean = score_machine(text_content="This is fine text with no issues at all here today.")
+    mostly_clean = score_machine(
+        text_content="This is fine text with (cid:114)(cid:97) issues at all here today."
+    )
+    assert (
+        mostly_clean.signals["char_script_plausibility"] < clean.signals["char_script_plausibility"]
+    )
+    assert not any(r.code == "machine.cid_glyph_artifacts" for r in mostly_clean.reasons)
+
+
+def test_cid_glyph_artifacts_partially_dominant_still_computes_signals() -> None:
+    """Between the blocking and fully-dominant ratios, the document is
+    flagged but structural signals are still computed (not hard-zeroed) so
+    a partially-corrupted document isn't scored identically to one that is
+    pure garbage end to end."""
+    text = (
+        "This is some normal readable prose text describing a routine visit and treatment. " * 6
+    ) + " ".join(f"(cid:{i % 100})" for i in range(20))
+    result = score_machine(text_content=text, config=DEFAULT_CONFIG)
+    assert result.signals["char_script_plausibility"] not in (0.0, None)
+    assert result.signals["structured_entities"] not in (0.0, None)
+    assert not any(r.code == "machine.cid_glyph_artifacts" for r in result.reasons)
+
+
+def test_cid_glyph_artifacts_fully_dominant_scores_zero() -> None:
+    """Docs where (cid:N) placeholders make up the vast majority of the
+    extracted text have no real content left for structural signals to
+    assess — this must score like the empty-text case (0), not inherit a
+    perfect repetition_noise score just because every glyph ID differs."""
+    text = "\n".join(
+        " ".join(f"(cid:{(i * 7 + j) % 140})(cid:{(i + j * 3) % 140})" for j in range(10))
+        for i in range(40)
+    )
+    result = score_machine(text_content=text, config=DEFAULT_CONFIG)
+    assert result.score == 0.0
+    assert any(r.code == "machine.cid_glyph_artifacts" for r in result.reasons)
+
+
 def pytest_approx(value: float, tol: float = 1e-6):
     """Small local helper to avoid importing pytest.approx repeatedly."""
     import pytest
