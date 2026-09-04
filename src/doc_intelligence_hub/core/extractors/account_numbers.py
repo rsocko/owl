@@ -16,6 +16,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+from doc_intelligence_hub.core.extractors.correction_hints import pick_nearest_to_anchor
 from doc_intelligence_hub.core.masked_identifiers import masked_identifier_suffix
 from doc_intelligence_hub.core.paperless import (
     MetadataFieldKey,
@@ -123,20 +124,37 @@ def extract_account_numbers(text: str) -> list[dict[str, str]]:
                         "value": raw_value,
                         "normalized": normalized,
                         "raw_match": m.group(0).strip(),
+                        "start": m.start(1),
                     }
                 )
 
     return matches
 
 
-def pick_best_account_identifier(matches: list[dict[str, str]]) -> str | None:
+def pick_best_account_identifier(
+    matches: list[dict[str, str]],
+    *,
+    text: str | None = None,
+    anchor: str | None = None,
+) -> str | None:
     """Pick the best account identifier from extracted matches.
 
-    Prefers last-4-digit identifiers (masked format) as they're the most
-    commonly used for account disambiguation in statements.
+    When ``text``/``anchor`` are supplied (a stored correspondent+field label anchor —
+    see issue #171) and more than one match exists, prefers whichever match sits
+    nearest the anchor over the default pattern-preference order below. Otherwise
+    prefers last-4-digit identifiers (masked format) as they're the most commonly used
+    for account disambiguation in statements.
     """
     if not matches:
         return None
+
+    if text and anchor and len(matches) > 1:
+        candidates = [(m["start"], m) for m in matches if "start" in m]
+        biased = pick_nearest_to_anchor(text, candidates, anchor)
+        if biased is not None:
+            if biased["pattern"] in ("account_last4", "ending_in", "card_number", "masked_number"):
+                return f"ending {biased['normalized']}"
+            return biased["value"]
 
     # Prefer last-4 patterns
     for m in matches:
@@ -167,10 +185,30 @@ def normalize_masked_account_identifier(value: object) -> str | None:
     return None
 
 
-def pick_masked_account_identifier(matches: list[dict[str, str]]) -> str | None:
-    """Pick an identifier while retaining only a short masked suffix."""
+def pick_masked_account_identifier(
+    matches: list[dict[str, str]],
+    *,
+    text: str | None = None,
+    anchor: str | None = None,
+) -> str | None:
+    """Pick an identifier while retaining only a short masked suffix.
+
+    When ``text``/``anchor`` are supplied and more than one match exists, prefers
+    whichever match sits nearest the anchor over the default pattern-preference order
+    (see ``pick_best_account_identifier`` and issue #171).
+    """
     if not matches:
         return None
+
+    if text and anchor and len(matches) > 1:
+        candidates = [(m["start"], m) for m in matches if "start" in m]
+        biased = pick_nearest_to_anchor(text, candidates, anchor)
+        if biased is not None:
+            normalized = re.sub(r"[^A-Za-z0-9]", "", biased.get("normalized", "")).upper()
+            if len(normalized) >= 2:
+                suffix = normalized[-4:]
+                prefix = "member " if biased.get("pattern") == "member_id" else ""
+                return f"{prefix}ending {suffix}"
 
     preferred = (
         "account_last4",

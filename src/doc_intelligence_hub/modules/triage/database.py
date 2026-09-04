@@ -159,6 +159,15 @@ class ExtractionCorrection(Base):
     source_region_json = Column(
         "source_region", Text, nullable=True
     )  # bounding box / OCR region JSON
+    # Resolved once (via Paperless) at correction-save time — see issue #171. Storing the
+    # name here (rather than re-resolving document_id -> correspondent on every read) keeps
+    # correspondent-keyed hint lookups a plain local DB query, with no Paperless calls, so
+    # they're cheap enough to run on every document during rule-based extraction.
+    correspondent = Column(String, nullable=True, index=True)
+    # Short text snippet immediately preceding the corrected value in the document's source
+    # content (e.g. "Total Due:"), derived once at correction-save time. Used to bias future
+    # extraction toward the same textual context for this correspondent+field.
+    label_anchor = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     created_by = Column(String, default="user")
@@ -219,6 +228,10 @@ def _migrate_missing_columns(engine):
             ("paperless_synced_at", "DATETIME"),
             ("undone", "INTEGER DEFAULT 0"),
             ("undone_at", "DATETIME"),
+        ],
+        "extraction_corrections": [
+            ("correspondent", "VARCHAR"),
+            ("label_anchor", "TEXT"),
         ],
     }
 
@@ -842,6 +855,8 @@ def _correction_to_dict(c: ExtractionCorrection) -> dict[str, Any]:
         "confidence": c.confidence,
         "correction_type": c.correction_type,
         "source_region": source_region,
+        "correspondent": c.correspondent,
+        "label_anchor": c.label_anchor,
         "notes": c.notes,
         "created_at": c.created_at.isoformat() if c.created_at else None,
         "created_by": c.created_by,
@@ -862,9 +877,16 @@ def create_extraction_correction(
     confidence: float | None = None,
     correction_type: str,
     source_region: dict | None = None,
+    correspondent: str | None = None,
+    label_anchor: str | None = None,
     notes: str | None = None,
 ) -> dict[str, Any]:
-    """Create an extraction correction record."""
+    """Create an extraction correction record.
+
+    ``correspondent`` and ``label_anchor`` are resolved/derived by the caller (typically
+    the metadata correction API, which has Paperless access) — see issue #171. Passing
+    them lets later correspondent+field hint lookups stay pure local DB reads.
+    """
     import json
 
     session = get_session()
@@ -877,6 +899,8 @@ def create_extraction_correction(
             confidence=confidence,
             correction_type=correction_type,
             source_region_json=json.dumps(source_region) if source_region else None,
+            correspondent=correspondent,
+            label_anchor=label_anchor,
             notes=notes,
         )
         session.add(correction)
@@ -920,6 +944,97 @@ def list_recent_corrections(
         query = query.order_by(ExtractionCorrection.created_at.desc())
         rows = query.offset(offset).limit(limit).all()
         return [_correction_to_dict(c) for c in rows]
+    finally:
+        session.close()
+
+
+# ------------------------------------------------------------------
+# Correspondent-keyed correction hints (issue #171)
+# ------------------------------------------------------------------
+
+# Correction types that represent a human-confirmed-correct value, safe to use as a
+# basis for biasing future extraction. 'added' (fully-automated writes with no human
+# review) is deliberately excluded.
+_HINT_CORRECTION_TYPES = ("corrected", "confirmed")
+
+
+def list_corrections_for_correspondent(
+    correspondent: str,
+    field_name: str,
+    *,
+    correction_type: tuple[str, ...] = _HINT_CORRECTION_TYPES,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List corrections for a specific correspondent + field, newest first."""
+    session = get_session()
+    try:
+        query = session.query(ExtractionCorrection).filter(
+            ExtractionCorrection.field_name == field_name,
+            ExtractionCorrection.correspondent == correspondent,
+        )
+        if correction_type:
+            query = query.filter(ExtractionCorrection.correction_type.in_(correction_type))
+        rows = query.order_by(ExtractionCorrection.created_at.desc()).limit(limit).all()
+        return [_correction_to_dict(c) for c in rows]
+    finally:
+        session.close()
+
+
+def group_corrections_by_correspondent(
+    field_name: str,
+    *,
+    correction_type: tuple[str, ...] = _HINT_CORRECTION_TYPES,
+    limit: int = 1000,
+) -> dict[str, list[dict[str, Any]]]:
+    """Group stored corrections for ``field_name`` by resolved correspondent name.
+
+    Only rows with a resolved ``correspondent`` (captured at correction-save time via
+    Paperless — see ``create_extraction_correction``) are included; corrections saved
+    before that lookup existed, or where resolution failed, are excluded.
+    """
+    session = get_session()
+    try:
+        rows = (
+            session.query(ExtractionCorrection)
+            .filter(
+                ExtractionCorrection.field_name == field_name,
+                ExtractionCorrection.correction_type.in_(correction_type),
+                ExtractionCorrection.correspondent.isnot(None),
+            )
+            .order_by(ExtractionCorrection.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            grouped.setdefault(row.correspondent, []).append(_correction_to_dict(row))
+        return grouped
+    finally:
+        session.close()
+
+
+def get_latest_label_anchor(correspondent: str | None, field_name: str) -> str | None:
+    """Return the most recent label anchor recorded for correspondent + field, if any.
+
+    This is the read path used by the extraction bias heuristics — a plain indexed DB
+    query with no Paperless calls, so it's cheap enough to run per document.
+    """
+    if not correspondent:
+        return None
+    session = get_session()
+    try:
+        row = (
+            session.query(ExtractionCorrection)
+            .filter(
+                ExtractionCorrection.field_name == field_name,
+                ExtractionCorrection.correspondent == correspondent,
+                ExtractionCorrection.correction_type.in_(_HINT_CORRECTION_TYPES),
+                ExtractionCorrection.label_anchor.isnot(None),
+            )
+            .order_by(ExtractionCorrection.created_at.desc())
+            .first()
+        )
+        return row.label_anchor if row else None
     finally:
         session.close()
 
