@@ -790,9 +790,7 @@ class Pipeline:
                     doc_id,
                     success=enrichment_error is None,
                     disposition=(
-                        "action_created"
-                        if enrichment_error is None
-                        else "action_enrichment_failed"
+                        "action_created" if enrichment_error is None else "action_enrichment_failed"
                     ),
                     error=str(enrichment_error) if enrichment_error is not None else None,
                     text_metrics=text_metrics,
