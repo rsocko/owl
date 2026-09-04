@@ -108,8 +108,8 @@ describe('OcrQualityDocumentDetail', () => {
     mocks.metadataCorrect.mockReset();
     mocks.metadataGet.mockResolvedValue({
       extracted_fields: [
-        { field_name: 'document_amount', paperless_field: 'document_amount', value: null },
-        { field_name: 'invoice_number', paperless_field: 'invoice_number', value: null },
+        { field_name: 'document_amount', paperless_field: 'document_amount', value: '129.99', has_value: true },
+        { field_name: 'invoice_number', paperless_field: 'invoice_number', value: null, has_value: false },
       ],
     });
     mocks.metadataCorrect.mockResolvedValue({ status: 'ok' });
@@ -255,6 +255,7 @@ describe('OcrQualityDocumentDetail', () => {
       reasons: [],
       document_profile: null,
     });
+
     mocks.regions.mockResolvedValue({
       page: 1,
       page_count: 1,
@@ -275,6 +276,25 @@ describe('OcrQualityDocumentDetail', () => {
     await waitFor(() => expect(mocks.regions).toHaveBeenCalledWith('501', 1));
     await waitFor(() => expect(mocks.annotationsList).toHaveBeenCalledWith('501'));
     expect(await screen.findByText('looks off')).toBeInTheDocument();
+  });
+
+  it('shows current Paperless field values before the reviewer starts a correction', async () => {
+    mocks.paperlessUrl.mockResolvedValue({ paperless_url: null });
+    mocks.documentDetail.mockResolvedValue({
+      document_id: 501,
+      review_status: 'UNCERTAIN',
+      reasons: [],
+      document_profile: null,
+    });
+
+    renderPage('501');
+
+    expect(await screen.findByRole('heading', { name: 'Current Paperless fields' })).toBeInTheDocument();
+    expect(screen.getByText('Document Amount')).toBeInTheDocument();
+    expect(screen.getByText('129.99')).toBeInTheDocument();
+    expect(screen.getByText('Invoice Number')).toBeInTheDocument();
+    expect(screen.getByText('Missing')).toBeInTheDocument();
+    expect(screen.getByText(/Review these values before marking the document/i)).toBeInTheDocument();
   });
 
   it('forces Stage 2 analysis and refreshes scores/profile in place on success', async () => {
@@ -338,7 +358,7 @@ describe('OcrQualityDocumentDetail', () => {
     expect(screen.getByRole('button', { name: /Force Stage 2 analysis/i })).not.toBeDisabled();
   });
 
-  it('draws a region in "Correct field" mode and submits it as a real metadata correction (issue #172)', async () => {
+  it('draws a region in "Correct metadata" mode and submits it as a real metadata correction (issue #172)', async () => {
     mocks.paperlessUrl.mockResolvedValue({ paperless_url: null });
     mocks.documentDetail.mockResolvedValue({
       document_id: 501,
@@ -357,7 +377,7 @@ describe('OcrQualityDocumentDetail', () => {
 
     await waitFor(() => expect(screen.getByText('Region inspection')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: /Correct field/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Correct metadata/i }));
     const canvas = document.querySelector('.region-overlay-canvas') as HTMLElement;
     const img = document.querySelector('img.region-overlay-image') as HTMLImageElement;
     Object.defineProperty(img, 'clientWidth', { value: 600, configurable: true });
@@ -366,14 +386,15 @@ describe('OcrQualityDocumentDetail', () => {
     vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
       left: 0, top: 0, right: 600, bottom: 800, width: 600, height: 800, x: 0, y: 0, toJSON: () => {},
     });
-    fireEvent.mouseDown(canvas, { clientX: 15, clientY: 25 });
-    fireEvent.mouseMove(canvas, { clientX: 115, clientY: 85 });
-    fireEvent.mouseUp(canvas, { clientX: 115, clientY: 85 });
+    fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 15, clientY: 25 });
+    fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 115, clientY: 85 });
+    fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 115, clientY: 85 });
 
     // Lazily loads the correctable field list from the live-resolved Paperless schema.
     await waitFor(() => expect(mocks.metadataGet).toHaveBeenCalledWith('501'));
     const form = await screen.findByTestId('metadata-correction-form');
     fireEvent.change(within(form).getByLabelText('Field'), { target: { value: 'document_amount' } });
+    expect(within(form).getByLabelText('Corrected value')).toHaveValue('129.99');
     fireEvent.change(within(form).getByLabelText('Corrected value'), { target: { value: '129.99' } });
     fireEvent.click(within(form).getByRole('button', { name: /Submit correction/i }));
 

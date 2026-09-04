@@ -30,6 +30,18 @@
 
 .region-overlay-canvas.draw-mode {
   cursor: crosshair;
+  touch-action: none;
+}
+
+.region-overlay-canvas.draw-mode > * {
+  pointer-events: none;
+}
+
+.region-overlay-tool-help {
+  color: var(--text-muted, #6b7280);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  max-width: 70ch;
 }
 
 .region-overlay-image {

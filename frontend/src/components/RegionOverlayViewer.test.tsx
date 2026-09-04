@@ -78,26 +78,29 @@ describe('RegionOverlayViewer', () => {
     );
     loadImage(container);
 
-    fireEvent.click(screen.getByRole('button', { name: /Draw annotation/i }));
+    expect(screen.getByText(/Flag region records a reviewer note without changing the document/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Flag region/i }));
     const canvas = container.querySelector('.region-overlay-canvas') as HTMLElement;
+    const image = container.querySelector('.region-overlay-image') as HTMLImageElement;
+    expect(image).toHaveAttribute('draggable', 'false');
     vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
       left: 0, top: 0, right: 600, bottom: 800, width: 600, height: 800, x: 0, y: 0, toJSON: () => {},
     });
-    fireEvent.mouseDown(canvas, { clientX: 10, clientY: 10 });
-    fireEvent.mouseMove(canvas, { clientX: 100, clientY: 60 });
-    fireEvent.mouseUp(canvas, { clientX: 100, clientY: 60 });
+    fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 60 });
+    fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 60 });
 
     expect(screen.getByTestId('annotation-form')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'key_data' } });
     fireEvent.change(screen.getByLabelText(/Note/i), { target: { value: 'important field' } });
-    fireEvent.click(screen.getByRole('button', { name: /Save annotation/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save flag/i }));
 
     expect(onCreateAnnotation).toHaveBeenCalledWith(
       expect.objectContaining({ label: 'key_data', note: 'important field' }),
     );
   });
 
-  it('supports drawing a region in "Correct field" mode and reports it via onCorrectRegion (issue #172)', () => {
+  it('supports drawing a region in "Correct metadata" mode and reports it via onCorrectRegion (issue #172)', () => {
     const onCreateAnnotation = vi.fn();
     const onCorrectRegion = vi.fn();
     const { container } = render(
@@ -110,14 +113,15 @@ describe('RegionOverlayViewer', () => {
     );
     loadImage(container);
 
-    fireEvent.click(screen.getByRole('button', { name: /Correct field/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Correct metadata/i }));
+    expect(screen.getByText(/Release to choose the document field/i)).toBeInTheDocument();
     const canvas = container.querySelector('.region-overlay-canvas') as HTMLElement;
     vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
       left: 0, top: 0, right: 600, bottom: 800, width: 600, height: 800, x: 0, y: 0, toJSON: () => {},
     });
-    fireEvent.mouseDown(canvas, { clientX: 20, clientY: 30 });
-    fireEvent.mouseMove(canvas, { clientX: 120, clientY: 90 });
-    fireEvent.mouseUp(canvas, { clientX: 120, clientY: 90 });
+    fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 20, clientY: 30 });
+    fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 120, clientY: 90 });
+    fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 120, clientY: 90 });
 
     // Real drawn geometry is reported directly -- no inline annotation form,
     // and the annotation flow (onCreateAnnotation) is untouched.
