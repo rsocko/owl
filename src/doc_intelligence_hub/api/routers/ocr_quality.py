@@ -51,7 +51,7 @@ CLI (``doc_intelligence_hub.modules.ocr_quality.cli``) writes to.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -60,6 +60,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from doc_intelligence_hub.api.routers import make_paperless_client
+from doc_intelligence_hub.core.datetime_utils import serialize_utc_datetime
 from doc_intelligence_hub.core.paperless import PaperlessClient
 from doc_intelligence_hub.modules.ocr_quality import annotations as annotations_service
 from doc_intelligence_hub.modules.ocr_quality import region_diff, region_inspection
@@ -114,13 +115,13 @@ def _run_to_dict(run: InventoryRun) -> dict[str, Any]:
         "throughput_docs_per_second": run.throughput_docs_per_second,
         "seed": run.seed,
         "source_run_id": run.source_run_id,
-        "started_at": run.started_at.isoformat() if run.started_at else None,
-        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+        "started_at": serialize_utc_datetime(run.started_at),
+        "finished_at": serialize_utc_datetime(run.finished_at),
         "actor": run.actor,
         "trigger": run.trigger,
         "correlation_id": run.correlation_id,
         "cancel_requested": run.cancel_requested,
-        "cancelled_at": run.cancelled_at.isoformat() if run.cancelled_at else None,
+        "cancelled_at": serialize_utc_datetime(run.cancelled_at),
         "retry_count": run.retry_count,
         "max_retries": run.max_retries,
     }
@@ -397,7 +398,7 @@ async def start_corpus_scan(
         "run_id": run_id,
         "stage": RunStage.STAGE_1_CORPUS_SCAN.value,
         "status": RunStatus.RUNNING.value,
-        "scheduled_at": datetime.utcnow().isoformat(),
+        "scheduled_at": serialize_utc_datetime(datetime.now(UTC)),
         "actor": body.actor,
         "correlation_id": body.correlation_id,
     }
@@ -461,7 +462,7 @@ async def resume_corpus_scan(
         "run_id": run_id,
         "stage": RunStage.STAGE_1_CORPUS_SCAN.value,
         "status": RunStatus.RUNNING.value,
-        "scheduled_at": datetime.utcnow().isoformat(),
+        "scheduled_at": serialize_utc_datetime(datetime.now(UTC)),
     }
 
 
@@ -524,7 +525,7 @@ async def start_stratified_sample(
         "source_run_id": run_id,
         "stage": RunStage.STAGE_2_STRATIFIED_SAMPLE.value,
         "status": RunStatus.RUNNING.value,
-        "scheduled_at": datetime.utcnow().isoformat(),
+        "scheduled_at": serialize_utc_datetime(datetime.now(UTC)),
         "actor": body.actor,
         "correlation_id": body.correlation_id,
     }
