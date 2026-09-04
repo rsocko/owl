@@ -292,6 +292,14 @@ tr.is-selected {
   flex-wrap: wrap;
 }
 
+.ocr-status-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+
 .ocr-score-compare-row {
   display: flex;
   gap: 16px;
