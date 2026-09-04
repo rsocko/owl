@@ -27,6 +27,7 @@ from sqlalchemy import exists, func
 from sqlalchemy.orm import Session
 
 from doc_intelligence_hub.core import alerts
+from doc_intelligence_hub.core.datetime_utils import serialize_utc_datetime
 from doc_intelligence_hub.core.paperless import PaperlessClient
 
 from .candidate_models import CandidateState
@@ -365,8 +366,8 @@ class OcrQualityInventoryService:
                 "status": run.status,
                 "counts": dict(counts),
                 "throughput_docs_per_second": run.throughput_docs_per_second,
-                "started_at": run.started_at.isoformat() if run.started_at else None,
-                "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                "started_at": serialize_utc_datetime(run.started_at),
+                "finished_at": serialize_utc_datetime(run.finished_at),
                 "actor": run.actor,
                 "trigger": run.trigger,
                 "correlation_id": run.correlation_id,
@@ -935,8 +936,8 @@ class OcrQualityInventoryService:
                 "run_id": run_id,
                 "stage": run.stage,
                 "status": run.status,
-                "started_at": run.started_at.isoformat() if run.started_at else None,
-                "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                "started_at": serialize_utc_datetime(run.started_at),
+                "finished_at": serialize_utc_datetime(run.finished_at),
                 "throughput_docs_per_second": run.throughput_docs_per_second,
                 "counts": dict(run.counts or {}),
                 "schema_version": "1.0",
@@ -1043,7 +1044,7 @@ class OcrQualityInventoryService:
                 continue  # already have the most recent acceptance for this doc
             info[row.document_id] = {
                 "has_accepted_ocr_candidate": True,
-                "accepted_candidate_at": row.decided_at.isoformat() if row.decided_at else None,
+                "accepted_candidate_at": serialize_utc_datetime(row.decided_at),
                 "accepted_candidate_pending_invalidation": row.state
                 == CandidateState.ACCEPTED_PENDING_INVALIDATION.value,
             }
@@ -1265,8 +1266,12 @@ class OcrQualityInventoryService:
                     DocumentAssessment.machine_score
                 ),
                 "scorer_version_distribution": dict(scorer_versions),
-                "oldest_assessed_at": min(assessed_ats).isoformat() if assessed_ats else None,
-                "newest_assessed_at": max(assessed_ats).isoformat() if assessed_ats else None,
+                "oldest_assessed_at": (
+                    serialize_utc_datetime(min(assessed_ats)) if assessed_ats else None
+                ),
+                "newest_assessed_at": (
+                    serialize_utc_datetime(max(assessed_ats)) if assessed_ats else None
+                ),
                 "schema_version": "1.0",
                 "redacted": True,
             }
@@ -1288,7 +1293,7 @@ def _assessment_summary(
         "downstream_outcome": row.downstream_outcome,
         "dominant_classification": (row.document_profile or {}).get("dominant_classification"),
         "quality_scorer_version": row.quality_scorer_version,
-        "assessed_at": row.updated_at.isoformat() if row.updated_at else None,
+        "assessed_at": serialize_utc_datetime(row.updated_at),
         "has_accepted_ocr_candidate": bool(
             accepted_info and accepted_info.get("has_accepted_ocr_candidate")
         ),

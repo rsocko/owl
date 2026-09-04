@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy.orm import Session
+
+from doc_intelligence_hub.core.datetime_utils import (
+    normalize_utc_datetime,
+    serialize_utc_datetime,
+)
 
 from .config import settings
 from .database import VALID_ACTION_TYPES, VALID_STATUSES, Action, ActionFeedback
 from .risk_scoring import compute_risk_score
+
+__all__ = ["normalize_utc_datetime", "serialize_utc_datetime"]
 
 VALID_FEEDBACK_TYPES = {
     "not_an_action",
@@ -39,21 +46,6 @@ def stored_status_values(status: str) -> set[str]:
         for stored in {*VALID_STATUSES, *STATUS_ALIASES}
         if normalize_action_status(stored) == normalized
     }
-
-
-def normalize_utc_datetime(value: datetime) -> datetime:
-    """Normalize API timestamps to the UTC-naive convention used by the database."""
-    if value.tzinfo is None:
-        return value
-    return value.astimezone(UTC).replace(tzinfo=None)
-
-
-def serialize_utc_datetime(value: datetime | None) -> str | None:
-    """Serialize a database timestamp explicitly as UTC."""
-    if value is None:
-        return None
-    normalized = value if value.tzinfo else value.replace(tzinfo=UTC)
-    return normalized.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def recalculate_action_risk(action: Action) -> None:

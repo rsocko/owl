@@ -584,6 +584,8 @@ class TestBuildAggregateReport:
         serialized = str(report)
         assert "secret patient content" not in serialized
         assert report["redacted"] is True
+        assert report["started_at"].endswith("Z")
+        assert report["finished_at"].endswith("Z")
         assert "preliminary_score_decile_distribution" in report
 
     @pytest.mark.asyncio

@@ -133,6 +133,7 @@ class TestListRuns:
         body = resp.json()
         assert len(body["runs"]) == 1
         assert body["runs"][0]["run_id"] == "run-1"
+        assert body["runs"][0]["started_at"].endswith("Z")
         # No raw content/titles should ever appear in this response.
         assert "content" not in str(body)
 
@@ -634,6 +635,7 @@ class TestStartCorpusScan:
         assert body["stage"] == RunStage.STAGE_1_CORPUS_SCAN.value
         assert body["status"] == "running"
         assert body["run_id"]
+        assert body["scheduled_at"].endswith("Z")
 
         mock_run_corpus_scan.assert_awaited_once()
         _, kwargs = mock_run_corpus_scan.call_args
@@ -798,6 +800,7 @@ class TestStartStratifiedSample:
         assert body["source_run_id"] == "source-run"
         assert body["stage"] == RunStage.STAGE_2_STRATIFIED_SAMPLE.value
         assert body["run_id"] != "source-run"
+        assert body["scheduled_at"].endswith("Z")
 
         mock_run_stratified_sample.assert_awaited_once()
         _, kwargs = mock_run_stratified_sample.call_args
