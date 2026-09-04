@@ -20,6 +20,9 @@ export type DocumentSummary = {
   dominant_classification?: string | null;
   quality_scorer_version?: string | null;
   assessed_at?: string | null;
+  has_accepted_ocr_candidate?: boolean;
+  accepted_candidate_at?: string | null;
+  accepted_candidate_pending_invalidation?: boolean;
 };
 
 export type DocumentListResponse = {
@@ -245,7 +248,24 @@ export default function OcrQualityReviewQueue() {
                 key: 'review_status',
                 header: 'Status',
                 sortable: true,
-                render: (row) => <Badge tone={statusTone(row.review_status ?? 'unscored') as Tone}>{row.review_status ?? 'unscored'}</Badge>,
+                render: (row) => (
+                  <div className="ocr-status-cell">
+                    <Badge tone={statusTone(row.review_status ?? 'unscored') as Tone}>{row.review_status ?? 'unscored'}</Badge>
+                    {row.has_accepted_ocr_candidate && (
+                      <span
+                        title={
+                          row.accepted_candidate_at
+                            ? `OCR candidate accepted ${row.accepted_candidate_at}`
+                            : 'OCR candidate accepted'
+                        }
+                      >
+                        <Badge tone={row.accepted_candidate_pending_invalidation ? 'warning' : 'success'}>
+                          Resolved
+                        </Badge>
+                      </span>
+                    )}
+                  </div>
+                ),
               },
               { key: 'overlay_score', header: 'Overlay', sortable: true, render: (row) => formatScore(row.overlay_score) },
               { key: 'machine_score', header: 'Machine', sortable: true, render: (row) => formatScore(row.machine_score) },

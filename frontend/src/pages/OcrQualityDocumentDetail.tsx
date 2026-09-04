@@ -63,6 +63,12 @@ export type DocumentDetail = {
   // ever run for this document — independent of whether overlay_score ended
   // up populated (profiling can run without producing a usable score).
   has_stage2_analysis?: boolean;
+  // Whether an OCR candidate has ever been accepted/applied to Paperless for
+  // this document — surfaced as a "resolved" indicator alongside the
+  // (unrefreshed) review_status baseline. See OcrCandidatesPanel's baseline note.
+  has_accepted_ocr_candidate?: boolean;
+  accepted_candidate_at?: string | null;
+  accepted_candidate_pending_invalidation?: boolean;
 };
 
 const SEVERITY_TONE: Record<string, Tone> = { info: 'info', warning: 'warn', blocking: 'err' };
@@ -318,12 +324,34 @@ export default function OcrQualityDocumentDetail() {
           <Card title="Scores">
             <div className="ocr-score-summary">
               <Badge tone={statusTone(detail.review_status ?? 'unscored') as Tone}>{detail.review_status ?? 'unscored'}</Badge>
+              {detail.has_accepted_ocr_candidate && (
+                <span
+                  title={
+                    detail.accepted_candidate_at
+                      ? `OCR candidate accepted ${detail.accepted_candidate_at}`
+                      : 'OCR candidate accepted'
+                  }
+                >
+                  <Badge tone={detail.accepted_candidate_pending_invalidation ? 'warning' : 'success'}>
+                    Resolved
+                  </Badge>
+                </span>
+              )}
               <span>Overlay/readability: <strong>{formatScore(detail.overlay_score)}</strong></span>
               <span>Machine-extraction: <strong>{formatScore(detail.machine_score)}</strong></span>
               {detail.preliminary_score != null && (
                 <span className="text-muted">Stage-1 preliminary heuristic: {detail.preliminary_score}</span>
               )}
             </div>
+            {detail.has_accepted_ocr_candidate && (
+              <div className="ocr-unavailable-note">
+                <Badge tone={detail.accepted_candidate_pending_invalidation ? 'warning' : 'success'}>Resolved</Badge>{' '}
+                An OCR candidate was accepted and applied to this document
+                {detail.accepted_candidate_at ? ` on ${detail.accepted_candidate_at}` : ''}. The scores above are
+                still the pre-acceptance baseline (not refreshed automatically) — re-run Stage 2 below to
+                re-score the applied version.
+              </div>
+            )}
             {!detail.has_stage2_analysis && (
               <div className="ocr-unavailable-note">
                 <Badge tone="info">Stage 2 not run</Badge> This document has not had deep Stage 2
