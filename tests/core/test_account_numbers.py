@@ -118,6 +118,47 @@ class TestPickBestAccountIdentifier:
     def test_empty_returns_none(self):
         assert pick_best_account_identifier([]) is None
 
+    def test_prefers_anchor_adjacent_match_over_pattern_preference(self):
+        text = "Old Card #****9999 (closed)\nAccount Number: ABC123456"
+        matches = extract_account_numbers(text)
+        # Naively, "ending 9999" (account_last4) would win over the full account number.
+        assert pick_best_account_identifier(matches) == "ending 9999"
+        # But a hint says the true account identifier follows "Account Number:".
+        biased = pick_best_account_identifier(matches, text=text, anchor="Account Number:")
+        assert biased == "ABC123456"
+
+    def test_anchor_not_found_falls_back_to_pattern_preference(self):
+        text = "Old Card #****9999 (closed)\nAccount Number: ABC123456"
+        matches = extract_account_numbers(text)
+        biased = pick_best_account_identifier(matches, text=text, anchor="Member ID:")
+        assert biased == "ending 9999"
+
+    def test_single_match_ignores_anchor(self):
+        matches = [
+            {"pattern": "member_id", "value": "MEM123456", "normalized": "MEM123456", "start": 0},
+        ]
+        assert pick_best_account_identifier(
+            matches, text="Member ID: MEM123456", anchor="Member ID:"
+        ) == "MEM123456"
+
+
+class TestPickMaskedAccountIdentifier:
+    """Tests for the masked-pick heuristic, including issue #171 hint bias."""
+
+    def test_prefers_anchor_adjacent_match_over_pattern_preference(self):
+        text = "Old Card #****9999 (closed)\nAccount Number: ABC123456"
+        matches = extract_account_numbers(text)
+        # Naively, the masked "ending 9999" pattern wins over a full account number.
+        assert pick_masked_account_identifier(matches) == "ending 9999"
+        biased = pick_masked_account_identifier(matches, text=text, anchor="Account Number:")
+        assert biased == "ending 3456"
+
+    def test_anchor_not_found_falls_back_to_pattern_preference(self):
+        text = "Old Card #****9999 (closed)\nAccount Number: ABC123456"
+        matches = extract_account_numbers(text)
+        biased = pick_masked_account_identifier(matches, text=text, anchor="Grand Total:")
+        assert biased == "ending 9999"
+
 
 def test_normalizes_only_masked_account_identifiers() -> None:
     assert normalize_masked_account_identifier(" xxxx-4321 ") == "ending 4321"

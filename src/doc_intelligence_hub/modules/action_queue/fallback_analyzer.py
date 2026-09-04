@@ -8,11 +8,35 @@ ensures the pipeline still produces useful results without AI.
 import re
 from datetime import date, timedelta
 
+from doc_intelligence_hub.core.extractors.correction_hints import pick_nearest_to_anchor
+
 from .analyzer import (
     _normalize_cta,
     normalize_extracted_data,
     receipt_no_action_result,
 )
+
+# Field name used for stored correction hints on the extracted dollar amount. Matches
+# the field name the companion metadata-correction allowlist (issue #172) is expected
+# to use once it adds amount corrections.
+_AMOUNT_HINT_FIELD = "document_amount"
+
+
+def _get_amount_hint_anchor(correspondent: str) -> str | None:
+    """Best-effort lookup of a stored correspondent+field label anchor.
+
+    Wrapped in a broad except so a database hiccup (or the triage DB not being
+    configured in this process) never breaks rule-based extraction, which must
+    always be able to run standalone.
+    """
+    if not correspondent:
+        return None
+    try:
+        from doc_intelligence_hub.modules.triage.database import get_latest_label_anchor
+
+        return get_latest_label_anchor(correspondent, _AMOUNT_HINT_FIELD)
+    except Exception:
+        return None
 
 # Keyword patterns for action type detection
 _PAY_KEYWORDS = re.compile(
@@ -144,7 +168,7 @@ class RuleBasedAnalyzer:
             }
 
         # Extract amount if it looks like a bill
-        amount = self._extract_amount(text) if action_type == "PAY" else None
+        amount = self._extract_amount(text, correspondent) if action_type == "PAY" else None
 
         # Extract due date
         due_date = self._extract_due_date(text)
@@ -260,19 +284,42 @@ class RuleBasedAnalyzer:
 
         return best_type, confidence
 
-    def _extract_amount(self, text: str) -> float | None:
-        """Extract the largest dollar amount from text."""
-        matches = _AMOUNT_PATTERN.findall(text)
+    def _extract_amount(self, text: str, correspondent: str = "") -> float | None:
+        """Extract a dollar amount from text.
+
+        Prefers the candidate positioned nearest a stored correspondent+field label
+        anchor (from past corrections/confirmations — see issue #171) when one exists
+        and there's more than one candidate to choose from. Otherwise falls back to
+        the naive "largest amount" heuristic (likely the total due).
+        """
+        matches = list(_AMOUNT_PATTERN.finditer(text))
         if not matches:
             return None
-        amounts = []
+
+        amounts: list[float] = []
+        candidates: list[tuple[int, float]] = []
         for m in matches:
             try:
-                amounts.append(float(m.replace(",", "")))
+                value = float(m.group(1).replace(",", ""))
             except ValueError:
                 continue
-        # Return the largest amount (likely the total due)
-        return max(amounts) if amounts else None
+            amounts.append(value)
+            candidates.append((m.start(), value))
+        if not amounts:
+            return None
+
+        if len(candidates) > 1:
+            anchor = self._get_amount_hint_anchor(correspondent)
+            if anchor:
+                biased = pick_nearest_to_anchor(text, candidates, anchor)
+                if biased is not None:
+                    return biased
+
+        # Naive fallback: return the largest amount (likely the total due)
+        return max(amounts)
+
+    def _get_amount_hint_anchor(self, correspondent: str) -> str | None:
+        return _get_amount_hint_anchor(correspondent)
 
     def _extract_due_date(self, text: str) -> date | None:
         """Extract the first plausible future date from text."""
