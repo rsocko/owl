@@ -150,7 +150,7 @@ def score_machine(
                 Reason(
                     code="machine.cid_glyph_artifacts",
                     message=(
-                        "Extracted text is dominated by \"(cid:N)\" placeholders — the PDF's "
+                        'Extracted text is dominated by "(cid:N)" placeholders — the PDF\'s '
                         "font is missing a ToUnicode mapping, so raw glyph IDs leaked through "
                         "instead of real characters. Re-extraction or re-OCR is required."
                     ),
@@ -175,7 +175,7 @@ def score_machine(
                     Reason(
                         code="machine.cid_glyph_artifacts",
                         message=(
-                            "Extracted text is dominated by \"(cid:N)\" placeholders — the "
+                            'Extracted text is dominated by "(cid:N)" placeholders — the '
                             "PDF's font is missing a ToUnicode mapping, so raw glyph IDs "
                             "leaked through instead of real characters. Re-extraction or "
                             "re-OCR is required."

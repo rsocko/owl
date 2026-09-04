@@ -140,16 +140,18 @@ def test_cid_glyph_artifacts_are_flagged_and_score_poorly() -> None:
     literal "(cid:N)" glyph-ID placeholders instead of real characters. Every
     individual character in that placeholder text is ordinary printable
     ASCII, so this must not be silently treated as clean/plausible text."""
-    text = " ".join(
-        f"(cid:{65 + i % 26})(cid:{97 + i % 26})(cid:{48 + i % 10})" for i in range(60)
-    )
+    text = " ".join(f"(cid:{65 + i % 26})(cid:{97 + i % 26})(cid:{48 + i % 10})" for i in range(60))
     clean = score_machine(text_content="This is fine text with no issues at all here.")
     corrupted = score_machine(text_content=text, config=DEFAULT_CONFIG)
     assert corrupted.score is not None
     assert corrupted.score < 60.0
     assert corrupted.signals["char_script_plausibility"] < clean.signals["char_script_plausibility"]
     assert any(r.code == "machine.cid_glyph_artifacts" for r in corrupted.reasons)
-    assert any(r.severity == "blocking" for r in corrupted.reasons if r.code == "machine.cid_glyph_artifacts")
+    assert any(
+        r.severity == "blocking"
+        for r in corrupted.reasons
+        if r.code == "machine.cid_glyph_artifacts"
+    )
     # Structured/table detection must not be given a neutral (0.5) pass on
     # text that is entirely glyph-ID corruption — it should be treated as
     # the computable failure it is, same as the empty-text case.
@@ -166,8 +168,7 @@ def test_cid_glyph_artifacts_below_blocking_ratio_still_lower_plausibility() -> 
         text_content="This is fine text with (cid:114)(cid:97) issues at all here today."
     )
     assert (
-        mostly_clean.signals["char_script_plausibility"]
-        < clean.signals["char_script_plausibility"]
+        mostly_clean.signals["char_script_plausibility"] < clean.signals["char_script_plausibility"]
     )
     assert not any(r.code == "machine.cid_glyph_artifacts" for r in mostly_clean.reasons)
 
