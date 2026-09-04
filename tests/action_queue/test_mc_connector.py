@@ -270,6 +270,7 @@ class TestMcListActions:
 
     def test_read_only_connector_omits_file_source_action(self, tmp_path):
         db_path = tmp_path / "readonly_mc_actions.db"
+        triage_db_path = tmp_path / "readonly_mc_triage.db"
         app = create_app(
             HubSettings(
                 paperless_url="http://paperless.test",
@@ -278,9 +279,12 @@ class TestMcListActions:
             )
         )
         original_db_url = aq_settings.database_url
+        original_triage_db_url = triage_database._db_url
         aq_settings.database_url = f"sqlite:///{db_path}"
+        triage_database.configure(f"sqlite:///{triage_db_path}")
         try:
             init_db()
+            triage_database.init_db()
             db = get_session()
             try:
                 db.add(
@@ -301,6 +305,7 @@ class TestMcListActions:
             assert {source["id"] for source in action["source_actions"]} == {"send_to_review"}
         finally:
             aq_settings.database_url = original_db_url
+            triage_database.configure(original_triage_db_url)
 
     def test_connector_never_exposes_legacy_raw_account_number(self, seeded_client):
         db = get_session()

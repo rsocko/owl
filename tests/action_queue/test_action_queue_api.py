@@ -965,6 +965,7 @@ class TestPreviewUrlEdgeCases:
     def test_preview_url_with_empty_paperless_url(self, tmp_path):
         """When both hub and action queue settings have empty paperless_url, preview_url is None."""
         db_path = tmp_path / "test_actions_edge.db"
+        triage_db_path = tmp_path / "test_actions_edge_triage.db"
         hub_settings = HubSettings(
             paperless_url="",
             paperless_token="test-token",
@@ -974,10 +975,13 @@ class TestPreviewUrlEdgeCases:
 
         original_db_url = aq_settings.database_url
         original_paperless_url = aq_settings.paperless_url
+        original_triage_db_url = triage_database._db_url
         aq_settings.database_url = f"sqlite:///{db_path}"
         aq_settings.paperless_url = ""
+        triage_database.configure(f"sqlite:///{triage_db_path}")
 
         init_db()
+        triage_database.init_db()
         db = get_session()
         try:
             db.add(
@@ -1001,6 +1005,7 @@ class TestPreviewUrlEdgeCases:
 
         aq_settings.database_url = original_db_url
         aq_settings.paperless_url = original_paperless_url
+        triage_database.configure(original_triage_db_url)
 
     def test_preview_url_strips_trailing_slash(self, seeded_client):
         original = aq_settings.paperless_url
