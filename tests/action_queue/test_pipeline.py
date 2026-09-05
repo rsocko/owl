@@ -141,17 +141,13 @@ class TestPipelineErrorIsolation:
         assert stats["timed_out"] is False
 
     @pytest.mark.asyncio
-    async def test_reanalysis_releases_database_during_paperless_enrichment(
-        self, db, monkeypatch
-    ):
+    async def test_reanalysis_releases_database_during_paperless_enrichment(self, db, monkeypatch):
         pipeline = Pipeline()
         enrichment_started = asyncio.Event()
         finish_enrichment = asyncio.Event()
 
         monkeypatch.setattr(aq_settings, "write_to_paperless", True)
-        monkeypatch.setattr(
-            pipeline.paperless, "list_correspondents", AsyncMock(return_value=[])
-        )
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", AsyncMock(return_value=[]))
         monkeypatch.setattr(
             pipeline.paperless,
             "fetch_all_metadata",
