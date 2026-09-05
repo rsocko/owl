@@ -623,6 +623,8 @@ class Pipeline:
                     if settings.write_to_paperless:
                         if self._enrichment_available:
                             try:
+                                # Never retain a SQLite write lock during network I/O.
+                                db.commit()
                                 await self.enricher.sync_status(doc_id, "not_an_action")
                                 for existing_action in existing_actions:
                                     existing_action.last_synced_status = "not_an_action"
@@ -743,6 +745,7 @@ class Pipeline:
                     reason = "; ".join(dict.fromkeys(review_reasons))
                     for stored_action in stored_actions:
                         route_action_to_review(db, stored_action, reason=reason)
+                    db.commit()
                     if settings.write_to_paperless and self._enrichment_available:
                         primary_action = (
                             actions[primary_idx] if primary_idx < len(actions) else actions[0]
@@ -793,6 +796,8 @@ class Pipeline:
                         list(enrichment_data.keys()),
                     )
                     try:
+                        # Make local analysis visible and release the writer before Paperless I/O.
+                        db.commit()
                         await self.enricher.enrich_document(doc_id, enrichment_data)
                         logger.info("doc_id=%s: enrichment succeeded", doc_id)
                         # Track what we wrote so bidirectional sync knows our last state
@@ -836,6 +841,7 @@ class Pipeline:
 
             except Exception as e:
                 # Isolate per-document failures so one bad document can't kill the whole run.
+                db.rollback()
                 console.print(f"  [red]✗[/red] Unexpected error processing document {doc_id}: {e}")
                 logger.exception(
                     "doc_id=%s title=%r: unexpected error during processing — continuing to next document",
@@ -851,8 +857,11 @@ class Pipeline:
                     }
                 )
                 continue
+            finally:
+                # Bound transactions to one document, including early-continue branches.
+                if db.in_transaction():
+                    db.commit()
 
-        db.commit()
         db.close()
 
         total_duration = time.monotonic() - run_start
