@@ -2,7 +2,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ActionQueueOperations from './ActionQueueOperations';
 
-const { runMock } = vi.hoisted(() => ({
+const { refreshMetadataMock, runMock } = vi.hoisted(() => ({
+  refreshMetadataMock: vi.fn(),
   runMock: vi.fn(),
 }));
 
@@ -13,7 +14,7 @@ vi.mock('../lib/api', () => ({
       check: vi.fn(),
       checkCustomFields: vi.fn(),
       backfill: vi.fn(),
-      refreshMetadata: vi.fn(),
+      refreshMetadata: refreshMetadataMock,
     },
   },
 }));
@@ -22,6 +23,8 @@ describe('ActionQueueOperations', () => {
   beforeEach(() => {
     runMock.mockReset();
     runMock.mockResolvedValue({});
+    refreshMetadataMock.mockReset();
+    refreshMetadataMock.mockResolvedValue({});
   });
 
   it('owns custom and dry-run controls outside the daily queue', async () => {
@@ -43,6 +46,16 @@ describe('ActionQueueOperations', () => {
         document_type: 'Statement',
         added_after: '2026-08-01',
       }));
+    });
+  });
+
+  it('treats Paperless as the source of truth when refreshing metadata', async () => {
+    render(<ActionQueueOperations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh all metadata' }));
+
+    await waitFor(() => {
+      expect(refreshMetadataMock).toHaveBeenCalledWith({ force: true });
     });
   });
 });

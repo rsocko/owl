@@ -261,7 +261,8 @@ export default function ActionQueueOperations() {
 
         <Card title="Backfill and repair">
           <p className="text-muted">
-            Preview or reapply Paperless metadata and intake-tag cleanup for existing actions.
+            Reapply OWL action data to Paperless, or replace OWL's cached document metadata
+            with current Paperless values.
           </p>
           <div className="btn-group">
             <Button
@@ -288,12 +289,12 @@ export default function ActionQueueOperations() {
             <Button
               onClick={() => void execute(
                 'metadata',
-                () => endpoints.actionQueue.refreshMetadata({ force: false }),
-                'Action metadata refreshed.',
+                () => endpoints.actionQueue.refreshMetadata({ force: true }),
+                'Action metadata refreshed from Paperless.',
               )}
               disabled={busy !== null}
             >
-              Refresh metadata
+              Refresh all metadata
             </Button>
           </div>
         </Card>

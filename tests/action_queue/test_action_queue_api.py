@@ -1317,6 +1317,69 @@ class TestRefreshMetadata:
             assert action["tags"] is not None
             assert len(action["tags"]) > 0
 
+    def test_force_refresh_replaces_and_clears_existing_metadata(self, seeded_client):
+        """Forced refresh makes the current Paperless snapshot authoritative."""
+        from unittest.mock import AsyncMock, patch
+
+        db = get_session()
+        try:
+            for action in db.query(Action).all():
+                action.document_date = date(2020, 1, 1)
+                action.document_type = "Old type"
+                action.tags = ["Old tag"]
+                action.correspondent = "Old correspondent"
+            db.commit()
+        finally:
+            db.close()
+
+        mock_fetch = AsyncMock(return_value=({}, {}, {}))
+        mock_get_doc = AsyncMock(
+            side_effect=[
+                {
+                    "id": 42,
+                    "created": None,
+                    "document_type": None,
+                    "tags": [],
+                    "correspondent": None,
+                },
+                {
+                    "id": 99,
+                    "created": None,
+                    "document_type": None,
+                    "tags": [],
+                    "correspondent": None,
+                },
+            ]
+        )
+
+        with (
+            patch(
+                "doc_intelligence_hub.core.paperless.PaperlessClient.fetch_all_metadata",
+                mock_fetch,
+            ),
+            patch(
+                "doc_intelligence_hub.core.paperless.PaperlessClient.get_document",
+                mock_get_doc,
+            ),
+        ):
+            resp = seeded_client.post(
+                "/api/queue/actions/refresh-metadata",
+                json={"force": True},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["updated"] == 2
+
+        db = get_session()
+        try:
+            for action in db.query(Action).all():
+                assert action.document_date is None
+                assert action.document_type is None
+                assert action.tags == []
+                assert action.correspondent is None
+        finally:
+            db.close()
+
 
 class TestRefreshAction:
     """Tests for GET /api/queue/actions/{id}/refresh."""
