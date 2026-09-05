@@ -338,6 +338,23 @@ class TestPipelineErrorIsolation:
                 "text_quality": "good",
             },
         }
+        session = get_session()
+        try:
+            session.add(
+                Action(
+                    document_id=1,
+                    document_title="Previously classified bill",
+                    action_type="PAY",
+                    title="Pay $50",
+                    status="pending",
+                    action_ready=True,
+                    review_state="ready",
+                    version=1,
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
 
         monkeypatch.setattr(aq_settings, "write_to_paperless", True)
         monkeypatch.setattr(pipeline.paperless, "list_correspondents", AsyncMock(return_value=[]))
@@ -369,6 +386,17 @@ class TestPipelineErrorIsolation:
 
         assert stats["no_action"] == 1
         pipeline.enricher.sync_status.assert_awaited_once_with(1, "not_an_action")
+        session = get_session()
+        try:
+            action = session.query(Action).filter_by(document_id=1).one()
+            assert action.status == "not_an_action"
+            assert action.action_ready is False
+            assert action.review_state == "resolved_no_action"
+            assert action.review_item_id is None
+            assert action.last_synced_status == "not_an_action"
+            assert action.version == 2
+        finally:
+            session.close()
 
     @pytest.mark.asyncio
     async def test_failed_no_action_sync_remains_retryable(self, db, monkeypatch):

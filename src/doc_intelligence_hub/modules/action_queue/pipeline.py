@@ -28,7 +28,12 @@ from .config import settings
 from .database import Action, ProcessingHistory, get_session, init_db
 from .enricher import PaperlessEnricher
 from .fallback_analyzer import RuleBasedAnalyzer
-from .lifecycle import action_has_critical_details, mark_action_ready, route_action_to_review
+from .lifecycle import (
+    action_has_critical_details,
+    mark_action_ready,
+    route_action_to_review,
+    transition_action_status,
+)
 from .obligations import associate_pay_action, associate_receipt
 from .risk_scoring import compute_risk_score
 
@@ -575,6 +580,35 @@ class Pipeline:
                     logger.info(
                         "doc_id=%s: no action needed (confidence=%s%%)", doc_id, overall_confidence
                     )
+                    existing_actions = (
+                        db.query(Action)
+                        .filter(
+                            Action.document_id == doc_id,
+                            Action.superseded_by_action_id.is_(None),
+                        )
+                        .all()
+                    )
+                    for existing_action in existing_actions:
+                        previous_state = (
+                            existing_action.status,
+                            existing_action.action_ready,
+                            existing_action.review_state,
+                            existing_action.review_item_id,
+                        )
+                        lifecycle_changed = transition_action_status(
+                            existing_action, "not_an_action"
+                        )
+                        existing_action.action_ready = False
+                        existing_action.review_state = "resolved_no_action"
+                        existing_action.review_item_id = None
+                        current_state = (
+                            existing_action.status,
+                            existing_action.action_ready,
+                            existing_action.review_state,
+                            existing_action.review_item_id,
+                        )
+                        if lifecycle_changed or current_state != previous_state:
+                            existing_action.version = (existing_action.version or 1) + 1
                     if is_non_actionable_receipt(doc):
                         receipt_match = associate_receipt(db, doc, content)
                         if receipt_match:
@@ -590,6 +624,8 @@ class Pipeline:
                         if self._enrichment_available:
                             try:
                                 await self.enricher.sync_status(doc_id, "not_an_action")
+                                for existing_action in existing_actions:
+                                    existing_action.last_synced_status = "not_an_action"
                             except Exception as exc:
                                 sync_error = exc
                                 logger.warning(
