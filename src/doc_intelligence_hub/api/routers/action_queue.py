@@ -1955,20 +1955,27 @@ async def refresh_metadata_from_paperless(
 
             # Document date (Paperless "created" field)
             new_date = _parse_date_safe(doc.get("created"))
-            if new_date and (body.force or action.document_date is None):
+            if body.force and action.document_date != new_date:
+                action.document_date = new_date
+                changed = True
+            elif not body.force and new_date and action.document_date is None:
                 action.document_date = new_date
                 changed = True
 
             # Document type (resolve ID to name)
             doc_type_raw = doc.get("document_type")
+            doc_type_name = None
             if doc_type_raw is not None:
                 if isinstance(doc_type_raw, int):
                     doc_type_name = doc_types.get(doc_type_raw, str(doc_type_raw))
                 else:
                     doc_type_name = str(doc_type_raw) if doc_type_raw else None
-                if doc_type_name and (body.force or action.document_type is None):
-                    action.document_type = doc_type_name
-                    changed = True
+            if body.force and action.document_type != doc_type_name:
+                action.document_type = doc_type_name
+                changed = True
+            elif not body.force and doc_type_name and action.document_type is None:
+                action.document_type = doc_type_name
+                changed = True
 
             # Tags (resolve IDs to names)
             tag_ids = doc.get("tags", [])
@@ -1979,20 +1986,27 @@ async def refresh_metadata_from_paperless(
                     tag_names = [str(t) for t in doc.get("tag_names", tag_ids)]
             else:
                 tag_names = [str(t) for t in doc.get("tag_names", [])]
-            if tag_names and (body.force or action.tags is None):
+            if body.force and action.tags != tag_names:
+                action.tags = tag_names
+                changed = True
+            elif not body.force and tag_names and action.tags is None:
                 action.tags = tag_names
                 changed = True
 
             # Correspondent (resolve ID to name)
             corr_raw = doc.get("correspondent")
+            corr_name = None
             if corr_raw is not None:
                 if isinstance(corr_raw, int):
                     corr_name = correspondents.get(corr_raw, str(corr_raw))
                 else:
                     corr_name = str(corr_raw) if corr_raw else None
-                if corr_name and (body.force or action.correspondent is None):
-                    action.correspondent = corr_name
-                    changed = True
+            if body.force and action.correspondent != corr_name:
+                action.correspondent = corr_name
+                changed = True
+            elif not body.force and corr_name and action.correspondent is None:
+                action.correspondent = corr_name
+                changed = True
 
             if changed:
                 action.updated_at = datetime.utcnow()
