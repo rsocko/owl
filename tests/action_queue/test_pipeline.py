@@ -140,6 +140,68 @@ class TestPipelineErrorIsolation:
         assert "simulated fetch failure" in stats["errors"][0]["error"]
         assert stats["timed_out"] is False
 
+    @pytest.mark.asyncio
+    async def test_reanalysis_releases_database_during_paperless_enrichment(self, db, monkeypatch):
+        pipeline = Pipeline()
+        enrichment_started = asyncio.Event()
+        finish_enrichment = asyncio.Event()
+
+        monkeypatch.setattr(aq_settings, "write_to_paperless", True)
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", AsyncMock(return_value=[]))
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "fetch_all_metadata",
+            AsyncMock(return_value=({}, {}, {})),
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "list_documents",
+            AsyncMock(return_value=_make_docs(1)),
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "get_document_content",
+            AsyncMock(return_value="Invoice: payment of $50.00 is due this month."),
+        )
+        monkeypatch.setattr(pipeline.analyzer, "health_check", AsyncMock(return_value=False))
+        monkeypatch.setattr(
+            pipeline.fallback_analyzer,
+            "analyze_document",
+            lambda doc: VALID_EXTRACTION,
+        )
+        pipeline.enricher.ensure_custom_fields_exist = AsyncMock(return_value={})
+
+        async def paused_enrichment(*args, **kwargs):
+            enrichment_started.set()
+            await finish_enrichment.wait()
+
+        pipeline.enricher.enrich_document = paused_enrichment
+        run_task = asyncio.create_task(pipeline.run(force=True, dry_run=False))
+
+        await asyncio.wait_for(enrichment_started.wait(), timeout=2)
+        session = get_session()
+        try:
+            action = session.query(Action).filter_by(document_id=1).one()
+            action.summary = "Updated while Paperless enrichment was running"
+            session.commit()
+        finally:
+            session.close()
+            finish_enrichment.set()
+
+        stats = await asyncio.wait_for(run_task, timeout=2)
+        assert stats["processed"] == 1
+
+    def test_sqlite_engine_uses_concurrency_pragmas(self, db):
+        from doc_intelligence_hub.modules.action_queue.database import get_engine
+
+        engine = get_engine()
+        with engine.connect() as connection:
+            journal_mode = connection.exec_driver_sql("PRAGMA journal_mode").scalar_one()
+            busy_timeout = connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one()
+
+        assert journal_mode == "wal"
+        assert busy_timeout == 30_000
+
     def test_resolves_paperless_metadata_for_analysis(self):
         pipeline = Pipeline()
         pipeline._correspondent_cache = {7: "City Utilities"}

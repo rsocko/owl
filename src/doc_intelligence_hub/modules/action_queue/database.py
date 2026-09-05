@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    event,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -197,7 +198,23 @@ class QueueConfiguration(Base):
 
 
 def get_engine():
-    return create_engine(settings.database_url, echo=False)
+    engine_kwargs = {"echo": False}
+    if settings.database_url.startswith("sqlite"):
+        engine_kwargs["connect_args"] = {"timeout": 30}
+
+    engine = create_engine(settings.database_url, **engine_kwargs)
+    if settings.database_url.startswith("sqlite"):
+
+        @event.listens_for(engine, "connect")
+        def configure_sqlite_connection(dbapi_connection, _connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=30000")
+            finally:
+                cursor.close()
+
+    return engine
 
 
 def get_session() -> Session:
