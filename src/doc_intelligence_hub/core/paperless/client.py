@@ -50,7 +50,10 @@ _SAVED_VIEW_MULTI_ID_RULES = {
     17: "tags__id__none",
     26: "correspondent__id__in",
 }
-_SAVED_VIEW_BOOLEAN_RULES = {7: "is_tagged"}
+_SAVED_VIEW_BOOLEAN_RULES = {
+    7: "is_tagged",
+    50: "has_duplicates",
+}
 _SAVED_VIEW_STRING_RULES = {20: "query"}
 _SAVED_VIEW_CUSTOM_FIELD_QUERY_RULE = 42
 _CUSTOM_FIELD_QUERY_MAX_DEPTH = 10

@@ -7,6 +7,7 @@ import re
 from datetime import date, datetime
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
@@ -69,6 +70,22 @@ _INITIAL_QUEUE_SETTINGS = {
     "rate_limit_delay": action_queue_settings.rate_limit_delay,
     "remove_source_tag_on_resolve": action_queue_settings.remove_source_tag_on_resolve,
 }
+
+
+def _paperless_query_diagnostics(response: httpx.Response) -> list[str]:
+    """Extract Paperless's structured advanced-query validation messages."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return []
+    if not isinstance(payload, dict):
+        return []
+    query_errors = payload.get("query")
+    if isinstance(query_errors, str):
+        return [query_errors]
+    if isinstance(query_errors, list):
+        return [error for error in query_errors if isinstance(error, str)]
+    return []
 
 
 class QueueRunRequest(BaseModel):
@@ -1211,6 +1228,23 @@ async def list_action_link_candidates(
                     paperless.fetch_all_metadata(),
                     paperless.list_custom_fields(),
                 )
+            except httpx.HTTPStatusError as exc:
+                from fastapi import HTTPException
+
+                if exc.response.status_code == 400:
+                    diagnostics = _paperless_query_diagnostics(exc.response)
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "code": "invalid_paperless_query",
+                            "message": "Paperless rejected the advanced search query.",
+                            "details": {"query": diagnostics},
+                        },
+                    ) from exc
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Paperless document search failed: {exc}",
+                ) from exc
             except Exception as exc:
                 from fastapi import HTTPException
 
