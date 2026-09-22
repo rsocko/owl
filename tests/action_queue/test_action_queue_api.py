@@ -3,6 +3,7 @@
 import json
 from datetime import date, datetime
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -289,6 +290,57 @@ class TestListActions:
         assert receipt["document_type"] == "Receipt"
         assert receipt["correspondent"] == "Power Co"
         assert receipt["amount"] == 125.5
+
+    def test_returns_paperless_advanced_query_diagnostics(self, seeded_client):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        request = httpx.Request(
+            "GET",
+            "http://paperless.test/api/documents/?query=title%3A%5B",
+        )
+        response = httpx.Response(
+            400,
+            request=request,
+            json={
+                "query": [
+                    "The query contains an unterminated range for field 'title'.",
+                    "Double-quote the value to search it as literal text.",
+                ]
+            },
+        )
+        paperless = MagicMock()
+        paperless.list_documents = AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "Bad Request",
+                request=request,
+                response=response,
+            )
+        )
+        paperless.fetch_all_metadata = AsyncMock(return_value=({}, {}, {}))
+        paperless.list_custom_fields = AsyncMock(return_value=[])
+
+        with patch(
+            "doc_intelligence_hub.api.routers.action_queue.make_paperless_client",
+            return_value=paperless,
+        ):
+            result = seeded_client.get(
+                "/api/queue/actions/1/link-candidates",
+                params={"q": "title:["},
+            )
+
+        assert result.status_code == 400
+        assert result.json() == {
+            "error": {
+                "code": "invalid_paperless_query",
+                "message": "Paperless rejected the advanced search query.",
+                "details": {
+                    "query": [
+                        "The query contains an unterminated range for field 'title'.",
+                        "Double-quote the value to search it as literal text.",
+                    ]
+                },
+            }
+        }
 
     def test_list_actions_resurfaces_expired_snoozes(self, seeded_client):
         seeded_client.post(

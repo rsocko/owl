@@ -190,6 +190,49 @@ async def test_get_document_content(client):
 
 
 @pytest.mark.asyncio
+async def test_document_content_and_versions_use_effective_version_payload(monkeypatch):
+    """Keep Paperless v3.2's effective latest-version content authoritative."""
+    versions = [
+        {
+            "id": 100,
+            "checksum": "root-checksum",
+            "version_label": None,
+            "is_root": True,
+        },
+        {
+            "id": 101,
+            "checksum": "latest-checksum",
+            "version_label": "owl-candidate-7",
+            "is_root": False,
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/documents/1/"
+        return httpx.Response(
+            200,
+            json={
+                "id": 1,
+                "content": "latest version content",
+                "versions": versions,
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    paperless = PaperlessClient(base_url="https://paperless.test", token="test-token")
+
+    assert await paperless.get_document_content(1) == "latest version content"
+    assert await paperless.list_document_versions(1) == versions
+
+
+@pytest.mark.asyncio
 async def test_fetch_all_metadata(client):
     correspondents, tags, document_types = await client.fetch_all_metadata()
     assert correspondents == {10: "Acme", 20: "Globex"}
@@ -302,6 +345,7 @@ async def test_saved_view_rules_are_translated_before_querying_documents(monkeyp
             {"rule_type": 26, "value": "31"},
             {"rule_type": 26, "value": "32"},
             {"rule_type": 42, "value": custom_field_query},
+            {"rule_type": 50, "value": "true"},
         ],
     }
     client, requests_seen = _make_saved_view_client(monkeypatch, definition)
@@ -324,6 +368,7 @@ async def test_saved_view_rules_are_translated_before_querying_documents(monkeyp
         "tags__id__none": "21,22",
         "correspondent__id__in": "31,32",
         "custom_field_query": custom_field_query,
+        "has_duplicates": "1",
         "page": "1",
     }
 
@@ -486,6 +531,7 @@ async def test_saved_view_duplicate_custom_field_query_fails_closed(monkeypatch)
         [{"rule_type": 999, "value": "1"}],
         [{"rule_type": 6, "value": ""}],
         [{"rule_type": 7, "value": "maybe"}],
+        [{"rule_type": 50, "value": "maybe"}],
         [{"rule_type": 20, "value": ""}],
         [{"rule_type": 3, "value": None}, {"rule_type": 3, "value": "4"}],
         ["not-a-rule"],
