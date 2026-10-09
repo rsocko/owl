@@ -101,9 +101,7 @@ async def test_client_uses_settled_generation_replay_contract() -> None:
 
     assert result.source_generation == "generation/one"
     assert seen is not None
-    assert seen.url.raw_path.startswith(
-        b"/api/connector/v1/payee-patterns/generation%2Fone"
-    )
+    assert seen.url.raw_path.startswith(b"/api/connector/v1/payee-patterns/generation%2Fone")
     assert seen.url.params["connectorRef"] == "opaque-connector"
 
 
@@ -124,9 +122,7 @@ def test_review_identity_history_and_no_documents_decision_are_durable(tmp_path)
                 notes="Paperless documents are not produced.",
             ),
         )
-        service.replace_snapshot(
-            _projection("generation-2", display_name="Renamed Utility")
-        )
+        service.replace_snapshot(_projection("generation-2", display_name="Renamed Utility"))
         reconciled = service.list_queue(status="reviewed")[0]
         history = service.list_history(candidate.id)
 

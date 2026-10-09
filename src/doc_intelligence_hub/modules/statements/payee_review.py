@@ -257,9 +257,7 @@ class TyrionPayeePatternsClient:
             timeout=timeout_seconds,
         )
 
-    async def fetch(
-        self, source_generation: str, connector_ref: str
-    ) -> PayeePatternProjectionV1:
+    async def fetch(self, source_generation: str, connector_ref: str) -> PayeePatternProjectionV1:
         generation = quote(source_generation, safe="")
         response = await self._client.get(
             f"/api/connector/v1/payee-patterns/{generation}",
@@ -605,12 +603,16 @@ class PayeeReviewService:
         return self._row_to_item(conn, updated)
 
     def list_history(self, candidate_id: str) -> list[PayeeReviewHistoryEvent]:
-        rows = self.database.connect().execute(
-            """SELECT * FROM tyrion_payee_review_events
+        rows = (
+            self.database.connect()
+            .execute(
+                """SELECT * FROM tyrion_payee_review_events
                WHERE deployment_id = ? AND candidate_id = ?
                ORDER BY created_at, id""",
-            (self.deployment_id, candidate_id),
-        ).fetchall()
+                (self.deployment_id, candidate_id),
+            )
+            .fetchall()
+        )
         return [
             PayeeReviewHistoryEvent(
                 id=row["id"],
@@ -707,10 +709,7 @@ class PayeeReviewService:
                     "id": "mark_no_documents_expected",
                     "label": "No documents expected",
                     "method": "POST",
-                    "url": (
-                        f"/api/mc/v1/payee-document-reviews/"
-                        f"{row['id']}/no-documents-expected"
-                    ),
+                    "url": (f"/api/mc/v1/payee-document-reviews/{row['id']}/no-documents-expected"),
                 },
             ],
         )

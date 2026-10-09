@@ -105,9 +105,7 @@ def test_mc_payee_contract_is_protected_and_records_explicit_actions(client, app
         "mark_no_documents_expected",
     }
 
-    correspondents = client.get(
-        "/api/mc/v1/correspondents?query=utility", headers=headers
-    )
+    correspondents = client.get("/api/mc/v1/correspondents?query=utility", headers=headers)
     assert correspondents.status_code == 200
     assert correspondents.json()[0]["id"] == 42
 
