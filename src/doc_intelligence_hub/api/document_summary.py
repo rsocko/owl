@@ -81,9 +81,7 @@ def build_document_summary(
             )
         ),
         # Paperless-native names are the only accepted document-type source.
-        document_type=_text(
-            _first(source, "document_type_name", "paperless_document_type")
-        ),
+        document_type=_text(_first(source, "document_type_name", "paperless_document_type")),
         document_date=document_date,
         date_label=date_label,
         tags=_tags(source.get("tags")),
