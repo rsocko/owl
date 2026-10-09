@@ -410,6 +410,61 @@ class TestListActions:
         assert action["recommended_cta"]["url"] == "https://billing.example/pay"
         assert action["extracted_data"]["reference_number"] == "INV-42"
 
+    def test_reads_and_appends_native_paperless_notes(self, seeded_client):
+        from unittest.mock import AsyncMock, patch
+
+        paperless = AsyncMock()
+        paperless.get_document_notes.return_value = [
+            {"id": 7, "note": "Paid through mortgage"}
+        ]
+        paperless.create_document_note.return_value = {
+            "id": 8,
+            "note": "Confirm escrow payment",
+        }
+
+        with patch(
+            "doc_intelligence_hub.api.routers.action_queue.make_paperless_client",
+            return_value=paperless,
+        ):
+            listed = seeded_client.get("/api/queue/actions/1/notes")
+            created = seeded_client.post(
+                "/api/queue/actions/1/notes",
+                json={"note": "  Confirm escrow payment  "},
+            )
+
+        assert listed.status_code == 200
+        assert listed.json()["notes"][0]["note"] == "Paid through mortgage"
+        assert created.status_code == 200
+        assert created.json()["note"]["id"] == 8
+        paperless.get_document_notes.assert_awaited_once_with(42)
+        paperless.create_document_note.assert_awaited_once_with(
+            42,
+            "Confirm escrow payment",
+        )
+
+    def test_unlinks_related_document_without_deleting_it(self, seeded_client):
+        from doc_intelligence_hub.modules.action_queue.obligations import (
+            manually_link_document,
+        )
+
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=1).one()
+            manually_link_document(
+                db,
+                action,
+                {"id": 77, "title": "Incorrect receipt", "document_type_name": "Receipt"},
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        response = seeded_client.delete("/api/queue/actions/1/links/77")
+
+        assert response.status_code == 200
+        assert response.json()["linked_document_count"] == 1
+        assert response.json()["linked_documents"][0]["document_id"] == 42
+
     def test_daily_list_excludes_not_ready_actions(self, seeded_client):
         db = get_session()
         try:

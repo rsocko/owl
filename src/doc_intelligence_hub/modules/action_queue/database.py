@@ -129,6 +129,8 @@ class ObligationDocument(Base):
     reference_number = Column(String, nullable=True)
     confidence = Column(Float, nullable=False, default=1.0)
     source = Column(String, nullable=False, default="action_queue")
+    excluded = Column(Boolean, nullable=False, default=False)
+    excluded_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -270,6 +272,10 @@ def _migrate_missing_columns(engine):
             ("corrected_urgency", "TEXT"),
             ("original_amount", "REAL"),
             ("corrected_amount", "REAL"),
+        ],
+        "obligation_documents": [
+            ("excluded", "BOOLEAN DEFAULT 0 NOT NULL"),
+            ("excluded_at", "TIMESTAMP"),
         ],
     }
 

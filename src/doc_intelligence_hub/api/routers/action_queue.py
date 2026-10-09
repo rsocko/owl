@@ -54,6 +54,7 @@ from doc_intelligence_hub.modules.action_queue.obligations import (
     manually_link_document,
     suggest_related_actions,
     sync_obligation_status,
+    unlink_document,
 )
 from doc_intelligence_hub.modules.action_queue.pipeline import get_pipeline_progress, run_pipeline
 from doc_intelligence_hub.modules.action_queue.risk_scoring import recalculate_risk_scores
@@ -219,6 +220,18 @@ class ActionLinkRequest(BaseModel):
                 "Provide exactly one related action or Paperless document",
             )
         return self
+
+
+class ActionNoteCreateRequest(BaseModel):
+    note: str = Field(min_length=1, max_length=10_000)
+
+    @field_validator("note")
+    @classmethod
+    def _normalize_note(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise PydanticCustomError("blank_note", "note cannot be blank")
+        return normalized
 
 
 class ActionCreateRequest(BaseModel):
@@ -1185,6 +1198,80 @@ async def update_action(
         db.close()
 
 
+@router.get("/actions/{action_id}/notes")
+async def get_action_notes(request: Request, action_id: int) -> dict[str, Any]:
+    """Return native Paperless notes for an action's source document."""
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        action = db.query(Action).filter_by(id=action_id).first()
+        if not action:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        if action.document_id is None:
+            return {"notes": []}
+
+        try:
+            client = make_paperless_client(request, timeout=15.0)
+            notes = await client.get_document_notes(action.document_id)
+        except Exception as exc:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not load Paperless notes: {exc}",
+            ) from exc
+        return {"notes": notes}
+    finally:
+        db.close()
+
+
+@router.post("/actions/{action_id}/notes")
+async def create_action_note(
+    request: Request,
+    action_id: int,
+    body: ActionNoteCreateRequest,
+) -> dict[str, Any]:
+    """Append a native Paperless note to an action's source document."""
+    _sync_action_queue_settings(request)
+    if not action_queue_settings.write_to_paperless:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=409, detail="Paperless writes are disabled")
+
+    init_db()
+    db = get_session()
+    try:
+        action = db.query(Action).filter_by(id=action_id).first()
+        if not action:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        if action.document_id is None:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=409,
+                detail="This action has no Paperless document for notes.",
+            )
+
+        try:
+            client = make_paperless_client(request, timeout=15.0)
+            note = await client.create_document_note(action.document_id, body.note)
+        except Exception as exc:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not save the Paperless note: {exc}",
+            ) from exc
+        return {"note": note}
+    finally:
+        db.close()
+
+
 @router.get("/actions/{action_id}/link-candidates")
 async def list_action_link_candidates(
     request: Request,
@@ -1411,6 +1498,42 @@ async def link_action_document(
             db.commit()
         primary.version = (primary.version or 1) + 1
         db.commit()
+        db.refresh(primary)
+        return _serialize_action_with_siblings(db, primary)
+    finally:
+        db.close()
+
+
+@router.delete("/actions/{action_id}/links/{document_id}")
+async def unlink_action_document(
+    request: Request,
+    action_id: int,
+    document_id: int,
+) -> dict[str, Any]:
+    """Remove a mistaken obligation link without deleting either Paperless document."""
+    from fastapi import HTTPException
+
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        primary = db.query(Action).filter_by(id=action_id).first()
+        if not primary:
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        try:
+            restored_actions = unlink_document(db, primary, document_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        primary.version = (primary.version or 1) + 1
+        db.commit()
+        for restored in restored_actions:
+            await sync_action_status(
+                db,
+                restored,
+                restored.status,
+                logger=logging.getLogger(__name__),
+            )
         db.refresh(primary)
         return _serialize_action_with_siblings(db, primary)
     finally:

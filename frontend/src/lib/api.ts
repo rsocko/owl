@@ -180,6 +180,9 @@ export const endpoints = {
     status: () => api.get('/api/queue/status'),
     actions: (params?: string) => api.get(`/api/queue/actions${params ? `?${params}` : ''}`),
     updateAction: (id: string, body: unknown) => api.patch(`/api/queue/actions/${id}`, body),
+    actionNotes: (id: string) => api.get(`/api/queue/actions/${id}/notes`),
+    createActionNote: (id: string, note: string) =>
+      api.post(`/api/queue/actions/${id}/notes`, { note }),
     actionSiblings: (id: string) => api.get(`/api/queue/actions/${id}/siblings`),
     actionLinkCandidates: (id: string, query?: string) =>
       api.get(`/api/queue/actions/${id}/link-candidates${query ? `?q=${encodeURIComponent(query)}` : ''}`),
@@ -187,6 +190,8 @@ export const endpoints = {
       api.post(`/api/queue/actions/${id}/link`, { related_action_id: relatedActionId }),
     linkDocument: (id: string, relatedDocumentId: number) =>
       api.post(`/api/queue/actions/${id}/link`, { related_document_id: relatedDocumentId }),
+    unlinkDocument: (id: string, relatedDocumentId: number) =>
+      api.delete(`/api/queue/actions/${id}/links/${relatedDocumentId}`),
     splitAction: (id: string, body: unknown) => api.post(`/api/queue/actions/${id}/split`, body),
     mergeActions: (id: string, body: unknown) => api.post(`/api/queue/actions/${id}/merge`, body),
     refreshAction: (id: string) => api.get(`/api/queue/actions/${id}/refresh`),

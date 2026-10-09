@@ -130,6 +130,17 @@ interface CompletionSuggestion {
   confidence?: number | null;
 }
 
+interface PaperlessNote {
+  id: number;
+  note: string;
+  created?: string | null;
+  user?: {
+    username?: string | null;
+    first_name?: string | null;
+    last_name?: string | null;
+  } | string | null;
+}
+
 interface RelatedActionCandidate {
   kind?: 'action' | 'document';
   action?: ActionItem;
@@ -564,6 +575,10 @@ export default function ActionQueue() {
   const [linkSearch, setLinkSearch] = useState('');
   const [linkCandidatesLoading, setLinkCandidatesLoading] = useState(false);
   const [relatedPanelOpen, setRelatedPanelOpen] = useState(false);
+  const [paperlessNotes, setPaperlessNotes] = useState<PaperlessNote[]>([]);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [pendingUnlinkDocument, setPendingUnlinkDocument] = useState<LinkedDocument | null>(null);
   const linkRequestRef = useRef(0);
 
   const [correspondents, setCorrespondents] = useState<Array<{
@@ -747,7 +762,34 @@ export default function ActionQueue() {
     setMergeOpen(false);
     setMergeSelection([]);
     setRelatedPanelOpen(false);
+    setNoteDraft('');
+    setPendingUnlinkDocument(null);
   }, [selectedActionId]);
+
+  const loadPaperlessNotes = useCallback(async (actionId: number) => {
+    setNotesLoading(true);
+    try {
+      const response = await endpoints.actionQueue.actionNotes(String(actionId)) as {
+        notes?: PaperlessNote[];
+      };
+      setPaperlessNotes(response.notes ?? []);
+    } catch (err) {
+      setPaperlessNotes([]);
+      setToast({
+        message: err instanceof Error ? err.message : 'Could not load Paperless notes.',
+        tone: 'error',
+      });
+    } finally {
+      setNotesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    setPaperlessNotes([]);
+    if (selectedActionId !== null) {
+      void loadPaperlessNotes(selectedActionId);
+    }
+  }, [loadPaperlessNotes, selectedActionId]);
 
   useEffect(() => {
     if (selectedActionId === null) {
@@ -817,6 +859,50 @@ export default function ActionQueue() {
     } catch (err) {
       setToast({
         message: err instanceof Error ? err.message : 'Could not link these documents.',
+        tone: 'error',
+      });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const addPaperlessNote = async () => {
+    if (!selectedAction || !noteDraft.trim()) return;
+    setBusyKey(`note-${selectedAction.id}`);
+    try {
+      await endpoints.actionQueue.createActionNote(selectedAction.id.toString(), noteDraft.trim());
+      setNoteDraft('');
+      await loadPaperlessNotes(selectedAction.id);
+      setToast({ message: 'Note saved in Paperless.', tone: 'success' });
+    } catch (err) {
+      setToast({
+        message: err instanceof Error ? err.message : 'Could not save the Paperless note.',
+        tone: 'error',
+      });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const unlinkRelatedDocument = async () => {
+    if (!selectedAction || !pendingUnlinkDocument) return;
+    const document = pendingUnlinkDocument;
+    setBusyKey(`unlink-document-${document.document_id}`);
+    try {
+      const updated = await endpoints.actionQueue.unlinkDocument(
+        selectedAction.id.toString(),
+        document.document_id,
+      ) as ActionItem;
+      setCachedAction(updated);
+      setPendingUnlinkDocument(null);
+      await loadData();
+      setToast({
+        message: 'Document link removed. The Paperless document was not deleted.',
+        tone: 'success',
+      });
+    } catch (err) {
+      setToast({
+        message: err instanceof Error ? err.message : 'Could not remove the document link.',
         tone: 'error',
       });
     } finally {
@@ -2223,6 +2309,43 @@ export default function ActionQueue() {
                       </Button>
                     </div>
                   </div>
+                  {selectedAction.linked_documents && selectedAction.linked_documents.length > 0 && (
+                    <div className="aq-linked-document-previews">
+                      {selectedAction.linked_documents.map((document) => (
+                        <div
+                          className="aq-linked-document-preview"
+                          key={document.document_id}
+                        >
+                          <button
+                            type="button"
+                            className="aq-linked-document-main"
+                            onClick={() => setTimelineViewer(document)}
+                            aria-label={`Preview ${document.title || `document ${document.document_id}`}`}
+                          >
+                            <img src={document.thumbnail_url} alt="" loading="lazy" />
+                            <span className="aq-linked-document-copy">
+                              <strong>{document.title || `Document #${document.document_id}`}</strong>
+                              <span>
+                                {linkedDocumentRoleLabel(document.role)}
+                                {document.document_date ? ` · ${formatDate(document.document_date)}` : ''}
+                              </span>
+                            </span>
+                            <span className="aq-linked-document-open">Preview</span>
+                          </button>
+                          {document.document_id !== selectedAction.document_id && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setPendingUnlinkDocument(document)}
+                              disabled={busyKey !== null}
+                            >
+                              Remove link
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {relatedPanelOpen && (
                     <>
                       <form
@@ -2354,6 +2477,69 @@ export default function ActionQueue() {
                 </div>
               )}
 
+              <section className="aq-notes" aria-labelledby="action-notes-title">
+                <div className="aq-edit-header">
+                  <div>
+                    <div className="section-title" id="action-notes-title">Notes</div>
+                    <div className="text-muted">Saved on this document in Paperless.</div>
+                  </div>
+                  {paperlessNotes.length > 0 && (
+                    <Badge tone="info">{paperlessNotes.length}</Badge>
+                  )}
+                </div>
+                {notesLoading ? (
+                  <div className="text-muted">Loading notes…</div>
+                ) : paperlessNotes.length > 0 ? (
+                  <div className="aq-note-list">
+                    {paperlessNotes.map((note) => (
+                      <article className="aq-note" key={note.id}>
+                        <div>{note.note}</div>
+                        {(note.created || note.user) && (
+                          <div className="aq-note-meta">
+                            {typeof note.user === 'string'
+                              ? note.user
+                              : note.user?.username
+                                || [note.user?.first_name, note.user?.last_name].filter(Boolean).join(' ')}
+                            {note.created ? ` · ${formatDateTime(note.created)}` : ''}
+                          </div>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-muted">No notes yet.</div>
+                )}
+                <form
+                  className="aq-note-compose"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void addPaperlessNote();
+                  }}
+                >
+                  <textarea
+                    aria-label="Add a note"
+                    placeholder="Add payment details, follow-up instructions, or context…"
+                    value={noteDraft}
+                    onChange={(event) => setNoteDraft(event.target.value)}
+                    rows={3}
+                    maxLength={10_000}
+                    disabled={status?.read_only}
+                  />
+                  <div className="aq-note-compose-footer">
+                    {status?.read_only && (
+                      <span className="text-muted">Paperless writes are disabled.</span>
+                    )}
+                    <Button
+                      size="sm"
+                      type="submit"
+                      disabled={!noteDraft.trim() || busyKey !== null || status?.read_only}
+                    >
+                      {busyKey === `note-${selectedAction.id}` ? 'Saving…' : 'Add note'}
+                    </Button>
+                  </div>
+                </form>
+              </section>
+
               {selectedAction.confidence != null && (
                 <ConfidenceBar label="AI confidence" pct={selectedAction.confidence} />
               )}
@@ -2373,6 +2559,12 @@ export default function ActionQueue() {
                 const currentStatus = normalizeStatus(selectedAction.status);
                 return (
                   <div className="aq-detail-actions">
+                    <div>
+                      <div className="section-title">Action status</div>
+                      <div className="text-muted">
+                        Done completes this action only. It does not change or mark linked documents.
+                      </div>
+                    </div>
                     {/* Lifecycle transition buttons */}
                     <div className="btn-group">
                       {['pending', 'acknowledged', 'snoozed'].includes(currentStatus)
@@ -2478,6 +2670,7 @@ export default function ActionQueue() {
                 <> OWL retains the extracted details. Paperless keeps Document Amount and clears Action Type,
                   Due Date, Urgency, Summary, and Action Count.</>
               )}
+
               This action cannot be easily undone in bulk.
             </p>
             <div className="aq-modal-actions">
@@ -2488,6 +2681,48 @@ export default function ActionQueue() {
                 onClick={() => void confirmPendingBulkAction()}
               >
                 {bulkActionLabel(pendingBulkAction.action)} for {pendingBulkAction.ids.length} actions
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingUnlinkDocument && (
+        <div className="aq-modal-overlay" onClick={() => setPendingUnlinkDocument(null)}>
+          <div
+            className="aq-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="unlink-document-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div id="unlink-document-title" className="aq-modal-title">Remove document link?</div>
+            <p>
+              <strong>
+                {pendingUnlinkDocument.title
+                  || `Document #${pendingUnlinkDocument.document_id}`}
+              </strong>
+              {' '}will no longer be related to this action. The document itself will remain in
+              Paperless.
+            </p>
+            <div className="aq-modal-actions">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setPendingUnlinkDocument(null)}
+                disabled={busyKey !== null}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => void unlinkRelatedDocument()}
+                disabled={busyKey !== null}
+              >
+                {busyKey === `unlink-document-${pendingUnlinkDocument.document_id}`
+                  ? 'Removing…'
+                  : 'Remove link'}
               </Button>
             </div>
           </div>
