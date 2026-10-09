@@ -269,10 +269,28 @@ def test_external_snapshot_replacement_is_generation_idempotent_and_bounded(tmp_
     )
     try:
         result = db.replace_external_candidate_snapshot(DEPLOYMENT_ID, first)
+        connection = db.connect()
+        connection.execute(
+            """UPDATE external_signal_sources
+               SET updated_at = '2020-01-01 00:00:00'
+               WHERE deployment_id = ? AND connector_ref = ?""",
+            (DEPLOYMENT_ID, first.connector_ref),
+        )
+        connection.commit()
         repeated = db.replace_external_candidate_snapshot(DEPLOYMENT_ID, first)
 
         assert result.active_candidates == 2
         assert repeated.idempotent is True
+        last_synced_at = (
+            db.connect()
+            .execute(
+                """SELECT updated_at FROM external_signal_sources
+               WHERE deployment_id = ? AND connector_ref = ?""",
+                (DEPLOYMENT_ID, first.connector_ref),
+            )
+            .fetchone()["updated_at"]
+        )
+        assert last_synced_at != "2020-01-01 00:00:00"
         candidates = db.list_external_candidates(DEPLOYMENT_ID)
         assert len(candidates) == 2
         assert all(candidate.recurrence_evidence == "high" for candidate in candidates)
