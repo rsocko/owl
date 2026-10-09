@@ -14,7 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from doc_intelligence_hub.api.routers import (
@@ -81,6 +81,20 @@ class HubSettings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "phi3:mini"
     cors_origins: str = "*"
+    mission_control_api_token: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "mission_control_api_token",
+            "OWL_MISSION_CONTROL_API_TOKEN",
+        ),
+    )
+    tyrion_payee_connector_ref: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "tyrion_payee_connector_ref",
+            "OWL_TYRION_PAYEE_CONNECTOR_REF",
+        ),
+    )
     host: str = "0.0.0.0"
     port: int = 8001
 

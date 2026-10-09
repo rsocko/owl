@@ -4,10 +4,10 @@ import contextlib
 import logging
 import uuid
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 import httpx
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
 from starlette.responses import StreamingResponse
 
@@ -16,6 +16,7 @@ from doc_intelligence_hub.api.routers import (
     load_statement_config_from_request,
     make_paperless_client,
     raise_api_error,
+    require_mission_control_auth,
 )
 from doc_intelligence_hub.core.extractors.account_numbers import (
     extract_from_document,
@@ -73,6 +74,14 @@ from doc_intelligence_hub.modules.statements.models import (
     SplitSeriesRequest,
 )
 from doc_intelligence_hub.modules.statements.paperless import build_document_records
+from doc_intelligence_hub.modules.statements.payee_review import (
+    PayeePatternSyncRequest,
+    PayeeReviewHistoryEvent,
+    PayeeReviewQueueItem,
+    PayeeReviewService,
+    PayeeSnapshotResult,
+    TyrionPayeePatternsClient,
+)
 from doc_intelligence_hub.modules.statements.policy_corrections import (
     apply_policy_operations,
     undo_policy_operation,
@@ -994,6 +1003,92 @@ async def review_external_candidate(
             return service.review_external_candidate(candidate_id, body)
         except (KeyError, ValueError) as exc:
             _raise_policy_error(exc)
+    finally:
+        service.close()
+
+
+@router.post(
+    "/payee-document-reviews/sync",
+    response_model=PayeeSnapshotResult,
+    summary="Synchronize one Tyrion PayeePatternProjectionV1 generation",
+    dependencies=[Depends(require_mission_control_auth)],
+)
+async def sync_payee_document_reviews(
+    request: Request,
+    body: PayeePatternSyncRequest,
+) -> PayeeSnapshotResult:
+    policy_service = _get_policy_service(request)
+    try:
+        connection = _get_effective_external_signal_credentials(request, policy_service)
+    finally:
+        policy_service.close()
+    client = TyrionPayeePatternsClient(
+        connection["base_url"],
+        api_token=connection["api_token"],
+        verify_ssl=bool(connection["verify_ssl"]),
+        timeout_seconds=connection["timeout_seconds"],
+    )
+    try:
+        connector_ref = request.app.state.hub_settings.tyrion_payee_connector_ref
+        if not connector_ref:
+            raise_api_error(
+                503,
+                "tyrion_payee_connector_not_configured",
+                "Configure OWL_TYRION_PAYEE_CONNECTOR_REF before synchronizing payee patterns.",
+            )
+        snapshot = await client.fetch(body.source_generation, connector_ref)
+    except (httpx.HTTPError, ValueError) as exc:
+        _raise_external_signal_error(exc)
+    finally:
+        await client.close()
+    service = PayeeReviewService(
+        Database(load_statement_config_from_request(request).runtime.database_path),
+        _get_deployment_id(request),
+    )
+    try:
+        return service.replace_snapshot(snapshot)
+    finally:
+        service.close()
+
+
+@router.get(
+    "/payee-document-reviews",
+    response_model=list[PayeeReviewQueueItem],
+    summary="List OWL's specialist Tyrion payee review queue",
+    dependencies=[Depends(require_mission_control_auth)],
+)
+async def list_payee_document_reviews(
+    request: Request,
+    status: Literal["all", "unreviewed", "reviewed", "inactive"] = Query(default="all"),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[PayeeReviewQueueItem]:
+    service = PayeeReviewService(
+        Database(load_statement_config_from_request(request).runtime.database_path),
+        _get_deployment_id(request),
+    )
+    try:
+        return service.list_queue(status=status, limit=limit, offset=offset)
+    finally:
+        service.close()
+
+
+@router.get(
+    "/payee-document-reviews/{candidate_id}/history",
+    response_model=list[PayeeReviewHistoryEvent],
+    summary="List immutable payee review history",
+    dependencies=[Depends(require_mission_control_auth)],
+)
+async def list_payee_document_review_history(
+    request: Request,
+    candidate_id: str,
+) -> list[PayeeReviewHistoryEvent]:
+    service = PayeeReviewService(
+        Database(load_statement_config_from_request(request).runtime.database_path),
+        _get_deployment_id(request),
+    )
+    try:
+        return service.list_history(candidate_id)
     finally:
         service.close()
 
