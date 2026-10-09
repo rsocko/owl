@@ -384,6 +384,7 @@ class TestListActions:
             "correspondent",
             "document_date",
             "document_type",
+            "document_summary",
             "tags",
             "extracted_data",
             "ai_reasoning",
@@ -542,7 +543,9 @@ class TestCanonicalCorrectionOverlay:
         assert action["document_amount"] == 999.99
         assert action["corrected_fields"] == {"document_amount": True}
 
-    def test_corrected_account_identifier_is_remasked_and_flagged(self, seeded_client, monkeypatch):
+    def test_corrected_account_identifier_is_omitted_from_general_action_response(
+        self, seeded_client, monkeypatch
+    ):
         from doc_intelligence_hub.modules.triage import database as triage_db
 
         monkeypatch.setattr(
@@ -563,9 +566,9 @@ class TestCanonicalCorrectionOverlay:
         resp = seeded_client.get("/api/queue/actions?status=pending")
         action = resp.json()["actions"][0]
 
-        assert action["corrected_fields"] == {"account_identifier": True}
-        # The raw corrected value must never leak unmasked into the API.
-        assert action["extracted_data"]["account_identifier"] != "1234567890"
+        assert action["corrected_fields"] == {}
+        assert "account_identifier" not in action["extracted_data"]
+        assert "1234567890" not in json.dumps(action)
 
     def test_no_correction_leaves_original_value_and_empty_flag_map(
         self, seeded_client, monkeypatch

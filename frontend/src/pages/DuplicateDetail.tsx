@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Badge, Button, Card, ConfidenceBar, SkeletonLoader } from '../components/ui';
 import { endpoints } from '../lib/api';
+import type { DocumentSummaryModel } from '../lib/api';
+import DocumentSummary from '../components/DocumentSummary';
 import '../styles/duplicate-detail.css';
 
 // ------------------------------------------------------------------
@@ -14,10 +16,8 @@ interface DocMetadata {
   provider_name?: string;
   amount?: number | string;
   date_of_service?: string;
-  patient_name?: string;
   invoice_number?: string;
   claim_number?: string;
-  doc_type?: string;
 }
 
 interface DuplicatePairDetail {
@@ -32,6 +32,8 @@ interface DuplicatePairDetail {
   created_at: string | null;
   doc_a_metadata: DocMetadata | null;
   doc_b_metadata: DocMetadata | null;
+  doc_a_summary: DocumentSummaryModel;
+  doc_b_summary: DocumentSummaryModel;
   relationship_proposal?: {
     source_document_id: number;
     target_document_id: number;
@@ -157,9 +159,18 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
       if (resolution === 'related') {
         const related = result as RelatedResolutionResponse;
         setRelationshipResult(related);
-        setPair(related.duplicate);
+        setPair({
+          ...related.duplicate,
+          doc_a_summary: related.duplicate.doc_a_summary ?? pair.doc_a_summary,
+          doc_b_summary: related.duplicate.doc_b_summary ?? pair.doc_b_summary,
+        });
       } else {
-        setPair(result as DuplicatePairDetail);
+        const updated = result as DuplicatePairDetail;
+        setPair({
+          ...updated,
+          doc_a_summary: updated.doc_a_summary ?? pair.doc_a_summary,
+          doc_b_summary: updated.doc_b_summary ?? pair.doc_b_summary,
+        });
       }
       setResolved(true);
       onResolved?.();
@@ -186,9 +197,7 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
     { key: 'provider', label: 'Provider', altKey: 'provider_name' },
     { key: 'amount', label: 'Amount' },
     { key: 'date_of_service', label: 'Date of Service' },
-    { key: 'patient_name', label: 'Patient' },
     { key: 'invoice_number', label: 'Invoice / Claim #', altKey: 'claim_number' },
-    { key: 'doc_type', label: 'Document Type' },
   ];
 
   return (
@@ -223,6 +232,7 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
               {primaryDocId === pair.doc_a_id && <Badge tone="info">Primary</Badge>}
             </div>
             <div className="duplicate-doc-card-body">
+              <DocumentSummary summary={pair.doc_a_summary} density="review" />
               {comparisonFields.map(({ key, label, altKey }) => {
                 const val = (metaA as Record<string, unknown>)[key] ?? (altKey ? (metaA as Record<string, unknown>)[altKey] : undefined);
                 const otherVal = (metaB as Record<string, unknown>)[key] ?? (altKey ? (metaB as Record<string, unknown>)[altKey] : undefined);
@@ -248,6 +258,7 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
               {primaryDocId === pair.doc_b_id && <Badge tone="info">Primary</Badge>}
             </div>
             <div className="duplicate-doc-card-body">
+              <DocumentSummary summary={pair.doc_b_summary} density="review" />
               {comparisonFields.map(({ key, label, altKey }) => {
                 const val = (metaB as Record<string, unknown>)[key] ?? (altKey ? (metaB as Record<string, unknown>)[altKey] : undefined);
                 const otherVal = (metaA as Record<string, unknown>)[key] ?? (altKey ? (metaA as Record<string, unknown>)[altKey] : undefined);
@@ -325,8 +336,7 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
                   checked={primaryDocId === pair.doc_a_id}
                   onChange={() => setPrimaryDocId(pair.doc_a_id)}
                 />
-                Doc A #{pair.doc_a_id}
-                {metaA.title ? ` — ${metaA.title}` : ''}
+                <DocumentSummary summary={pair.doc_a_summary} />
               </label>
               <label
                 className={`duplicate-primary-option${primaryDocId === pair.doc_b_id ? ' selected' : ''}`}
@@ -337,8 +347,7 @@ export default function DuplicateDetail({ pairId, onResolved }: DuplicateDetailP
                   checked={primaryDocId === pair.doc_b_id}
                   onChange={() => setPrimaryDocId(pair.doc_b_id)}
                 />
-                Doc B #{pair.doc_b_id}
-                {metaB.title ? ` — ${metaB.title}` : ''}
+                <DocumentSummary summary={pair.doc_b_summary} />
               </label>
             </div>
           </div>

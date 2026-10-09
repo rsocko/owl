@@ -12,7 +12,8 @@ import {
   Toast,
 } from '../components/ui';
 import DocumentPreview from '../components/DocumentPreview';
-import { endpoints } from '../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
+import DocumentSummary from '../components/DocumentSummary';
 import { getToastDuration } from '../lib/toast';
 import '../styles/manual-match-search.css';
 
@@ -36,6 +37,8 @@ interface MatchRecord {
   eob_preview_url?: string | null;
   bill_preview_url?: string | null;
   created_at?: string | null;
+  eob_summary?: DocumentSummaryModel;
+  bill_summary?: DocumentSummaryModel;
 }
 
 interface MatchesResponse {
@@ -251,7 +254,14 @@ export default function ManualMatchSearch() {
             {selectedMatch ? (
               <Card title="Selected candidate">
                 <div className="manual-selected-summary">
-                  <div className="manual-selected-title">EOB #{selectedMatch.eob_document_id ?? '—'} ↔ Bill #{selectedMatch.bill_document_id ?? '—'}</div>
+                  <div className="manual-selected-title">
+                    {selectedMatch.eob_summary
+                      ? <DocumentSummary summary={selectedMatch.eob_summary} />
+                      : `EOB #${selectedMatch.eob_document_id ?? '—'}`}
+                    {selectedMatch.bill_summary
+                      ? <DocumentSummary summary={selectedMatch.bill_summary} />
+                      : `Bill #${selectedMatch.bill_document_id ?? '—'}`}
+                  </div>
                   <div className="manual-selected-badges">
                     <Badge tone={scoreTone(selectedMatch.score)}>{valueToPercent(selectedMatch.score)}% match</Badge>
                     <Badge tone="muted">{selectedMatch.confidence ?? 'Candidate'}</Badge>

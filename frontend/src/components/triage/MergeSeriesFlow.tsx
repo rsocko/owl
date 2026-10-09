@@ -61,14 +61,17 @@ export function MergeSeriesFlow({ series, documents, similarSeries, sourceTimeli
       title: d.title,
       statement_date: d.statement_date,
       period_label: d.period_label,
-      account_hint: d.account_hint,
+      account_identifier_display: d.account_identifier_display,
+      document_summary: d.document_summary,
       gap_before_days: null,
     }));
   }, [sourceTimeline, documents]);
 
   // Account data for source timeline
   const sourceAccounts = useMemo(() =>
-    Array.from(new Set(documents.map(d => d.account_hint).filter(Boolean))) as string[],
+    Array.from(
+      new Set(documents.map(d => d.account_identifier_display).filter(Boolean)),
+    ) as string[],
     [documents],
   );
   const sourceColorMap = useMemo(() => {
@@ -79,7 +82,9 @@ export function MergeSeriesFlow({ series, documents, similarSeries, sourceTimeli
   // Account data for target timeline
   const targetAccounts = useMemo(() => {
     if (!targetDetail) return [];
-    return Array.from(new Set(targetDetail.documents.map(d => d.account_hint).filter(Boolean))) as string[];
+    return Array.from(
+      new Set(targetDetail.documents.map(d => d.account_identifier_display).filter(Boolean)),
+    ) as string[];
   }, [targetDetail]);
   const targetColorMap = useMemo(() => {
     const COLORS = ['var(--series-b)', 'var(--series-a)', 'var(--series-c)', 'var(--series-d)'];
@@ -103,8 +108,8 @@ export function MergeSeriesFlow({ series, documents, similarSeries, sourceTimeli
     }
 
     // Check for different account numbers
-    const srcAccounts = new Set(documents.map(d => d.account_hint).filter(Boolean));
-    const tgtAccounts = new Set(targetDetail.documents.map(d => d.account_hint).filter(Boolean));
+    const srcAccounts = new Set(documents.map(d => d.account_identifier_display).filter(Boolean));
+    const tgtAccounts = new Set(targetDetail.documents.map(d => d.account_identifier_display).filter(Boolean));
     const allAccounts = new Set([...srcAccounts, ...tgtAccounts]);
     if (allAccounts.size > 1) {
       warnings.push(`⚠️ Different account numbers detected: ${[...allAccounts].join(', ')}`);
@@ -177,7 +182,7 @@ export function MergeSeriesFlow({ series, documents, similarSeries, sourceTimeli
                   <div className="sg-merge-option-name">{s.name}</div>
                   <div className="sg-merge-option-meta">
                     {s.frequency} · {s.document_count} docs
-                    {s.account_identifier && ` · ${s.account_identifier}`}
+                    {s.account_identifier_display && ` · ${s.account_identifier_display}`}
                   </div>
                 </button>
               ))}
@@ -260,20 +265,20 @@ export function MergeSeriesFlow({ series, documents, similarSeries, sourceTimeli
                 </div>
                 <div className="sg-merge-side-meta">
                   {series.document_count} documents · {series.frequency}
-                  {series.account_identifier && ` · ${series.account_identifier}`}
+                  {series.account_identifier_display && ` · ${series.account_identifier_display}`}
                 </div>
                 <div className="sg-merge-side-docs">
                   {documents.slice(0, 5).map(d => (
                     <div key={d.document_id} className="sg-merge-doc-item">
                       {d.title || `Doc ${d.document_id}`}
                       <span className="text-muted"> · {d.statement_date}</span>
-                      {d.account_hint && (
+                      {d.account_identifier_display && (
                         <span className="sg-doc-account" style={{
-                          background: `${sourceColorMap[d.account_hint] || 'var(--muted)'}22`,
-                          color: sourceColorMap[d.account_hint] || 'var(--muted)',
+                          background: `${sourceColorMap[d.account_identifier_display] || 'var(--muted)'}22`,
+                          color: sourceColorMap[d.account_identifier_display] || 'var(--muted)',
                           marginLeft: 4,
                         }}>
-                          {d.account_hint}
+                          {d.account_identifier_display}
                         </span>
                       )}
                     </div>
@@ -292,20 +297,20 @@ export function MergeSeriesFlow({ series, documents, similarSeries, sourceTimeli
                 </div>
                 <div className="sg-merge-side-meta">
                   {targetDetail.series.document_count} documents · {targetDetail.series.frequency}
-                  {targetDetail.series.account_identifier && ` · ${targetDetail.series.account_identifier}`}
+                  {targetDetail.series.account_identifier_display && ` · ${targetDetail.series.account_identifier_display}`}
                 </div>
                 <div className="sg-merge-side-docs">
                   {targetDetail.documents.slice(0, 5).map(d => (
                     <div key={d.document_id} className="sg-merge-doc-item">
                       {d.title || `Doc ${d.document_id}`}
                       <span className="text-muted"> · {d.statement_date}</span>
-                      {d.account_hint && (
+                      {d.account_identifier_display && (
                         <span className="sg-doc-account" style={{
-                          background: `${targetColorMap[d.account_hint] || 'var(--muted)'}22`,
-                          color: targetColorMap[d.account_hint] || 'var(--muted)',
+                          background: `${targetColorMap[d.account_identifier_display] || 'var(--muted)'}22`,
+                          color: targetColorMap[d.account_identifier_display] || 'var(--muted)',
                           marginLeft: 4,
                         }}>
-                          {d.account_hint}
+                          {d.account_identifier_display}
                         </span>
                       )}
                     </div>

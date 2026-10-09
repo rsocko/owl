@@ -101,7 +101,7 @@ export default function StatementSeriesDetail() {
       setOverrides(overridesResponse ?? {});
       setRenameForm({
         name: seriesResponse.series.name,
-        account_identifier: seriesResponse.series.account_identifier || '',
+        account_identifier: '',
       });
     } catch (err) {
       setError(getErrorMessage(err));
@@ -151,7 +151,9 @@ export default function StatementSeriesDetail() {
 
   // Derive unique accounts and color map
   const accounts = useMemo(() =>
-    Array.from(new Set(documents.map(d => d.account_hint).filter(Boolean))) as string[],
+    Array.from(
+      new Set(documents.map(d => d.account_identifier_display).filter(Boolean)),
+    ) as string[],
     [documents],
   );
   const accountColorMap = useMemo(() =>
@@ -190,7 +192,9 @@ export default function StatementSeriesDetail() {
   };
 
   const selectAllByAccount = (account: string) => {
-    const ids = documents.filter(d => d.account_hint === account).map(d => d.document_id);
+    const ids = documents
+      .filter(d => d.account_identifier_display === account)
+      .map(d => d.document_id);
     setSelectedDocs(new Set(ids));
   };
 
@@ -350,7 +354,7 @@ export default function StatementSeriesDetail() {
             <div className="statement-series-info-item">
               <div className="statement-series-info-label">Account</div>
               <div className="statement-series-info-value">
-                {series?.account_identifier || (accounts.length > 1 ? '⚠️ Multiple detected' : accounts[0] || '—')}
+                {series?.account_identifier_display || (accounts.length > 1 ? 'Multiple detected' : accounts[0] || '—')}
               </div>
             </div>
             <div className="statement-series-info-item">
@@ -530,7 +534,7 @@ export default function StatementSeriesDetail() {
 
                     {documents.map(doc => {
                       const isSelected = selectedDocs.has(doc.document_id);
-                      const acctColor = accountColorMap[doc.account_hint || ''] || 'var(--muted)';
+                      const acctColor = accountColorMap[doc.account_identifier_display || ''] || 'var(--muted)';
                       return (
                         <div
                           key={doc.document_id}
@@ -550,6 +554,7 @@ export default function StatementSeriesDetail() {
                               <DocumentPreview
                                 documentId={Number(doc.document_id)}
                                 variant="compact"
+                                summary={doc.document_summary}
                               />
                             ) : (
                               <div className="statement-series-list-title">
@@ -562,12 +567,12 @@ export default function StatementSeriesDetail() {
                               {doc.period_label && ` · ${doc.period_label}`}
                             </div>
                           </div>
-                          {doc.account_hint && (
+                          {doc.account_identifier_display && (
                             <span
                               className="statement-series-account-badge"
                               style={{ background: `${acctColor}22`, color: acctColor }}
                             >
-                              {doc.account_hint}
+                              {doc.account_identifier_display}
                             </span>
                           )}
                           {isCandidate && membershipComplete && (
@@ -678,7 +683,7 @@ export default function StatementSeriesDetail() {
                           <div className="statement-series-list-title">{s.name}</div>
                           <div className="statement-series-list-meta">
                             {s.frequency} · {s.document_count} documents
-                            {s.account_identifier && ` · ${s.account_identifier}`}
+                            {s.account_identifier_display && ` · ${s.account_identifier_display}`}
                             {s.last_seen && ` · Last: ${s.last_seen}`}
                           </div>
                         </div>

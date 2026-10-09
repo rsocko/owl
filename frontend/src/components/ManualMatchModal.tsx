@@ -8,7 +8,8 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge, Button, EmptyState, SkeletonLoader, Toast } from './ui';
 import DocumentPreview from './DocumentPreview';
-import { endpoints } from '../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
+import DocumentSummary from './DocumentSummary';
 import { getToastDuration } from '../lib/toast';
 import '../styles/manual-match-modal.css';
 
@@ -36,6 +37,8 @@ interface MatchRecord {
   eob_preview_url?: string | null;
   bill_preview_url?: string | null;
   created_at?: string | null;
+  eob_summary?: DocumentSummaryModel;
+  bill_summary?: DocumentSummaryModel;
 }
 
 interface MatchesResponse {
@@ -379,7 +382,12 @@ export default function ManualMatchModal({
                 <div className="mm-ctx-divider">
                   <div className="mm-ctx-label">Selected candidate</div>
                   <div className="mm-ctx-value">
-                    EOB #{selectedMatch.eob_document_id ?? '—'} ↔ Bill #{selectedMatch.bill_document_id ?? '—'}
+                    {selectedMatch.eob_summary
+                      ? <DocumentSummary summary={selectedMatch.eob_summary} />
+                      : `EOB #${selectedMatch.eob_document_id ?? '—'}`}
+                    {selectedMatch.bill_summary
+                      ? <DocumentSummary summary={selectedMatch.bill_summary} />
+                      : `Bill #${selectedMatch.bill_document_id ?? '—'}`}
                   </div>
                   <Badge tone={scoreTone(selectedMatch.score)}>{valueToPercent(selectedMatch.score)}% match</Badge>
                   <div style={{ marginTop: 8, display: 'grid', gap: 4 }}>
@@ -518,7 +526,12 @@ export default function ManualMatchModal({
                         >
                           <div className="mm-rc-top">
                             <span className="mm-rc-title">
-                              EOB #{match.eob_document_id ?? '—'} ↔ Bill #{match.bill_document_id ?? '—'}
+                              {match.eob_summary
+                                ? <DocumentSummary summary={match.eob_summary} />
+                                : `EOB #${match.eob_document_id ?? '—'}`}
+                              {match.bill_summary
+                                ? <DocumentSummary summary={match.bill_summary} />
+                                : `Bill #${match.bill_document_id ?? '—'}`}
                             </span>
                             {isBestMatch && <Badge tone="success">⭐ Best match</Badge>}
                             <Badge tone={scoreTone(match.score)}>
@@ -580,6 +593,7 @@ export default function ManualMatchModal({
                                   paperlessUrl={match.eob_preview_url}
                                   variant="compact"
                                   label="EOB"
+                                  summary={match.eob_summary}
                                 />
                               )}
                               {match.bill_document_id && (
@@ -588,6 +602,7 @@ export default function ManualMatchModal({
                                   paperlessUrl={match.bill_preview_url}
                                   variant="compact"
                                   label="Bill"
+                                  summary={match.bill_summary}
                                 />
                               )}
                               {!match.eob_document_id && !match.bill_document_id && (

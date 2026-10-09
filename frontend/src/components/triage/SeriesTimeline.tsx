@@ -11,6 +11,7 @@
  */
 import { useMemo, useState } from 'react';
 import type { TimelineEntry } from './StatementGroupingDetail';
+import DocumentSummary from '../DocumentSummary';
 import '../../styles/series-timeline.css';
 
 interface Props {
@@ -114,7 +115,7 @@ export function SeriesTimeline({
     return accounts.map(acct => ({
       label: acct,
       color: accountColorMap[acct] || 'var(--series-a)',
-      docs: entries.filter(e => e.account_hint === acct),
+      docs: entries.filter(e => e.account_identifier_display === acct),
     }));
   }, [entries, accounts, hasMultiAccounts, accountColorMap]);
 
@@ -174,11 +175,15 @@ export function SeriesTimeline({
         {label}
         {isHovered && !compact && (
           <div className="st-tooltip">
-            <div className="st-tooltip-title">{entry.title || `Document ${entry.document_id}`}</div>
+            {entry.document_summary ? (
+              <DocumentSummary summary={entry.document_summary} />
+            ) : (
+              <div className="st-tooltip-title">
+                {entry.title || `Document ${entry.document_id}`}
+              </div>
+            )}
             <div className="st-tooltip-meta">
-              {entry.statement_date && <span>{entry.statement_date}</span>}
               {entry.period_label && <span> · {entry.period_label}</span>}
-              {entry.account_hint && <span> · {entry.account_hint}</span>}
               {isGap && <span> · ⚠️ {entry.gap_before_days}d gap</span>}
             </div>
           </div>

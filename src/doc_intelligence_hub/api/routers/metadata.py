@@ -16,6 +16,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from doc_intelligence_hub.api.document_summary import build_document_summary
 from doc_intelligence_hub.api.routers import make_paperless_client
 from doc_intelligence_hub.core.extractors.correction_hints import derive_label_anchor
 from doc_intelligence_hub.core.paperless import (
@@ -205,6 +206,7 @@ async def get_document_metadata(
     return {
         "document_id": doc_id,
         "title": doc.get("title", ""),
+        "document_summary": build_document_summary(doc),
         "paperless_url": f"/documents/{doc_id}/details",
         "extracted_fields": extracted_fields,
         "corrections": corrections,

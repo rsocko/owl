@@ -12,6 +12,7 @@ import { MergeSeriesFlow } from './MergeSeriesFlow';
 import { SeriesTimeline } from './SeriesTimeline';
 import { StatementAccountGroups } from './StatementAccountGroups';
 import DocumentPreview from '../DocumentPreview';
+import type { DocumentSummaryModel } from '../../lib/api';
 import './statement-grouping.css';
 
 // ------------------------------------------------------------------
@@ -25,7 +26,7 @@ export interface SeriesInfo {
   correspondent_id: number | null;
   correspondent_name: string;
   frequency: string;
-  account_identifier: string | null;
+  account_identifier_display?: string | null;
   manually_curated: boolean;
   document_count: number;
   first_seen: string | null;
@@ -41,7 +42,8 @@ export interface SeriesDoc {
   title: string | null;
   statement_date: string | null;
   period_label: string | null;
-  account_hint: string | null;
+  account_identifier_display: string | null;
+  document_summary: DocumentSummaryModel;
 }
 
 export interface TimelineEntry {
@@ -49,7 +51,8 @@ export interface TimelineEntry {
   title: string | null;
   statement_date: string | null;
   period_label: string | null;
-  account_hint: string | null;
+  account_identifier_display: string | null;
+  document_summary: DocumentSummaryModel;
   gap_before_days: number | null;
 }
 
@@ -59,7 +62,7 @@ interface SeriesDetailResponse {
   timeline: TimelineEntry[];
   similar_series: SeriesInfo[];
   anomaly_indicators: string[];
-  suggested_split_groups?: { account_hint: string; document_ids: string[] }[];
+  suggested_split_groups?: { account_identifier_display: string; document_ids: string[] }[];
   excluded_documents?: SeriesDoc[];
   membership_complete?: boolean;
 }
@@ -95,7 +98,7 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
       setDetail(data);
       setRenameForm({
         name: data.series.name,
-        account_identifier: data.series.account_identifier || '',
+        account_identifier: '',
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load series detail');
@@ -158,7 +161,9 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
 
   const selectAllByAccount = (account: string) => {
     if (!detail) return;
-    const ids = detail.documents.filter(d => d.account_hint === account).map(d => d.document_id);
+    const ids = detail.documents
+      .filter(d => d.account_identifier_display === account)
+      .map(d => d.document_id);
     setSelectedDocs(new Set(ids));
   };
 
@@ -193,7 +198,9 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
     : `Documents in series (${documents.length})`;
 
   // Derive unique accounts
-  const accounts = Array.from(new Set(documents.map(d => d.account_hint).filter(Boolean))) as string[];
+  const accounts = Array.from(
+    new Set(documents.map(d => d.account_identifier_display).filter(Boolean)),
+  ) as string[];
   const COLORS = ['var(--series-a)', 'var(--series-b)', 'var(--series-c)', 'var(--series-d)'];
   const accountColorMap = Object.fromEntries(accounts.map((a, i) => [a, COLORS[i % COLORS.length]]));
 
@@ -230,7 +237,7 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
         <div className="sg-info-item">
           <div className="sg-info-label">Account</div>
           <div className="sg-info-value">
-            {series.account_identifier || (accounts.length > 1 ? '⚠️ Multiple detected' : accounts[0] || '—')}
+            {series.account_identifier_display || (accounts.length > 1 ? 'Multiple detected' : accounts[0] || '—')}
           </div>
         </div>
       </div>
@@ -370,7 +377,7 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
 
           {documents.map(doc => {
             const isSelected = selectedDocs.has(doc.document_id);
-            const acctColor = accountColorMap[doc.account_hint || ''] || 'var(--muted)';
+            const acctColor = accountColorMap[doc.account_identifier_display || ''] || 'var(--muted)';
             return (
               <div
                 key={doc.document_id}
@@ -388,6 +395,7 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
                     <DocumentPreview
                       documentId={Number(doc.document_id)}
                       variant="compact"
+                      summary={doc.document_summary}
                     />
                   ) : (
                     <div className="sg-doc-title">{doc.title || `Document ${doc.document_id}`}</div>
@@ -398,9 +406,9 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
                     {doc.period_label && ` · ${doc.period_label}`}
                   </div>
                 </div>
-                {doc.account_hint && (
+                {doc.account_identifier_display && (
                   <span className="sg-doc-account" style={{ background: `${acctColor}22`, color: acctColor }}>
-                    {doc.account_hint}
+                    {doc.account_identifier_display}
                   </span>
                 )}
                 {/* Reassign button — move document to another series */}
@@ -427,7 +435,7 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
                             <span className="sg-reassign-option-name">{s.name}</span>
                             <span className="sg-reassign-option-meta">
                               {s.frequency} · {s.document_count} docs
-                              {s.account_identifier ? ` · ${s.account_identifier}` : ''}
+                              {s.account_identifier_display ? ` · ${s.account_identifier_display}` : ''}
                             </span>
                           </button>
                         ))}
@@ -451,7 +459,7 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
                   <div className="sg-similar-name">{s.name}</div>
                   <div className="sg-similar-meta">
                     {s.frequency} · {s.document_count} documents
-                    {s.account_identifier && ` · ${s.account_identifier}`}
+                    {s.account_identifier_display && ` · ${s.account_identifier_display}`}
                     {s.last_seen && ` · Last: ${s.last_seen}`}
                   </div>
                 </div>

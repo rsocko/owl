@@ -105,6 +105,12 @@ const initialAction = {
   risk_score: 94,
   status: 'pending',
   correspondent: 'Utility Co',
+  document_summary: {
+    document_id: 1,
+    title: 'Electric Bill',
+    correspondent: 'Utility Co',
+    tags: ['Inbox', 'Utilities', 'Bills', 'Household'],
+  },
   recommended_cta: {
     id: 'pay-online',
     label: 'Pay online',
@@ -216,6 +222,14 @@ beforeEach(() => {
     document_date: '2026-02-03',
     document_type: 'Statement',
     tags: ['Reviewed'],
+    document_summary: {
+      document_id: 1,
+      title: 'Corrected Electric Statement',
+      correspondent: 'Updated Utility',
+      document_type: 'Statement',
+      document_date: '2026-02-03',
+      tags: ['Reviewed'],
+    },
     version: 4,
   });
   feedbackMock.mockResolvedValue({});
@@ -489,7 +503,7 @@ describe('ActionQueue', () => {
 
     await waitFor(() => {
       expect(refreshActionMock).toHaveBeenCalledWith('1');
-      expect(screen.getByText('Corrected Electric Statement')).toBeTruthy();
+      expect(screen.getAllByText('Corrected Electric Statement')).not.toHaveLength(0);
       expect(screen.getAllByText('Updated Utility')).not.toHaveLength(0);
       expect(screen.getAllByText('Statement')).not.toHaveLength(0);
       expect(screen.getAllByText('Reviewed')).not.toHaveLength(0);
@@ -626,6 +640,7 @@ describe('ActionQueue', () => {
           source: 'action_queue',
           thumbnail_url: '/thumb-1.png',
           preview_url: '/documents/1/details',
+          document_summary: { document_id: 1, title: 'Electric Bill' },
         },
         {
           document_id: 2,
@@ -637,6 +652,7 @@ describe('ActionQueue', () => {
           source: 'receipt_match',
           thumbnail_url: '/thumb-2.png',
           preview_url: '/documents/2/details',
+          document_summary: { document_id: 2, title: 'Payment Receipt' },
         },
       ],
       completion_suggestion: {
@@ -677,6 +693,7 @@ describe('ActionQueue', () => {
           source: 'action_queue',
           thumbnail_url: '/thumb-1.png',
           preview_url: '/documents/1/details',
+          document_summary: { document_id: 1, title: 'Electric Bill' },
         },
         {
           document_id: 2,
@@ -686,6 +703,7 @@ describe('ActionQueue', () => {
           source: 'receipt_match',
           thumbnail_url: '/thumb-2.png',
           preview_url: '/documents/2/details',
+          document_summary: { document_id: 2, title: 'Payment Receipt' },
         },
       ],
     };
@@ -724,6 +742,11 @@ describe('ActionQueue', () => {
       id: 2,
       document_id: 2,
       document_title: 'READ CODE Total Current Billing',
+      document_summary: {
+        document_id: 2,
+        title: 'READ CODE Total Current Billing',
+        correspondent: 'Utility Co',
+      },
       amount: 229,
     };
     actionLinkCandidatesMock.mockResolvedValue({
@@ -772,7 +795,12 @@ describe('ActionQueue', () => {
 
     resolveSearch({
       candidates: [{
-        action: { ...initialAction, id: 3, document_title: 'Current result' },
+        action: {
+          ...initialAction,
+          id: 3,
+          document_title: 'Current result',
+          document_summary: { document_id: 3, title: 'Current result' },
+        },
         score: 0.8,
         reasons: ['same account'],
       }],
@@ -781,7 +809,12 @@ describe('ActionQueue', () => {
 
     resolveInitial({
       candidates: [{
-        action: { ...initialAction, id: 2, document_title: 'Stale result' },
+        action: {
+          ...initialAction,
+          id: 2,
+          document_title: 'Stale result',
+          document_summary: { document_id: 2, title: 'Stale result' },
+        },
         score: 0.9,
         reasons: ['same amount'],
       }],
@@ -804,6 +837,13 @@ describe('ActionQueue', () => {
             amount: 125.5,
             thumbnail_url: '/receipt-thumb.png',
             paperless_url: 'https://paperless.test/documents/77/details',
+            document_summary: {
+              document_id: 77,
+              title: 'Power Co payment receipt',
+              document_type: 'Receipt',
+              correspondent: 'Power Co',
+              document_date: '2026-02-10',
+            },
           },
           score: 0,
           reasons: ['Paperless document search result'],

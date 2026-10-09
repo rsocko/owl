@@ -16,9 +16,10 @@ import {
   Tooltip,
 } from '../components/ui';
 import DocumentViewerModal from '../components/DocumentViewerModal';
+import DocumentSummary from '../components/DocumentSummary';
 import { MetadataTypeahead } from '../components/MetadataTypeahead';
 import { useStreamingAction } from '../hooks/useStreamingAction';
-import { endpoints } from '../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import '../styles/action-queue.css';
 import '../styles/sortable-table.css';
@@ -88,6 +89,7 @@ interface ActionItem {
   acknowledged_at?: string | null;
   snoozed_until?: string | null;
   severity?: string | null;
+  document_summary?: DocumentSummaryModel;
   recommended_cta?: {
     id: string;
     label: string;
@@ -121,6 +123,7 @@ interface LinkedDocument {
   source: string;
   thumbnail_url: string;
   preview_url?: string | null;
+  document_summary: DocumentSummaryModel;
 }
 
 interface CompletionSuggestion {
@@ -152,8 +155,8 @@ interface RelatedActionCandidate {
     document_date?: string | null;
     amount?: number | null;
     due_date?: string | null;
-    account_identifier?: string | null;
     reference_number?: string | null;
+    document_summary?: DocumentSummaryModel;
     thumbnail_url?: string | null;
     paperless_url?: string | null;
   };
@@ -1674,8 +1677,10 @@ export default function ActionQueue() {
                               <div className="aq-action-card-meta">
                                 <span>{action.due_date ? `Due ${formatDate(action.due_date)}` : 'No due date'}</span>
                                 {action.amount != null && <span>{formatCurrency(action.amount)}</span>}
-                                {action.correspondent && <span>{action.correspondent}</span>}
                               </div>
+                              {action.document_summary && (
+                                <DocumentSummary summary={{ ...action.document_summary, tags: [] }} />
+                              )}
                             </button>
                             <div className="aq-action-card-actions">
                               {(action.linked_document_count ?? 1) > 1 && (
@@ -1713,7 +1718,7 @@ export default function ActionQueue() {
                                         onClick={() => setTimelineViewer(document)}
                                       >
                                         <span className="aq-timeline-role">{linkedDocumentRoleLabel(document.role)}</span>
-                                        <strong>{document.title || `Document #${document.document_id}`}</strong>
+                                        <DocumentSummary summary={document.document_summary} />
                                         <span className="aq-timeline-meta">
                                           {document.document_date ? formatDate(document.document_date) : 'Date unavailable'}
                                           {document.amount != null ? ` · ${formatCurrency(document.amount)}` : ''}
@@ -2211,6 +2216,7 @@ export default function ActionQueue() {
                     <DocumentViewerModal
                       documentId={selectedAction.document_id}
                       title={selectedAction.document_title || selectedAction.correspondent || `Document #${selectedAction.document_id}`}
+                      summary={selectedAction.document_summary}
                       paperlessUrl={selectedAction.preview_url}
                       onClose={() => setPdfViewerOpen(false)}
                     />
@@ -2257,10 +2263,12 @@ export default function ActionQueue() {
                 </div>
               </div>
               <div className="aq-meta-list">
-                <div className="aq-meta-row"><span>Document</span><span>{selectedAction.document_title || `#${selectedAction.document_id ?? '—'}`}</span></div>
-                <div className="aq-meta-row"><span>Correspondent</span><span>{selectedAction.correspondent || '—'}</span></div>
-                <div className="aq-meta-row"><span>Document date</span><span>{formatDate(selectedAction.document_date)}</span></div>
-                <div className="aq-meta-row"><span>Document type</span><span>{selectedAction.document_type || '—'}</span></div>
+                {selectedAction.document_summary && (
+                  <DocumentSummary
+                    summary={{ ...selectedAction.document_summary, tags: [] }}
+                    density="review"
+                  />
+                )}
                 <div className="aq-meta-row">
                   <span>Tags</span>
                   <span style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -2274,7 +2282,6 @@ export default function ActionQueue() {
                 <div className="aq-meta-row"><span>Document amount</span><span>{formatCurrency(selectedAction.document_amount ?? selectedAction.amount)}</span></div>
                 <div className="aq-meta-row"><span>Document due date</span><span>{formatDate(selectedAction.document_due_date)}</span></div>
                 <div className="aq-meta-row"><span>Action deadline</span><span>{formatDate(selectedAction.due_date)}</span></div>
-                {selectedAction.extracted_data?.account_identifier && <div className="aq-meta-row"><span>Account</span><span>{selectedAction.extracted_data.account_identifier}</span></div>}
                 {selectedAction.extracted_data?.reference_number && <div className="aq-meta-row"><span>Reference</span><span>{selectedAction.extracted_data.reference_number}</span></div>}
                 {selectedAction.extracted_data?.phone && <div className="aq-meta-row"><span>Phone</span><span><a href={`tel:${selectedAction.extracted_data.phone}`}>{selectedAction.extracted_data.phone}</a></span></div>}
                 {selectedAction.extracted_data?.email && <div className="aq-meta-row"><span>Email</span><span><a href={`mailto:${selectedAction.extracted_data.email}`}>{selectedAction.extracted_data.email}</a></span></div>}
@@ -2324,7 +2331,7 @@ export default function ActionQueue() {
                           >
                             <img src={document.thumbnail_url} alt="" loading="lazy" />
                             <span className="aq-linked-document-copy">
-                              <strong>{document.title || `Document #${document.document_id}`}</strong>
+                              <DocumentSummary summary={document.document_summary} />
                               <span>
                                 {linkedDocumentRoleLabel(document.role)}
                                 {document.document_date ? ` · ${formatDate(document.document_date)}` : ''}
@@ -2384,10 +2391,17 @@ export default function ActionQueue() {
                           const documentDate = target?.document_date || document?.document_date;
                           const amount = target?.document_amount ?? target?.amount ?? document?.amount;
                           const dueDate = target?.document_due_date ?? target?.due_date ?? document?.due_date;
-                          const account = target?.extracted_data?.account_identifier
-                            || document?.account_identifier;
                           const reference = target?.extracted_data?.reference_number
                             || document?.reference_number;
+                          const documentSummary = target?.document_summary
+                            || document?.document_summary
+                            || {
+                              document_id: documentId,
+                              title,
+                              correspondent,
+                              document_type: documentType,
+                              document_date: documentDate,
+                            };
                           const thumbnailUrl = document?.thumbnail_url
                             || `/api/statements/documents/${documentId}/thumb`;
                           const paperlessUrl = document?.paperless_url || target?.preview_url;
@@ -2416,6 +2430,7 @@ export default function ActionQueue() {
                                     : 'action_queue',
                                   thumbnail_url: thumbnailUrl,
                                   preview_url: paperlessUrl,
+                                  document_summary: documentSummary,
                                 })}
                                 aria-label={`Preview ${title}`}
                               >
@@ -2424,7 +2439,7 @@ export default function ActionQueue() {
                               </button>
                               <div className="aq-related-candidate-content">
                                 <div className="aq-related-candidate-title">
-                                  <strong>{title}</strong>
+                                  <DocumentSummary summary={documentSummary} />
                                   {candidate.score >= 0.5 && (
                                     <Badge tone="warning">
                                       {Math.round(candidate.score * 100)}% suggestion
@@ -2432,15 +2447,11 @@ export default function ActionQueue() {
                                   )}
                                 </div>
                                 <div className="aq-related-candidate-meta">
-                                  <span>{correspondent || 'Unknown correspondent'}</span>
-                                  <span>{documentType || 'Unknown type'}</span>
-                                  <span>{formatDate(documentDate)}</span>
                                   <span>{formatCurrency(amount)}</span>
                                 </div>
-                                {(dueDate || account || reference) && (
+                                {(dueDate || reference) && (
                                   <div className="aq-related-candidate-meta secondary">
                                     {dueDate && <span>Due {formatDate(dueDate)}</span>}
-                                    {account && <span>Account {account}</span>}
                                     {reference && <span>Reference {reference}</span>}
                                   </div>
                                 )}
