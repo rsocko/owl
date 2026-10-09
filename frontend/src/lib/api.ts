@@ -130,6 +130,15 @@ export const endpoints = {
       api.post(`/api/statements/series/${id}/reassign`, body),
     seriesRename: (id: string, body: { name?: string; account_identifier?: string }) =>
       api.post(`/api/statements/series/${id}/rename`, body),
+    candidateExcludeDocument: (id: string, documentId: string) =>
+      api.post(`/api/statements/series/${id}/candidate-documents/${documentId}/exclude`),
+    candidateRestoreDocument: (id: string, documentId: string) =>
+      api.delete(`/api/statements/series/${id}/candidate-documents/${documentId}/exclude`),
+    candidateConfirm: (id: string) => api.post(`/api/statements/series/${id}/confirm`),
+    candidateSplit: (id: string, body: { document_ids: number[]; new_candidate_name: string }) =>
+      api.post(`/api/statements/series/${id}/candidate-split`, body),
+    candidateMerge: (id: string, sourceId: string) =>
+      api.post(`/api/statements/series/${id}/candidate-merge/${sourceId}`),
   },
   eob: {
     check: () => api.get('/api/eob/check'),

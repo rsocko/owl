@@ -41,6 +41,7 @@ class ProviderCandidate(BaseModel):
     title_consistency: float
     pattern: AnalysisPattern
     sample_document_ids: list[int]
+    documents: list[DocumentRecord] = Field(default_factory=list)
     first_seen: date
     last_seen: date
 
@@ -167,6 +168,13 @@ class SplitSeriesRequest(BaseModel):
     document_ids: list[str]
     new_series_name: str
     account_identifier: str | None = None
+
+
+class SplitCandidateRequest(BaseModel):
+    """Request to partition a discovered candidate before confirmation."""
+
+    document_ids: list[int]
+    new_candidate_name: str = Field(min_length=1)
 
 
 class MergeSeriesRequest(BaseModel):

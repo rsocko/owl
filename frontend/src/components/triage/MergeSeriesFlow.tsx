@@ -18,6 +18,7 @@ interface Props {
   sourceTimeline?: TimelineEntry[];
   onComplete: () => void;
   onCancel: () => void;
+  candidateMode?: boolean;
 }
 
 interface TargetDetail {
@@ -26,7 +27,7 @@ interface TargetDetail {
   timeline: TimelineEntry[];
 }
 
-export function MergeSeriesFlow({ series, documents, similarSeries, sourceTimeline, onComplete, onCancel }: Props) {
+export function MergeSeriesFlow({ series, documents, similarSeries, sourceTimeline, onComplete, onCancel, candidateMode = false }: Props) {
   const [targetId, setTargetId] = useState<string | null>(null);
   const [targetDetail, setTargetDetail] = useState<TargetDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -124,10 +125,14 @@ export function MergeSeriesFlow({ series, documents, similarSeries, sourceTimeli
     setBusy(true);
     setError(null);
     try {
-      await endpoints.statements.seriesMerge({
-        source_series_id: series.id,
-        target_series_id: targetId,
-      });
+      if (candidateMode) {
+        await endpoints.statements.candidateMerge(series.id, targetId);
+      } else {
+        await endpoints.statements.seriesMerge({
+          source_series_id: series.id,
+          target_series_id: targetId,
+        });
+      }
       onComplete();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Merge failed');
@@ -156,14 +161,16 @@ export function MergeSeriesFlow({ series, documents, similarSeries, sourceTimeli
   }, [mergedAccounts]);
 
   return (
-    <Card title="🔗 Merge Series">
+    <Card title={candidateMode ? 'Merge candidates' : '🔗 Merge Series'}>
       <div className="sg-merge-root">
         {error && <div className="sg-merge-error">{error}</div>}
 
         {/* Target series picker */}
         {!targetId ? (
           <div className="sg-merge-picker">
-            <p>Select a series to merge with <strong>{series.name}</strong>:</p>
+            <p>
+              Select a {candidateMode ? 'candidate' : 'series'} to merge with <strong>{series.name}</strong>:
+            </p>
             <div className="sg-merge-options">
               {similarSeries.map(s => (
                 <button key={s.id} className="sg-merge-option" onClick={() => setTargetId(s.id)}>

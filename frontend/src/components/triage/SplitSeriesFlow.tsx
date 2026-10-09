@@ -24,6 +24,7 @@ interface Props {
   accounts: string[];
   accountColorMap: Record<string, string>;
   suggestedSplitGroups?: SuggestedSplitGroup[];
+  candidateMode?: boolean;
   onComplete: () => void;
   onCancel: () => void;
 }
@@ -63,6 +64,7 @@ export function SplitSeriesFlow({
   accounts,
   accountColorMap,
   suggestedSplitGroups,
+  candidateMode = false,
   onComplete,
   onCancel,
 }: Props) {
@@ -104,17 +106,24 @@ export function SplitSeriesFlow({
       return;
     }
     if (!newName.trim()) {
-      setError('Please enter a name for the new series');
+      setError(`Enter a name for the new ${candidateMode ? 'candidate' : 'series'}`);
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      await endpoints.statements.seriesSplit(series.id, {
-        document_ids: Array.from(selectedDocIds),
-        new_series_name: newName.trim(),
-        account_identifier: accountId.trim() || undefined,
-      });
+      if (candidateMode) {
+        await endpoints.statements.candidateSplit(series.id, {
+          document_ids: Array.from(selectedDocIds).map(Number),
+          new_candidate_name: newName.trim(),
+        });
+      } else {
+        await endpoints.statements.seriesSplit(series.id, {
+          document_ids: Array.from(selectedDocIds),
+          new_series_name: newName.trim(),
+          account_identifier: accountId.trim() || undefined,
+        });
+      }
       onComplete();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Split failed');
@@ -124,7 +133,7 @@ export function SplitSeriesFlow({
   };
 
   return (
-    <Card title="✂️ Split Series">
+    <Card title={candidateMode ? 'Split candidate' : '✂️ Split Series'}>
       <div className="sg-split-root">
         {error && <div className="sg-split-error">{error}</div>}
 
@@ -157,7 +166,9 @@ export function SplitSeriesFlow({
 
         {selectedDocIds.size === 0 ? (
           <div className="sg-split-hint">
-            <p>Select documents from the list below to move them to a new series.</p>
+            <p>
+              Select documents from the list below to move them to a new {candidateMode ? 'candidate' : 'series'}.
+            </p>
             {accounts.length > 1 && (
               <p className="text-muted">
                 <strong>Tip:</strong> Multiple account numbers detected. Select all documents for one account using the "Select all" buttons.
@@ -169,7 +180,7 @@ export function SplitSeriesFlow({
             {/* Split preview with mini-timelines */}
             <div className="sg-split-preview">
               <div className="sg-split-title">
-                ✂️ Split Preview — {selectedDocIds.size} document{selectedDocIds.size > 1 ? 's' : ''} selected for new series
+                Split preview — {selectedDocIds.size} document{selectedDocIds.size > 1 ? 's' : ''} selected for new {candidateMode ? 'candidate' : 'series'}
               </div>
 
               {/* Side-by-side mini-timelines */}
@@ -191,7 +202,7 @@ export function SplitSeriesFlow({
                 <div className="st-split-timeline-panel">
                   <div className="st-split-timeline-label">
                     <span className="sg-split-dot" style={{ background: 'var(--series-b)' }} />
-                    New: "{newName || '(enter name)'}" ({selectedDocs.length} docs)
+                    New {candidateMode ? 'candidate' : 'series'}: "{newName || '(enter name)'}" ({selectedDocs.length} docs)
                   </div>
                   <SeriesTimeline
                     entries={selectedTimeline}
@@ -259,7 +270,7 @@ export function SplitSeriesFlow({
               {/* Name + account form */}
               <div className="sg-split-form">
                 <label>
-                  New series name:
+                  New {candidateMode ? 'candidate' : 'series'} name:
                   <input
                     type="text"
                     className="sg-split-input"
@@ -268,18 +279,20 @@ export function SplitSeriesFlow({
                     placeholder="e.g., Chase Freedom"
                   />
                 </label>
-                <label>
-                  Account ID:
-                  <input
-                    type="text"
-                    className="sg-split-input sg-split-input-short"
-                    value={accountId}
-                    onChange={e => setAccountId(e.target.value)}
-                    placeholder="e.g., ending 8876"
-                  />
-                </label>
+                {!candidateMode && (
+                  <label>
+                    Account ID:
+                    <input
+                      type="text"
+                      className="sg-split-input sg-split-input-short"
+                      value={accountId}
+                      onChange={e => setAccountId(e.target.value)}
+                      placeholder="e.g., ending 8876"
+                    />
+                  </label>
+                )}
                 <Button variant="success" onClick={() => void handleSplit()} disabled={busy || !newName.trim()}>
-                  ✂️ Confirm Split
+                  {candidateMode ? 'Create second candidate' : '✂️ Confirm Split'}
                 </Button>
                 <Button onClick={onCancel} disabled={busy}>Cancel</Button>
               </div>

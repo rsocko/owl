@@ -190,6 +190,7 @@ def analyze_group(
         title_consistency=round(title_consistency, 2),
         pattern=pattern,
         sample_document_ids=[document.id for document in ordered[-3:]],
+        documents=ordered,
         first_seen=ordered[0].created,
         last_seen=ordered[-1].created,
     )

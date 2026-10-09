@@ -154,6 +154,14 @@
   flex-wrap: wrap;
 }
 
+.statement-series-review-note {
+  background: var(--accent-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 12px 16px;
+}
+
 /* -- Rename form -- */
 
 .statement-series-rename-form {

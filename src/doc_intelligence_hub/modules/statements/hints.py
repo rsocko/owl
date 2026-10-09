@@ -106,6 +106,7 @@ def _apply_split(
                     title_consistency=1.0,
                     pattern=p.pattern.model_copy(),
                     sample_document_ids=[d.id for d in ordered[-3:]],
+                    documents=ordered,
                     first_seen=ordered[0].created,
                     last_seen=ordered[-1].created,
                 )
@@ -134,12 +135,14 @@ def _apply_merge(providers: list[ProviderCandidate], hint: ProviderHint) -> list
     # Use the first as the base, combine stats
     base = to_merge[0]
     all_doc_ids = []
+    all_documents = []
     total_count = 0
     earliest = base.first_seen
     latest = base.last_seen
 
     for p in to_merge:
         all_doc_ids.extend(p.sample_document_ids)
+        all_documents.extend(p.documents)
         total_count += p.document_count
         earliest = min(earliest, p.first_seen)
         latest = max(latest, p.last_seen)
@@ -155,6 +158,7 @@ def _apply_merge(providers: list[ProviderCandidate], hint: ProviderHint) -> list
         title_consistency=base.title_consistency,
         pattern=base.pattern.model_copy(),
         sample_document_ids=all_doc_ids[-3:],
+        documents=sorted(all_documents, key=lambda document: document.created),
         first_seen=earliest,
         last_seen=latest,
     )
@@ -211,6 +215,7 @@ def _apply_define(
             grace_period_days=5,
         ),
         sample_document_ids=[d.id for d in ordered[-3:]],
+        documents=ordered,
         first_seen=ordered[0].created,
         last_seen=ordered[-1].created,
     )

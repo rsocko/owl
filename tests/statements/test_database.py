@@ -9,6 +9,7 @@ from doc_intelligence_hub.modules.statements.database import SCHEMA_VERSION, Dat
 from doc_intelligence_hub.modules.statements.models import (
     AnalysisPattern,
     DiscoveryResult,
+    DocumentRecord,
     ProviderCandidate,
     Recommendation,
     RecommendationResult,
@@ -36,6 +37,16 @@ def _sample_discovery() -> DiscoveryResult:
                     grace_period_days=5,
                 ),
                 sample_document_ids=[10, 11, 12],
+                documents=[
+                    DocumentRecord(
+                        id=month,
+                        title=f"Chase statement {month}",
+                        correspondent_id=42,
+                        correspondent_name="Chase Visa",
+                        created=date(2025, month, 3),
+                    )
+                    for month in range(1, 13)
+                ],
                 first_seen=date(2025, 1, 3),
                 last_seen=date(2025, 12, 3),
             ),
@@ -164,11 +175,74 @@ def test_save_and_load_discovery(tmp_path) -> None:
         assert chase.first_seen == date(2025, 1, 3)
         assert chase.last_seen == date(2025, 12, 3)
         assert chase.sample_document_ids == [10, 11, 12]
+        assert [document.id for document in chase.documents] == list(range(1, 13))
 
         vanguard = next(
             p for p in loaded.providers if p.provider_key == "vanguard-investment-statement"
         )
         assert vanguard.pattern.frequency == "quarterly"
+    finally:
+        db.close()
+
+
+def test_provider_document_review_tracks_reversible_exclusions(tmp_path) -> None:
+    db = Database(str(tmp_path / "test.db"))
+    try:
+        db.save_discovery(_sample_discovery())
+
+        included, excluded, complete = db.get_provider_document_review("chase-visa-chase-statement")
+        assert complete is True
+        assert len(included) == 12
+        assert excluded == []
+
+        db.set_provider_document_excluded("chase-visa-chase-statement", 4, excluded=True)
+        included, excluded, complete = db.get_provider_document_review("chase-visa-chase-statement")
+        assert complete is True
+        assert len(included) == 11
+        assert [document["document_id"] for document in excluded] == ["4"]
+
+        db.set_provider_document_excluded("chase-visa-chase-statement", 4, excluded=False)
+        included, excluded, _ = db.get_provider_document_review("chase-visa-chase-statement")
+        assert len(included) == 12
+        assert excluded == []
+    finally:
+        db.close()
+
+
+def test_provider_candidates_can_split_and_merge_before_confirmation(tmp_path) -> None:
+    db = Database(str(tmp_path / "test.db"))
+    try:
+        db.save_discovery(_sample_discovery())
+
+        split_key = db.split_provider_candidate(
+            "chase-visa-chase-statement",
+            [10, 11, 12],
+            "Chase Rewards",
+        )
+
+        original_documents, _, original_complete = db.get_provider_document_review(
+            "chase-visa-chase-statement"
+        )
+        split_documents, _, split_complete = db.get_provider_document_review(split_key)
+        assert original_complete is True
+        assert split_complete is True
+        assert len(original_documents) == 9
+        assert [document["document_id"] for document in split_documents] == [
+            "10",
+            "11",
+            "12",
+        ]
+        similar = db.get_similar_provider_candidates("chase-visa-chase-statement")
+        assert [candidate["provider_key"] for candidate in similar] == [split_key]
+
+        db.merge_provider_candidates("chase-visa-chase-statement", split_key)
+
+        merged_documents, _, merged_complete = db.get_provider_document_review(
+            "chase-visa-chase-statement"
+        )
+        assert merged_complete is True
+        assert len(merged_documents) == 12
+        assert db.get_provider_by_key(split_key) is None
     finally:
         db.close()
 

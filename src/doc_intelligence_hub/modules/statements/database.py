@@ -43,12 +43,13 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
 from doc_intelligence_hub.modules.statements.models import (
     AnalysisPattern,
     DiscoveryResult,
+    DocumentRecord,
     ProviderCandidate,
     Recommendation,
     RecommendationResult,
 )
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -83,6 +84,22 @@ CREATE TABLE IF NOT EXISTS providers (
     last_seen TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS provider_documents (
+    provider_id INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+    document_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    statement_date TEXT NOT NULL,
+    account_hint TEXT,
+    PRIMARY KEY (provider_id, document_id)
+);
+
+CREATE TABLE IF NOT EXISTS provider_document_exclusions (
+    provider_key TEXT NOT NULL,
+    document_id INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (provider_key, document_id)
+);
+
 CREATE TABLE IF NOT EXISTS recommendation_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -105,6 +122,7 @@ CREATE TABLE IF NOT EXISTS recommendations (
 
 CREATE INDEX IF NOT EXISTS idx_providers_run ON providers(discovery_run_id);
 CREATE INDEX IF NOT EXISTS idx_providers_key ON providers(provider_key);
+CREATE INDEX IF NOT EXISTS idx_provider_documents_provider ON provider_documents(provider_id);
 CREATE INDEX IF NOT EXISTS idx_recommendations_run ON recommendations(recommendation_run_id);
 
 CREATE TABLE IF NOT EXISTS provider_overrides (
@@ -494,7 +512,7 @@ class Database:
         run_id = cursor.lastrowid
 
         for provider in result.providers:
-            conn.execute(
+            provider_cursor = conn.execute(
                 """INSERT INTO providers (
                     discovery_run_id, provider_key, provider_name, statement_name, correspondent_id,
                     document_count, normalized_title, title_consistency,
@@ -522,6 +540,22 @@ class Database:
                     provider.last_seen.isoformat(),
                 ),
             )
+            provider_id = provider_cursor.lastrowid
+            conn.executemany(
+                """INSERT INTO provider_documents (
+                       provider_id, document_id, title, statement_date, account_hint
+                   ) VALUES (?, ?, ?, ?, ?)""",
+                [
+                    (
+                        provider_id,
+                        document.id,
+                        document.title,
+                        document.created.isoformat(),
+                        document.account_identifier,
+                    )
+                    for document in provider.documents
+                ],
+            )
 
         conn.commit()
         return run_id
@@ -541,29 +575,48 @@ class Database:
             (run_id,),
         ).fetchall()
 
-        providers = [
-            ProviderCandidate(
-                provider_key=row["provider_key"],
-                provider_name=row["provider_name"],
-                statement_name=row["statement_name"],
-                correspondent_id=row["correspondent_id"],
-                document_count=row["document_count"],
-                normalized_title=row["normalized_title"],
-                title_consistency=row["title_consistency"],
-                pattern=AnalysisPattern(
-                    frequency=row["frequency"],
-                    pattern_type=row["pattern_type"],
-                    confidence=row["confidence"],
-                    anchor_day=row["anchor_day"],
-                    variance_days=row["variance_days"],
-                    grace_period_days=row["grace_period_days"],
-                ),
-                sample_document_ids=json.loads(row["sample_document_ids"]),
-                first_seen=date.fromisoformat(row["first_seen"]),
-                last_seen=date.fromisoformat(row["last_seen"]),
+        providers = []
+        for row in rows:
+            document_rows = conn.execute(
+                """SELECT document_id, title, statement_date, account_hint
+                   FROM provider_documents
+                   WHERE provider_id = ?
+                   ORDER BY statement_date, document_id""",
+                (row["id"],),
+            ).fetchall()
+            providers.append(
+                ProviderCandidate(
+                    provider_key=row["provider_key"],
+                    provider_name=row["provider_name"],
+                    statement_name=row["statement_name"],
+                    correspondent_id=row["correspondent_id"],
+                    document_count=row["document_count"],
+                    normalized_title=row["normalized_title"],
+                    title_consistency=row["title_consistency"],
+                    pattern=AnalysisPattern(
+                        frequency=row["frequency"],
+                        pattern_type=row["pattern_type"],
+                        confidence=row["confidence"],
+                        anchor_day=row["anchor_day"],
+                        variance_days=row["variance_days"],
+                        grace_period_days=row["grace_period_days"],
+                    ),
+                    sample_document_ids=json.loads(row["sample_document_ids"]),
+                    documents=[
+                        DocumentRecord(
+                            id=document["document_id"],
+                            title=document["title"],
+                            correspondent_id=row["correspondent_id"],
+                            correspondent_name=row["provider_name"],
+                            created=date.fromisoformat(document["statement_date"]),
+                            account_identifier=document["account_hint"],
+                        )
+                        for document in document_rows
+                    ],
+                    first_seen=date.fromisoformat(row["first_seen"]),
+                    last_seen=date.fromisoformat(row["last_seen"]),
+                )
             )
-            for row in rows
-        ]
 
         return DiscoveryResult(
             analyzed_documents=run_row["analyzed_documents"], providers=providers
@@ -671,6 +724,247 @@ class Database:
             (run_row["id"], provider_key),
         ).fetchone()
         return dict(row) if row else None
+
+    def get_provider_document_review(
+        self, provider_key: str
+    ) -> tuple[list[dict], list[dict], bool]:
+        """Return included and excluded documents for a latest-run provider."""
+        conn = self.connect()
+        provider = self.get_provider_by_key(provider_key)
+        if provider is None:
+            return [], [], False
+        rows = conn.execute(
+            """SELECT pd.document_id, pd.title, pd.statement_date, pd.account_hint,
+                      CASE WHEN pde.document_id IS NULL THEN 0 ELSE 1 END AS excluded
+               FROM provider_documents pd
+               LEFT JOIN provider_document_exclusions pde
+                 ON pde.provider_key = ? AND pde.document_id = pd.document_id
+               WHERE pd.provider_id = ?
+               ORDER BY pd.statement_date, pd.document_id""",
+            (provider_key, provider["id"]),
+        ).fetchall()
+        documents = [
+            {
+                "series_id": provider_key,
+                "document_id": str(row["document_id"]),
+                "title": row["title"],
+                "statement_date": row["statement_date"],
+                "period_label": row["statement_date"][:7],
+                "account_hint": row["account_hint"],
+            }
+            for row in rows
+        ]
+        included = [
+            document for document, row in zip(documents, rows, strict=True) if not row["excluded"]
+        ]
+        excluded = [
+            document for document, row in zip(documents, rows, strict=True) if row["excluded"]
+        ]
+        return included, excluded, len(rows) == provider["document_count"]
+
+    def set_provider_document_excluded(
+        self, provider_key: str, document_id: int, *, excluded: bool
+    ) -> None:
+        """Exclude or restore one document in a discovered provider review."""
+        conn = self.connect()
+        provider = self.get_provider_by_key(provider_key)
+        if provider is None:
+            raise ValueError(f"Provider '{provider_key}' not found")
+        member = conn.execute(
+            "SELECT 1 FROM provider_documents WHERE provider_id = ? AND document_id = ?",
+            (provider["id"], document_id),
+        ).fetchone()
+        if member is None:
+            raise ValueError(
+                f"Document '{document_id}' does not belong to provider '{provider_key}'"
+            )
+        if excluded:
+            conn.execute(
+                """INSERT OR REPLACE INTO provider_document_exclusions (
+                       provider_key, document_id, updated_at
+                   ) VALUES (?, ?, datetime('now'))""",
+                (provider_key, document_id),
+            )
+        else:
+            conn.execute(
+                """DELETE FROM provider_document_exclusions
+                   WHERE provider_key = ? AND document_id = ?""",
+                (provider_key, document_id),
+            )
+        conn.commit()
+
+    def get_similar_provider_candidates(self, provider_key: str) -> list[dict]:
+        """Return other unconfirmed candidates from the same correspondent."""
+        conn = self.connect()
+        provider = self.get_provider_by_key(provider_key)
+        if provider is None:
+            return []
+        if provider["correspondent_id"] is not None:
+            identity_clause = "candidate.correspondent_id = ?"
+            identity_value: Any = provider["correspondent_id"]
+        else:
+            identity_clause = "candidate.provider_name = ?"
+            identity_value = provider["provider_name"]
+        rows = conn.execute(
+            f"""SELECT candidate.*
+                FROM providers candidate
+                LEFT JOIN statement_series confirmed ON confirmed.id = candidate.provider_key
+                WHERE candidate.discovery_run_id = ?
+                  AND {identity_clause}
+                  AND candidate.provider_key != ?
+                  AND confirmed.id IS NULL
+                ORDER BY candidate.statement_name, candidate.provider_name""",
+            (provider["discovery_run_id"], identity_value, provider_key),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def split_provider_candidate(
+        self, provider_key: str, document_ids: list[int], new_name: str
+    ) -> str:
+        """Move selected documents into a second unconfirmed candidate."""
+        conn = self.connect()
+        provider = self.get_provider_by_key(provider_key)
+        if provider is None:
+            raise ValueError(f"Provider '{provider_key}' not found")
+        selected_ids = sorted(set(document_ids))
+        if not selected_ids:
+            raise ValueError("Select at least one document to split")
+        placeholders = ",".join("?" for _ in selected_ids)
+        selected_rows = conn.execute(
+            f"""SELECT pd.document_id
+                FROM provider_documents pd
+                LEFT JOIN provider_document_exclusions excluded
+                  ON excluded.provider_key = ? AND excluded.document_id = pd.document_id
+                WHERE pd.provider_id = ?
+                  AND pd.document_id IN ({placeholders})
+                  AND excluded.document_id IS NULL""",
+            (provider_key, provider["id"], *selected_ids),
+        ).fetchall()
+        if len(selected_rows) != len(selected_ids):
+            raise ValueError("Every selected document must belong to the current candidate")
+        included_count = conn.execute(
+            """SELECT COUNT(*) AS count
+               FROM provider_documents pd
+               LEFT JOIN provider_document_exclusions excluded
+                 ON excluded.provider_key = ? AND excluded.document_id = pd.document_id
+               WHERE pd.provider_id = ? AND excluded.document_id IS NULL""",
+            (provider_key, provider["id"]),
+        ).fetchone()["count"]
+        if len(selected_ids) >= included_count:
+            raise ValueError("Leave at least one document in the current candidate")
+
+        normalized_name = "-".join(new_name.lower().split()) or "split"
+        new_key = f"{provider_key}-{normalized_name}-{uuid.uuid4().hex[:6]}"
+        cursor = conn.execute(
+            """INSERT INTO providers (
+                   discovery_run_id, provider_key, provider_name, statement_name, correspondent_id,
+                   document_count, normalized_title, title_consistency,
+                   frequency, pattern_type, confidence, anchor_day,
+                   variance_days, grace_period_days, sample_document_ids,
+                   first_seen, last_seen
+               ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?)""",
+            (
+                provider["discovery_run_id"],
+                new_key,
+                provider["provider_name"],
+                new_name,
+                provider["correspondent_id"],
+                new_name.lower(),
+                provider["title_consistency"],
+                provider["frequency"],
+                provider["pattern_type"],
+                provider["confidence"],
+                provider["anchor_day"],
+                provider["variance_days"],
+                provider["grace_period_days"],
+                provider["first_seen"],
+                provider["last_seen"],
+            ),
+        )
+        new_provider_id = cursor.lastrowid
+        conn.execute(
+            f"""UPDATE provider_documents
+                SET provider_id = ?
+                WHERE provider_id = ? AND document_id IN ({placeholders})""",
+            (new_provider_id, provider["id"], *selected_ids),
+        )
+        self._refresh_provider_candidate(provider["id"])
+        self._refresh_provider_candidate(new_provider_id)
+        conn.commit()
+        return new_key
+
+    def merge_provider_candidates(self, target_key: str, source_key: str) -> None:
+        """Combine two unconfirmed candidates from the same correspondent."""
+        conn = self.connect()
+        target = self.get_provider_by_key(target_key)
+        source = self.get_provider_by_key(source_key)
+        if target is None or source is None:
+            raise ValueError("Both candidates must exist in the latest discovery run")
+        same_correspondent = (
+            target["correspondent_id"] == source["correspondent_id"]
+            if target["correspondent_id"] is not None and source["correspondent_id"] is not None
+            else target["provider_name"] == source["provider_name"]
+        )
+        if not same_correspondent:
+            raise ValueError("Candidates must have the same correspondent")
+        if self.get_series(target_key) or self.get_series(source_key):
+            raise ValueError("Confirmed series must use the series merge workflow")
+
+        conn.execute(
+            """INSERT OR IGNORE INTO provider_documents (
+                   provider_id, document_id, title, statement_date, account_hint
+               )
+               SELECT ?, document_id, title, statement_date, account_hint
+               FROM provider_documents
+               WHERE provider_id = ?""",
+            (target["id"], source["id"]),
+        )
+        conn.execute(
+            """INSERT OR IGNORE INTO provider_document_exclusions (
+                   provider_key, document_id, updated_at
+               )
+               SELECT ?, document_id, updated_at
+               FROM provider_document_exclusions
+               WHERE provider_key = ?""",
+            (target_key, source_key),
+        )
+        conn.execute(
+            "DELETE FROM provider_document_exclusions WHERE provider_key = ?",
+            (source_key,),
+        )
+        conn.execute("DELETE FROM provider_overrides WHERE provider_key = ?", (source_key,))
+        conn.execute("DELETE FROM providers WHERE id = ?", (source["id"],))
+        self._refresh_provider_candidate(target["id"])
+        conn.commit()
+
+    def _refresh_provider_candidate(self, provider_id: int) -> None:
+        """Refresh candidate counts, date range, and representative samples."""
+        conn = self.connect()
+        summary = conn.execute(
+            """SELECT COUNT(*) AS count, MIN(statement_date) AS first_seen,
+                      MAX(statement_date) AS last_seen
+               FROM provider_documents WHERE provider_id = ?""",
+            (provider_id,),
+        ).fetchone()
+        sample_rows = conn.execute(
+            """SELECT document_id FROM provider_documents
+               WHERE provider_id = ?
+               ORDER BY statement_date DESC, document_id DESC LIMIT 3""",
+            (provider_id,),
+        ).fetchall()
+        conn.execute(
+            """UPDATE providers
+               SET document_count = ?, first_seen = ?, last_seen = ?,
+                   sample_document_ids = ?
+               WHERE id = ?""",
+            (
+                summary["count"],
+                summary["first_seen"],
+                summary["last_seen"],
+                json.dumps([row["document_id"] for row in reversed(sample_rows)]),
+                provider_id,
+            ),
+        )
 
     # ----- Provider overrides -----
 

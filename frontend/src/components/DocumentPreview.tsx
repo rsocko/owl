@@ -77,7 +77,9 @@ export default function DocumentPreview({
   const thumbnailUrl = endpoints.documents.thumbnailUrl(documentId);
   const downloadUrl = endpoints.documents.downloadUrl(documentId);
   const paperlessUrl = paperlessUrlOverride ?? meta?.paperless_url;
-  const filename = meta?.original_file_name ?? meta?.title ?? `Document #${documentId}`;
+  const documentTitle = meta?.title || `Document #${documentId}`;
+  const filename = meta?.original_file_name;
+  const showFilename = Boolean(filename && filename !== documentTitle);
   const displayLabel = label ? `${label}: ` : '';
 
   if (variant === 'compact') {
@@ -92,7 +94,7 @@ export default function DocumentPreview({
             {!thumbError ? (
               <img
                 src={thumbnailUrl}
-                alt={filename}
+                alt={documentTitle}
                 onLoad={() => setThumbLoaded(true)}
                 onError={() => setThumbError(true)}
                 style={{ display: thumbLoaded ? 'block' : 'none' }}
@@ -102,9 +104,14 @@ export default function DocumentPreview({
             {thumbError && <div className="doc-preview-compact-thumb-placeholder">📄</div>}
           </div>
           <div className="doc-preview-compact-info">
-            <div className="doc-preview-compact-filename" title={filename}>
-              {displayLabel}{filename}
+            <div className="doc-preview-compact-title" title={documentTitle}>
+              {displayLabel}{documentTitle}
             </div>
+            {showFilename && (
+              <div className="doc-preview-compact-filename" title={filename}>
+                {filename}
+              </div>
+            )}
             <div className="doc-preview-compact-links">
               <a href="#" onClick={(e) => { e.preventDefault(); setViewerOpen(true); }}>
                 Preview
@@ -123,7 +130,7 @@ export default function DocumentPreview({
         {viewerOpen && (
           <DocumentViewerModal
             documentId={documentId}
-            title={filename}
+            title={documentTitle}
             paperlessUrl={paperlessUrl}
             onClose={() => setViewerOpen(false)}
           />
@@ -158,7 +165,7 @@ export default function DocumentPreview({
             {!thumbError ? (
               <img
                 src={thumbnailUrl}
-                alt={filename}
+                alt={documentTitle}
                 onLoad={() => setThumbLoaded(true)}
                 onError={() => setThumbError(true)}
                 style={{ display: thumbLoaded ? 'block' : 'none' }}
@@ -168,7 +175,8 @@ export default function DocumentPreview({
             {thumbError && <div className="doc-preview-thumb-placeholder">📄</div>}
           </div>
           <div className="doc-preview-meta">
-            <div className="doc-preview-filename">{displayLabel}{filename}</div>
+            <div className="doc-preview-title">{displayLabel}{documentTitle}</div>
+            {showFilename && <div className="doc-preview-filename">{filename}</div>}
             <div className="doc-preview-info">
               {meta?.page_count != null && <span>📄 {meta.page_count} page{meta.page_count !== 1 ? 's' : ''}</span>}
               {meta?.added && <span>📥 Ingested {formatDate(meta.added)}</span>}
@@ -196,7 +204,7 @@ export default function DocumentPreview({
       {viewerOpen && (
         <DocumentViewerModal
           documentId={documentId}
-          title={filename}
+          title={documentTitle}
           paperlessUrl={paperlessUrl}
           onClose={() => setViewerOpen(false)}
         />
