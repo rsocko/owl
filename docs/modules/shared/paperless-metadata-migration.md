@@ -22,9 +22,9 @@ names, aliases, types, or IDs independently.
   actionable outcomes. They are never converted to plausible defaults.
 - Legacy fields are never renamed, hidden, cleared, or deleted by this tooling.
 
-`Normalized Document Type` accepts deployed text or select fields, but field creation is
-disabled until a protected inventory resolves that deployment-specific decision. The
-tool reports `type_decision_required` instead of choosing a type or adding private options.
+Paperless's native Document Type remains the canonical taxonomy and is outside this
+custom-field migration. The tool does not create or migrate a separate OWL document-type
+field.
 
 ## Output classes
 
@@ -101,7 +101,7 @@ returns a success-shaped result.
 1. Deploy a compatibility release containing the typed registry.
 2. Disable all external metadata writers.
 3. Run read-only inventory and review the protected report.
-4. Resolve the `Normalized Document Type` decision and schema incompatibilities.
+4. Resolve schema incompatibilities.
 5. Dry-run canonical preparation and backfill.
 6. Apply in bounded batches with protected state.
 7. Observe canonical coverage for a normal processing cycle.

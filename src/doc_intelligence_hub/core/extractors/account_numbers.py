@@ -15,13 +15,19 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from doc_intelligence_hub.core.extractors.correction_hints import pick_nearest_to_anchor
 from doc_intelligence_hub.core.masked_identifiers import masked_identifier_suffix
 from doc_intelligence_hub.core.paperless import (
+    AccountIdentifierClass,
+    AccountIdentifierProjection,
     MetadataFieldKey,
     PaperlessMetadataResolver,
+    build_account_identifier_update,
     build_metadata_update,
+    govern_account_identifier,
+    mask_account_identifier,
 )
 from doc_intelligence_hub.modules.triage.database import has_correction_for_field
 
@@ -29,9 +35,49 @@ logger = logging.getLogger(__name__)
 
 # Common account number patterns — each captures the meaningful identifier portion.
 # Ordered from most specific to least specific to reduce false positives.
-ACCOUNT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+ACCOUNT_PATTERNS: list[
+    tuple[str, AccountIdentifierClass, float, re.Pattern[str]]
+] = [
+    (
+        "bank_account",
+        AccountIdentifierClass.BANK_ACCOUNT,
+        0.99,
+        re.compile(
+            r"(?:bank|checking|savings)\s+account\s*(?:#|number|no\.?)[\s.:]*"
+            r"([A-Z0-9][\w-]{3,24})",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "payment_card",
+        AccountIdentifierClass.PAYMENT_CARD,
+        0.99,
+        re.compile(
+            r"(?:payment\s+)?card\s*(?:#|number|no\.?)[\s.:]*"
+            r"[*Xx.\s-]*(\d{4,19})",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "payment_card_ending",
+        AccountIdentifierClass.PAYMENT_CARD,
+        0.99,
+        re.compile(r"(?:payment\s+)?card\s+ending\s+(?:in\s+)?(\d{4})", re.IGNORECASE),
+    ),
+    (
+        "service_account",
+        AccountIdentifierClass.SERVICE_ACCOUNT,
+        0.99,
+        re.compile(
+            r"(?:provider|service)\s+account\s*(?:#|number|no\.?)[\s.:]*"
+            r"([A-Z0-9][\w-]{2,24})",
+            re.IGNORECASE,
+        ),
+    ),
     (
         "account_last4",
+        AccountIdentifierClass.PROVIDER_ACCOUNT,
+        0.99,
         re.compile(
             r"(?:account|acct)[\s.]*(?:#|number|no\.?|num\.?)[\s.:]*[*Xx.]+(\d{4})",
             re.IGNORECASE,
@@ -39,6 +85,8 @@ ACCOUNT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         "account_number_full",
+        AccountIdentifierClass.PROVIDER_ACCOUNT,
+        0.99,
         re.compile(
             r"(?:account|acct)[\s.]*(?:#|number|no\.?|num\.?)[\s.:]*([A-Z0-9][\w-]{2,18}[A-Z0-9])",
             re.IGNORECASE,
@@ -46,26 +94,25 @@ ACCOUNT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         "ending_in",
+        AccountIdentifierClass.AMBIGUOUS,
+        0.60,
         re.compile(
             r"(?:ending[\s.:]+(?:in[\s.:]+)?|last\s*4[\s.:]+(?:in[\s.:]+)?)(\d{4})",
             re.IGNORECASE,
         ),
     ),
     (
-        "card_number",
-        re.compile(
-            r"card\s+(?:#|number)[\s.:]*[*Xx.]+(\d{4})",
-            re.IGNORECASE,
-        ),
-    ),
-    (
         "masked_number",
+        AccountIdentifierClass.AMBIGUOUS,
+        0.50,
         re.compile(
             r"[*Xx]{4,}\s*(\d{4})",
         ),
     ),
     (
         "member_id",
+        AccountIdentifierClass.MEMBER,
+        0.99,
         re.compile(
             r"member\s*(?:id|#|number)[\s.:]*([A-Z0-9]{6,15})",
             re.IGNORECASE,
@@ -73,6 +120,8 @@ ACCOUNT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         "policy_number",
+        AccountIdentifierClass.POLICY,
+        0.99,
         re.compile(
             r"policy\s*(?:#|number|no\.?)[\s.:]*([A-Z0-9]{4,15})",
             re.IGNORECASE,
@@ -80,8 +129,19 @@ ACCOUNT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         "claim_number",
+        AccountIdentifierClass.CLAIM,
+        0.99,
         re.compile(
             r"claim\s*(?:#|number|no\.?)[\s.:]*([A-Z0-9-]{4,20})",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "invoice_number",
+        AccountIdentifierClass.INVOICE,
+        0.99,
+        re.compile(
+            r"invoice\s*(?:#|number|no\.?)[\s.:]*([A-Z0-9-]{4,20})",
             re.IGNORECASE,
         ),
     ),
@@ -93,14 +153,23 @@ class ExtractionResult:
     """Result of account number extraction from a document."""
 
     document_id: int
-    account_numbers: list[str] = field(default_factory=list)
-    pattern_matches: list[dict[str, str]] = field(default_factory=list)
+    pattern_matches: list[dict[str, Any]] = field(default_factory=list)
     raw_text_length: int = 0
     success: bool = False
     error: str | None = None
 
 
-def extract_account_numbers(text: str) -> list[dict[str, str]]:
+@dataclass(frozen=True)
+class AccountExtractionDecision:
+    candidate: dict[str, Any] | None
+    projection: AccountIdentifierProjection | None
+    candidate_count: int
+    requires_review: bool
+    reason: str | None = None
+    display_values: tuple[str, ...] = ()
+
+
+def extract_account_numbers(text: str) -> list[dict[str, Any]]:
     """Extract account numbers from text using regex patterns.
 
     Returns a list of dicts with 'pattern', 'value', and 'raw_match' keys.
@@ -109,10 +178,10 @@ def extract_account_numbers(text: str) -> list[dict[str, str]]:
     if not text or not text.strip():
         return []
 
-    matches: list[dict[str, str]] = []
+    matches: list[dict[str, Any]] = []
     seen_values: set[str] = set()
 
-    for pattern_name, pattern in ACCOUNT_PATTERNS:
+    for pattern_name, identifier_class, confidence, pattern in ACCOUNT_PATTERNS:
         for m in pattern.finditer(text):
             raw_value = m.group(1).strip()
             # Normalize: collapse whitespace, uppercase
@@ -124,7 +193,8 @@ def extract_account_numbers(text: str) -> list[dict[str, str]]:
                         "pattern": pattern_name,
                         "value": raw_value,
                         "normalized": normalized,
-                        "raw_match": m.group(0).strip(),
+                        "identifier_class": identifier_class.value,
+                        "confidence": confidence,
                         "start": m.start(1),
                     }
                 )
@@ -133,7 +203,7 @@ def extract_account_numbers(text: str) -> list[dict[str, str]]:
 
 
 def pick_best_account_identifier(
-    matches: list[dict[str, str]],
+    matches: list[dict[str, Any]],
     *,
     text: str | None = None,
     anchor: str | None = None,
@@ -153,17 +223,78 @@ def pick_best_account_identifier(
         candidates = [(m["start"], m) for m in matches if "start" in m]
         biased = pick_nearest_to_anchor(text, candidates, anchor)
         if biased is not None:
-            if biased["pattern"] in ("account_last4", "ending_in", "card_number", "masked_number"):
+            if biased["pattern"] in (
+                "account_last4",
+                "ending_in",
+                "payment_card",
+                "payment_card_ending",
+                "masked_number",
+            ):
                 return f"ending {biased['normalized']}"
             return biased["value"]
 
-    # Prefer last-4 patterns
-    for m in matches:
-        if m["pattern"] in ("account_last4", "ending_in", "card_number", "masked_number"):
-            return f"ending {m['normalized']}"
+    for match in matches:
+        if match["pattern"] in (
+            "account_last4",
+            "ending_in",
+            "payment_card",
+            "payment_card_ending",
+            "masked_number",
+        ):
+            return f"ending {match['normalized']}"
+    return str(matches[0]["value"])
 
-    # Fall back to first full account number
-    return matches[0]["value"]
+
+def evaluate_account_identifiers(
+    matches: list[dict[str, Any]],
+) -> AccountExtractionDecision:
+    """Apply identifier policy without exposing exact candidates."""
+    eligible = [
+        match
+        for match in matches
+        if AccountIdentifierClass(str(match["identifier_class"]))
+        not in {AccountIdentifierClass.CLAIM, AccountIdentifierClass.INVOICE}
+    ]
+    if not eligible:
+        return AccountExtractionDecision(None, None, 0, False, "No account identifier found")
+
+    distinct = {str(match["normalized"]) for match in eligible}
+    if len(distinct) > 1:
+        display_values = tuple(
+            dict.fromkeys(
+                display
+                for match in eligible
+                if (
+                    display := mask_account_identifier(
+                        match["value"],
+                        str(match["identifier_class"]),
+                    )
+                )
+            )
+        )
+        return AccountExtractionDecision(
+            None,
+            None,
+            len(distinct),
+            True,
+            "Multiple plausible account identifiers require review",
+            display_values,
+        )
+
+    candidate = eligible[0]
+    projection = govern_account_identifier(
+        candidate["value"],
+        str(candidate["identifier_class"]),
+        float(candidate["confidence"]),
+    )
+    return AccountExtractionDecision(
+        candidate,
+        projection,
+        1,
+        projection.requires_review,
+        projection.reason,
+        (projection.display_value,) if projection.display_value else (),
+    )
 
 
 def normalize_masked_account_identifier(value: object) -> str | None:
@@ -187,7 +318,7 @@ def normalize_masked_account_identifier(value: object) -> str | None:
 
 
 def pick_masked_account_identifier(
-    matches: list[dict[str, str]],
+    matches: list[dict[str, Any]],
     *,
     text: str | None = None,
     anchor: str | None = None,
@@ -214,7 +345,8 @@ def pick_masked_account_identifier(
     preferred = (
         "account_last4",
         "ending_in",
-        "card_number",
+        "payment_card",
+        "payment_card_ending",
         "masked_number",
         "account_number_full",
         "member_id",
@@ -256,7 +388,6 @@ async def extract_from_document(
 
         result.raw_text_length = len(text)
         result.pattern_matches = extract_account_numbers(text)
-        result.account_numbers = [m["normalized"] for m in result.pattern_matches]
         result.success = True
 
     except Exception as exc:
@@ -301,8 +432,11 @@ async def write_account_to_paperless(
     document_id: int,
     account_identifier: str,
     paperless_client: object,
+    *,
+    identifier_class: AccountIdentifierClass | str | None = None,
+    confidence: float = 1.0,
 ) -> bool:
-    """Write a masked account identifier to the canonical Paperless field.
+    """Write a governed account identifier to the canonical Paperless field.
 
     Skipped if a user-submitted correction already exists for account_identifier
     on this document — corrections are authoritative and must not be clobbered
@@ -322,16 +456,24 @@ async def write_account_to_paperless(
         schema = await PaperlessMetadataResolver(paperless_client).resolve(
             (MetadataFieldKey.ACCOUNT_IDENTIFIER,)
         )
-        update = build_metadata_update(
-            MetadataFieldKey.ACCOUNT_IDENTIFIER,
-            account_identifier,
-            schema,
-        )
+        if identifier_class is None:
+            update = build_metadata_update(
+                MetadataFieldKey.ACCOUNT_IDENTIFIER,
+                account_identifier,
+                schema,
+            )
+        else:
+            update, _projection = build_account_identifier_update(
+                account_identifier,
+                identifier_class,
+                confidence,
+                schema,
+            )
 
         update_fields_fn = getattr(paperless_client, "update_custom_fields", None)
         if update_fields_fn is not None:
             await _call_sync_or_async(update_fields_fn, document_id, [update])
-            logger.info("Wrote masked account identifier to Paperless doc %d", document_id)
+            logger.info("Wrote governed account identifier to Paperless doc %d", document_id)
             return True
 
         patch_fn = getattr(paperless_client, "patch", None)
@@ -344,8 +486,8 @@ async def write_account_to_paperless(
             f"/api/documents/{document_id}/",
             {"custom_fields": [update]},
         )
-        logger.info("Wrote masked account identifier to Paperless doc %d", document_id)
+        logger.info("Wrote governed account identifier to Paperless doc %d", document_id)
         return True
-    except Exception as exc:
-        logger.error("Failed to write account to Paperless doc %d: %s", document_id, exc)
+    except Exception:
+        logger.error("Failed to write governed account identifier to Paperless doc %d", document_id)
         return False

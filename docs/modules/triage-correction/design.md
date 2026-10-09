@@ -677,7 +677,9 @@ CREATE INDEX idx_corrections_field ON extraction_corrections(field_name, correct
 | claim_number | `di_claim_number` | Corrected or newly extracted |
 | invoice_number | `di_invoice_number` | Corrected or newly extracted |
 | account_identifier | `di_account_id` | Extracted or user-provided; governed by identifier class |
-| document_classification | `di_doc_type` | EOB, Bill, Statement |
+
+Document classification uses Paperless's native Document Type. OWL does not
+maintain or correct a parallel custom document-type field.
 
 ---
 

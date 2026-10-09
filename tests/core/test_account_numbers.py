@@ -9,12 +9,14 @@ import pytest
 from doc_intelligence_hub.core.extractors import account_numbers as account_numbers_module
 from doc_intelligence_hub.core.extractors.account_numbers import (
     ExtractionResult,
+    evaluate_account_identifiers,
     extract_account_numbers,
     normalize_masked_account_identifier,
     pick_best_account_identifier,
     pick_masked_account_identifier,
     write_account_to_paperless,
 )
+from doc_intelligence_hub.core.paperless import AccountIdentifierClass
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +43,10 @@ class TestExtractAccountNumbers:
     def test_ending_in(self):
         text = "Card ending in 9876"
         matches = extract_account_numbers(text)
-        assert any(m["normalized"] == "9876" and m["pattern"] == "ending_in" for m in matches)
+        assert any(
+            m["normalized"] == "9876" and m["pattern"] == "payment_card_ending"
+            for m in matches
+        )
 
     def test_last4_variant(self):
         text = "last 4: 5555"
@@ -168,6 +173,56 @@ class TestPickMaskedAccountIdentifier:
         assert biased == "ending 9999"
 
 
+class TestAccountIdentifierPolicy:
+    def test_provider_account_can_project_exact_to_paperless(self):
+        decision = evaluate_account_identifiers(
+            extract_account_numbers("Account Number: SAMPLE123456")
+        )
+        assert decision.requires_review is False
+        assert decision.projection is not None
+        assert decision.projection.paperless_value == "SAMPLE123456"
+        assert decision.projection.display_value == "ending 3456"
+
+    def test_service_account_can_project_exact_to_paperless(self):
+        decision = evaluate_account_identifiers(
+            extract_account_numbers("Service Account Number: SERVICE123456")
+        )
+        assert decision.projection is not None
+        assert decision.projection.identifier_class is AccountIdentifierClass.SERVICE_ACCOUNT
+        assert decision.projection.paperless_value == "SERVICE123456"
+
+    def test_bank_account_is_masked_before_projection(self):
+        decision = evaluate_account_identifiers(
+            extract_account_numbers("Bank Account Number: 123456789")
+        )
+        assert decision.projection is not None
+        assert decision.projection.identifier_class is AccountIdentifierClass.BANK_ACCOUNT
+        assert decision.projection.paperless_value == "bank account ending 6789"
+
+    def test_unlabeled_suffix_requires_review(self):
+        decision = evaluate_account_identifiers(extract_account_numbers("ending in 9876"))
+        assert decision.requires_review is True
+        assert decision.projection is not None
+        assert decision.projection.identifier_class is AccountIdentifierClass.AMBIGUOUS
+        assert decision.projection.paperless_value is None
+
+    def test_multiple_candidates_require_review(self):
+        decision = evaluate_account_identifiers(
+            extract_account_numbers("Member ID: MEM123456\nPolicy Number: POL998877")
+        )
+        assert decision.requires_review is True
+        assert decision.candidate_count == 2
+        assert decision.candidate is None
+
+    def test_claim_and_invoice_use_dedicated_fields(self):
+        decision = evaluate_account_identifiers(
+            extract_account_numbers("Claim Number: CLM-1234\nInvoice Number: INV-5678")
+        )
+        assert decision.candidate_count == 0
+        assert decision.projection is None
+        assert decision.requires_review is False
+
+
 def test_normalizes_only_masked_account_identifiers() -> None:
     assert normalize_masked_account_identifier(" xxxx-4321 ") == "ending 4321"
     assert normalize_masked_account_identifier("XXX") == "ending XX"
@@ -189,7 +244,7 @@ class TestExtractionResult:
     def test_defaults(self):
         r = ExtractionResult(document_id=1)
         assert r.document_id == 1
-        assert r.account_numbers == []
+        assert r.pattern_matches == []
         assert r.success is False
         assert r.error is None
 
@@ -219,6 +274,26 @@ async def test_write_account_rejects_unmasked_value() -> None:
 
     assert await write_account_to_paperless(100, "SAMPLE123456789", client) is False
     client.update_custom_fields.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_write_classified_member_allows_exact_paperless_value() -> None:
+    client = AsyncMock()
+    client.list_custom_fields.return_value = [
+        {"id": 42, "name": "Account Identifier", "data_type": "string"}
+    ]
+
+    assert await write_account_to_paperless(
+        100,
+        "MEMBER123456",
+        client,
+        identifier_class=AccountIdentifierClass.MEMBER,
+        confidence=0.99,
+    )
+    client.update_custom_fields.assert_awaited_once_with(
+        100,
+        [{"field": 42, "value": "MEMBER123456"}],
+    )
 
 
 @pytest.mark.asyncio

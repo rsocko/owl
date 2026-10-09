@@ -34,11 +34,7 @@ def _definitions(*, include_provider: bool = True) -> list[dict]:
         if key is MetadataFieldKey.PROVIDER_NAME and not include_provider:
             field_id += 2
             continue
-        data_type = (
-            spec.compatible_types[-1].value
-            if key is MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE
-            else spec.compatible_types[0].value
-        )
+        data_type = spec.compatible_types[0].value
         definitions.append({"id": field_id, "name": spec.canonical_name, "data_type": data_type})
         if spec.aliases:
             definitions.append(
@@ -183,36 +179,10 @@ async def test_prepare_creates_only_unambiguous_missing_canonical_fields():
     definitions = _definitions(include_provider=False)
     client = FakeClient(definitions, [])
 
-    summary = await MetadataMigrationService(client).prepare(apply=True)
+    await MetadataMigrationService(client).prepare(apply=True)
 
     assert [item["name"] for item in client.created] == ["Provider Name"]
     assert client.created[0]["data_type"] == "string"
-    normalized = PAPERLESS_METADATA_REGISTRY[MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE]
-    assert normalized.create_type is None
-    assert any(
-        item.stable_key == MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE.value
-        and item.reason_code is ReasonCode.CANONICAL_PRESENT
-        for item in summary.compatibility
-    )
-
-
-@pytest.mark.asyncio
-async def test_prepare_refuses_undecided_normalized_document_type_creation():
-    spec = PAPERLESS_METADATA_REGISTRY[MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE]
-    definitions = [
-        item for item in _definitions() if item["name"] not in {spec.canonical_name, *spec.aliases}
-    ]
-    client = FakeClient(definitions, [])
-
-    summary = await MetadataMigrationService(client).prepare(apply=True)
-
-    assert all(item["name"] != spec.canonical_name for item in client.created)
-    assert summary.counts[MigrationResult.REVIEW_REQUIRED.value] == 1
-    assert any(
-        item.stable_key == MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE.value
-        and item.reason_code is ReasonCode.TYPE_DECISION_REQUIRED
-        for item in summary.compatibility
-    )
 
 
 @pytest.mark.asyncio

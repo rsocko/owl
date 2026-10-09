@@ -9,12 +9,14 @@ import pytest
 
 from doc_intelligence_hub.core.paperless import (
     PAPERLESS_METADATA_REGISTRY,
+    AccountIdentifierClass,
     MetadataCreatePolicy,
     MetadataDiagnosticCode,
     MetadataFieldKey,
     MetadataSchemaError,
     MetadataValueError,
     PaperlessMetadataResolver,
+    build_account_identifier_update,
     build_metadata_update,
     get_metadata_field_spec,
     resolve_metadata_schema,
@@ -29,7 +31,6 @@ CANONICAL_KEYS = (
     MetadataFieldKey.PATIENT_RESPONSIBILITY,
     MetadataFieldKey.CLAIM_NUMBER,
     MetadataFieldKey.INVOICE_NUMBER,
-    MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE,
 )
 
 
@@ -70,12 +71,6 @@ def test_relationship_projection_fields_are_creatable() -> None:
     assert related.create_policy is MetadataCreatePolicy.IF_MISSING
     assert related.create_definition()["data_type"] == "string"
     assert summary.create_policy is MetadataCreatePolicy.IF_MISSING
-
-
-def test_document_classification_is_an_internal_key_alias() -> None:
-    spec = get_metadata_field_spec("document_classification")
-    assert spec.key is MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE
-    assert spec.canonical_name == "Normalized Document Type"
 
 
 def test_canonical_nonblank_value_wins() -> None:
@@ -168,36 +163,6 @@ def test_conflict_is_reported_and_canonical_wins() -> None:
     assert result.value == "INV-NEW"
     assert result.conflict is not None
     assert result.conflict.conflicting_sources == (("di_invoice_number", "INV-OLD"),)
-
-
-def test_select_option_id_and_legacy_label_normalize_equally() -> None:
-    schema = resolve_metadata_schema(
-        [
-            _definition(
-                45,
-                MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE,
-                data_type="select",
-                options=((1, "Statement"), (2, "Invoice")),
-            ),
-            _definition(
-                46,
-                MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE,
-                alias=True,
-                data_type="select",
-            ),
-        ],
-        (MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE,),
-    )
-
-    result = resolve_metadata_value(
-        MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE,
-        [{"field": 45, "value": 2}, {"field": 46, "value": "Invoice"}],
-        schema,
-    )
-
-    assert result.value == "Invoice"
-    assert result.conflict is None
-    assert result.validation_error is None
 
 
 def test_missing_and_incompatible_fields_are_diagnostics() -> None:
@@ -397,13 +362,6 @@ def test_build_update_rejects_adversarial_long_masked_identifier() -> None:
         )
 
 
-def test_normalized_document_type_remains_inventory_gated() -> None:
-    spec = get_metadata_field_spec(MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE)
-    assert {field_type.value for field_type in spec.compatible_types} == {"select", "string"}
-    assert spec.create_policy is MetadataCreatePolicy.NEVER
-    assert spec.create_type is None
-
-
 def test_unambiguous_canonical_fields_are_creation_enabled() -> None:
     expected_types = {
         MetadataFieldKey.ACCOUNT_IDENTIFIER: "string",
@@ -422,28 +380,42 @@ def test_unambiguous_canonical_fields_are_creation_enabled() -> None:
         assert spec.create_type.value == expected_type
 
 
-def test_deployed_select_document_type_uses_existing_option_ids() -> None:
+def test_governed_account_update_masks_financial_credentials() -> None:
     schema = resolve_metadata_schema(
-        [
-            _definition(
-                93,
-                MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE,
-                data_type="select",
-                options=((1, "Statement"), (2, "Invoice")),
-            )
-        ],
-        (MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE,),
+        [_definition(93, MetadataFieldKey.ACCOUNT_IDENTIFIER)],
+        (MetadataFieldKey.ACCOUNT_IDENTIFIER,),
     )
 
-    assert build_metadata_update(
-        MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE,
-        "Invoice",
+    update, projection = build_account_identifier_update(
+        "123456789",
+        AccountIdentifierClass.BANK_ACCOUNT,
+        0.99,
         schema,
-    ) == {"field": 93, "value": 2}
+    )
+
+    assert update == {"field": 93, "value": "bank account ending 6789"}
+    assert projection.display_value == "bank account ending 6789"
+
+
+def test_governed_account_update_allows_exact_archive_identifier() -> None:
+    schema = resolve_metadata_schema(
+        [_definition(94, MetadataFieldKey.ACCOUNT_IDENTIFIER)],
+        (MetadataFieldKey.ACCOUNT_IDENTIFIER,),
+    )
+
+    update, projection = build_account_identifier_update(
+        "MEMBER123456",
+        AccountIdentifierClass.MEMBER,
+        0.99,
+        schema,
+    )
+
+    assert update == {"field": 94, "value": "MEMBER123456"}
+    assert projection.display_value == "member ending 3456"
 
 
 @pytest.mark.asyncio
-async def test_resolver_ensure_creates_seven_unambiguous_canonical_fields() -> None:
+async def test_resolver_ensure_creates_unambiguous_canonical_fields() -> None:
     class StubClient:
         def __init__(self) -> None:
             self.definitions: list[dict] = []
@@ -472,9 +444,8 @@ async def test_resolver_ensure_creates_seven_unambiguous_canonical_fields() -> N
     resolver = PaperlessMetadataResolver(client)
     schema = await resolver.ensure(CANONICAL_KEYS)
 
-    for key in CANONICAL_KEYS[:-1]:
+    for key in CANONICAL_KEYS:
         assert schema.field(key).is_compatible
-    assert schema.field(MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE).canonical_id is None
     assert [definition["name"] for definition in client.definitions] == [
         "Account Identifier",
         "Patient Name",
