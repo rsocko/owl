@@ -424,6 +424,7 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         ),
         "correspondent": a.correspondent,
         "document_date": a.document_date.isoformat() if a.document_date else None,
+        "document_created_at": a.document_date.isoformat() if a.document_date else None,
         "document_type": a.document_type,
         "tags": a.tags if isinstance(a.tags, list) else None,
         "extracted_data": extracted_data,

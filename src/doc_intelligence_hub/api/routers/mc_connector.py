@@ -363,6 +363,7 @@ async def mc_list_actions(
                     "amount": action.amount,
                     "correspondent": action.correspondent,
                     "summary": action.summary or "",
+                    "document_created_at": serialized["document_created_at"],
                     "recommended_cta": _deserialize_recommended_cta(action.recommended_cta),
                     "action_ready": serialized["action_ready"],
                     "review_state": serialized["review_state"],

@@ -63,6 +63,7 @@ def seeded_client(client):
                 confidence=85,
                 status="pending",
                 correspondent="Power Co",
+                document_date=date(2026, 1, 24),
                 recommended_cta=json.dumps(
                     {
                         "id": "pay-online",
@@ -107,6 +108,12 @@ class TestMcListActions:
         assert action["urgency"] == "critical"
         assert action["action_type"] == action["action_type"].lower()
         assert action["urgency"] == action["urgency"].lower()
+
+    def test_response_exposes_authoritative_paperless_created_date(self, seeded_client):
+        action = seeded_client.get("/api/action-queue/actions").json()[0]
+
+        assert action["document_created_at"] == "2026-01-24"
+        assert action["document_created_at"] != action["created_at"]
 
     def test_category_field_present(self, seeded_client):
         resp = seeded_client.get("/api/action-queue/actions")
@@ -153,6 +160,7 @@ class TestMcListActions:
         action = client.get("/api/action-queue/actions").json()[0]
         assert action["recommended_cta"] is None
         assert action["extracted_data"] is None
+        assert action["document_created_at"] is None
 
     def test_default_list_excludes_not_ready_actions_and_opt_in_exposes_review(self, seeded_client):
         db = get_session()

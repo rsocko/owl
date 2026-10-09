@@ -383,6 +383,7 @@ class TestListActions:
             "needs_review_url",
             "correspondent",
             "document_date",
+            "document_created_at",
             "document_type",
             "document_summary",
             "tags",
