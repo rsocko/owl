@@ -164,7 +164,9 @@ describe('Needs Review actions', () => {
       target: { value: 'File annual statement' },
     });
     fireEvent.change(screen.getByLabelText('Corrected amount'), { target: { value: '' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Correct and continue' }));
+    expect(screen.getByRole('button', { name: 'Save corrections' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Reset to suggested values' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save corrections' }));
 
     await waitFor(() => {
       expect(resolveMock).toHaveBeenCalledWith('action-review-1', {
@@ -178,6 +180,93 @@ describe('Needs Review actions', () => {
         },
       });
     });
+  });
+
+  it('switches between accepting detected values and saving corrections', async () => {
+    queueMock.mockResolvedValue({
+      items: [{
+        id: 'action-review-1',
+        item_type: 'action_classification',
+        priority: 80,
+        status: 'pending',
+        source: 'action_queue',
+        target_type: 'action',
+        target_id: '42',
+        reason: 'Low-confidence action classification',
+        metadata: {
+          action_type: 'PAY',
+          title: 'Pay utility bill',
+          summary: 'Detected summary',
+          amount: 25,
+          document_id: 777,
+        },
+        deferred_until: null,
+        resolved_at: null,
+        resolved_action: null,
+        created_at: '2026-08-10T12:00:00Z',
+      }],
+      count: 1,
+      offset: 0,
+      limit: 200,
+    });
+
+    render(
+      <MemoryRouter>
+        <TriageQueue />
+      </MemoryRouter>,
+    );
+
+    const accept = await screen.findByRole('button', { name: 'Accept suggestion' });
+    expect(accept).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Save corrections' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reset to suggested values' })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Corrected amount'), { target: { value: '30' } });
+    expect(screen.getByRole('button', { name: 'Save corrections' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to suggested values' }));
+
+    expect(screen.getByRole('button', { name: 'Accept suggestion' })).toBeEnabled();
+    expect(screen.getByLabelText('Corrected amount')).toHaveValue(25);
+  });
+
+  it('requires an amount for payment actions but not a due date', async () => {
+    queueMock.mockResolvedValue({
+      items: [{
+        id: 'action-review-1',
+        item_type: 'action_classification',
+        priority: 80,
+        status: 'pending',
+        source: 'action_queue',
+        target_type: 'action',
+        target_id: '42',
+        reason: 'PAY is missing critical action details',
+        metadata: {
+          action_type: 'PAY',
+          title: 'Pay utility bill',
+          summary: 'Detected summary',
+          document_id: 777,
+        },
+        deferred_until: null,
+        resolved_at: null,
+        resolved_action: null,
+        created_at: '2026-08-10T12:00:00Z',
+      }],
+      count: 1,
+      offset: 0,
+      limit: 200,
+    });
+
+    render(
+      <MemoryRouter>
+        <TriageQueue />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Enter an amount to continue. A due date is optional.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Accept suggestion' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Corrected amount'), { target: { value: '395' } });
+    expect(screen.getByRole('button', { name: 'Save corrections' })).toBeEnabled();
   });
 
   it('disables action-review resolution controls after the item is resolved', async () => {
@@ -212,9 +301,8 @@ describe('Needs Review actions', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByRole('button', { name: 'Confirm action' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Correct and continue' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Accept suggestion' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'No action needed' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Re-evaluate' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Analyze document again' })).toBeDisabled();
   });
 });
