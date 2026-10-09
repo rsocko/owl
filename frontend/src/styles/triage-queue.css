@@ -136,6 +136,17 @@
   margin-left: 6px;
 }
 
+.triage-queue-header-content > .tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.triage-queue-header-content > .tabs .tab {
+  min-width: 0;
+  padding-inline: 6px;
+  text-align: center;
+}
+
 .triage-bulk-bar,
 .triage-list-toolbar,
 .triage-collapsed-strip {
