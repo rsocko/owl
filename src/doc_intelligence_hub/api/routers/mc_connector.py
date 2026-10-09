@@ -11,11 +11,15 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 
-from doc_intelligence_hub.api.routers import get_loaded_statement_config
+from doc_intelligence_hub.api.routers import (
+    get_loaded_statement_config,
+    load_statement_config_from_request,
+    require_mission_control_auth,
+)
 from doc_intelligence_hub.api.routers.action_queue import (
     _resurface_expired_snoozes,
     _serialize_action,
@@ -55,7 +59,16 @@ from doc_intelligence_hub.modules.eob_matching.database import (
 from doc_intelligence_hub.modules.eob_matching.database import (
     init_db as eob_init_db,
 )
+from doc_intelligence_hub.modules.statements.correspondent_models import (
+    paperless_deployment_identity,
+)
 from doc_intelligence_hub.modules.statements.database import Database as StatementsDB
+from doc_intelligence_hub.modules.statements.payee_review import (
+    PayeeCorrespondentMapping,
+    PayeeReviewAction,
+    PayeeReviewQueueItem,
+    PayeeReviewService,
+)
 
 router = APIRouter(tags=["mc-connector"])
 logger = logging.getLogger(__name__)
@@ -83,6 +96,41 @@ class MCFeedbackRequest(BaseModel):
     reason: str | None = None
 
 
+class MCPayeeMappingRequest(BaseModel):
+    mappings: list[PayeeCorrespondentMapping] = Field(default_factory=list, max_length=100)
+    expectation_ids: list[str] = Field(default_factory=list, max_length=100)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class MCNoDocumentsExpectedRequest(BaseModel):
+    mappings: list[PayeeCorrespondentMapping] = Field(default_factory=list, max_length=100)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class MCCorrespondent(BaseModel):
+    id: int
+    name: str
+    lifecycle_status: str
+    owl_deep_link: str
+
+
+def _get_payee_review_service(request: Request) -> PayeeReviewService:
+    config = load_statement_config_from_request(request)
+    paperless_url = request.app.state.hub_settings.paperless_url or config.source.paperless_url
+    if not paperless_url:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "paperless_not_configured",
+                "message": "A Paperless deployment URL is required for payee review.",
+            },
+        )
+    return PayeeReviewService(
+        StatementsDB(config.runtime.database_path),
+        paperless_deployment_identity(paperless_url),
+    )
+
+
 def _deserialize_recommended_cta(value: object) -> dict[str, Any] | None:
     """Return the structured CTA stored on an action, if available."""
     if isinstance(value, dict):
@@ -94,6 +142,117 @@ def _deserialize_recommended_cta(value: object) -> dict[str, Any] | None:
             return None
         return parsed if isinstance(parsed, dict) else None
     return None
+
+
+@router.get(
+    "/api/mc/v1/payee-document-reviews",
+    response_model=list[PayeeReviewQueueItem],
+    dependencies=[Depends(require_mission_control_auth)],
+)
+async def mc_list_payee_document_reviews(
+    request: Request,
+    status: str = Query(default="all", pattern=r"^(all|unreviewed|reviewed|inactive)$"),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[PayeeReviewQueueItem]:
+    """Return OWL-owned payee/document review work without exposing Tyrion identities."""
+    service = _get_payee_review_service(request)
+    try:
+        return service.list_queue(status=status, limit=limit, offset=offset)
+    finally:
+        service.close()
+
+
+@router.get(
+    "/api/mc/v1/correspondents",
+    response_model=list[MCCorrespondent],
+    dependencies=[Depends(require_mission_control_auth)],
+)
+async def mc_list_correspondents(
+    request: Request,
+    query: str | None = Query(default=None, max_length=200),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[MCCorrespondent]:
+    """Search display metadata only; correspondent IDs remain the mapping identity."""
+    service = _get_payee_review_service(request)
+    try:
+        profiles = service.database.list_correspondent_profiles(service.deployment_id)
+        if query:
+            folded = query.casefold()
+            profiles = [
+                profile for profile in profiles if folded in profile.current_name.casefold()
+            ]
+        return [
+            MCCorrespondent(
+                id=profile.correspondent_id,
+                name=profile.current_name,
+                lifecycle_status=profile.lifecycle_status,
+                owl_deep_link=f"#/correspondents/{profile.correspondent_id}",
+            )
+            for profile in profiles[offset : offset + limit]
+        ]
+    finally:
+        service.close()
+
+
+@router.put(
+    "/api/mc/v1/payee-document-reviews/{candidate_id}/mapping",
+    response_model=PayeeReviewQueueItem,
+    dependencies=[Depends(require_mission_control_auth)],
+)
+async def mc_set_payee_document_mapping(
+    request: Request,
+    candidate_id: str,
+    body: MCPayeeMappingRequest,
+) -> PayeeReviewQueueItem:
+    service = _get_payee_review_service(request)
+    try:
+        try:
+            return service.review(
+                candidate_id,
+                PayeeReviewAction(
+                    document_decision="documents_expected",
+                    mappings=body.mappings,
+                    expectation_ids=body.expectation_ids,
+                    notes=body.notes,
+                ),
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc.args[0])) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        service.close()
+
+
+@router.post(
+    "/api/mc/v1/payee-document-reviews/{candidate_id}/no-documents-expected",
+    response_model=PayeeReviewQueueItem,
+    dependencies=[Depends(require_mission_control_auth)],
+)
+async def mc_mark_no_documents_expected(
+    request: Request,
+    candidate_id: str,
+    body: MCNoDocumentsExpectedRequest,
+) -> PayeeReviewQueueItem:
+    service = _get_payee_review_service(request)
+    try:
+        try:
+            return service.review(
+                candidate_id,
+                PayeeReviewAction(
+                    document_decision="no_documents_expected",
+                    mappings=body.mappings,
+                    notes=body.notes,
+                ),
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc.args[0])) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        service.close()
 
 
 @router.get("/api/action-queue/actions")

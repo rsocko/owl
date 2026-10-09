@@ -49,7 +49,7 @@ from doc_intelligence_hub.modules.statements.models import (
     RecommendationResult,
 )
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -378,6 +378,89 @@ CREATE TABLE IF NOT EXISTS external_candidate_expectations (
 
 CREATE INDEX IF NOT EXISTS idx_external_candidate_expectations_expectation
     ON external_candidate_expectations(deployment_id, expectation_id);
+
+-- Tyrion V2 payee review projection (schema v11). This remains separate from
+-- V1 account/recurring signals so financial recurrence is never document cadence.
+CREATE TABLE IF NOT EXISTS tyrion_payee_candidates (
+    id TEXT PRIMARY KEY,
+    deployment_id TEXT NOT NULL,
+    connector_ref TEXT NOT NULL,
+    payee_ref TEXT NOT NULL,
+    source_generation TEXT NOT NULL,
+    source_as_of TEXT NOT NULL,
+    active INTEGER NOT NULL,
+    display_hint TEXT NOT NULL,
+    classification TEXT NOT NULL,
+    observation_count INTEGER NOT NULL,
+    observation_window_json TEXT NOT NULL,
+    interval_evidence_json TEXT,
+    confidence REAL NOT NULL,
+    basis_json TEXT NOT NULL DEFAULT '[]',
+    provenance_json TEXT NOT NULL,
+    monarch_confirmed_recurring_json TEXT,
+    document_decision TEXT NOT NULL DEFAULT 'unknown'
+        CHECK (document_decision IN ('unknown', 'documents_expected', 'no_documents_expected')),
+    notes TEXT,
+    reviewed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (deployment_id, connector_ref, payee_ref)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tyrion_payee_review
+    ON tyrion_payee_candidates(deployment_id, active, document_decision);
+
+CREATE TABLE IF NOT EXISTS tyrion_payee_generations (
+    deployment_id TEXT NOT NULL,
+    connector_ref TEXT NOT NULL,
+    source_generation TEXT NOT NULL,
+    processed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (deployment_id, connector_ref, source_generation)
+);
+
+CREATE TABLE IF NOT EXISTS tyrion_payee_sources (
+    deployment_id TEXT NOT NULL,
+    connector_ref TEXT NOT NULL,
+    source_generation TEXT NOT NULL,
+    source_as_of TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (deployment_id, connector_ref)
+);
+
+CREATE TABLE IF NOT EXISTS tyrion_payee_mappings (
+    deployment_id TEXT NOT NULL,
+    candidate_id TEXT NOT NULL,
+    account_candidate_id TEXT,
+    correspondent_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (deployment_id, candidate_id, account_candidate_id, correspondent_id),
+    FOREIGN KEY (candidate_id) REFERENCES tyrion_payee_candidates(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tyrion_payee_expectations (
+    deployment_id TEXT NOT NULL,
+    candidate_id TEXT NOT NULL,
+    expectation_id TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (deployment_id, candidate_id, expectation_id),
+    FOREIGN KEY (candidate_id) REFERENCES tyrion_payee_candidates(id) ON DELETE CASCADE,
+    FOREIGN KEY (expectation_id) REFERENCES document_expectations(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS tyrion_payee_review_events (
+    id TEXT PRIMARY KEY,
+    deployment_id TEXT NOT NULL,
+    candidate_id TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('reviewed')),
+    previous_state_json TEXT NOT NULL,
+    new_state_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (candidate_id) REFERENCES tyrion_payee_candidates(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_tyrion_payee_events
+    ON tyrion_payee_review_events(deployment_id, candidate_id, created_at);
 """
 
 

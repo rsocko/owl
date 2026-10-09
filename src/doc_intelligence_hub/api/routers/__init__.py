@@ -2,12 +2,45 @@
 
 from __future__ import annotations
 
+import secrets
 from typing import Any, NoReturn
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from doc_intelligence_hub.core.paperless import PaperlessClient
 from doc_intelligence_hub.modules.statements.config import AppConfig, load_config, resolve_api_token
+
+_mission_control_bearer = HTTPBearer(auto_error=False)
+
+
+def require_mission_control_auth(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(  # noqa: B008
+        _mission_control_bearer
+    ),
+) -> None:
+    configured = request.app.state.hub_settings.mission_control_api_token
+    if configured is None:
+        raise_api_error(
+            503,
+            "mission_control_auth_not_configured",
+            "Configure OWL_MISSION_CONTROL_API_TOKEN before using this contract.",
+        )
+    expected = configured.get_secret_value()
+    if (
+        credentials is None
+        or credentials.scheme.lower() != "bearer"
+        or not secrets.compare_digest(credentials.credentials, expected)
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "mission_control_auth_required",
+                "message": "A valid Mission Control bearer token is required.",
+            },
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 def raise_api_error(
@@ -85,4 +118,5 @@ __all__ = [
     "load_statement_config_from_request",
     "make_paperless_client",
     "raise_api_error",
+    "require_mission_control_auth",
 ]

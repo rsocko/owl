@@ -15,6 +15,89 @@ enabled.
 MC owns cross-system prioritization only. OWL owns classification, readiness,
 document/Paperless metadata, lifecycle transitions, and correction history.
 
+## Payee and document review
+
+The versioned payee-review contract requires
+`Authorization: Bearer <OWL_MISSION_CONTROL_API_TOKEN>` on every request. It is
+additive to the existing Action Queue connector.
+
+Set `OWL_TYRION_PAYEE_CONNECTOR_REF` to the one opaque connector identity that
+OWL may synchronize. Callers select only an opaque replay generation; they
+cannot use OWL's stored Tyrion credentials to select another connector.
+
+OWL consumes Tyrion's read-only `PayeePatternProjectionV1` replay endpoint:
+
+```http
+GET /api/connector/v1/payee-patterns/{sourceGeneration}?connectorRef={connectorRef}
+```
+
+The projection supplies opaque `payeeRef` identity and privacy-bounded
+recurrence evidence. OWL never ingests raw transactions, never matches identity
+by `displayName`, and never converts financial recurrence classifications or
+interval evidence into document cadence. OWL derives a stable local review ID
+from its Paperless deployment identity, Tyrion connector identity, and opaque
+payee identity; the source `payeeRef` is not exposed to Mission Control.
+
+### Reconcile the review queue
+
+```http
+GET /api/mc/v1/payee-document-reviews?status=all&limit=100&offset=0
+```
+
+`status` accepts `all`, `unreviewed`, `reviewed`, or `inactive`. Each item
+contains the bounded Tyrion evidence, OWL `document_decision`, zero or more
+reviewed mappings and expectation IDs, an `owl_deep_link`, and these
+`source_actions`:
+
+- `set_mapping` — `PUT /api/mc/v1/payee-document-reviews/{id}/mapping`
+- `mark_no_documents_expected` —
+  `POST /api/mc/v1/payee-document-reviews/{id}/no-documents-expected`
+
+The mapping action accepts:
+
+```json
+{
+  "mappings": [
+    {"account_candidate_id": null, "correspondent_id": 42}
+  ],
+  "expectation_ids": [],
+  "notes": "Reviewed in Mission Control."
+}
+```
+
+`account_candidate_id` is optional and, when present, references OWL's stable
+V1 `accountStatementCandidate` ID. It is not a display name or a raw financial
+account identifier. `expectation_ids` supports zero or many OWL document
+expectations. The action records `document_decision=documents_expected`.
+
+The durable negative decision accepts the same `mappings` and optional `notes`,
+but no expectation IDs:
+
+```json
+{
+  "mappings": [
+    {"account_candidate_id": null, "correspondent_id": 42}
+  ],
+  "notes": "This payee does not issue documents."
+}
+```
+
+It records `document_decision=no_documents_expected` and remains in force
+across Tyrion generations and display-name changes. Every review replaces the
+current mapping atomically and appends an immutable OWL history event.
+
+### Correspondent lookup
+
+```http
+GET /api/mc/v1/correspondents?query=utility&limit=100&offset=0
+```
+
+The result is `{id, name, lifecycle_status, owl_deep_link}[]`. `name` is for
+search and display only; actions persist the numeric Paperless correspondent
+`id`. Specialist queue inspection and immutable history remain available in
+OWL under `/api/statements/payee-document-reviews` and
+`/api/statements/payee-document-reviews/{id}/history`.
+
 ## List and reconcile actions
 
 ```http
