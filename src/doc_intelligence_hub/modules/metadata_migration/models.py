@@ -48,7 +48,6 @@ class ReasonCode(str, Enum):
     NO_LEGACY_VALUE = "no_legacy_value"
     MISSING_CANONICAL = "missing_canonical"
     INCOMPATIBLE_SCHEMA = "incompatible_schema"
-    TYPE_DECISION_REQUIRED = "type_decision_required"
     VALUE_CONFLICT = "value_conflict"
     INVALID_VALUE = "invalid_value"
     READY = "ready"

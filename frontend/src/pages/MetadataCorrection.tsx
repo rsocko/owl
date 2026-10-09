@@ -66,7 +66,6 @@ type ToastState = { message: string; tone: 'success' | 'error' } | null;
 // ------------------------------------------------------------------
 
 const FIELD_LABELS: Record<string, string> = {
-  document_classification: 'Document Type',
   patient_name: 'Patient Name',
   provider_name: 'Provider Name',
   date_of_service: 'Date of Service',

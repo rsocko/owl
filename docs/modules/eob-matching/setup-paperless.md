@@ -97,108 +97,32 @@ else:
 
 ## Custom Fields Setup
 
-### Step 1: Create Custom Fields
+OWL provisions only durable archive metadata:
 
-Navigate to: Settings → Custom Fields → Add Custom Field
+| Field | Paperless type | Projection policy |
+| --- | --- | --- |
+| Account Identifier | Text | EOB or bill; automatic only at 95%+ extraction confidence and governed by identifier class |
+| Patient Name | Text | EOB or bill; reviewer confirmation required |
+| Provider Name | Text | EOB or bill; reviewer confirmation required |
+| Date of Service | Date | EOB or bill; automatic at 85%+ extraction confidence or after confirmation |
+| Patient Responsibility | Monetary | EOB only; automatic at 85%+ extraction confidence or after confirmation |
+| Claim Number | Text | EOB only; reviewer confirmation required |
+| Invoice Number | Text | Bill only; reviewer confirmation required |
 
-#### Field 1: Document Type
-```yaml
-name: medical_doc_type
-label: Medical Document Type
-type: Select
-options:
-  - EOB
-  - Bill
-  - Other
-required: false
-```
-
-#### Field 2: Match Status
-```yaml
-name: match_status
-label: Match Status
-type: Select
-options:
-  - Matched
-  - Unmatched
-  - Pending Review
-  - Orphaned
-required: false
-```
-
-#### Field 3: Match Confidence
-```yaml
-name: match_confidence
-label: Match Confidence Score
-type: Number
-required: false
-```
-
-#### Field 4: Payment Status
-```yaml
-name: payment_status
-label: Payment Status
-type: Select
-options:
-  - Pending
-  - Paid
-  - Overdue
-  - Disputed
-required: false
-```
-
-#### Field 5: Amount Due
-```yaml
-name: amount_due
-label: Amount Due
-type: Number
-required: false
-```
-
-#### Field 6: Date of Service
-```yaml
-name: date_of_service
-label: Date of Service
-type: Date
-required: false
-```
-
-#### Field 7: Provider Name
-```yaml
-name: provider_name
-label: Provider Name
-type: Text
-required: false
-```
-
-#### Field 8: Patient Name
-```yaml
-name: patient_name
-label: Patient Name
-type: Text
-required: false
-```
-
-### Step 2: Get Custom Field IDs
-
-Custom fields are referenced by ID in the API. Get IDs:
+Run the setup command to create missing canonical fields:
 
 ```bash
-Authorization: ${PAPERLESS_AUTH_HEADER} \
-  http://your-paperless-url/api/custom_fields/ | jq
+eob-match setup
 ```
 
-**Save these IDs for configuration:**
-```env
-PAPERLESS_FIELD_DOC_TYPE=1
-PAPERLESS_FIELD_MATCH_STATUS=2
-PAPERLESS_FIELD_MATCH_CONFIDENCE=3
-PAPERLESS_FIELD_PAYMENT_STATUS=4
-PAPERLESS_FIELD_AMOUNT_DUE=5
-PAPERLESS_FIELD_DATE_OF_SERVICE=6
-PAPERLESS_FIELD_PROVIDER_NAME=7
-PAPERLESS_FIELD_PATIENT_NAME=8
-```
+Paperless's native **Document Type** is authoritative. OWL does not create or write
+`Normalized Document Type`, `EOB Document Type`, match score/confidence, match
+relationships, analysis timestamps, or triage state. Existing legacy fields are left in
+place for compatibility but are not provisioned or updated.
+
+Exact governed Account Identifier values are sent only to Paperless. OWL stores masked
+audit displays such as `policy ending 5678` and records each projection as pending,
+applied, or failed.
 
 ---
 
@@ -270,7 +194,7 @@ PAPERLESS_TAG_ORPHANED=7
 3. Webhook or polling triggers processing
 4. System classifies and extracts data
 5. System attempts matching
-6. System updates Paperless with tags/fields/links
+6. System projects eligible durable metadata to Paperless
 
 #### Option 2: Email Import
 1. Forward medical documents to Paperless email
@@ -348,10 +272,13 @@ def test_custom_fields():
         print(f"✅ Found {len(fields)} custom fields")
         
         required_fields = [
-            "medical_doc_type",
-            "match_status",
-            "match_confidence",
-            "payment_status"
+            "Account Identifier",
+            "Patient Name",
+            "Provider Name",
+            "Date of Service",
+            "Patient Responsibility",
+            "Claim Number",
+            "Invoice Number",
         ]
         
         for field_name in required_fields:
@@ -439,53 +366,6 @@ def test_document_update():
         print(f"   ❌ Document update failed: {update_response.status_code}")
         return False
 
-def test_document_links():
-    """Test document linking feature."""
-    print("\nTesting document links...")
-    
-    # Get first two documents
-    response = requests.get(f"{PAPERLESS_URL}/api/documents/?page_size=2", headers=headers)
-    if response.status_code != 200 or response.json()['count'] < 2:
-        print("   ⚠️ Need at least 2 documents for link testing")
-        return True
-    
-    docs = response.json()['results']
-    doc1_id = docs[0]['id']
-    doc2_id = docs[1]['id']
-    
-    print(f"   Testing link: {doc1_id} → {doc2_id}")
-    
-    # Try to create link (may fail if already exists, that's okay)
-    link_response = requests.post(
-        f"{PAPERLESS_URL}/api/documents/{doc1_id}/links/",
-        headers=headers,
-        json={"target_document": doc2_id}
-    )
-    
-    if link_response.status_code in [200, 201]:
-        print("   ✅ Document link created")
-        
-        # Clean up - delete the test link
-        links_response = requests.get(
-            f"{PAPERLESS_URL}/api/documents/{doc1_id}/links/",
-            headers=headers
-        )
-        if links_response.status_code == 200:
-            for link in links_response.json():
-                if link['target_document'] == doc2_id:
-                    requests.delete(
-                        f"{PAPERLESS_URL}/api/documents/{doc1_id}/links/{link['id']}/",
-                        headers=headers
-                    )
-        return True
-    elif link_response.status_code == 400 and "already exists" in link_response.text.lower():
-        print("   ✅ Document linking works (link already exists)")
-        return True
-    else:
-        print(f"   ❌ Link creation failed: {link_response.status_code}")
-        print(f"   {link_response.text}")
-        return False
-
 def main():
     print("=" * 60)
     print("Paperless-ngx Integration Test")
@@ -495,8 +375,7 @@ def main():
         "API Connection": test_api_connection(),
         "Custom Fields": test_custom_fields(),
         "Tags": test_tags(),
-        "Document Update": test_document_update(),
-        "Document Links": test_document_links()
+        "Document Update": test_document_update()
     }
     
     print("\n" + "=" * 60)
@@ -541,11 +420,14 @@ Testing API connection...
    Total documents: 42
 
 Testing custom fields...
-✅ Found 8 custom fields
-   ✅ medical_doc_type (ID: 1)
-   ✅ match_status (ID: 2)
-   ✅ match_confidence (ID: 3)
-   ✅ payment_status (ID: 4)
+✅ Found 7 custom fields
+   ✅ Account Identifier (ID: 1)
+   ✅ Patient Name (ID: 2)
+   ✅ Provider Name (ID: 3)
+   ✅ Date of Service (ID: 4)
+   ✅ Patient Responsibility (ID: 5)
+   ✅ Claim Number (ID: 6)
+   ✅ Invoice Number (ID: 7)
 
 Testing tags...
 ✅ Found 7 tags
@@ -558,10 +440,6 @@ Testing document update...
    Using document ID: 123
    ✅ Document update successful
 
-Testing document links...
-   Testing link: 123 → 124
-   ✅ Document link created
-
 ============================================================
 Test Summary
 ============================================================
@@ -569,7 +447,6 @@ Test Summary
 ✅ PASS  Custom Fields
 ✅ PASS  Tags
 ✅ PASS  Document Update
-✅ PASS  Document Links
 
 ✅ All tests passed! Paperless integration is ready.
 ```
@@ -621,21 +498,6 @@ Test Summary
 
 ---
 
-### Issue: Document Links Failed
-
-**Symptoms:**
-```
-404 Not Found on /api/documents/{id}/links/
-```
-
-**Solutions:**
-1. Check Paperless version (links added in v1.17.0)
-2. Verify both document IDs exist
-3. Check API permissions allow creating links
-4. Try via Django admin if API fails
-
----
-
 ### Issue: Webhook Not Triggering
 
 **Symptoms:**
@@ -678,13 +540,9 @@ GET /api/documents/{id}/
 # Get document text (OCR result)
 GET /api/documents/{id}/download/?original=false
 
-# Update document
+# Update a durable custom field
 PATCH /api/documents/{id}/
-Body: {"tags": [1,2,3], "custom_fields": [{"field": 1, "value": "EOB"}]}
-
-# Create document link
-POST /api/documents/{id}/links/
-Body: {"target_document": 456}
+Body: {"custom_fields": [{"field": 4, "value": "2026-08-01"}]}
 
 # List custom fields
 GET /api/custom_fields/

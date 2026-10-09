@@ -18,7 +18,6 @@ from doc_intelligence_hub.core.paperless import (
     PAPERLESS_METADATA_REGISTRY,
     MetadataCreatePolicy,
     MetadataDiagnosticCode,
-    MetadataFieldKey,
     MetadataNormalization,
     PaperlessClient,
     PaperlessMetadataResolver,
@@ -153,12 +152,6 @@ class MetadataMigrationService:
                 )
             elif resolved.canonical_id is not None:
                 summary.add(stable_key, MigrationResult.SKIPPED, ReasonCode.CANONICAL_PRESENT)
-            elif resolved.spec.create_policy is MetadataCreatePolicy.NEVER:
-                summary.add(
-                    stable_key,
-                    MigrationResult.REVIEW_REQUIRED,
-                    ReasonCode.TYPE_DECISION_REQUIRED,
-                )
             elif key not in missing_creatable:
                 summary.add(
                     stable_key,
@@ -349,11 +342,7 @@ class MetadataMigrationService:
                 result = MigrationResult.SKIPPED
                 action = MigrationAction.NONE
             elif resolved.canonical_id is None:
-                reason = (
-                    ReasonCode.TYPE_DECISION_REQUIRED
-                    if key is MetadataFieldKey.NORMALIZED_DOCUMENT_TYPE
-                    else ReasonCode.MISSING_CANONICAL
-                )
+                reason = ReasonCode.MISSING_CANONICAL
                 result = MigrationResult.REVIEW_REQUIRED
                 action = MigrationAction.REVIEW
             elif not resolved.is_compatible:
@@ -404,11 +393,6 @@ class MetadataMigrationService:
             if resolved.canonical_id is not None and resolved.is_compatible:
                 action = MigrationAction.NONE
                 reason = ReasonCode.CANONICAL_PRESENT
-            elif resolved.canonical_id is None and (
-                resolved.spec.create_policy is MetadataCreatePolicy.NEVER
-            ):
-                action = MigrationAction.REVIEW
-                reason = ReasonCode.TYPE_DECISION_REQUIRED
             elif resolved.canonical_id is None:
                 action = MigrationAction.CREATE_FIELD
                 reason = ReasonCode.MISSING_CANONICAL
@@ -448,12 +432,6 @@ class MetadataMigrationService:
                         key.value,
                         MigrationResult.REVIEW_REQUIRED,
                         ReasonCode.INCOMPATIBLE_SCHEMA,
-                    )
-                elif resolved.spec.create_policy is MetadataCreatePolicy.NEVER:
-                    summary.add(
-                        key.value,
-                        MigrationResult.REVIEW_REQUIRED,
-                        ReasonCode.TYPE_DECISION_REQUIRED,
                     )
                 else:
                     summary.add(
