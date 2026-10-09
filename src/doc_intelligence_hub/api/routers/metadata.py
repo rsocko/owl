@@ -192,8 +192,7 @@ async def get_document_metadata(
 
     # Get corrections
     corrections = [
-        _sanitize_correction(correction)
-        for correction in get_corrections_for_document(doc_id)
+        _sanitize_correction(correction) for correction in get_corrections_for_document(doc_id)
     ]
 
     # Build per-field correction map (latest correction per field)

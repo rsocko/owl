@@ -35,9 +35,7 @@ logger = logging.getLogger(__name__)
 
 # Common account number patterns — each captures the meaningful identifier portion.
 # Ordered from most specific to least specific to reduce false positives.
-ACCOUNT_PATTERNS: list[
-    tuple[str, AccountIdentifierClass, float, re.Pattern[str]]
-] = [
+ACCOUNT_PATTERNS: list[tuple[str, AccountIdentifierClass, float, re.Pattern[str]]] = [
     (
         "bank_account",
         AccountIdentifierClass.BANK_ACCOUNT,

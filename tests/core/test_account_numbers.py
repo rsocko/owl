@@ -44,8 +44,7 @@ class TestExtractAccountNumbers:
         text = "Card ending in 9876"
         matches = extract_account_numbers(text)
         assert any(
-            m["normalized"] == "9876" and m["pattern"] == "payment_card_ending"
-            for m in matches
+            m["normalized"] == "9876" and m["pattern"] == "payment_card_ending" for m in matches
         )
 
     def test_last4_variant(self):

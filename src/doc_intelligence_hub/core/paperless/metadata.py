@@ -420,6 +420,7 @@ PAPERLESS_METADATA_REGISTRY: Mapping[MetadataFieldKey, MetadataFieldSpec] = Mapp
     {entry.key: entry for entry in _REGISTRY_ENTRIES}
 )
 
+
 def get_metadata_field_spec(key: MetadataFieldKey | str) -> MetadataFieldSpec:
     try:
         resolved_key = key if isinstance(key, MetadataFieldKey) else MetadataFieldKey(key)
