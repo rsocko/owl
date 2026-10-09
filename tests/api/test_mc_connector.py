@@ -53,6 +53,7 @@ class TestMCListActions:
         assert "document_title" in action
         assert "category" in action
         assert "summary" in action
+        assert "document_created_at" in action
         assert "updated_at" in action
 
     def test_actions_include_all_lifecycle_statuses_by_default(self, client, seed_actions):

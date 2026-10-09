@@ -114,10 +114,13 @@ GET /api/action-queue/actions?status=all&limit=100&offset=0&updated_since=2026-0
 
 The response remains a flat JSON array for backward compatibility. Each item
 includes `id`, normalized lowercase `action_type` and `urgency`, normalized OWL
-`status`, `created_at`, `updated_at`, `completed_at`, `snoozed_until`, and the
-existing document/action metadata. Results preserve the legacy newest-first
-order by `created_at`, then `id`, so unpaginated clients continue to receive the
-newest actions.
+`status`, `document_created_at`, `created_at`, `updated_at`, `completed_at`,
+`snoozed_until`, and the existing document/action metadata.
+`document_created_at` is the authoritative Paperless `created` calendar date as
+an ISO `YYYY-MM-DD` string, or `null` when Paperless did not provide a valid
+date. It never falls back to the OWL action's `created_at` lifecycle timestamp.
+Results preserve the legacy newest-first order by action `created_at`, then
+`id`, so unpaginated clients continue to receive the newest actions.
 
 OWL creates one MC item per action, not one per Paperless document. Additive
 grouping fields let MC present related work without collapsing task identity:
