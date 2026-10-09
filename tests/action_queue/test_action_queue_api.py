@@ -414,9 +414,7 @@ class TestListActions:
         from unittest.mock import AsyncMock, patch
 
         paperless = AsyncMock()
-        paperless.get_document_notes.return_value = [
-            {"id": 7, "note": "Paid through mortgage"}
-        ]
+        paperless.get_document_notes.return_value = [{"id": 7, "note": "Paid through mortgage"}]
         paperless.create_document_note.return_value = {
             "id": 8,
             "note": "Confirm escrow payment",

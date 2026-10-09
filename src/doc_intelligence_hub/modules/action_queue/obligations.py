@@ -670,11 +670,7 @@ def unlink_document(db: Session, action: Action, document_id: int) -> list[Actio
     )
     if restored:
         restored_primary = next(
-            (
-                candidate
-                for candidate in restored
-                if candidate.superseded_by_action_id == action.id
-            ),
+            (candidate for candidate in restored if candidate.superseded_by_action_id == action.id),
             restored[0],
         )
         restored_obligation = Obligation(primary_action_id=restored_primary.id, status="open")

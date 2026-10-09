@@ -181,16 +181,19 @@ def test_unlink_document_hides_auto_match_and_prevents_relink(db):
     assert unlink_document(db, action, 9) == []
     assert [document["document_id"] for document in linked_documents(db, action)] == [1]
     assert completion_suggestion(db, action) is None
-    assert associate_receipt(
-        db,
-        {
-            "id": 9,
-            "title": "Payment Receipt",
-            "document_type_name": "Receipt",
-            "correspondent_name": "Utility Co",
-        },
-        "Invoice INV-42 paid $100.00",
-    ) is None
+    assert (
+        associate_receipt(
+            db,
+            {
+                "id": 9,
+                "title": "Payment Receipt",
+                "document_type_name": "Receipt",
+                "correspondent_name": "Utility Co",
+            },
+            "Invoice INV-42 paid $100.00",
+        )
+        is None
+    )
 
 
 def test_unlink_action_document_restores_suppressed_action(db):
