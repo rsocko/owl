@@ -281,11 +281,15 @@ def test_external_snapshot_replacement_is_generation_idempotent_and_bounded(tmp_
 
         assert result.active_candidates == 2
         assert repeated.idempotent is True
-        last_synced_at = db.connect().execute(
-            """SELECT updated_at FROM external_signal_sources
+        last_synced_at = (
+            db.connect()
+            .execute(
+                """SELECT updated_at FROM external_signal_sources
                WHERE deployment_id = ? AND connector_ref = ?""",
-            (DEPLOYMENT_ID, first.connector_ref),
-        ).fetchone()["updated_at"]
+                (DEPLOYMENT_ID, first.connector_ref),
+            )
+            .fetchone()["updated_at"]
+        )
         assert last_synced_at != "2020-01-01 00:00:00"
         candidates = db.list_external_candidates(DEPLOYMENT_ID)
         assert len(candidates) == 2
