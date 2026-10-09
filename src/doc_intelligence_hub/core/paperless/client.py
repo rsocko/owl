@@ -787,6 +787,17 @@ class PaperlessClient:
         resp.raise_for_status()
         return resp.content, resp.headers.get("content-type", "application/pdf")
 
+    async def get_document_notes(self, document_id: int) -> list[dict]:
+        """Get native Paperless notes attached to a document."""
+        resp = await self._request("GET", f"/api/documents/{document_id}/notes/")
+        resp.raise_for_status()
+        payload = resp.json()
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict) and isinstance(payload.get("results"), list):
+            return payload["results"]
+        raise PaperlessError(f"Paperless notes for document {document_id} returned invalid data")
+
     # ------------------------------------------------------------------
     # Documents — write
     # ------------------------------------------------------------------
@@ -796,6 +807,19 @@ class PaperlessClient:
         resp = await self._request("PATCH", f"/api/documents/{document_id}/", json=data)
         resp.raise_for_status()
         return resp.json()
+
+    async def create_document_note(self, document_id: int, note: str) -> dict:
+        """Append a native Paperless note to a document."""
+        resp = await self._request(
+            "POST",
+            f"/api/documents/{document_id}/notes/",
+            json={"note": note},
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        if not isinstance(payload, dict):
+            raise PaperlessError(f"Paperless note creation for document {document_id} failed")
+        return payload
 
     async def update_custom_field(self, field_id: int, data: dict) -> dict:
         """Patch a Paperless custom field definition."""

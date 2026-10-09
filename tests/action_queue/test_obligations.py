@@ -21,6 +21,7 @@ from doc_intelligence_hub.modules.action_queue.obligations import (
     manually_link_document,
     suggest_related_actions,
     sync_obligation_status,
+    unlink_document,
 )
 
 
@@ -159,6 +160,59 @@ def test_manual_link_receipt_suggests_completion_without_receipt_action(db):
     assert linked.role == "receipt"
     assert linked.source == "user_link"
     assert completion_suggestion(db, action)["receipt_document_id"] == 9
+
+
+def test_unlink_document_hides_auto_match_and_prevents_relink(db):
+    action = _pay_action(1, "Utility invoice")
+    db.add(action)
+    db.flush()
+    associate_pay_action(db, action, {"id": 1, "title": action.document_title})
+    associate_receipt(
+        db,
+        {
+            "id": 9,
+            "title": "Payment Receipt",
+            "document_type_name": "Receipt",
+            "correspondent_name": "Utility Co",
+        },
+        "Invoice INV-42 paid $100.00",
+    )
+
+    assert unlink_document(db, action, 9) == []
+    assert [document["document_id"] for document in linked_documents(db, action)] == [1]
+    assert completion_suggestion(db, action) is None
+    assert (
+        associate_receipt(
+            db,
+            {
+                "id": 9,
+                "title": "Payment Receipt",
+                "document_type_name": "Receipt",
+                "correspondent_name": "Utility Co",
+            },
+            "Invoice INV-42 paid $100.00",
+        )
+        is None
+    )
+
+
+def test_unlink_action_document_restores_suppressed_action(db):
+    primary = _pay_action(1, "July water billing", amount=1382.38)
+    related = _pay_action(2, "READ CODE Total Current Billing", amount=229.0)
+    db.add_all([primary, related])
+    db.flush()
+    associate_pay_action(db, primary, {"id": 1, "title": primary.document_title})
+    manually_link_actions(db, primary, related)
+
+    restored = unlink_document(db, primary, 2)
+
+    assert restored == [related]
+    assert related.obligation_id != primary.obligation_id
+    assert related.superseded_by_action_id is None
+    assert related.action_ready is True
+    assert related.review_state == "ready"
+    assert [document["document_id"] for document in linked_documents(db, primary)] == [1]
+    assert [document["document_id"] for document in linked_documents(db, related)] == [2]
 
 
 def test_receipt_suggests_completion_without_closing_action(db):

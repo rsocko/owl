@@ -16,6 +16,9 @@ const {
   refreshActionMock,
   actionSiblingsMock,
   actionLinkCandidatesMock,
+  actionNotesMock,
+  createActionNoteMock,
+  unlinkDocumentMock,
   linkActionMock,
   linkDocumentMock,
   splitActionMock,
@@ -31,6 +34,9 @@ const {
   refreshActionMock: vi.fn(),
   actionSiblingsMock: vi.fn(),
   actionLinkCandidatesMock: vi.fn(),
+  actionNotesMock: vi.fn(),
+  createActionNoteMock: vi.fn(),
+  unlinkDocumentMock: vi.fn(),
   linkActionMock: vi.fn(),
   linkDocumentMock: vi.fn(),
   splitActionMock: vi.fn(),
@@ -58,6 +64,9 @@ vi.mock('../lib/api', () => ({
       refreshAction: refreshActionMock,
       actionSiblings: actionSiblingsMock,
       actionLinkCandidates: actionLinkCandidatesMock,
+      actionNotes: actionNotesMock,
+      createActionNote: createActionNoteMock,
+      unlinkDocument: unlinkDocumentMock,
       linkAction: linkActionMock,
       linkDocument: linkDocumentMock,
       splitAction: splitActionMock,
@@ -149,6 +158,9 @@ beforeEach(() => {
   refreshActionMock.mockReset();
   actionSiblingsMock.mockReset();
   actionLinkCandidatesMock.mockReset();
+  actionNotesMock.mockReset();
+  createActionNoteMock.mockReset();
+  unlinkDocumentMock.mockReset();
   linkActionMock.mockReset();
   linkDocumentMock.mockReset();
   splitActionMock.mockReset();
@@ -171,6 +183,9 @@ beforeEach(() => {
       { id: 12, name: 'Utility Co', suggested: false },
     ],
   });
+  actionNotesMock.mockResolvedValue({ notes: [] });
+  createActionNoteMock.mockResolvedValue({ note: { id: 2, note: 'Paid through mortgage' } });
+  unlinkDocumentMock.mockResolvedValue(initialAction);
   statusMock.mockResolvedValue({
     status: 'idle',
     database: {
@@ -647,6 +662,61 @@ describe('ActionQueue', () => {
       '1',
       expect.objectContaining({ status: 'completed' }),
     ));
+  });
+
+  it('shows linked document previews and saves native Paperless notes', async () => {
+    const linkedAction = {
+      ...initialAction,
+      linked_document_count: 2,
+      linked_documents: [
+        {
+          document_id: 1,
+          role: 'invoice',
+          title: 'Electric Bill',
+          confidence: 1,
+          source: 'action_queue',
+          thumbnail_url: '/thumb-1.png',
+          preview_url: '/documents/1/details',
+        },
+        {
+          document_id: 2,
+          role: 'receipt',
+          title: 'Payment Receipt',
+          confidence: 0.98,
+          source: 'receipt_match',
+          thumbnail_url: '/thumb-2.png',
+          preview_url: '/documents/2/details',
+        },
+      ],
+    };
+    actionsMock.mockReset().mockResolvedValue({ actions: [linkedAction], total: 1 });
+    actionNotesMock.mockResolvedValue({
+      notes: [{ id: 1, note: 'Paid through mortgage', created: '2026-07-22T12:00:00Z' }],
+    });
+
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
+    expect(await screen.findByRole('button', { name: 'Preview Payment Receipt' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove link' })).toBeInTheDocument();
+    expect(await screen.findByText('Paid through mortgage')).toBeInTheDocument();
+    expect(screen.getByText(/Done completes this action only/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Add a note' }), {
+      target: { value: 'Call the collector after escrow posts.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+
+    await waitFor(() => expect(createActionNoteMock).toHaveBeenCalledWith(
+      '1',
+      'Call the collector after escrow posts.',
+    ));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove link' }));
+    const unlinkDialog = screen.getByRole('dialog', { name: 'Remove document link?' });
+    expect(unlinkDialog).toBeInTheDocument();
+    fireEvent.click(within(unlinkDialog).getByRole('button', { name: 'Remove link' }));
+    await waitFor(() => expect(unlinkDocumentMock).toHaveBeenCalledWith('1', 2));
   });
   it('suggests and manually links a related PAY action', async () => {
     const relatedAction = {

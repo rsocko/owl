@@ -155,6 +155,10 @@ def add_document(
     if not linked:
         linked = ObligationDocument(obligation_id=obligation.id, document_id=document_id)
         db.add(linked)
+    elif linked.excluded and source != "user_link":
+        return linked
+    linked.excluded = False
+    linked.excluded_at = None
     linked.role = role
     linked.title = title
     linked.document_type = document_type
@@ -165,6 +169,19 @@ def add_document(
     linked.confidence = round(confidence, 3)
     linked.source = source
     return linked
+
+
+def _document_excluded(db: Session, obligation_id: str, document_id: int) -> bool:
+    return (
+        db.query(ObligationDocument)
+        .filter_by(
+            obligation_id=obligation_id,
+            document_id=document_id,
+            excluded=True,
+        )
+        .first()
+        is not None
+    )
 
 
 def _add_action_document(
@@ -473,6 +490,10 @@ def associate_pay_action(db: Session, action: Action, document: dict[str, Any]) 
 
     if canonical is not None and best_score >= ACTION_LINK_THRESHOLD:
         obligation = ensure_obligation(db, canonical)
+        if _document_excluded(db, obligation.id, action.document_id):
+            obligation = ensure_obligation(db, action)
+            _add_action_document(db, obligation, action, document)
+            return obligation
         _add_action_document(db, obligation, canonical, {}, source="action_queue")
         action.obligation_id = obligation.id
         action.superseded_by_action_id = canonical.id
@@ -592,6 +613,8 @@ def associate_receipt(
         return None
 
     obligation = ensure_obligation(db, action)
+    if _document_excluded(db, obligation.id, document_id):
+        return None
     _add_action_document(db, obligation, action, {}, source="action_queue")
     add_document(
         db,
@@ -614,6 +637,73 @@ def associate_receipt(
         f"{round(best_score * 100)}% confidence."
     )
     return action, best_score
+
+
+def unlink_document(db: Session, action: Action, document_id: int) -> list[Action]:
+    """Hide a mistaken link and restore any action represented by that document."""
+    if not action.obligation_id:
+        raise ValueError("This action has no linked documents")
+    if document_id == action.document_id:
+        raise ValueError("The action's source document cannot be unlinked")
+
+    obligation = db.query(Obligation).filter_by(id=action.obligation_id).first()
+    linked = (
+        db.query(ObligationDocument)
+        .filter_by(
+            obligation_id=action.obligation_id,
+            document_id=document_id,
+            excluded=False,
+        )
+        .first()
+    )
+    if not obligation or not linked:
+        raise ValueError("The related document link was not found")
+
+    linked.excluded = True
+    linked.excluded_at = datetime.utcnow()
+
+    restored = (
+        db.query(Action)
+        .filter_by(obligation_id=obligation.id, document_id=document_id)
+        .order_by(Action.id.asc())
+        .all()
+    )
+    if restored:
+        restored_primary = next(
+            (candidate for candidate in restored if candidate.superseded_by_action_id == action.id),
+            restored[0],
+        )
+        restored_obligation = Obligation(primary_action_id=restored_primary.id, status="open")
+        db.add(restored_obligation)
+        db.flush()
+        for restored_action in restored:
+            restored_action.obligation_id = restored_obligation.id
+            restored_action.superseded_by_action_id = None
+            restored_action.action_ready = True
+            if restored_action.review_state == "linked_document":
+                restored_action.review_state = "ready"
+            restored_action.version = (restored_action.version or 1) + 1
+        _add_action_document(
+            db,
+            restored_obligation,
+            restored_primary,
+            {},
+            source="action_queue",
+        )
+
+    remaining_receipt = (
+        db.query(ObligationDocument)
+        .filter_by(obligation_id=obligation.id, role="receipt", excluded=False)
+        .first()
+    )
+    if not remaining_receipt:
+        obligation.completion_suggested = False
+        obligation.suggestion_reason = None
+        if obligation.status == "payment_detected":
+            obligation.status = "open"
+
+    db.flush()
+    return restored
 
 
 def sync_obligation_status(db: Session, action: Action) -> None:
@@ -645,7 +735,7 @@ def linked_documents(db: Session, action: Action) -> list[dict[str, Any]]:
     """Return timeline documents for serialization, including legacy actions."""
     rows = (
         db.query(ObligationDocument)
-        .filter_by(obligation_id=action.obligation_id)
+        .filter_by(obligation_id=action.obligation_id, excluded=False)
         .order_by(ObligationDocument.document_date.asc(), ObligationDocument.created_at.asc())
         .all()
         if action.obligation_id
