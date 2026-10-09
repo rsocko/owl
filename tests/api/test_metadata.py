@@ -35,6 +35,7 @@ async def test_get_document_metadata_reads_alias_and_reports_conflict(monkeypatc
     assert fields["claim_number"]["value"] == "SAMPLE-100"
     assert fields["claim_number"]["source_field"] == "di_claim_number"
     assert result["metadata_conflicts"][0]["field_name"] == "provider_name"
+    assert "document_classification" not in metadata.VALID_FIELD_NAMES
 
 
 @pytest.mark.asyncio
@@ -157,7 +158,7 @@ async def test_correct_field_resolves_correspondent_and_label_anchor(monkeypatch
     monkeypatch.setattr(metadata, "create_extraction_correction", fake_create_extraction_correction)
 
     body = metadata.CorrectFieldRequest(
-        field_name="account_identifier",
+        field_name="document_amount",
         corrected_value="$142.50",
         original_value="$50.00",
     )
@@ -174,7 +175,7 @@ async def test_confirm_field_resolves_correspondent_and_label_anchor(monkeypatch
     client.get_document.return_value = {
         "id": 200,
         "correspondent": "Chase Visa",  # Paperless sometimes already resolves to a name
-        "content": "Account Number: ending 4321",
+        "content": "Claim Number: CLM-4321",
     }
     monkeypatch.setattr(metadata, "make_paperless_client", lambda request: client)
 
@@ -187,13 +188,13 @@ async def test_confirm_field_resolves_correspondent_and_label_anchor(monkeypatch
     monkeypatch.setattr(metadata, "create_extraction_correction", fake_create_extraction_correction)
 
     body = metadata.ConfirmFieldRequest(
-        field_name="account_identifier",
-        current_value="ending 4321",
+        field_name="claim_number",
+        current_value="CLM-4321",
     )
     await metadata.confirm_field(200, body, object())
 
     assert captured["correspondent"] == "Chase Visa"
-    assert captured["label_anchor"] == "Account Number:"
+    assert captured["label_anchor"] == "Claim Number:"
     client.list_correspondents.assert_not_awaited()
 
 
@@ -212,10 +213,75 @@ async def test_correct_field_tolerates_document_fetch_failure(monkeypatch) -> No
     monkeypatch.setattr(metadata, "create_extraction_correction", fake_create_extraction_correction)
 
     body = metadata.CorrectFieldRequest(
-        field_name="account_identifier", corrected_value="ending 1234"
+        field_name="provider_name", corrected_value="Sample Provider"
     )
     result = await metadata.correct_field(300, body, object())
 
     assert captured["correspondent"] is None
     assert captured["label_anchor"] is None
     assert result["correction"]["id"] == "ghi789"
+
+
+@pytest.mark.asyncio
+async def test_account_identifier_is_only_masked_in_named_review_context(monkeypatch) -> None:
+    client = AsyncMock()
+    client.get_document.return_value = {
+        "id": 100,
+        "title": "Synthetic Document",
+        "custom_fields": [{"field": 6, "value": "SENSITIVE123456"}],
+    }
+    client.list_custom_fields.return_value = [
+        {"id": 6, "name": "Account Identifier", "data_type": "string"}
+    ]
+    monkeypatch.setattr(metadata, "make_paperless_client", lambda request: client)
+    monkeypatch.setattr(metadata, "get_corrections_for_document", lambda document_id: [])
+
+    general = await metadata.get_document_metadata(100, object())
+    review = await metadata.get_document_metadata(100, object(), context="account_review")
+
+    assert all(field["field_name"] != "account_identifier" for field in general["extracted_fields"])
+    account = next(
+        field for field in review["extracted_fields"] if field["field_name"] == "account_identifier"
+    )
+    assert account["account_identifier_display"] == "ending 3456"
+    assert "value" not in account
+    assert "SENSITIVE123456" not in str(review)
+
+
+@pytest.mark.asyncio
+async def test_account_correction_writes_exact_only_to_paperless(monkeypatch) -> None:
+    client = AsyncMock()
+    client.get_document.return_value = {
+        "id": 100,
+        "correspondent": "Sample Provider",
+        "content": "Member ID: MEMBER123456",
+    }
+    client.list_custom_fields.return_value = [
+        {"id": 10, "name": "Account Identifier", "data_type": "string"}
+    ]
+    persisted: dict = {}
+
+    def capture_correction(**kwargs):
+        persisted.update(kwargs)
+        return kwargs
+
+    monkeypatch.setattr(metadata, "make_paperless_client", lambda request: client)
+    monkeypatch.setattr(metadata, "create_extraction_correction", capture_correction)
+    body = metadata.CorrectFieldRequest(
+        field_name="account_identifier",
+        corrected_value="MEMBER123456",
+        original_value="OLDMEMBER9876",
+        identifier_class="member",
+        notes="must not persist exact values",
+    )
+
+    result = await metadata.correct_field(100, body, object())
+
+    client.update_custom_fields.assert_awaited_once_with(
+        100,
+        [{"field": 10, "value": "MEMBER123456"}],
+    )
+    assert persisted["corrected_value"] == "member ending 3456"
+    assert persisted["original_value"] == "member ending 9876"
+    assert persisted["notes"] is None
+    assert result["written_to_paperless"] is True

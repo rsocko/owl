@@ -72,7 +72,7 @@ The model should support:
 
 | Group | Fields | Display rule |
 |---|---|---|
-| Identity | Paperless document ID, title, normalized document type | Always available; ID is the stable fallback |
+| Identity | Paperless document ID, title, native Paperless Document Type | Always available; ID is the stable fallback |
 | Source | correspondent or provider | Show when known |
 | Date | created date, document date, statement date, or date of service | Use a labeled, context-appropriate date |
 | Financial | patient responsibility, invoice amount, or balance | Show one labeled amount when relevant |
@@ -156,14 +156,13 @@ Canonical Paperless names contain **no `di_` prefix**:
 | `patient_responsibility` | `Patient Responsibility` | monetary | `di_patient_resp` |
 | `claim_number` | `Claim Number` | text | `di_claim_number` |
 | `invoice_number` | `Invoice Number` | text | `di_invoice_number` |
-| `normalized_document_type` | `Normalized Document Type` | select or text, selected after deployed-schema audit | `di_doc_type` |
-
-`document_classification` remains a compatibility alias for the internal OWL
-key `normalized_document_type`; it is not a second Paperless field.
-
 Additional aliases may be added only after a deployed-schema inventory proves
 they exist. Alias matching is exact after trimming; fuzzy field-name matching
 is unsafe.
+
+Paperless's native Document Type is the canonical authoritative taxonomy. OWL
+does not create, migrate, correct, or project a separate custom document-type
+field.
 
 ### Read Precedence and Conflicts
 
@@ -275,8 +274,10 @@ understandable to a Paperless user, and safe to expose:
 - Patient Responsibility;
 - Claim Number;
 - Invoice Number;
-- policy-approved Account Identifier; and
-- Normalized Document Type.
+- policy-approved Account Identifier.
+
+Document classification uses the native Paperless Document Type relation and
+is not part of custom-field projection.
 
 Projection is not automatic merely because a value was extracted. Registry
 policy determines whether confidence is sufficient, confirmation is required,
@@ -327,10 +328,6 @@ Paperless field-type changes are data migrations:
 Every operation supports dry-run output, checkpoints, per-document errors, and
 retry without duplicating writes. A failed conversion remains queued; it is not
 coerced to a plausible default.
-
-`Normalized Document Type` requires a deployed-value inventory before choosing
-`select` versus `text`. If a select field is used, unknown values must be queued
-rather than silently added or dropped.
 
 ## 6. OWL 0.2.0 Compatibility and Rollout
 
@@ -391,7 +388,8 @@ metadata before completion.
 
 ## Acceptance Criteria for the Design
 
-- All eight canonical field names are defined without a `di_` prefix.
+- All seven canonical durable metadata field names are defined without a `di_` prefix.
+- Native Paperless Document Type remains the sole authoritative taxonomy.
 - Legacy aliases and deterministic conflict behavior are explicit.
 - No initial migration step deletes or renames a deployed field in place.
 - Exact account identifiers are retained only in Paperless; financial
