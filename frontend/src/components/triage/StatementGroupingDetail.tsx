@@ -30,6 +30,9 @@ export interface SeriesInfo {
   document_count: number;
   first_seen: string | null;
   last_seen: string | null;
+  source?: string;
+  detected_document_count?: number;
+  excluded_document_count?: number;
 }
 
 export interface SeriesDoc {
@@ -57,6 +60,8 @@ interface SeriesDetailResponse {
   similar_series: SeriesInfo[];
   anomaly_indicators: string[];
   suggested_split_groups?: { account_hint: string; document_ids: string[] }[];
+  excluded_documents?: SeriesDoc[];
+  membership_complete?: boolean;
 }
 
 interface Props {
@@ -182,6 +187,10 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
   }
 
   const { series, documents, timeline, similar_series, anomaly_indicators } = detail;
+  const isDiscoverySample = series.source === 'discovery' && series.document_count > documents.length;
+  const documentListTitle = isDiscoverySample
+    ? `Sample documents (${documents.length} of ${series.document_count})`
+    : `Documents in series (${documents.length})`;
 
   // Derive unique accounts
   const accounts = Array.from(new Set(documents.map(d => d.account_hint).filter(Boolean))) as string[];
@@ -210,7 +219,7 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
           <div className="sg-info-value">{series.frequency}</div>
         </div>
         <div className="sg-info-item">
-          <div className="sg-info-label">Documents</div>
+          <div className="sg-info-label">{isDiscoverySample ? 'Detected documents' : 'Documents'}</div>
           <div className="sg-info-value">
             {series.document_count}
             {series.first_seen && series.last_seen && (
@@ -335,7 +344,7 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
       )}
 
       {/* Timeline visualization */}
-      <Card title="📅 Document Timeline">
+      <Card title={isDiscoverySample ? 'Sample document timeline' : 'Document timeline'}>
         <SeriesTimeline
           entries={timeline}
           accounts={accounts}
@@ -346,7 +355,7 @@ export function StatementGroupingDetail({ seriesId, triageItemId, reason, onReso
       </Card>
 
       {/* Document list */}
-      <Card title={`📋 Documents in Series (${documents.length})`}>
+      <Card title={documentListTitle}>
         <div className="sg-doc-list">
           {/* Select-all buttons per account */}
           {accounts.length > 1 && activeFlow === 'split' && (

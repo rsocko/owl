@@ -69,6 +69,7 @@ from doc_intelligence_hub.modules.statements.models import (
     MergeSeriesRequest,
     ReassignDocumentRequest,
     RenameSeriesRequest,
+    SplitCandidateRequest,
     SplitSeriesRequest,
 )
 from doc_intelligence_hub.modules.statements.paperless import build_document_records
@@ -1255,6 +1256,8 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
         if series:
             series["statement_name"] = series["name"]
             documents = db.get_series_documents(series_id)
+            excluded_documents: list[dict[str, Any]] = []
+            membership_complete = True
             similar = db.get_similar_series(series_id)
         else:
             # Fallback: try to resolve as a provider_key from discovery
@@ -1265,11 +1268,16 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
             # Build a synthetic series dict from the provider record
             import json as _json
 
-            sample_ids = (
-                _json.loads(provider["sample_document_ids"])
-                if isinstance(provider["sample_document_ids"], str)
-                else provider["sample_document_ids"]
+            included_documents, excluded_documents, membership_complete = (
+                db.get_provider_document_review(series_id)
             )
+            sample_ids = _json.loads(provider["sample_document_ids"])
+            if included_documents or excluded_documents:
+                documents = included_documents
+            else:
+                documents = [
+                    {"document_id": str(doc_id), "series_id": series_id} for doc_id in sample_ids
+                ]
             series = {
                 "id": provider["provider_key"],
                 "name": provider.get("statement_name") or provider["provider_name"],
@@ -1281,7 +1289,9 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
                 "frequency": provider.get("frequency", "monthly"),
                 "account_identifier": None,
                 "manually_curated": False,
-                "document_count": provider.get("document_count", 0),
+                "document_count": len(documents),
+                "detected_document_count": provider.get("document_count", 0),
+                "excluded_document_count": len(excluded_documents),
                 "first_seen": provider.get("first_seen"),
                 "last_seen": provider.get("last_seen"),
                 "created_at": None,
@@ -1294,11 +1304,24 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
                 "variance_days": provider.get("variance_days"),
             }
 
-            # Build minimal document list from sample_document_ids
-            documents = [
-                {"document_id": str(doc_id), "series_id": series_id} for doc_id in sample_ids
+            similar = [
+                {
+                    "id": candidate["provider_key"],
+                    "name": candidate.get("statement_name")
+                    or candidate["normalized_title"].title(),
+                    "statement_name": candidate.get("statement_name"),
+                    "correspondent_id": candidate.get("correspondent_id"),
+                    "correspondent_name": candidate["provider_name"],
+                    "frequency": candidate["frequency"],
+                    "account_identifier": None,
+                    "manually_curated": False,
+                    "document_count": candidate["document_count"],
+                    "first_seen": candidate["first_seen"],
+                    "last_seen": candidate["last_seen"],
+                    "source": "discovery",
+                }
+                for candidate in db.get_similar_provider_candidates(series_id)
             ]
-            similar = []
 
         timeline = _build_timeline(documents)
 
@@ -1336,7 +1359,157 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
             "similar_series": similar,
             "anomaly_indicators": anomaly_indicators,
             "suggested_split_groups": suggested_split_groups,
+            "excluded_documents": excluded_documents,
+            "membership_complete": membership_complete,
         }
+    finally:
+        db.close()
+
+
+@router.post("/series/{series_id}/candidate-documents/{document_id}/exclude")
+async def exclude_candidate_document(
+    request: Request, series_id: str, document_id: int
+) -> dict[str, Any]:
+    """Exclude one matched document while reviewing a discovered candidate."""
+    db = _get_db(request)
+    try:
+        if db.get_series(series_id):
+            raise_api_error(
+                409,
+                "series_already_confirmed",
+                "Confirmed series documents must be moved or split instead.",
+            )
+        try:
+            db.set_provider_document_excluded(series_id, document_id, excluded=True)
+        except ValueError as exc:
+            raise_api_error(404, "candidate_document_not_found", str(exc))
+        return {"status": "ok", "document_id": document_id, "excluded": True}
+    finally:
+        db.close()
+
+
+@router.delete("/series/{series_id}/candidate-documents/{document_id}/exclude")
+async def restore_candidate_document(
+    request: Request, series_id: str, document_id: int
+) -> dict[str, Any]:
+    """Restore one previously excluded candidate document."""
+    db = _get_db(request)
+    try:
+        if db.get_series(series_id):
+            raise_api_error(
+                409,
+                "series_already_confirmed",
+                "Confirmed series documents must be moved or split instead.",
+            )
+        try:
+            db.set_provider_document_excluded(series_id, document_id, excluded=False)
+        except ValueError as exc:
+            raise_api_error(404, "candidate_document_not_found", str(exc))
+        return {"status": "ok", "document_id": document_id, "excluded": False}
+    finally:
+        db.close()
+
+
+@router.post("/series/{series_id}/confirm")
+async def confirm_candidate_series(request: Request, series_id: str) -> dict[str, Any]:
+    """Create a curated statement series from a reviewed discovery candidate."""
+    db = _get_db(request)
+    try:
+        existing = db.get_series(series_id)
+        if existing:
+            return {"status": "ok", "series": existing}
+
+        provider = db.get_provider_by_key(series_id)
+        if provider is None:
+            raise_api_error(404, "series_not_found", f"Series '{series_id}' not found")
+
+        documents, _, membership_complete = db.get_provider_document_review(series_id)
+        if not membership_complete:
+            raise_api_error(
+                409,
+                "candidate_membership_incomplete",
+                "Run statement discovery again before confirming this candidate.",
+            )
+        if not documents:
+            raise_api_error(
+                400,
+                "candidate_has_no_documents",
+                "Restore at least one document before confirming this candidate.",
+            )
+
+        override = db.get_provider_overrides().get(series_id, {})
+        name = (
+            override.get("display_name")
+            or provider.get("statement_name")
+            or provider["normalized_title"].title()
+        )
+        frequency = override.get("frequency_override") or provider["frequency"]
+        created = db.create_series(
+            series_id=series_id,
+            name=name,
+            correspondent_name=provider["provider_name"],
+            correspondent_id=provider.get("correspondent_id"),
+            frequency=frequency,
+        )
+        db.add_documents_to_series(series_id, documents)
+        db.set_provider_override(
+            provider_key=series_id,
+            status="confirmed",
+            display_name=override.get("display_name"),
+            frequency_override=override.get("frequency_override"),
+            anchor_day_override=override.get("anchor_day_override"),
+            notes=override.get("notes"),
+        )
+        _record_correction_event(
+            "series_confirmed",
+            "statement_series",
+            series_id,
+            {
+                "document_ids": [document["document_id"] for document in documents],
+                "excluded_document_count": provider["document_count"] - len(documents),
+            },
+        )
+        return {"status": "ok", "series": db.get_series(series_id) or created}
+    finally:
+        db.close()
+
+
+@router.post("/series/{series_id}/candidate-split")
+async def split_candidate_series(
+    request: Request, series_id: str, body: SplitCandidateRequest
+) -> dict[str, Any]:
+    """Partition selected documents into a second unconfirmed candidate."""
+    db = _get_db(request)
+    try:
+        if db.get_series(series_id):
+            raise_api_error(
+                409,
+                "series_already_confirmed",
+                "Confirmed series must use the series split workflow.",
+            )
+        try:
+            new_candidate_id = db.split_provider_candidate(
+                series_id, body.document_ids, body.new_candidate_name.strip()
+            )
+        except ValueError as exc:
+            raise_api_error(400, "candidate_split_invalid", str(exc))
+        return {"status": "ok", "new_candidate_id": new_candidate_id}
+    finally:
+        db.close()
+
+
+@router.post("/series/{series_id}/candidate-merge/{source_id}")
+async def merge_candidate_series(
+    request: Request, series_id: str, source_id: str
+) -> dict[str, Any]:
+    """Merge another same-correspondent candidate into the current candidate."""
+    db = _get_db(request)
+    try:
+        try:
+            db.merge_provider_candidates(series_id, source_id)
+        except ValueError as exc:
+            raise_api_error(400, "candidate_merge_invalid", str(exc))
+        return {"status": "ok", "candidate_id": series_id}
     finally:
         db.close()
 

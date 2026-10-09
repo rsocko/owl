@@ -17,6 +17,8 @@ interface SeriesDetailResponse {
   timeline: TimelineEntry[];
   similar_series: SeriesInfo[];
   anomaly_indicators: string[];
+  excluded_documents?: SeriesDoc[];
+  membership_complete?: boolean;
 }
 
 interface ProviderOverride {
@@ -72,6 +74,7 @@ export default function StatementSeriesDetail() {
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [updatingDocumentId, setUpdatingDocumentId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
 
   const [activeFlow, setActiveFlow] = useState<ActiveFlow>('none');
@@ -120,14 +123,31 @@ export default function StatementSeriesDetail() {
   }, [toast]);
 
   const series = detail?.series;
-  const documents = detail?.documents ?? [];
-  const timeline = detail?.timeline ?? [];
-  const similarSeries = detail?.similar_series ?? [];
-  const anomalyIndicators = detail?.anomaly_indicators ?? [];
+  const documents = useMemo(() => detail?.documents ?? [], [detail?.documents]);
+  const timeline = useMemo(() => detail?.timeline ?? [], [detail?.timeline]);
+  const similarSeries = useMemo(() => detail?.similar_series ?? [], [detail?.similar_series]);
+  const anomalyIndicators = useMemo(
+    () => detail?.anomaly_indicators ?? [],
+    [detail?.anomaly_indicators],
+  );
+  const excludedDocuments = useMemo(
+    () => detail?.excluded_documents ?? [],
+    [detail?.excluded_documents],
+  );
 
   const seriesOverride = overrides[decodedSeriesId] ?? overrides[series?.id ?? ''];
   const canonicalSeriesKey = series?.id ?? decodedSeriesId;
   const seriesName = seriesOverride?.display_name || series?.name || decodedSeriesId || 'Statement series';
+  const correspondentName = series?.correspondent_name || 'Unknown correspondent';
+  const isCandidate = series?.source === 'discovery';
+  const membershipComplete = detail?.membership_complete ?? !isCandidate;
+  const detectedDocumentCount = series?.detected_document_count ?? series?.document_count ?? documents.length;
+  const isDiscoverySample = isCandidate && !membershipComplete;
+  const documentListTitle = isCandidate
+    ? isDiscoverySample
+      ? `Sample documents (${documents.length} of ${detectedDocumentCount})`
+      : `Documents to include (${documents.length})`
+    : `Documents in series (${documents.length})`;
 
   // Derive unique accounts and color map
   const accounts = useMemo(() =>
@@ -140,6 +160,7 @@ export default function StatementSeriesDetail() {
   );
 
   const statusBadge = useMemo(() => {
+    if (isCandidate) return { label: 'Needs review', tone: 'warning' as const };
     if (seriesOverride?.status) {
       return { label: seriesOverride.status, tone: statusTone(seriesOverride.status) };
     }
@@ -147,7 +168,7 @@ export default function StatementSeriesDetail() {
     if (anomalyIndicators.length > 0) return { label: 'Needs review', tone: 'warning' as const };
     if (series) return { label: 'Tracking', tone: 'info' as const };
     return { label: 'Unknown', tone: 'muted' as const };
-  }, [seriesOverride?.status, series, anomalyIndicators]);
+  }, [seriesOverride?.status, series, anomalyIndicators, isCandidate]);
 
   useEffect(() => {
     setOverrideStatus(seriesOverride?.status ?? 'pending');
@@ -195,13 +216,54 @@ export default function StatementSeriesDetail() {
     setActiveFlow('none');
     setSelectedDocs(new Set());
     await loadDetail();
-    setToast({ message: 'Series split completed.', tone: 'success' });
+    setToast({
+      message: isCandidate
+        ? 'Candidate split. Both groups remain unconfirmed.'
+        : 'Series split completed.',
+      tone: 'success',
+    });
   };
 
   const handleMergeComplete = async () => {
     setActiveFlow('none');
     await loadDetail();
-    setToast({ message: 'Series merge completed.', tone: 'success' });
+    setToast({
+      message: isCandidate ? 'Candidates merged for continued review.' : 'Series merge completed.',
+      tone: 'success',
+    });
+  };
+
+  const handleCandidateDocument = async (documentId: string, exclude: boolean) => {
+    setUpdatingDocumentId(documentId);
+    try {
+      if (exclude) {
+        await endpoints.statements.candidateExcludeDocument(decodedSeriesId, documentId);
+      } else {
+        await endpoints.statements.candidateRestoreDocument(decodedSeriesId, documentId);
+      }
+      await loadDetail();
+      setToast({
+        message: exclude ? 'Document excluded from this candidate.' : 'Document restored to this candidate.',
+        tone: 'success',
+      });
+    } catch (err) {
+      setToast({ message: getErrorMessage(err), tone: 'error' });
+    } finally {
+      setUpdatingDocumentId(null);
+    }
+  };
+
+  const handleConfirmCandidate = async () => {
+    setBusy(true);
+    try {
+      await endpoints.statements.candidateConfirm(decodedSeriesId);
+      await loadDetail();
+      setToast({ message: 'Statement series confirmed.', tone: 'success' });
+    } catch (err) {
+      setToast({ message: getErrorMessage(err), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleSaveOverride = useCallback(async () => {
@@ -245,8 +307,10 @@ export default function StatementSeriesDetail() {
         ]}
       />
       <PageHeader
-        title={`Statement series: ${seriesName}`}
-        desc="View document timeline, manage series grouping, and configure provider overrides."
+        title={seriesName}
+        desc={isCandidate
+          ? `Review ${correspondentName} documents before creating this ${series?.frequency || 'recurring'} series`
+          : `${correspondentName} · ${series?.frequency || 'Unknown cadence'} statement series`}
         actions={
           <div className="btn-group">
             <Button onClick={() => navigate('/statements')}>Back to Statements</Button>
@@ -262,18 +326,24 @@ export default function StatementSeriesDetail() {
           <div className="statement-series-info section">
             <div className="statement-series-info-item">
               <div className="statement-series-info-label">Correspondent</div>
-              <div className="statement-series-info-value">{series?.correspondent_name ?? seriesName}</div>
+              <div className="statement-series-info-value">{correspondentName}</div>
             </div>
             <div className="statement-series-info-item">
               <div className="statement-series-info-label">Frequency</div>
               <div className="statement-series-info-value">{series?.frequency || 'Unknown cadence'}</div>
             </div>
             <div className="statement-series-info-item">
-              <div className="statement-series-info-label">Documents</div>
+              <div className="statement-series-info-label">{isCandidate ? 'Documents to include' : 'Documents'}</div>
               <div className="statement-series-info-value">
-                {series?.document_count ?? documents.length}
+                {documents.length}
+                {isCandidate && (
+                  <span className="statement-series-info-sub">
+                    {' '}of {detectedDocumentCount} detected
+                    {excludedDocuments.length > 0 && ` · ${excludedDocuments.length} excluded`}
+                  </span>
+                )}
                 {series?.first_seen && series?.last_seen && (
-                  <span className="statement-series-info-sub"> ({series.first_seen} – {series.last_seen})</span>
+                  <span className="statement-series-info-sub"> · {series.first_seen} – {series.last_seen}</span>
                 )}
               </div>
             </div>
@@ -311,30 +381,50 @@ export default function StatementSeriesDetail() {
             </div>
           )}
 
-          {/* Action bar with Split / Merge / Rename */}
+          {isDiscoverySample && (
+            <div className="statement-series-review-note section" role="status">
+              This candidate was discovered before full membership tracking was enabled. Run discovery again to review and confirm all {detectedDocumentCount} documents.
+            </div>
+          )}
+
+          {/* Action bar with candidate review or series management actions */}
           <div className="statement-series-action-bar section">
-            <span className="statement-series-action-label">Actions</span>
-            <Button
-              disabled={busy}
-              onClick={() => setActiveFlow(activeFlow === 'split' ? 'none' : 'split')}
-            >
-              ✂️ Split Series
-            </Button>
-            <Button
-              disabled={busy || similarSeries.length === 0}
-              onClick={() => setActiveFlow(activeFlow === 'merge' ? 'none' : 'merge')}
-            >
-              🔗 Merge with Another
-            </Button>
-            <Button
-              disabled={busy}
-              onClick={() => setActiveFlow(activeFlow === 'rename' ? 'none' : 'rename')}
-            >
-              ✏️ Rename
-            </Button>
-            <Button variant="success" onClick={() => navigate('/statements')}>
-              ✓ Looks Correct
-            </Button>
+            <span className="statement-series-action-label">{isCandidate ? 'Candidate review' : 'Actions'}</span>
+            {isCandidate ? (
+              <>
+                <Button
+                  disabled={busy || !membershipComplete || documents.length < 2}
+                  onClick={() => setActiveFlow(activeFlow === 'split' ? 'none' : 'split')}
+                >
+                  Split candidate
+                </Button>
+                <Button
+                  variant="success"
+                  disabled={busy || !membershipComplete || documents.length === 0}
+                  onClick={() => void handleConfirmCandidate()}
+                >
+                  {busy ? 'Confirming…' : 'Confirm and create series'}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  disabled={busy}
+                  onClick={() => setActiveFlow(activeFlow === 'split' ? 'none' : 'split')}
+                >
+                  ✂️ Split Series
+                </Button>
+                <Button
+                  disabled={busy}
+                  onClick={() => setActiveFlow(activeFlow === 'rename' ? 'none' : 'rename')}
+                >
+                  ✏️ Rename
+                </Button>
+                <Button variant="success" onClick={() => navigate('/statements')}>
+                  ✓ Looks Correct
+                </Button>
+              </>
+            )}
           </div>
 
           {/* Rename flow (inline) */}
@@ -381,6 +471,7 @@ export default function StatementSeriesDetail() {
                 onSelectAllByAccount={selectAllByAccount}
                 accounts={accounts}
                 accountColorMap={accountColorMap}
+                candidateMode={isCandidate}
                 onComplete={() => void handleSplitComplete()}
                 onCancel={() => { setActiveFlow('none'); setSelectedDocs(new Set()); }}
               />
@@ -395,6 +486,7 @@ export default function StatementSeriesDetail() {
                 documents={documents}
                 similarSeries={similarSeries}
                 sourceTimeline={timeline}
+                candidateMode={isCandidate}
                 onComplete={() => void handleMergeComplete()}
                 onCancel={() => setActiveFlow('none')}
               />
@@ -404,7 +496,7 @@ export default function StatementSeriesDetail() {
           <div className="statement-series-layout">
             <div>
               {/* Document Timeline */}
-              <Card title="📅 Document Timeline" className="section">
+              <Card title={isCandidate ? 'Candidate timeline' : 'Document timeline'} className="section">
                 <SeriesTimeline
                   entries={timeline}
                   accounts={accounts}
@@ -415,9 +507,14 @@ export default function StatementSeriesDetail() {
               </Card>
 
               {/* Document list */}
-              <Card title={`📋 Documents in Series (${documents.length})`} className="section">
+              <Card title={documentListTitle} className="section">
                 {documents.length === 0 ? (
-                  <EmptyState title="No documents in this series" desc="Documents will appear here once assigned to this series." />
+                  <EmptyState
+                    title={isCandidate ? 'No documents selected for this candidate' : 'No documents in this series'}
+                    desc={isCandidate
+                      ? 'Restore an excluded document before confirming this candidate.'
+                      : 'Documents will appear here once assigned to this series.'}
+                  />
                 ) : (
                   <div className="statement-series-list">
                     {/* Select-all buttons per account during split */}
@@ -473,12 +570,49 @@ export default function StatementSeriesDetail() {
                               {doc.account_hint}
                             </span>
                           )}
+                          {isCandidate && membershipComplete && (
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              disabled={updatingDocumentId === doc.document_id}
+                              onClick={() => void handleCandidateDocument(doc.document_id, true)}
+                            >
+                              {updatingDocumentId === doc.document_id ? 'Excluding…' : 'Exclude'}
+                            </Button>
+                          )}
                         </div>
                       );
                     })}
                   </div>
                 )}
               </Card>
+
+              {isCandidate && excludedDocuments.length > 0 && (
+                <Card title={`Excluded documents (${excludedDocuments.length})`} className="section">
+                  <div className="statement-series-list">
+                    {excludedDocuments.map(doc => (
+                      <div key={doc.document_id} className="statement-series-list-item">
+                        <div className="statement-series-document">
+                          <div className="statement-series-list-title">
+                            {doc.title || `Document ${doc.document_id}`}
+                          </div>
+                          <div className="statement-series-list-meta">
+                            Paperless #{doc.document_id}
+                            {doc.statement_date && ` · ${doc.statement_date}`}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          disabled={updatingDocumentId === doc.document_id}
+                          onClick={() => void handleCandidateDocument(doc.document_id, false)}
+                        >
+                          {updatingDocumentId === doc.document_id ? 'Restoring…' : 'Restore'}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
             </div>
 
             <div>
@@ -528,9 +662,14 @@ export default function StatementSeriesDetail() {
               </Card>
 
               {/* Similar series (merge candidates) */}
-              <Card title="🔗 Other Series from Same Correspondent" className="section">
+              <Card title={isCandidate ? 'Other candidates from this correspondent' : 'Other series from this correspondent'} className="section">
                 {similarSeries.length === 0 ? (
-                  <EmptyState title="No similar series found" desc="If multiple account variants exist for this correspondent, they will show up here." />
+                  <EmptyState
+                    title={isCandidate ? 'No other candidates found' : 'No similar series found'}
+                    desc={isCandidate
+                      ? 'If discovery finds another candidate for this correspondent, it will appear here for comparison.'
+                      : 'If multiple account variants exist for this correspondent, they will show up here.'}
+                  />
                 ) : (
                   <div className="statement-series-list">
                     {similarSeries.map(s => (
@@ -547,7 +686,7 @@ export default function StatementSeriesDetail() {
                           <Button
                             onClick={() => setActiveFlow('merge')}
                           >
-                            Merge into ↗
+                            Review merge
                           </Button>
                           <Link className="statement-series-link" to={`/statements/${encodeURIComponent(s.id)}`}>
                             Open →

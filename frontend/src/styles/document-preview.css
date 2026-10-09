@@ -63,9 +63,15 @@
   min-width: 0;
 }
 
-.doc-preview-filename {
+.doc-preview-title {
   font-weight: 600;
   font-size: 0.92rem;
+  word-break: break-word;
+}
+
+.doc-preview-filename {
+  color: var(--text-muted);
+  font-size: 0.78rem;
   word-break: break-word;
 }
 
@@ -168,9 +174,17 @@
   min-width: 0;
 }
 
-.doc-preview-compact-filename {
+.doc-preview-compact-title {
   font-size: 0.82rem;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-preview-compact-filename {
+  color: var(--text-muted);
+  font-size: 0.72rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
