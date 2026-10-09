@@ -19,9 +19,9 @@ from doc_intelligence_hub.modules.action_queue.obligations import (
     linked_documents,
     manually_link_actions,
     manually_link_document,
-    unlink_document,
     suggest_related_actions,
     sync_obligation_status,
+    unlink_document,
 )
 
 
