@@ -1735,6 +1735,12 @@ class Database:
             (deployment_id, snapshot.connector_ref, snapshot.source_generation),
         ).fetchone()
         if processed:
+            conn.execute(
+                """UPDATE external_signal_sources
+                   SET updated_at = datetime('now')
+                   WHERE deployment_id = ? AND connector_ref = ?""",
+                (deployment_id, snapshot.connector_ref),
+            )
             active = conn.execute(
                 """SELECT COUNT(*) FROM external_document_candidates
                    WHERE deployment_id = ? AND connector_ref = ? AND active = 1""",
