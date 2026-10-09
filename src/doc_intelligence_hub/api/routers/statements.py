@@ -11,6 +11,10 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
 from starlette.responses import StreamingResponse
 
+from doc_intelligence_hub.api.document_summary import (
+    DocumentSummaryContext,
+    build_document_summary,
+)
 from doc_intelligence_hub.api.routers import (
     get_statement_config_path,
     load_statement_config_from_request,
@@ -22,7 +26,11 @@ from doc_intelligence_hub.core.extractors.account_numbers import (
     extract_from_document,
     pick_masked_account_identifier,
 )
-from doc_intelligence_hub.core.paperless import MetadataFieldKey, PaperlessMetadataResolver
+from doc_intelligence_hub.core.paperless import (
+    MetadataFieldKey,
+    PaperlessMetadataResolver,
+    mask_account_identifier,
+)
 from doc_intelligence_hub.modules.statements.api import (
     _discovery_event_generator,
     _recommendations_event_generator,
@@ -1158,7 +1166,38 @@ async def list_legacy_provider_override_review(
         service.close()
 
 
-def _build_timeline(documents: list[dict]) -> list[dict]:
+def _statement_document_payload(
+    document: dict[str, Any],
+    *,
+    correspondent_name: str | None = None,
+) -> dict[str, Any]:
+    payload = dict(document)
+    account_display = mask_account_identifier(payload.pop("account_hint", None))
+    if account_display:
+        payload["account_identifier_display"] = account_display
+    payload["document_summary"] = build_document_summary(
+        {
+            **document,
+            "correspondent_name": correspondent_name,
+        },
+        context=DocumentSummaryContext.ACCOUNT_REVIEW,
+    )
+    return payload
+
+
+def _series_payload(series: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(series)
+    account_display = mask_account_identifier(payload.pop("account_identifier", None))
+    if account_display:
+        payload["account_identifier_display"] = account_display
+    return payload
+
+
+def _build_timeline(
+    documents: list[dict],
+    *,
+    correspondent_name: str | None = None,
+) -> list[dict]:
     """Build timeline entries from documents, calculating gap_before_days."""
     from datetime import date as date_type
 
@@ -1176,7 +1215,7 @@ def _build_timeline(documents: list[dict]) -> list[dict]:
         if stmt_date_str:
             with contextlib.suppress(ValueError, TypeError):
                 prev_date = date_type.fromisoformat(stmt_date_str)
-        timeline.append(
+        entry = _statement_document_payload(
             {
                 "document_id": doc["document_id"],
                 "title": doc.get("title"),
@@ -1184,8 +1223,10 @@ def _build_timeline(documents: list[dict]) -> list[dict]:
                 "period_label": doc.get("period_label"),
                 "account_hint": doc.get("account_hint"),
                 "gap_before_days": gap_days,
-            }
+            },
+            correspondent_name=correspondent_name,
         )
+        timeline.append(entry)
     return timeline
 
 
@@ -1330,7 +1371,10 @@ async def list_series(
     """List statement series with optional filters."""
     db = _get_db(request)
     try:
-        series = db.list_series(correspondent=correspondent, flagged=flagged)
+        series = [
+            _series_payload(item)
+            for item in db.list_series(correspondent=correspondent, flagged=flagged)
+        ]
         return {"series": series, "count": len(series)}
     finally:
         db.close()
@@ -1418,14 +1462,22 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
                 for candidate in db.get_similar_provider_candidates(series_id)
             ]
 
-        timeline = _build_timeline(documents)
+        timeline = _build_timeline(
+            documents,
+            correspondent_name=series.get("correspondent_name"),
+        )
 
         # Derive anomaly indicators from the data
         anomaly_indicators: list[str] = []
         account_hints = {d.get("account_hint") for d in documents if d.get("account_hint")}
         if len(account_hints) > 1:
             anomaly_indicators.append(
-                f"Multiple account numbers detected: {', '.join(sorted(account_hints))}"
+                "Multiple account identifiers detected: "
+                + ", ".join(
+                    display
+                    for hint in sorted(account_hints)
+                    if (display := mask_account_identifier(hint))
+                )
             )
         anomaly_indicators.extend(
             f"Large gap of {entry['gap_before_days']} days before {entry.get('period_label', entry.get('statement_date', 'unknown'))}"
@@ -1442,19 +1494,31 @@ async def get_series_detail(request: Request, series_id: str) -> dict[str, Any]:
                 ]
                 suggested_split_groups.append(
                     {
-                        "account_hint": hint,
+                        "account_identifier_display": mask_account_identifier(hint),
                         "document_ids": group_doc_ids,
                     }
                 )
 
         return {
-            "series": series,
-            "documents": documents,
+            "series": _series_payload(series),
+            "documents": [
+                _statement_document_payload(
+                    document,
+                    correspondent_name=series.get("correspondent_name"),
+                )
+                for document in documents
+            ],
             "timeline": timeline,
-            "similar_series": similar,
+            "similar_series": [_series_payload(item) for item in similar],
             "anomaly_indicators": anomaly_indicators,
             "suggested_split_groups": suggested_split_groups,
-            "excluded_documents": excluded_documents,
+            "excluded_documents": [
+                _statement_document_payload(
+                    document,
+                    correspondent_name=series.get("correspondent_name"),
+                )
+                for document in excluded_documents
+            ],
             "membership_complete": membership_complete,
         }
     finally:
@@ -1619,7 +1683,10 @@ async def get_series_timeline(request: Request, series_id: str) -> dict[str, Any
             raise_api_error(404, "series_not_found", f"Series '{series_id}' not found")
 
         documents = db.get_series_documents(series_id)
-        timeline = _build_timeline(documents)
+        timeline = _build_timeline(
+            documents,
+            correspondent_name=series.get("correspondent_name"),
+        )
         return {"series_id": series_id, "timeline": timeline}
     finally:
         db.close()

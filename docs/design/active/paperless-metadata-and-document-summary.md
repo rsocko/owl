@@ -23,7 +23,9 @@ OWL will:
 6. retain match confidence and triage analytics in OWL while projecting durable, user-facing metadata to Paperless only when it improves the archive; and
 7. migrate metadata through reviewable queues and reversible, type-safe operations.
 
-This is a design contract, not a product implementation.
+The metadata registry, governed Account Identifier projection, durable EOB
+projection, and shared document-summary contract are implemented. This document
+remains the design authority for extending those capabilities to new surfaces.
 
 ## Context
 
@@ -52,8 +54,6 @@ merge, duplicate, and matching operations.
 
 ## Non-Goals
 
-- Implementing the registry, component, extractors, queues, or migrations in
-  this change.
 - Turning Paperless into OWL's analytics database.
 - Writing every extracted value or model signal back to Paperless.
 - Renaming fields in place or deleting legacy fields during initial rollout.
@@ -123,6 +123,23 @@ or a shared adapter should normalize those responses at the API boundary.
 Formatting, masking, field precedence, and privacy flags belong in shared code.
 The normalized model exposes `account_identifier_display`, never the canonical
 Paperless value. It is omitted outside named account-review contexts.
+
+### Implemented Summary Contexts
+
+The server owns field precedence and privacy enforcement through four named
+contexts:
+
+- `general` omits Account Identifier and Patient Name;
+- `account_review` may include only server-masked
+  `account_identifier_display`;
+- `medical_review` may include Patient Name but omits Account Identifier; and
+- `medical_account_review` may include Patient Name plus the masked account
+  display needed for EOB review.
+
+Only `document_type_name` or an explicitly supplied native
+`paperless_document_type` can populate the summary's Document Type. Module
+classifications such as EOB, bill, statement, and receipt roles remain workflow
+labels and do not override Paperless's native taxonomy.
 
 ## 2. Central Paperless Metadata Schema Registry
 

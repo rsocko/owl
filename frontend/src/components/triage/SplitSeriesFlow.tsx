@@ -11,7 +11,7 @@ import { SeriesTimeline } from './SeriesTimeline';
 import type { SeriesInfo, SeriesDoc, TimelineEntry } from './StatementGroupingDetail';
 
 interface SuggestedSplitGroup {
-  account_hint: string;
+  account_identifier_display: string;
   document_ids: string[];
 }
 
@@ -49,7 +49,8 @@ function docsToTimeline(docs: SeriesDoc[]): TimelineEntry[] {
       title: d.title,
       statement_date: d.statement_date,
       period_label: d.period_label,
-      account_hint: d.account_hint,
+      account_identifier_display: d.account_identifier_display,
+      document_summary: d.document_summary,
       gap_before_days: gapDays,
     };
   });
@@ -82,21 +83,26 @@ export function SplitSeriesFlow({
     documents.filter(d => !selectedDocIds.has(d.document_id)),
     [documents, selectedDocIds],
   );
+  const selectedAccounts = new Set(
+    selectedDocs.map(d => d.account_identifier_display).filter(Boolean),
+  );
 
   // Auto-suggest name from common account hint
-  const selectedAccounts = new Set(selectedDocs.map(d => d.account_hint).filter(Boolean));
-
   // Mini-timeline data
   const remainingTimeline = useMemo(() => docsToTimeline(remainingDocs), [remainingDocs]);
   const selectedTimeline = useMemo(() => docsToTimeline(selectedDocs), [selectedDocs]);
 
   // Derive account subsets for the mini-timelines
   const remainingAccounts = useMemo(() =>
-    Array.from(new Set(remainingDocs.map(d => d.account_hint).filter(Boolean))) as string[],
+    Array.from(
+      new Set(remainingDocs.map(d => d.account_identifier_display).filter(Boolean)),
+    ) as string[],
     [remainingDocs],
   );
   const selectedDocAccounts = useMemo(() =>
-    Array.from(new Set(selectedDocs.map(d => d.account_hint).filter(Boolean))) as string[],
+    Array.from(
+      new Set(selectedDocs.map(d => d.account_identifier_display).filter(Boolean)),
+    ) as string[],
     [selectedDocs],
   );
 
@@ -146,15 +152,14 @@ export function SplitSeriesFlow({
             <div className="sg-split-suggest-actions">
               {suggestedSplitGroups.map(group => (
                 <button
-                  key={group.account_hint}
+                  key={group.account_identifier_display}
                   className="sg-split-suggest-btn"
                   onClick={() => {
-                    onSelectAllByAccount(group.account_hint);
-                    setNewName(`${series.name} — ${group.account_hint}`);
-                    setAccountId(group.account_hint);
+                    onSelectAllByAccount(group.account_identifier_display);
+                    setNewName(`${series.name} — ${group.account_identifier_display}`);
                   }}
                 >
-                  Select "{group.account_hint}" ({group.document_ids.length} docs)
+                  Select "{group.account_identifier_display}" ({group.document_ids.length} docs)
                 </button>
               ))}
               <button className="sg-split-suggest-dismiss" onClick={() => setSuggestDismissed(true)}>
@@ -221,13 +226,13 @@ export function SplitSeriesFlow({
                     {remainingDocs.slice(0, 5).map(d => (
                       <li key={d.document_id}>
                         {d.title || `Doc ${d.document_id}`}
-                        {d.account_hint && (
+                        {d.account_identifier_display && (
                           <span className="sg-doc-account" style={{
-                            background: `${accountColorMap[d.account_hint] || 'var(--muted)'}22`,
-                            color: accountColorMap[d.account_hint] || 'var(--muted)',
+                            background: `${accountColorMap[d.account_identifier_display] || 'var(--muted)'}22`,
+                            color: accountColorMap[d.account_identifier_display] || 'var(--muted)',
                             marginLeft: 4,
                           }}>
-                            {d.account_hint}
+                            {d.account_identifier_display}
                           </span>
                         )}
                       </li>
@@ -243,13 +248,13 @@ export function SplitSeriesFlow({
                     {selectedDocs.slice(0, 5).map(d => (
                       <li key={d.document_id}>
                         {d.title || `Doc ${d.document_id}`}
-                        {d.account_hint && (
+                        {d.account_identifier_display && (
                           <span className="sg-doc-account" style={{
-                            background: `${accountColorMap[d.account_hint] || 'var(--muted)'}22`,
-                            color: accountColorMap[d.account_hint] || 'var(--muted)',
+                            background: `${accountColorMap[d.account_identifier_display] || 'var(--muted)'}22`,
+                            color: accountColorMap[d.account_identifier_display] || 'var(--muted)',
                             marginLeft: 4,
                           }}>
-                            {d.account_hint}
+                            {d.account_identifier_display}
                           </span>
                         )}
                       </li>

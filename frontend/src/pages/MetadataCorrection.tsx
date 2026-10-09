@@ -13,7 +13,8 @@ import {
   SkeletonLoader,
   Toast,
 } from '../components/ui';
-import { endpoints } from '../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
+import DocumentSummary from '../components/DocumentSummary';
 import { getToastDuration } from '../lib/toast';
 import '../styles/metadata-correction.css';
 
@@ -45,6 +46,7 @@ interface CorrectionRecord {
 interface MetadataResponse {
   document_id: number;
   title: string;
+  document_summary: DocumentSummaryModel;
   paperless_url: string;
   extracted_fields: ExtractedField[];
   corrections: CorrectionRecord[];
@@ -346,7 +348,7 @@ export default function MetadataCorrection() {
         ]}
       />
       <PageHeader
-        title={`Metadata Correction: ${data.title || `Document #${data.document_id}`}`}
+        title="Metadata Correction"
         desc={`Paperless #${data.document_id}`}
         actions={
           <div className="metadata-header-actions">
@@ -517,12 +519,7 @@ export default function MetadataCorrection() {
         <div>
           <Card title="🔍 Source Document" className="meta-doc-card">
             <div className="meta-doc-info">
-              <p>
-                <strong>Document:</strong> {data.title || `#${data.document_id}`}
-              </p>
-              <p>
-                <strong>Paperless ID:</strong> #{data.document_id}
-              </p>
+              <DocumentSummary summary={data.document_summary} density="review" />
               <div className="meta-doc-link">
                 <a
                   href={`/api/documents/${data.document_id}/download`}

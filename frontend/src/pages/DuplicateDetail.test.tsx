@@ -28,6 +28,8 @@ const pair = {
   created_at: '2026-08-01T00:00:00Z',
   doc_a_metadata: { title: 'Original Bill', provider: 'Utility' },
   doc_b_metadata: { title: 'Second Notice', provider: 'Utility' },
+  doc_a_summary: { document_id: 10, title: 'Original Bill', correspondent: 'Utility' },
+  doc_b_summary: { document_id: 20, title: 'Second Notice', correspondent: 'Utility' },
   relationship_proposal: null,
 };
 

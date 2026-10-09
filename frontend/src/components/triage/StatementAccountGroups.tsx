@@ -27,7 +27,9 @@ export function StatementAccountGroups({
       </div>
       <div className="sg-account-group-grid">
         {accounts.map(account => {
-          const accountDocuments = documents.filter(doc => doc.account_hint === account);
+          const accountDocuments = documents.filter(
+            doc => doc.account_identifier_display === account,
+          );
           const exampleTitle = accountDocuments.find(doc => doc.title)?.title;
           return (
             <div className="sg-account-group" key={account}>

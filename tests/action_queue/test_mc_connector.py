@@ -128,7 +128,7 @@ class TestMcListActions:
             "label": "Pay online",
             "url": "https://billing.example/pay",
         }
-        assert action["extracted_data"]["account_identifier"] == "ending 1234"
+        assert "account_identifier" not in action["extracted_data"]
         assert action["extracted_data"]["reference_number"] == "INV-42"
         assert action["extracted_data"]["links"][0]["purpose"] == "payment"
 
@@ -307,7 +307,7 @@ class TestMcListActions:
             aq_settings.database_url = original_db_url
             triage_database.configure(original_triage_db_url)
 
-    def test_connector_never_exposes_legacy_raw_account_number(self, seeded_client):
+    def test_connector_never_exposes_account_identifiers(self, seeded_client):
         db = get_session()
         try:
             action = db.query(Action).filter_by(id=1).one()
@@ -321,7 +321,7 @@ class TestMcListActions:
 
         extracted = seeded_client.get("/api/action-queue/actions").json()[0]["extracted_data"]
         assert "account_number" not in extracted
-        assert extracted["account_identifier"] == "ending 6789"
+        assert "account_identifier" not in extracted
 
     def test_incomplete_mc_type_correction_routes_to_review_and_returns_current_cta(
         self, seeded_client

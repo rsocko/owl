@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { endpoints } from '../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
 import DocumentViewerModal from './DocumentViewerModal';
+import DocumentSummary from './DocumentSummary';
 import '../styles/document-preview.css';
 
 interface DocumentMetadata {
@@ -25,6 +26,8 @@ interface DocumentPreviewProps {
   variant?: 'card' | 'compact';
   /** Label for the document type (e.g. "EOB", "Bill") */
   label?: string;
+  /** Server-normalized identity and privacy-scoped metadata. */
+  summary?: DocumentSummaryModel;
 }
 
 function formatDate(value?: string | null) {
@@ -42,6 +45,7 @@ export default function DocumentPreview({
   paperlessUrl: paperlessUrlOverride,
   variant = 'card',
   label,
+  summary,
 }: DocumentPreviewProps) {
   const [meta, setMeta] = useState<DocumentMetadata | null>(null);
   const [loading, setLoading] = useState(true);
@@ -104,10 +108,14 @@ export default function DocumentPreview({
             {thumbError && <div className="doc-preview-compact-thumb-placeholder">📄</div>}
           </div>
           <div className="doc-preview-compact-info">
-            <div className="doc-preview-compact-title" title={documentTitle}>
-              {displayLabel}{documentTitle}
-            </div>
-            {showFilename && (
+            {summary ? (
+              <DocumentSummary summary={summary} />
+            ) : (
+              <div className="doc-preview-compact-title" title={documentTitle}>
+                {displayLabel}{documentTitle}
+              </div>
+            )}
+            {!summary && showFilename && (
               <div className="doc-preview-compact-filename" title={filename}>
                 {filename}
               </div>
@@ -131,6 +139,7 @@ export default function DocumentPreview({
           <DocumentViewerModal
             documentId={documentId}
             title={documentTitle}
+            summary={summary}
             paperlessUrl={paperlessUrl}
             onClose={() => setViewerOpen(false)}
           />
@@ -175,8 +184,12 @@ export default function DocumentPreview({
             {thumbError && <div className="doc-preview-thumb-placeholder">📄</div>}
           </div>
           <div className="doc-preview-meta">
-            <div className="doc-preview-title">{displayLabel}{documentTitle}</div>
-            {showFilename && <div className="doc-preview-filename">{filename}</div>}
+            {summary ? (
+              <DocumentSummary summary={summary} density="review" />
+            ) : (
+              <div className="doc-preview-title">{displayLabel}{documentTitle}</div>
+            )}
+            {!summary && showFilename && <div className="doc-preview-filename">{filename}</div>}
             <div className="doc-preview-info">
               {meta?.page_count != null && <span>📄 {meta.page_count} page{meta.page_count !== 1 ? 's' : ''}</span>}
               {meta?.added && <span>📥 Ingested {formatDate(meta.added)}</span>}
@@ -205,6 +218,7 @@ export default function DocumentPreview({
         <DocumentViewerModal
           documentId={documentId}
           title={documentTitle}
+          summary={summary}
           paperlessUrl={paperlessUrl}
           onClose={() => setViewerOpen(false)}
         />

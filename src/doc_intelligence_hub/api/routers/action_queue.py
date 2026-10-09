@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from datetime import date, datetime
 from typing import Any
 
@@ -16,6 +15,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
+from doc_intelligence_hub.api.document_summary import build_document_summary
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
 from doc_intelligence_hub.core.paperless import (
     MetadataFieldKey,
@@ -337,9 +337,6 @@ def _serialize_action(a: Action) -> dict[str, Any]:
     """Serialize an Action row to a JSON-safe dict with preview_url."""
     import json
 
-    from doc_intelligence_hub.core.extractors.account_numbers import (
-        normalize_masked_account_identifier,
-    )
     from doc_intelligence_hub.modules.triage.database import get_corrections_for_document
 
     # Deserialize recommended_cta from JSON string if stored as such
@@ -353,13 +350,7 @@ def _serialize_action(a: Action) -> dict[str, Any]:
     extracted_data = dict(a.extracted_data) if isinstance(a.extracted_data, dict) else None
     if extracted_data is not None:
         extracted_data.pop("account_number", None)
-        masked_identifier = normalize_masked_account_identifier(
-            extracted_data.get("account_identifier")
-        )
-        if masked_identifier:
-            extracted_data["account_identifier"] = masked_identifier
-        else:
-            extracted_data.pop("account_identifier", None)
+        extracted_data.pop("account_identifier", None)
 
     document_amount = a.document_amount
     document_due_date = a.document_due_date.isoformat() if a.document_due_date else None
@@ -402,24 +393,11 @@ def _serialize_action(a: Action) -> dict[str, Any]:
             document_due_date = raw_due_date or None
             corrected_fields["document_due_date"] = True
         if extracted_data is not None:
-            if "account_identifier" in latest_by_field:
-                corrected_identifier = latest_by_field["account_identifier"]
-                masked_correction = normalize_masked_account_identifier(corrected_identifier)
-                if masked_correction is None and corrected_identifier:
-                    # The correction wasn't submitted in an already-masked
-                    # "ending XXXX" form (e.g. a user pasted a raw account
-                    # number) -- re-mask it ourselves so an unmasked value
-                    # never leaks into the API response.
-                    alnum_suffix = re.sub(r"[^A-Za-z0-9]", "", corrected_identifier)[-4:].upper()
-                    masked_correction = f"ending {alnum_suffix}" if alnum_suffix else None
-                if masked_correction:
-                    extracted_data["account_identifier"] = masked_correction
-                    corrected_fields["account_identifier"] = True
             if "invoice_number" in latest_by_field:
                 extracted_data["reference_number"] = latest_by_field["invoice_number"]
                 corrected_fields["invoice_number"] = True
 
-    return {
+    payload = {
         "id": a.id,
         "document_id": a.document_id,
         "document_title": a.document_title,
@@ -462,6 +440,14 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         "acknowledged_at": a.acknowledged_at.isoformat() if a.acknowledged_at else None,
         "snoozed_until": a.snoozed_until.isoformat() if a.snoozed_until else None,
     }
+    if a.document_id is not None:
+        payload["document_summary"] = build_document_summary(
+            {
+                **payload,
+                "document_type_name": a.document_type,
+            }
+        )
+    return payload
 
 
 def _serialize_action_with_siblings(db: Session, action: Action) -> dict[str, Any]:
@@ -486,6 +472,12 @@ def _serialize_action_with_siblings(db: Session, action: Action) -> dict[str, An
     serialized["linked_documents"] = [
         {
             **document,
+            "document_summary": build_document_summary(
+                {
+                    **document,
+                    "document_type_name": document.get("document_type"),
+                }
+            ),
             "thumbnail_url": f"/api/statements/documents/{document['document_id']}/thumb",
             "preview_url": _build_preview_url(document["document_id"]),
         }
@@ -1372,38 +1364,35 @@ async def list_action_link_candidates(
                     document_custom_fields,
                     metadata_schema,
                 ).value
-                account_identifier = resolve_metadata_value(
-                    MetadataFieldKey.ACCOUNT_IDENTIFIER,
-                    document_custom_fields,
-                    metadata_schema,
-                ).value
                 reference_number = resolve_metadata_value(
                     MetadataFieldKey.INVOICE_NUMBER,
                     document_custom_fields,
                     metadata_schema,
                 ).value
+                document_payload = {
+                    "id": document_id,
+                    "title": document.get("title") or f"Document #{document_id}",
+                    "document_type": document.get("document_type_name")
+                    or _resolve_metadata_name(document.get("document_type"), document_types),
+                    "correspondent": document.get("correspondent_name")
+                    or _resolve_metadata_name(document.get("correspondent"), correspondents),
+                    "document_date": document.get("created"),
+                    "amount": float(amount) if amount is not None else None,
+                    "due_date": due_date,
+                    "reference_number": reference_number,
+                    "thumbnail_url": (f"/api/statements/documents/{document_id}/thumb"),
+                    "paperless_url": _build_preview_url(document_id),
+                }
+                document_payload["document_summary"] = build_document_summary(
+                    {
+                        **document_payload,
+                        "document_type_name": document_payload["document_type"],
+                    }
+                )
                 candidates.append(
                     {
                         "kind": "document",
-                        "document": {
-                            "id": document_id,
-                            "title": document.get("title") or f"Document #{document_id}",
-                            "document_type": document.get("document_type_name")
-                            or _resolve_metadata_name(
-                                document.get("document_type"), document_types
-                            ),
-                            "correspondent": document.get("correspondent_name")
-                            or _resolve_metadata_name(
-                                document.get("correspondent"), correspondents
-                            ),
-                            "document_date": document.get("created"),
-                            "amount": float(amount) if amount is not None else None,
-                            "due_date": due_date,
-                            "account_identifier": account_identifier,
-                            "reference_number": reference_number,
-                            "thumbnail_url": (f"/api/statements/documents/{document_id}/thumb"),
-                            "paperless_url": _build_preview_url(document_id),
-                        },
+                        "document": document_payload,
                         "score": 0.0,
                         "reasons": ["Paperless document search result"],
                     }

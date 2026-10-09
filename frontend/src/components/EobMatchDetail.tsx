@@ -17,7 +17,7 @@ import {
   Toast,
   confidenceTone,
 } from './ui';
-import { endpoints } from '../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import ManualMatchModal from './ManualMatchModal';
 import ConfirmModal from './ConfirmModal';
@@ -97,6 +97,8 @@ interface EobMatch {
   user_notes?: string | null;
   eob_details?: EobDetails | null;
   bill_details?: BillDetails | null;
+  eob_summary?: DocumentSummaryModel;
+  bill_summary?: DocumentSummaryModel;
 }
 
 interface MatchHistoryEvent {
@@ -851,6 +853,7 @@ export default function EobMatchDetail({
               documentId={match.eob_document_id}
               paperlessUrl={match.eob_preview_url}
               label="EOB"
+              summary={match.eob_summary}
             />
           ) : (
             <div className="eob-preview-placeholder">
@@ -864,6 +867,7 @@ export default function EobMatchDetail({
               documentId={match.bill_document_id}
               paperlessUrl={match.bill_preview_url}
               label="Bill"
+              summary={match.bill_summary}
             />
           ) : (
             <div className="eob-preview-placeholder">

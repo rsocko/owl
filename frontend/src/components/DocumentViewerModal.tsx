@@ -1,10 +1,13 @@
 import { useCallback, useEffect } from 'react';
-import { endpoints } from '../lib/api';
+import { endpoints, type DocumentSummaryModel } from '../lib/api';
+import DocumentSummary from './DocumentSummary';
+import { documentSummaryLabel } from './documentSummaryFormat';
 import '../styles/document-preview.css';
 
 interface DocumentViewerModalProps {
   documentId: number;
   title?: string;
+  summary?: DocumentSummaryModel;
   paperlessUrl?: string | null;
   onClose: () => void;
 }
@@ -16,6 +19,7 @@ interface DocumentViewerModalProps {
 export default function DocumentViewerModal({
   documentId,
   title,
+  summary,
   paperlessUrl,
   onClose,
 }: DocumentViewerModalProps) {
@@ -54,7 +58,9 @@ export default function DocumentViewerModal({
     <div className="doc-viewer-overlay" onClick={handleOverlayClick}>
       <div className="doc-viewer-container">
         <div className="doc-viewer-header">
-          <div className="doc-viewer-title">{title ?? `Document #${documentId}`}</div>
+          <div className="doc-viewer-title">
+            {summary ? <DocumentSummary summary={summary} /> : title ?? `Document #${documentId}`}
+          </div>
           <div className="doc-viewer-header-actions">
             {paperlessUrl && (
               <a href={paperlessUrl} target="_blank" rel="noreferrer">
@@ -72,7 +78,11 @@ export default function DocumentViewerModal({
             ✕
           </button>
         </div>
-        <iframe className="doc-viewer-iframe" src={previewSrc} title={title ?? 'Document preview'} />
+        <iframe
+          className="doc-viewer-iframe"
+          src={previewSrc}
+          title={summary ? documentSummaryLabel(summary) : title ?? 'Document preview'}
+        />
       </div>
     </div>
   );

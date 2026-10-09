@@ -10,6 +10,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from doc_intelligence_hub.api.document_summary import (
+    DocumentSummaryContext,
+    build_document_summary,
+)
 from doc_intelligence_hub.api.routers import make_paperless_client, raise_api_error
 from doc_intelligence_hub.core.paperless import AccountIdentifierClass, mask_account_identifier
 from doc_intelligence_hub.modules.eob_matching.classifier import classify_document
@@ -307,7 +311,30 @@ def _serialize_match(
     detailed: bool = False,
 ) -> dict[str, Any]:
     base_url = paperless_url.rstrip("/") if paperless_url else ""
-    return {
+    eob_source = (
+        {
+            "document_id": eob.document_id,
+            "title": eob.title,
+            "provider_name": eob.provider_name,
+            "date_of_service": eob.date_of_service,
+            "patient_name": eob.patient_name,
+            "account_identifier": eob.policy_number,
+        }
+        if eob is not None
+        else {"document_id": m.eob_document_id}
+    )
+    bill_source = (
+        {
+            "document_id": bill.document_id,
+            "title": bill.title,
+            "provider_name": bill.provider_name,
+            "date_of_service": bill.date_of_service,
+            "patient_name": bill.patient_name,
+        }
+        if bill is not None
+        else {"document_id": m.bill_document_id}
+    )
+    payload = {
         "id": m.id,
         "run_id": m.run_id,
         "eob_document_id": m.eob_document_id,
@@ -341,6 +368,17 @@ def _serialize_match(
         "eob_details": _serialize_eob_full(eob) if detailed else _serialize_eob_details(eob),
         "bill_details": _serialize_bill_full(bill) if detailed else _serialize_bill_details(bill),
     }
+    if m.eob_document_id is not None:
+        payload["eob_summary"] = build_document_summary(
+            eob_source,
+            context=DocumentSummaryContext.MEDICAL_ACCOUNT_REVIEW,
+        )
+    if m.bill_document_id is not None:
+        payload["bill_summary"] = build_document_summary(
+            bill_source,
+            context=DocumentSummaryContext.MEDICAL_REVIEW,
+        )
+    return payload
 
 
 def _batch_load_records(

@@ -13,6 +13,19 @@ export class ApiError extends Error {
     this.status = status;
     this.details = details;
   }
+
+}
+
+export interface DocumentSummaryModel {
+  document_id: number | string;
+  title?: string | null;
+  correspondent?: string | null;
+  document_type?: string | null;
+  document_date?: string | null;
+  date_label?: string | null;
+  tags?: string[];
+  account_identifier_display?: string | null;
+  patient_name?: string | null;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
