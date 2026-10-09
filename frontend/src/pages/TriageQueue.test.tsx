@@ -269,25 +269,27 @@ describe('Needs Review actions', () => {
     expect(screen.getByRole('button', { name: 'Save corrections' })).toBeEnabled();
   });
 
-  it('disables action-review resolution controls after the item is resolved', async () => {
+  it('shows persisted values and an Action Queue link after the item is resolved', async () => {
       queueMock.mockResolvedValue({
         items: [{
           id: 'action-review-resolved',
           item_type: 'action_classification',
           priority: 80,
-          status: 'confirmed',
+          status: 'resolved',
           source: 'action_queue',
           target_type: 'action',
           target_id: '42',
-          reason: 'Confirmed',
+          reason: 'Correction saved',
           metadata: {
             action_type: 'PAY',
-            action_title: 'Pay utility bill',
+            title: 'Pay utility bill',
+            summary: 'Pay the corrected invoice.',
+            amount: 395,
             document_id: 777,
           },
           deferred_until: null,
           resolved_at: '2026-08-11T12:00:00Z',
-          resolved_action: 'confirm',
+          resolved_action: 'correct',
           created_at: '2026-08-10T12:00:00Z',
         }],
         count: 1,
@@ -301,8 +303,14 @@ describe('Needs Review actions', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByRole('button', { name: 'Accept suggestion' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'No action needed' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Analyze document again' })).toBeDisabled();
+    expect(await screen.findByText('Corrections saved')).toBeTruthy();
+    expect(screen.getByText('395')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'View in Action Queue' })).toHaveAttribute(
+      'href',
+      '#/action-queue',
+    );
+    expect(screen.queryByLabelText('Corrected amount')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save corrections' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'No action needed' })).toBeNull();
   });
 });

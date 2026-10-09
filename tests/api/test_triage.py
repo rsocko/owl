@@ -352,6 +352,76 @@ class TestTriageResolve:
         assert refreshed["metadata"]["title"] == "Corrected payment"
         assert "critical details" in refreshed["reason"]
 
+    def test_complete_correction_is_persisted_and_visible_in_action_queue(self, client):
+        from unittest.mock import AsyncMock, patch
+
+        from doc_intelligence_hub.modules.action_queue.database import Action
+        from doc_intelligence_hub.modules.action_queue.database import (
+            get_session as get_action_session,
+        )
+
+        session = get_action_session()
+        try:
+            action = Action(
+                document_id=780,
+                document_title="Electrician invoice",
+                action_type="PAY",
+                title="Pay electrician",
+                amount=None,
+                confidence=80,
+                status="pending",
+                action_ready=False,
+                review_state="needs_review",
+            )
+            session.add(action)
+            session.commit()
+            item = create_action_classification_review(
+                action_id=action.id,
+                document_id=780,
+                confidence=80,
+                reason="Missing critical amount",
+                metadata={
+                    "action_type": "PAY",
+                    "title": action.title,
+                    "amount": None,
+                },
+            )
+            action.review_item_id = item["id"]
+            session.commit()
+            action_id = action.id
+        finally:
+            session.close()
+
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.lifecycle.project_action_metadata",
+            new=AsyncMock(),
+        ):
+            response = client.post(
+                f"/api/triage/queue/{item['id']}/resolve",
+                json={
+                    "action": "correct",
+                    "payload": {
+                        "action_type": "PAY",
+                        "title": "Pay electrician",
+                        "summary": "Pay for EV charger installation.",
+                        "due_date": None,
+                        "amount": 395.0,
+                    },
+                },
+            )
+
+        assert response.status_code == 200
+        resolved = response.json()
+        assert resolved["status"] == "resolved"
+        assert resolved["action_id"] == action_id
+        assert resolved["action_ready"] is True
+        assert resolved["metadata"]["amount"] == 395.0
+
+        saved_review = client.get(f"/api/triage/queue/{item['id']}").json()
+        assert saved_review["metadata"]["amount"] == 395.0
+        queue = client.get("/api/queue/actions?status=pending").json()
+        assert any(candidate["id"] == action_id for candidate in queue["actions"])
+
     def test_resolved_action_classification_cannot_be_resolved_again(self, client, action_review):
         from unittest.mock import AsyncMock, patch
 

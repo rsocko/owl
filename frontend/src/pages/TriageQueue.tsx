@@ -871,7 +871,9 @@ export default function TriageQueue() {
                     <div>
                       <div className="triage-detail-title">{itemTitle(selectedItem)}</div>
                       <div className="text-muted">
-                        Decide what OWL should believe before this becomes actionable work.
+                        {selectedReviewCanResolve
+                          ? 'Decide what OWL should believe before this becomes actionable work.'
+                          : 'This review is complete. The accepted values are shown below.'}
                       </div>
                     </div>
                   </div>
@@ -894,7 +896,7 @@ export default function TriageQueue() {
                         <strong>{String(selectedItem.metadata?.amount ?? '—')}</strong>
                       </div>
                     </div>
-                    {actionCorrection && (
+                    {selectedReviewCanResolve && actionCorrection && (
                       <div className="triage-action-correction">
                         <label>
                           <span>Action type</span>
@@ -955,54 +957,75 @@ export default function TriageQueue() {
                         </label>
                       </div>
                     )}
-                    {actionCorrectionMissingRequirement && (
+                    {selectedReviewCanResolve && actionCorrectionMissingRequirement && (
                       <p className="triage-action-requirement" role="status">
                         {actionCorrectionMissingRequirement}
                       </p>
                     )}
-                    <div className="btn-group">
-                      <Button
-                        variant="success"
-                        disabled={
-                          busyAction !== null
-                          || !selectedReviewCanResolve
-                          || actionCorrectionMissingRequirement !== null
-                        }
-                        onClick={() => {
-                          if (actionCorrectionIsDirty) {
-                            void correctActionClassification(selectedItem.id);
-                          } else {
-                            void handleResolve(selectedItem.id, 'confirm');
+                    {selectedReviewCanResolve ? (
+                      <div className="btn-group">
+                        <Button
+                          variant="success"
+                          disabled={
+                            busyAction !== null
+                            || actionCorrectionMissingRequirement !== null
                           }
-                        }}
-                      >
-                        {actionCorrectionIsDirty ? 'Save corrections' : 'Accept suggestion'}
-                      </Button>
-                      {actionCorrectionIsDirty && (
+                          onClick={() => {
+                            if (actionCorrectionIsDirty) {
+                              void correctActionClassification(selectedItem.id);
+                            } else {
+                              void handleResolve(selectedItem.id, 'confirm');
+                            }
+                          }}
+                        >
+                          {actionCorrectionIsDirty ? 'Save corrections' : 'Accept suggestion'}
+                        </Button>
+                        {actionCorrectionIsDirty && (
+                          <Button
+                            variant="ghost"
+                            disabled={busyAction !== null}
+                            onClick={() => setActionCorrection(detectedActionCorrection)}
+                          >
+                            Reset to suggested values
+                          </Button>
+                        )}
+                        <Button
+                          variant="danger"
+                          disabled={busyAction !== null}
+                          onClick={() => void handleResolve(selectedItem.id, 'no_action')}
+                        >
+                          No action needed
+                        </Button>
                         <Button
                           variant="ghost"
-                          disabled={busyAction !== null || !selectedReviewCanResolve}
-                          onClick={() => setActionCorrection(detectedActionCorrection)}
+                          disabled={busyAction !== null}
+                          onClick={() => void handleResolve(selectedItem.id, 're_evaluate')}
+                          title="Discard these values and rerun extraction from the original document."
                         >
-                          Reset to suggested values
+                          Analyze document again
                         </Button>
-                      )}
-                      <Button
-                        variant="danger"
-                        disabled={busyAction !== null || !selectedReviewCanResolve}
-                        onClick={() => void handleResolve(selectedItem.id, 'no_action')}
-                      >
-                        No action needed
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        disabled={busyAction !== null || !selectedReviewCanResolve}
-                        onClick={() => void handleResolve(selectedItem.id, 're_evaluate')}
-                        title="Discard these values and rerun extraction from the original document."
-                      >
-                        Analyze document again
-                      </Button>
-                    </div>
+                      </div>
+                    ) : (
+                      <div className="triage-action-resolution" role="status">
+                        <div>
+                          <strong>
+                            {selectedItem.resolved_action === 'correct'
+                              ? 'Corrections saved'
+                              : selectedItem.resolved_action === 'confirm'
+                                ? 'Suggestion accepted'
+                                : 'No action needed'}
+                          </strong>
+                          <span>
+                            {selectedItem.resolved_at
+                              ? `Completed ${new Date(selectedItem.resolved_at).toLocaleString()}`
+                              : 'Review completed'}
+                          </span>
+                        </div>
+                        {['confirm', 'correct'].includes(selectedItem.resolved_action ?? '') && (
+                          <a href="#/action-queue">View in Action Queue</a>
+                        )}
+                      </div>
+                    )}
                   </Card>
                   {selectedItem.metadata?.document_id && (
                     <Card title="Document preview">

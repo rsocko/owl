@@ -362,6 +362,7 @@ async def _resolve_action_classification(
         resolved = resolve_queue_item(item["id"], body.action, payload)
         return {
             **(resolved or item),
+            "action_id": action.id,
             "action_ready": bool(action.action_ready),
             "review_state": action.review_state,
         }

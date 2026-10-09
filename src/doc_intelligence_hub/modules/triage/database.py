@@ -360,6 +360,16 @@ def resolve_queue_item(
         item.status = "resolved"
         item.resolved_at = datetime.now(UTC)
         item.resolved_action = action
+        if item.item_type == "action_classification" and action == "correct" and payload:
+            metadata = {}
+            if item.metadata_json:
+                try:
+                    parsed = json.loads(item.metadata_json)
+                    if isinstance(parsed, dict):
+                        metadata = parsed
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            item.metadata_json = json.dumps({**metadata, **payload})
 
         # Record correction event
         event = CorrectionEvent(
