@@ -85,6 +85,28 @@ function itemTypeFilterFromQuery(value: string | null): ItemTypeFilter {
     : 'all';
 }
 
+function actionCorrectionDraft(item: TriageItem | null): ActionCorrectionDraft | null {
+  if (item?.item_type !== 'action_classification') return null;
+  const metadata = item.metadata ?? {};
+  return {
+    action_type: String(metadata.action_type ?? 'REVIEW').toUpperCase(),
+    title: String(metadata.title ?? metadata.action_title ?? metadata.document_title ?? ''),
+    summary: String(metadata.summary ?? ''),
+    due_date: metadata.due_date ? String(metadata.due_date).slice(0, 10) : '',
+    amount: metadata.amount == null ? '' : String(metadata.amount),
+  };
+}
+
+function actionDraftsMatch(
+  current: ActionCorrectionDraft | null,
+  detected: ActionCorrectionDraft | null,
+): boolean {
+  if (!current || !detected) return current === detected;
+  return Object.keys(current).every(
+    (key) => current[key as keyof ActionCorrectionDraft] === detected[key as keyof ActionCorrectionDraft],
+  );
+}
+
 // ------------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------------
@@ -331,21 +353,22 @@ export default function TriageQueue() {
   );
   const selectedReviewCanResolve = selectedItem?.item_type !== 'action_classification'
     || ['pending', 'deferred'].includes(selectedItem.status);
+  const detectedActionCorrection = useMemo(
+    () => actionCorrectionDraft(selectedItem),
+    [selectedItem],
+  );
+  const actionCorrectionIsDirty = !actionDraftsMatch(actionCorrection, detectedActionCorrection);
+  const actionCorrectionMissingRequirement = actionCorrection
+    ? !(actionCorrection.title || '').trim()
+      ? 'Enter a task name to continue.'
+      : actionCorrection.action_type === 'PAY' && actionCorrection.amount === ''
+        ? 'Enter an amount to continue. A due date is optional.'
+        : null
+    : null;
 
   useEffect(() => {
-    if (selectedItem?.item_type !== 'action_classification') {
-      setActionCorrection(null);
-      return;
-    }
-    const metadata = selectedItem.metadata ?? {};
-    setActionCorrection({
-      action_type: String(metadata.action_type ?? 'REVIEW').toUpperCase(),
-      title: String(metadata.title ?? metadata.document_title ?? ''),
-      summary: String(metadata.summary ?? ''),
-      due_date: metadata.due_date ? String(metadata.due_date).slice(0, 10) : '',
-      amount: metadata.amount == null ? '' : String(metadata.amount),
-    });
-  }, [selectedItem]);
+    setActionCorrection(detectedActionCorrection);
+  }, [detectedActionCorrection]);
 
   // Keep selectedId valid when items change
   useEffect(() => {
@@ -932,20 +955,38 @@ export default function TriageQueue() {
                         </label>
                       </div>
                     )}
+                    {actionCorrectionMissingRequirement && (
+                      <p className="triage-action-requirement" role="status">
+                        {actionCorrectionMissingRequirement}
+                      </p>
+                    )}
                     <div className="btn-group">
                       <Button
                         variant="success"
-                        disabled={busyAction !== null || !selectedReviewCanResolve}
-                        onClick={() => void handleResolve(selectedItem.id, 'confirm')}
+                        disabled={
+                          busyAction !== null
+                          || !selectedReviewCanResolve
+                          || actionCorrectionMissingRequirement !== null
+                        }
+                        onClick={() => {
+                          if (actionCorrectionIsDirty) {
+                            void correctActionClassification(selectedItem.id);
+                          } else {
+                            void handleResolve(selectedItem.id, 'confirm');
+                          }
+                        }}
                       >
-                        Confirm action
+                        {actionCorrectionIsDirty ? 'Save corrections' : 'Accept suggestion'}
                       </Button>
-                      <Button
-                        disabled={busyAction !== null || !selectedReviewCanResolve}
-                        onClick={() => void correctActionClassification(selectedItem.id)}
-                      >
-                        Correct and continue
-                      </Button>
+                      {actionCorrectionIsDirty && (
+                        <Button
+                          variant="ghost"
+                          disabled={busyAction !== null || !selectedReviewCanResolve}
+                          onClick={() => setActionCorrection(detectedActionCorrection)}
+                        >
+                          Reset to suggested values
+                        </Button>
+                      )}
                       <Button
                         variant="danger"
                         disabled={busyAction !== null || !selectedReviewCanResolve}
@@ -957,8 +998,9 @@ export default function TriageQueue() {
                         variant="ghost"
                         disabled={busyAction !== null || !selectedReviewCanResolve}
                         onClick={() => void handleResolve(selectedItem.id, 're_evaluate')}
+                        title="Discard these values and rerun extraction from the original document."
                       >
-                        Re-evaluate
+                        Analyze document again
                       </Button>
                     </div>
                   </Card>
