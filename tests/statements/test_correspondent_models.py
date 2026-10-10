@@ -154,13 +154,9 @@ def test_user_can_define_important_annual_tax_form_from_one_example() -> None:
         ("fulfilled", False),
     ],
 )
-def test_one_off_occurrence_alert_lifecycle(
-    occurrence_status: str, eligible: bool
-) -> None:
+def test_one_off_occurrence_alert_lifecycle(occurrence_status: str, eligible: bool) -> None:
     fulfilled_at = (
-        datetime(2026, 10, 10, tzinfo=timezone.utc)
-        if occurrence_status == "fulfilled"
-        else None
+        datetime(2026, 10, 10, tzinfo=timezone.utc) if occurrence_status == "fulfilled" else None
     )
     expectation = DocumentExpectationCreate(
         kind="record",

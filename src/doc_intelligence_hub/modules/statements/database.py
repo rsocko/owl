@@ -533,9 +533,7 @@ class Database:
         added_monitoring_mode = "monitoring_mode" not in expectation_columns
         for column, definition in expectation_migrations.items():
             if column not in expectation_columns:
-                conn.execute(
-                    f"ALTER TABLE document_expectations ADD COLUMN {column} {definition}"
-                )
+                conn.execute(f"ALTER TABLE document_expectations ADD COLUMN {column} {definition}")
         if added_monitoring_mode:
             conn.execute(
                 """UPDATE document_expectations
@@ -1415,9 +1413,7 @@ class Database:
             if row["availability_window_json"]
             else None,
             grace_period_days=row["grace_period_days"],
-            escalation_policy=EscalationPolicy.model_validate_json(
-                row["escalation_policy_json"]
-            ),
+            escalation_policy=EscalationPolicy.model_validate_json(row["escalation_policy_json"]),
             fulfillment_rule=FulfillmentRule.model_validate_json(row["fulfillment_rule_json"]),
             evidence=ExpectationEvidence.model_validate_json(row["evidence_json"]),
             title_convention=TitleConvention.model_validate_json(row["title_convention_json"])
@@ -1936,9 +1932,7 @@ class Database:
                 expectation.cadence.model_dump_json() if expectation.cadence else None,
                 expectation.importance,
                 expectation.monitoring_mode,
-                expectation.calendar_rule.model_dump_json()
-                if expectation.calendar_rule
-                else None,
+                expectation.calendar_rule.model_dump_json() if expectation.calendar_rule else None,
                 expectation.availability_window.model_dump_json()
                 if expectation.availability_window
                 else None,
@@ -2016,9 +2010,7 @@ class Database:
                     validated.cadence.model_dump_json() if validated.cadence else None,
                     validated.importance,
                     validated.monitoring_mode,
-                    validated.calendar_rule.model_dump_json()
-                    if validated.calendar_rule
-                    else None,
+                    validated.calendar_rule.model_dump_json() if validated.calendar_rule else None,
                     validated.availability_window.model_dump_json()
                     if validated.availability_window
                     else None,
@@ -2160,9 +2152,9 @@ class Database:
         return [
             expectation
             for row in rows
-            if (
-                expectation := self._expectation_row_to_model(row)
-            ).can_emit_missing_alert(row["profile_lifecycle"])
+            if (expectation := self._expectation_row_to_model(row)).can_emit_missing_alert(
+                row["profile_lifecycle"]
+            )
         ]
 
     def expectation_can_emit_missing_alert(self, deployment_id: str, expectation_id: str) -> bool:

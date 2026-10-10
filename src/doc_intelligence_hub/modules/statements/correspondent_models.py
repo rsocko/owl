@@ -638,12 +638,14 @@ class DocumentExpectationBase(PolicyModel):
         if self.status == "confirmed" and self.expectation_mode in {"recurring", "periodic"}:
             if self.cadence is None:
                 raise ValueError("Confirmed recurring or periodic expectations require cadence")
-        if self.expectation_mode in {"irregular", "not_expected"} and self.monitoring_mode != "none":
+        if (
+            self.expectation_mode in {"irregular", "not_expected"}
+            and self.monitoring_mode != "none"
+        ):
             raise ValueError(f"{self.expectation_mode} expectations cannot enable monitoring")
         if self.expectation_mode == "one_off":
-            if (
-                self.status == "confirmed"
-                and (self.calendar_rule is None or self.calendar_rule.rule_type != "one_off")
+            if self.status == "confirmed" and (
+                self.calendar_rule is None or self.calendar_rule.rule_type != "one_off"
             ):
                 raise ValueError("One-off expectations require a one_off calendar rule")
             if self.monitoring_mode == "presence":
@@ -669,10 +671,7 @@ class DocumentExpectationBase(PolicyModel):
             and self.status == "confirmed"
             and self.monitoring_mode != "none"
             and (
-                (
-                    self.expectation_mode in {"recurring", "periodic"}
-                    and self.cadence is not None
-                )
+                (self.expectation_mode in {"recurring", "periodic"} and self.cadence is not None)
                 or (
                     self.expectation_mode == "one_off"
                     and self.monitoring_mode == "deadline"
