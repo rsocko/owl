@@ -210,7 +210,7 @@ export default function ManualMatchSearch() {
     try {
       await endpoints.eob.updateMatch(String(match.id), { status: 'confirmed' });
       setToast({ message: `Linked candidate match #${match.id}.` });
-      navigate('/triage');
+      navigate('/needs-review');
     } catch (err) {
       setToast({ message: err instanceof Error ? err.message : 'Failed to link match.', tone: 'error' });
     } finally {
@@ -222,7 +222,7 @@ export default function ManualMatchSearch() {
     <>
       <Breadcrumb
         items={[
-          { label: 'Needs Review', to: '/triage' },
+          { label: 'Needs Review', to: '/needs-review' },
           { label: 'Manual Match Search' },
         ]}
       />

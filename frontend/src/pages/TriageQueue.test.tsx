@@ -95,7 +95,7 @@ describe('Needs Review actions', () => {
 
   it('initializes the queue filter from a validated type query parameter', async () => {
     render(
-      <MemoryRouter initialEntries={['/triage?type=eob_match_review']}>
+      <MemoryRouter initialEntries={['/needs-review?type=eob_match_review']}>
         <TriageQueue />
       </MemoryRouter>,
     );
@@ -107,7 +107,7 @@ describe('Needs Review actions', () => {
 
   it('ignores unknown type query parameters', async () => {
     render(
-      <MemoryRouter initialEntries={['/triage?type=not-a-real-queue']}>
+      <MemoryRouter initialEntries={['/needs-review?type=not-a-real-queue']}>
         <TriageQueue />
       </MemoryRouter>,
     );
@@ -152,7 +152,7 @@ describe('Needs Review actions', () => {
     });
 
     render(
-      <MemoryRouter initialEntries={['/triage?type=action_classification&item=action-review-1']}>
+      <MemoryRouter initialEntries={['/needs-review?type=action_classification&item=action-review-1']}>
         <TriageQueue />
       </MemoryRouter>,
     );

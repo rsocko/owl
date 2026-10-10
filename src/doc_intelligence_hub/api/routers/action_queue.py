@@ -418,7 +418,7 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         "action_ready": bool(a.action_ready),
         "review_state": a.review_state or ("ready" if a.action_ready else "needs_review"),
         "needs_review_url": (
-            f"#/triage?type=action_classification&item={a.review_item_id}"
+            f"#/needs-review?type=action_classification&item={a.review_item_id}"
             if a.review_item_id
             else None
         ),

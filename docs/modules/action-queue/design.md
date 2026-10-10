@@ -41,7 +41,7 @@ all action types. PAY also requires an amount. Confident actionable items bypass
 review, confident no-action assessments file automatically, and uncertain
 interpretations remain absent from the default Action Queue and Mission Control
 feeds until resolved. Needs Review URLs use
-`#/triage?type=action_classification&item={review_item_id}` and must select the
+`#/needs-review?type=action_classification&item={review_item_id}` and must select the
 specific review item.
 
 ## Daily Action Queue

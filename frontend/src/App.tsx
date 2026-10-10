@@ -1,4 +1,4 @@
-import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
+import { HashRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { TopNav } from './components/TopNav';
 import { TooltipProvider } from './components/ui';
 import OverviewDashboard from './pages/OverviewDashboard';
@@ -31,6 +31,11 @@ function EobMatchRedirect() {
   return <Navigate to={`/eob?tab=review&matchId=${matchId}`} replace />;
 }
 
+function LegacyRouteRedirect({ to }: { to: string }) {
+  const { search } = useLocation();
+  return <Navigate to={`${to}${search}`} replace />;
+}
+
 function App() {
   return (
     <HashRouter>
@@ -55,8 +60,13 @@ function App() {
             <Route path="/eob/manual-search" element={<ManualMatchSearch />} />
             <Route path="/action-queue" element={<ActionQueue />} />
             <Route path="/action-queue/operations" element={<ActionQueueOperations />} />
-            <Route path="/triage" element={<TriageQueue />} />
-            <Route path="/triage/manual-search" element={<ManualMatchSearch />} />
+            <Route path="/needs-review" element={<TriageQueue />} />
+            <Route path="/needs-review/manual-search" element={<ManualMatchSearch />} />
+            <Route path="/triage" element={<LegacyRouteRedirect to="/needs-review" />} />
+            <Route
+              path="/triage/manual-search"
+              element={<LegacyRouteRedirect to="/needs-review/manual-search" />}
+            />
             <Route path="/metadata/:docId" element={<MetadataCorrection />} />
             <Route path="/rules" element={<RulesConfig />} />
             <Route path="/insights" element={<Insights />} />

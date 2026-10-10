@@ -474,9 +474,9 @@ def _emit_orphan_escalation_alert(
                 f"{doc_label} (doc #{document_id}) has been unmatched for {age_days} days "
                 f"and requires manual attention."
             ),
-            action_url=f"/triage?filter=orphan_document&target=eob-{document_id}"
+            action_url=f"/needs-review?filter=orphan_document&target=eob-{document_id}"
             if document_type == "eob"
-            else f"/triage?filter=orphan_document&target=bill-{document_id}",
+            else f"/needs-review?filter=orphan_document&target=bill-{document_id}",
             metadata={
                 "document_id": document_id,
                 "document_type": document_type,

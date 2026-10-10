@@ -505,7 +505,7 @@ export default function EobUnmatched({
                       if (item.date_of_service) params.set('dateOfService', item.date_of_service);
                       return (
                         <div className="eob-actions-end">
-                          <Link className="eob-link" to={`/triage/manual-search?${params.toString()}`}>
+                          <Link className="eob-link" to={`/needs-review/manual-search?${params.toString()}`}>
                             Find match →
                           </Link>
                           {item.document_url ? (
