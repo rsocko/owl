@@ -23,7 +23,7 @@ def _configure_catalog(app, *, paperless_launch: str = "paperless") -> None:
         "launch": paperless_launch,
     }
     if paperless_launch == "owl":
-        paperless_view["owl_route"] = "/triage?type=eob_match_review"
+        paperless_view["owl_route"] = "/needs-review?type=eob_match_review"
     app.state.document_views_configured = True
     app.state.document_views_config = DocumentViewCatalogConfig.model_validate(
         {
@@ -86,7 +86,7 @@ def test_document_views_returns_mixed_provider_catalog(
     }
     assert owl["provider"] == "owl"
     assert owl["source_id"] == "triage.pending"
-    assert owl["href"] == "/triage"
+    assert owl["href"] == "/needs-review"
     assert owl["count"] == 3
     assert owl["availability"] == "ready"
     assert "documents" not in response.text
@@ -210,7 +210,7 @@ def test_document_views_isolates_typed_owl_database_failures(
     assert paperless["availability"] == "ready"
     assert owl["availability"] == "unavailable"
     assert owl["error"]["code"] == "owl_view_unavailable"
-    assert owl["href"] == "/triage"
+    assert owl["href"] == "/needs-review"
 
 
 def test_document_views_does_not_expose_service_url_as_browser_link(
@@ -249,7 +249,7 @@ def test_document_views_preserves_owl_launch_when_paperless_is_not_configured(
     paperless = response.json()["groups"][0]["views"][0]
     assert paperless["availability"] == "unavailable"
     assert paperless["error"]["code"] == "paperless_not_configured"
-    assert paperless["href"] == "/triage?type=eob_match_review"
+    assert paperless["href"] == "/needs-review?type=eob_match_review"
 
 
 def test_paperless_browser_url_requires_absolute_http_url():
