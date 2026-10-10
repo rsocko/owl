@@ -99,6 +99,14 @@ OWL's active graph. Projection failure is explicit in the API response and audit
 it does not roll back the authoritative OWL relationship. The next sync can safely retry
 because projection is rebuilt, not incrementally appended.
 
+When **automatic duplicate detection** is enabled, Paperless post-consumption automation
+calls `POST /api/duplicates/document-ingested` with `{"document_id": 123}` after metadata
+extraction completes. Delivery retries are idempotent: an existing relationship or
+Needs Review item is reused, and an unsynced relationship projection is attempted again.
+`POST /api/relationships/reconcile-projections` retries any durable projection failures,
+including failures left by a service restart. Automatic detection remains disabled by
+default and can be controlled through `PUT /api/duplicates/settings`.
+
 ## UX
 
 Duplicate review offers **Keep both and link** separately from **Not duplicate**. The

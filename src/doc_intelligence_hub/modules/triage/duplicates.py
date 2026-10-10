@@ -616,8 +616,7 @@ def on_document_ingested(document_id: int) -> dict[str, Any]:
                     priority_explanation=proposal.priority_explanation,
                 )
                 relationships_created += int(created)
-                if created:
-                    relationship_ids.append(relationship["id"])
+                relationship_ids.append(relationship["id"])
                 continue
             except RelationshipConflictError:
                 relationship_conflict = True

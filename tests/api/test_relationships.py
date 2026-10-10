@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-from doc_intelligence_hub.modules.triage.database import create_duplicate_pair
+from doc_intelligence_hub.modules.triage.database import (
+    create_duplicate_pair,
+    set_triage_setting,
+)
+from doc_intelligence_hub.modules.triage.relationships import (
+    create_document_relationship,
+    get_document_relationship,
+    set_projection_result,
+)
 
 
 def test_create_query_and_remove_relationship_without_projection(client):
@@ -108,6 +116,77 @@ def test_projection_failure_is_reported_without_losing_relationship(client):
     assert body["relationship"]["paperless_synced"] is False
     assert body["projection"]["error"] == "Failed to sync relationship projection to Paperless"
     assert client.get("/api/relationships/documents/1").json()["count"] == 1
+
+
+def test_ingestion_endpoint_projects_relationship_and_is_retry_safe(client):
+    set_triage_setting("duplicate_auto_detect", "true")
+    relationship = {
+        "id": "relationship-1",
+        "source_document_id": 2,
+        "target_document_id": 1,
+    }
+    detection_results = [
+        {
+            "document_id": 2,
+            "skipped": False,
+            "relationships_created": 1,
+            "relationship_ids": ["relationship-1"],
+        },
+        {
+            "document_id": 2,
+            "skipped": False,
+            "relationships_created": 0,
+            "relationship_ids": ["relationship-1"],
+        },
+    ]
+    projection = AsyncMock(return_value={"synced": True, "documents": [1, 2], "error": None})
+    with (
+        patch(
+            "doc_intelligence_hub.api.routers.duplicates.on_document_ingested",
+            side_effect=detection_results,
+        ),
+        patch(
+            "doc_intelligence_hub.api.routers.duplicates.get_document_relationship",
+            return_value=relationship,
+        ),
+        patch(
+            "doc_intelligence_hub.api.routers.duplicates.set_projection_result"
+        ) as record_projection,
+        patch(
+            "doc_intelligence_hub.api.routers.duplicates.project_relationships_to_paperless",
+            new=projection,
+        ),
+    ):
+        first = client.post("/api/duplicates/document-ingested", json={"document_id": 2})
+        retried = client.post("/api/duplicates/document-ingested", json={"document_id": 2})
+
+    assert first.status_code == 200
+    assert retried.status_code == 200
+    assert first.json()["projection"]["synced"] is True
+    assert retried.json()["relationships_created"] == 0
+    assert projection.await_count == 2
+    assert record_projection.call_count == 2
+
+
+def test_reconcile_projection_failures_after_restart(client):
+    relationship, _ = create_document_relationship(
+        source_document_id=2,
+        target_document_id=1,
+        relationship_type="follows",
+        provenance="automatic",
+    )
+    set_projection_result(relationship["id"], synced=False, error="Paperless unavailable")
+    projection = AsyncMock(return_value={"synced": True, "documents": [1, 2], "error": None})
+    with patch(
+        "doc_intelligence_hub.api.routers.relationships.project_relationships_to_paperless",
+        new=projection,
+    ):
+        response = client.post("/api/relationships/reconcile-projections")
+
+    assert response.status_code == 200
+    assert response.json()["attempted"] == 1
+    assert response.json()["synced"] is True
+    assert get_document_relationship(relationship["id"])["paperless_synced"] is True
 
 
 def test_duplicate_review_related_resolution_applies_notice_priority(client):

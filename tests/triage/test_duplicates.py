@@ -348,6 +348,44 @@ class TestOnDocumentIngested:
 
     @patch("doc_intelligence_hub.modules.triage.duplicates.detect_duplicates")
     @patch("doc_intelligence_hub.modules.triage.duplicates.get_document_metadata")
+    def test_retried_ingestion_reuses_relationship_for_projection(self, mock_meta, mock_detect, db):
+        original = {
+            "document_id": 1,
+            "title": "Original Bill",
+            "provider": "City Utility",
+            "invoice_number": "INV-100",
+            "amount": 75,
+            "document_date": "2026-07-01",
+        }
+        second_notice = {
+            "document_id": 2,
+            "title": "Second Notice - Past Due",
+            "provider": "City Utility",
+            "invoice_number": "INV-100",
+            "amount": 75,
+            "document_date": "2026-08-01",
+        }
+        mock_meta.return_value = second_notice
+        mock_detect.return_value = [
+            {
+                "doc_id": 1,
+                "similarity_score": 0.85,
+                "breakdown": {"invoice_number": 1.0},
+                "metadata": original,
+            }
+        ]
+        set_triage_setting("duplicate_auto_detect", "true")
+
+        first = on_document_ingested(2)
+        retried = on_document_ingested(2)
+
+        assert first["relationships_created"] == 1
+        assert retried["relationships_created"] == 0
+        assert retried["relationship_ids"] == first["relationship_ids"]
+        assert len(list_document_relationships(2, "outgoing")) == 1
+
+    @patch("doc_intelligence_hub.modules.triage.duplicates.detect_duplicates")
+    @patch("doc_intelligence_hub.modules.triage.duplicates.get_document_metadata")
     def test_conflicting_auto_link_falls_back_to_review(self, mock_meta, mock_detect, db):
         create_document_relationship(
             source_document_id=2,
