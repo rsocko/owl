@@ -319,6 +319,7 @@ export const endpoints = {
   relationships: {
     list: (documentId: number, direction = 'all') =>
       api.get(`/api/relationships/documents/${documentId}?direction=${direction}`),
+    graph: (actionId: number) => api.get(`/api/relationships/graph?action_id=${actionId}`),
     propose: (body: unknown) => api.post('/api/relationships/propose', body),
     create: (body: unknown) => api.post('/api/relationships', body),
     remove: (id: string) => api.delete(`/api/relationships/${id}`),

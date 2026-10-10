@@ -8,6 +8,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from doc_intelligence_hub.modules.action_queue.relationship_graph import (
+    RelationshipGraphNotFoundError,
+    build_relationship_graph,
+)
 from doc_intelligence_hub.modules.triage.duplicates import get_document_metadata
 from doc_intelligence_hub.modules.triage.relationship_projection import (
     project_relationships_to_paperless,
@@ -46,6 +50,17 @@ class RelationshipProposalRequest(BaseModel):
     right_document_id: int = Field(gt=0)
     left_metadata: dict[str, Any] | None = None
     right_metadata: dict[str, Any] | None = None
+
+
+@router.get("/graph")
+async def get_relationship_graph(
+    action_id: int = Query(gt=0),
+) -> dict[str, Any]:
+    """Return the read-only OWL relationship projection for one action."""
+    try:
+        return build_relationship_graph(action_id)
+    except RelationshipGraphNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 async def _project_and_record(relationship: dict[str, Any]) -> dict[str, Any]:

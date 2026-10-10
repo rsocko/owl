@@ -26,6 +26,7 @@ const {
   feedbackMock,
   metadataTagsMock,
   metadataCorrespondentsMock,
+  relationshipsGraphMock,
   runPipelineStreamMock,
 } = vi.hoisted(() => ({
   statusMock: vi.fn(),
@@ -44,6 +45,7 @@ const {
   feedbackMock: vi.fn(),
   metadataTagsMock: vi.fn(),
   metadataCorrespondentsMock: vi.fn(),
+  relationshipsGraphMock: vi.fn(),
   runPipelineStreamMock: vi.fn(),
 }));
 
@@ -84,6 +86,9 @@ vi.mock('../lib/api', () => ({
     },
     statements: {
       documentThumb: vi.fn().mockReturnValue('/thumb.png'),
+    },
+    relationships: {
+      graph: relationshipsGraphMock,
     },
     documents: {
       previewUrl: vi.fn().mockReturnValue('/documents/1'),
@@ -174,6 +179,7 @@ beforeEach(() => {
   feedbackMock.mockReset();
   metadataTagsMock.mockReset();
   metadataCorrespondentsMock.mockReset();
+  relationshipsGraphMock.mockReset();
   runPipelineStreamMock.mockReset();
   metadataTagsMock.mockResolvedValue({
     tags: [
@@ -233,6 +239,72 @@ beforeEach(() => {
     version: 4,
   });
   feedbackMock.mockResolvedValue({});
+  relationshipsGraphMock.mockResolvedValue({
+    contract_version: '1.0',
+    scope: { action_id: 1, obligation_id: 'obligation-1' },
+    nodes: [
+      {
+        id: 'obligation:obligation-1',
+        kind: 'obligation',
+        label: 'Pay electric bill',
+        status: 'open',
+        metadata: { obligation_id: 'obligation-1' },
+      },
+      {
+        id: 'action:1',
+        kind: 'action',
+        label: 'Pay electric bill',
+        status: 'pending',
+        metadata: { action_id: 1 },
+      },
+      {
+        id: 'document:1',
+        kind: 'document',
+        label: 'Electric Bill',
+        occurred_at: '2026-07-20',
+        status: 'invoice',
+        metadata: { document_id: 1 },
+      },
+      {
+        id: 'document:2',
+        kind: 'document',
+        label: 'Payment Receipt',
+        occurred_at: '2026-07-22',
+        status: 'receipt',
+        metadata: { document_id: 2 },
+      },
+    ],
+    edges: [
+      {
+        id: 'action-obligation:1:obligation-1',
+        source: 'action:1',
+        target: 'obligation:obligation-1',
+        kind: 'represents',
+        label: 'represents',
+        status: 'active',
+      },
+      {
+        id: 'obligation-document:obligation-1:1',
+        source: 'obligation:obligation-1',
+        target: 'document:1',
+        kind: 'evidence',
+        label: 'invoice',
+        status: 'active',
+      },
+      {
+        id: 'obligation-document:obligation-1:2',
+        source: 'obligation:obligation-1',
+        target: 'document:2',
+        kind: 'evidence',
+        label: 'receipt',
+        status: 'active',
+      },
+    ],
+    warnings: [{
+      code: 'mission_control_task_identity_unavailable',
+      message: 'Mission Control task nodes are omitted until a durable task identity exists.',
+    }],
+  });
 });
 
 describe('ActionQueue', () => {
@@ -669,9 +741,13 @@ describe('ActionQueue', () => {
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
 
     fireEvent.click(await screen.findByRole('button', { name: /View 2 docs/i }));
-    expect(screen.getByText('Obligation timeline')).toBeInTheDocument();
-    expect(screen.getAllByText('Payment Receipt')).toHaveLength(2);
+    expect(await screen.findByText('Obligation links')).toBeInTheDocument();
+    expect(screen.getByText('Payment Receipt')).toBeInTheDocument();
+    expect(screen.getByText(/Mission Control task nodes are omitted/i)).toBeInTheDocument();
     expect(screen.getByText('Payment evidence found')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
+    expect(screen.getByRole('img', { name: /Obligation graph with 4 nodes and 3 edges/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Mark completed' }));
     await waitFor(() => expect(updateActionMock).toHaveBeenCalledWith(

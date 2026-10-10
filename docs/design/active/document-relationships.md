@@ -130,6 +130,27 @@ reviewer sees the proposed type, direction, evidence, confidence, and priority e
 before confirming. Document context shows incoming and outgoing relationships and
 supports removal. Uncertain or conflicting proposals appear in Needs Review.
 
+### Visual projection contract
+
+`GET /api/relationships/graph?action_id={id}` is the single read-only projection used
+by the Action Queue Timeline and Graph views. Node IDs are namespaced durable IDs:
+`obligation:{owl_id}`, `action:{owl_id}`, `document:{paperless_id}`, and
+`payment-evidence:{owl_id}`. OWL owns obligation, action, payment-evidence, and every
+edge identity. Paperless owns document identity and content.
+
+The projection includes `represents`, obligation evidence, typed document-relationship,
+and obligation-payment edges. Timeline order uses stored document/evidence dates with
+durable creation time as a fallback; it never infers ordering from display labels.
+
+Tyrion source records are represented only after OWL has persisted normalized,
+privacy-bounded `PaymentEvidence` and `ObligationPaymentEdge` identities. Raw Tyrion
+source references are not graph identities. Mission Control task nodes are omitted:
+OWL exports Action Queue items but does not receive or persist a durable MC task ID.
+Action nodes declare their MC projection, and the response returns an explicit
+`mission_control_task_identity_unavailable` warning until that connector contract
+exists. Display-name, amount, date, or text heuristics must not create cross-system
+nodes or edges.
+
 ## Delivery order
 
 1. Relationship model, conflict rules, lifecycle, and audit events.

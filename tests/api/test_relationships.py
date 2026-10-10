@@ -2,11 +2,26 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
+from doc_intelligence_hub.modules.action_queue.database import (
+    Action,
+    Obligation,
+    ObligationDocument,
+    ObligationPaymentEdge,
+    PaymentEvidence,
+)
+from doc_intelligence_hub.modules.action_queue.database import (
+    get_session as get_action_queue_session,
+)
 from doc_intelligence_hub.modules.triage.database import (
+    DocumentRelationship,
     create_duplicate_pair,
     set_triage_setting,
+)
+from doc_intelligence_hub.modules.triage.database import (
+    get_session as get_triage_session,
 )
 from doc_intelligence_hub.modules.triage.relationships import (
     create_document_relationship,
@@ -225,3 +240,137 @@ def test_duplicate_review_related_resolution_applies_notice_priority(client):
     assert body["relationship"]["priority_adjustment"] == 18
     assert body["relationship"]["reason_codes"] == ["duplicate_review", "past_due"]
     assert body["relationship"]["priority_explanation"] == "Priority +18: past due"
+
+
+def test_graph_projects_only_durable_owl_relationship_identities(client):
+    db = get_action_queue_session()
+    try:
+        obligation = Obligation(
+            id="obligation-graph",
+            identity_key="provider:account:invoice",
+            authoritative_document_id=20,
+            relationship_explanation="Second notice follows the original statement.",
+            relationship_rules=["second_notice"],
+        )
+        action = Action(
+            document_id=20,
+            document_title="Second notice",
+            action_type="PAY",
+            title="Pay utility balance",
+            status="pending",
+            obligation_id=obligation.id,
+        )
+        db.add_all([obligation, action])
+        db.flush()
+        obligation.primary_action_id = action.id
+        db.add_all(
+            [
+                ObligationDocument(
+                    obligation_id=obligation.id,
+                    document_id=10,
+                    role="invoice",
+                    title="Utility statement",
+                    source="relationship",
+                ),
+                ObligationDocument(
+                    obligation_id=obligation.id,
+                    document_id=20,
+                    role="reminder",
+                    title="Second notice",
+                    source="relationship",
+                ),
+            ]
+        )
+        evidence = PaymentEvidence(
+            id="evidence-graph",
+            source_system="tyrion_bill_match",
+            connector_ref="opaque-connector",
+            evidence_ref="opaque-evidence",
+            kind="posted_transaction",
+            amount_minor=12500,
+            currency="USD",
+            source_state="posted",
+            match_state="matched",
+            payment_status="paid",
+            reason_codes=["amount_exact"],
+            source_generation="generation-1",
+            source_as_of=datetime(2026, 10, 10, 12, tzinfo=UTC),
+            payload_digest="digest",
+        )
+        db.add(evidence)
+        db.add(
+            ObligationPaymentEdge(
+                id="payment-edge-graph",
+                obligation_id=obligation.id,
+                evidence_id=evidence.id,
+                state="active",
+                reason_codes=["amount_exact"],
+            )
+        )
+        db.commit()
+        action_id = action.id
+    finally:
+        db.close()
+
+    triage_db = get_triage_session()
+    try:
+        triage_db.add(
+            DocumentRelationship(
+                id="relationship-graph",
+                source_document_id=20,
+                target_document_id=10,
+                relationship_type="follows",
+                provenance="automatic",
+                reason_codes_json='["second_notice"]',
+            )
+        )
+        triage_db.commit()
+    finally:
+        triage_db.close()
+
+    response = client.get(f"/api/relationships/graph?action_id={action_id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["contract_version"] == "1.0"
+    assert body["scope"] == {
+        "action_id": action_id,
+        "obligation_id": "obligation-graph",
+    }
+    assert {node["id"] for node in body["nodes"]} == {
+        "obligation:obligation-graph",
+        f"action:{action_id}",
+        "document:10",
+        "document:20",
+        "payment-evidence:evidence-graph",
+    }
+    assert "document-relationship:relationship-graph" in {
+        edge["id"] for edge in body["edges"]
+    }
+    payment_node = next(
+        node for node in body["nodes"] if node["id"] == "payment-evidence:evidence-graph"
+    )
+    assert payment_node["metadata"]["source_system"] == "tyrion_bill_match"
+    assert "evidence_ref" not in payment_node["metadata"]
+    assert body["warnings"] == [
+        {
+            "code": "mission_control_task_identity_unavailable",
+            "message": (
+                "Mission Control task nodes are omitted: OWL exports actions but does not "
+                "receive a durable Mission Control task identity."
+            ),
+        },
+        {
+            "code": "tyrion_source_record_identity_private",
+            "message": (
+                "Tyrion source-record nodes are omitted: the graph uses OWL's durable, "
+                "privacy-bounded payment-evidence identity instead of upstream references."
+            ),
+        },
+    ]
+
+
+def test_graph_returns_404_for_unknown_action(client):
+    response = client.get("/api/relationships/graph?action_id=999999")
+
+    assert response.status_code == 404
