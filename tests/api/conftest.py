@@ -50,6 +50,8 @@ from doc_intelligence_hub.modules.eob_matching.database import (
 from doc_intelligence_hub.modules.eob_matching.database import (
     init_db as eob_init_db,
 )
+from doc_intelligence_hub.modules.receipt_intake.config import settings as receipt_settings
+from doc_intelligence_hub.modules.receipt_intake.database import init_db as receipt_init_db
 from doc_intelligence_hub.modules.triage.database import (
     configure as triage_configure,
 )
@@ -122,6 +124,7 @@ def mock_paperless():
         "doc_intelligence_hub.api.routers.document_views.make_paperless_client",
         "doc_intelligence_hub.api.routers.ocr_quality.make_paperless_client",
         "doc_intelligence_hub.api.routers.ocr_quality_candidates.make_paperless_client",
+        "doc_intelligence_hub.api.routers.receipt_intake.make_paperless_client",
         # "doc_intelligence_hub.api.routers.stats.make_paperless_client",  # stats doesn't import this
     ]
     patches = [patch(t, return_value=mock) for t in targets]
@@ -169,6 +172,7 @@ def hub_settings(tmp_path) -> HubSettings:
         paperless_url="http://paperless.test",
         paperless_browser_url="https://paperless.browser.test",
         paperless_token="test-token",
+        receipt_intake_api_token="receipt-intake-test-token",
         statement_tracker_config=str(config_path),
     )
 
@@ -197,11 +201,18 @@ def app(hub_settings, mock_llm, tmp_path):
     triage_configure(f"sqlite:///{triage_db_path}")
     triage_init_db()
 
+    # Receipt intake DB
+    receipt_db_path = tmp_path / "test_receipt_intake.db"
+    original_receipt_db_url = receipt_settings.database_url
+    receipt_settings.database_url = f"sqlite:///{receipt_db_path}"
+    receipt_init_db()
+
     application = create_app(hub_settings)
 
     yield application
 
     aq_settings.database_url = original_aq_db_url
+    receipt_settings.database_url = original_receipt_db_url
 
 
 @pytest.fixture()

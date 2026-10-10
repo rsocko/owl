@@ -34,6 +34,7 @@ from doc_intelligence_hub.api.routers import (
     metadata,
     ocr_quality,
     ocr_quality_candidates,
+    receipt_intake,
     relationships,
     statements,
     stats,
@@ -86,6 +87,13 @@ class HubSettings(BaseSettings):
         validation_alias=AliasChoices(
             "mission_control_api_token",
             "OWL_MISSION_CONTROL_API_TOKEN",
+        ),
+    )
+    receipt_intake_api_token: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "receipt_intake_api_token",
+            "OWL_RECEIPT_INTAKE_API_TOKEN",
         ),
     )
     tyrion_payee_connector_ref: str | None = Field(
@@ -354,6 +362,10 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
                     "slice 1). Never writes to Paperless."
                 ),
             },
+            {
+                "name": "receipt-intake",
+                "description": "Canonical Paperless receipt intake and byte-free provenance.",
+            },
         ],
         lifespan=lifespan,
     )
@@ -413,6 +425,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(ocr_quality.router)
     app.include_router(ocr_quality_candidates.router)
     app.include_router(analysis_invalidation.router)
+    app.include_router(receipt_intake.router)
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
