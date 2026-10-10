@@ -293,9 +293,7 @@ def test_partial_many_payment_and_double_payment_review(db) -> None:
     service.ingest_snapshot(
         _snapshot(generation="partial-1", evidence_ref="payment-one", amount_minor=4_000)
     )
-    assert (
-        db.query(PaymentReconciliationCase).filter_by(case_kind="partial_payment").one().active
-    )
+    assert db.query(PaymentReconciliationCase).filter_by(case_kind="partial_payment").one().active
     service.ingest_snapshot(
         _snapshot(
             generation="partial-2",

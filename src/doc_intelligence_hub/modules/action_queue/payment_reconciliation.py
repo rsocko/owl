@@ -113,10 +113,7 @@ class NormalizedPaymentEvidence(BaseModel):
         if any(
             not item
             or len(item) > 64
-            or any(
-                character not in "abcdefghijklmnopqrstuvwxyz0123456789._-"
-                for character in item
-            )
+            or any(character not in "abcdefghijklmnopqrstuvwxyz0123456789._-" for character in item)
             for item in normalized
         ):
             raise ValueError("reason_codes must contain bounded lowercase identifiers")
@@ -159,9 +156,7 @@ class TyrionIntakeResultV1(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     schema_version: Literal["1.0"]
-    intake_ref: str = Field(
-        min_length=1, max_length=160, pattern=_SOURCE_REFERENCE_PATTERN
-    )
+    intake_ref: str = Field(min_length=1, max_length=160, pattern=_SOURCE_REFERENCE_PATTERN)
     outcome: Literal[
         "new_canonical",
         "source_occurrence_reused",
@@ -199,9 +194,9 @@ class TyrionIntakeResultV1(BaseModel):
     retry_safe: bool
     external_replica_eligible: bool
 
-    _validate_refs = field_validator(
-        "intake_ref", "canonical_document_ref", "review_ref"
-    )(_validate_source_reference)
+    _validate_refs = field_validator("intake_ref", "canonical_document_ref", "review_ref")(
+        _validate_source_reference
+    )
 
 
 class TyrionNativeReceiptEvidenceV1(BaseModel):
@@ -227,9 +222,7 @@ class TyrionNativeReceiptEvidenceV1(BaseModel):
     source_as_of: datetime | None = Field(alias="sourceAsOf")
     observed_at: datetime = Field(alias="observedAt")
 
-    _validate_transaction_ref = field_validator("transaction_ref")(
-        _validate_source_reference
-    )
+    _validate_transaction_ref = field_validator("transaction_ref")(_validate_source_reference)
 
 
 class TyrionReceiptEvidenceV1(BaseModel):
@@ -289,8 +282,7 @@ class TyrionReceiptEvidenceIngestRequest(BaseModel):
             if native and native.source_as_of
             else native.observed_at
             if native
-            else self.evidence.intake.source_as_of
-            or datetime.now(UTC)
+            else self.evidence.intake.source_as_of or datetime.now(UTC)
         )
         if self.evidence.replica_lifecycle == "ambiguous":
             match_state: MatchState = "ambiguous"
@@ -298,11 +290,7 @@ class TyrionReceiptEvidenceIngestRequest(BaseModel):
             match_state = "source_unavailable"
         elif self.evidence.replica_lifecycle == "not_applicable":
             match_state = "not_applicable"
-        elif (
-            native
-            and native.receipt_state == "matched"
-            and native.transaction_ref is not None
-        ):
+        elif native and native.receipt_state == "matched" and native.transaction_ref is not None:
             match_state = "matched"
         else:
             match_state = "no_match"
@@ -310,9 +298,7 @@ class TyrionReceiptEvidenceIngestRequest(BaseModel):
         return PaymentEvidenceSnapshot(
             source_system="tyrion_receipt",
             connector_ref=self.connector_ref,
-            source_generation=(
-                f"{self.evidence.intake.intake_ref}:{self.evidence.revision}"
-            ),
+            source_generation=(f"{self.evidence.intake.intake_ref}:{self.evidence.revision}"),
             source_as_of=source_as_of,
             completeness="partial",
             obligation_id=self.obligation_id,
@@ -344,9 +330,7 @@ class TyrionBillMatchSignalV1(BaseModel):
 
     kind: Literal["amount", "date", "payee", "account"]
     strength: Literal["exact", "strong", "partial", "none", "notProvided"]
-    contribution_basis_points: int = Field(
-        alias="contributionBasisPoints", ge=0, le=5_500
-    )
+    contribution_basis_points: int = Field(alias="contributionBasisPoints", ge=0, le=5_500)
 
 
 class TyrionBillMatchCandidateV1(BaseModel):
@@ -369,9 +353,7 @@ class TyrionBillMatchCandidateV1(BaseModel):
     confidence: Literal["high", "medium", "low"]
     signals: list[TyrionBillMatchSignalV1] = Field(min_length=4, max_length=4)
 
-    _validate_transaction_ref = field_validator("transaction_ref")(
-        _validate_source_reference
-    )
+    _validate_transaction_ref = field_validator("transaction_ref")(_validate_source_reference)
 
 
 class TyrionBillMatchResponseV1(BaseModel):
@@ -456,10 +438,7 @@ class TyrionBillMatchIngestRequest(BaseModel):
             "ambiguous": "ambiguous",
         }[self.response.match_status]
         reason_codes = (
-            [
-                f"{signal.kind}_{signal.strength}".lower()
-                for signal in selected.signals
-            ]
+            [f"{signal.kind}_{signal.strength}".lower() for signal in selected.signals]
             if selected
             else [f"bill_match_{match_state}"]
         )
@@ -607,9 +586,7 @@ class PaymentReviewAction(BaseModel):
         if self.action in {"confirm", "reject", "clear", "mark_not_applicable"}:
             if not self.evidence_id:
                 raise ValueError(f"{self.action} requires evidence_id")
-        if self.action == "replace" and (
-            not self.evidence_id or not self.replacement_evidence_id
-        ):
+        if self.action == "replace" and (not self.evidence_id or not self.replacement_evidence_id):
             raise ValueError("replace requires evidence_id and replacement_evidence_id")
         if self.action == "defer" and self.defer_until is None:
             raise ValueError("defer requires defer_until")
@@ -636,7 +613,10 @@ class PaymentReconciliationService:
             raise KeyError("obligation_not_found")
         if snapshot.source_system == "tyrion_bill_match" and snapshot.evidence:
             normalized_bill = snapshot.evidence[0]
-            if obligation.expected_amount_minor is None and normalized_bill.amount_minor is not None:
+            if (
+                obligation.expected_amount_minor is None
+                and normalized_bill.amount_minor is not None
+            ):
                 obligation.expected_amount_minor = normalized_bill.amount_minor
                 obligation.currency = normalized_bill.currency
 
@@ -870,13 +850,11 @@ class PaymentReconciliationService:
                     idempotency_key=request.idempotency_key,
                     expected_revision=request.expected_revision,
                 )
-                self.db.query(PaymentEvidence).filter_by(id=edge.evidence_id).one().match_state = (
-                    "not_applicable"
-                )
+                self.db.query(PaymentEvidence).filter_by(
+                    id=edge.evidence_id
+                ).one().match_state = "not_applicable"
             else:
-                replacement = self._edge_for_action(
-                    obligation.id, request.replacement_evidence_id
-                )
+                replacement = self._edge_for_action(obligation.id, request.replacement_evidence_id)
                 edge.manual_precedence = True
                 replacement.manual_precedence = True
                 replacement.provenance = "user"
@@ -1103,9 +1081,7 @@ class PaymentReconciliationService:
                 setattr(evidence, name, value)
         return evidence
 
-    def _reconcile_automatic_edge(
-        self, obligation: Obligation, evidence: PaymentEvidence
-    ) -> None:
+    def _reconcile_automatic_edge(self, obligation: Obligation, evidence: PaymentEvidence) -> None:
         edge = (
             self.db.query(ObligationPaymentEdge)
             .filter_by(obligation_id=obligation.id, evidence_id=evidence.id)
@@ -1467,9 +1443,7 @@ class PaymentReconciliationService:
             active_edge_count=active_edge_count,
         )
 
-    def _case_dict(
-        self, case: PaymentReconciliationCase, *, include_history: bool = False
-    ) -> dict:
+    def _case_dict(self, case: PaymentReconciliationCase, *, include_history: bool = False) -> dict:
         obligation = self.db.query(Obligation).filter_by(id=case.obligation_id).one()
         evidence = (
             self.db.query(PaymentEvidence).filter_by(id=case.evidence_id).first()
