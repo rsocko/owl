@@ -139,9 +139,7 @@ def test_ingestion_endpoint_projects_relationship_and_is_retry_safe(client):
             "relationship_ids": ["relationship-1"],
         },
     ]
-    projection = AsyncMock(
-        return_value={"synced": True, "documents": [1, 2], "error": None}
-    )
+    projection = AsyncMock(return_value={"synced": True, "documents": [1, 2], "error": None})
     with (
         patch(
             "doc_intelligence_hub.api.routers.duplicates.on_document_ingested",
@@ -178,9 +176,7 @@ def test_reconcile_projection_failures_after_restart(client):
         provenance="automatic",
     )
     set_projection_result(relationship["id"], synced=False, error="Paperless unavailable")
-    projection = AsyncMock(
-        return_value={"synced": True, "documents": [1, 2], "error": None}
-    )
+    projection = AsyncMock(return_value={"synced": True, "documents": [1, 2], "error": None})
     with patch(
         "doc_intelligence_hub.api.routers.relationships.project_relationships_to_paperless",
         new=projection,

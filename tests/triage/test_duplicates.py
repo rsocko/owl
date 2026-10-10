@@ -348,9 +348,7 @@ class TestOnDocumentIngested:
 
     @patch("doc_intelligence_hub.modules.triage.duplicates.detect_duplicates")
     @patch("doc_intelligence_hub.modules.triage.duplicates.get_document_metadata")
-    def test_retried_ingestion_reuses_relationship_for_projection(
-        self, mock_meta, mock_detect, db
-    ):
+    def test_retried_ingestion_reuses_relationship_for_projection(self, mock_meta, mock_detect, db):
         original = {
             "document_id": 1,
             "title": "Original Bill",
