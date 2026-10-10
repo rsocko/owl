@@ -10,6 +10,9 @@ type ReviewStatus = 'unreviewed' | 'reviewed' | 'ignored';
 type LifecycleStatus = 'active' | 'orphaned' | 'retired';
 type ExpectationMode = 'recurring' | 'periodic' | 'one_off' | 'irregular' | 'not_expected';
 type ExpectationStatus = 'suggested' | 'confirmed' | 'dismissed' | 'retired';
+type Importance = 'routine' | 'important' | 'critical';
+type MonitoringMode = 'none' | 'presence' | 'deadline';
+type CalendarRuleType = 'annual_month' | 'quarter' | 'tax_year';
 
 interface ObservedSummary {
   document_count: number;
@@ -115,6 +118,20 @@ interface DocumentExpectation {
   expectation_mode: ExpectationMode;
   status: ExpectationStatus;
   cadence?: Cadence | null;
+  importance: Importance;
+  monitoring_mode: MonitoringMode;
+  calendar_rule?: {
+    rule_type: CalendarRuleType | 'one_off';
+    expected_month?: number | null;
+    expected_quarter?: number | null;
+    tax_year_offset?: number | null;
+    occurrence_id?: string | null;
+    due_start?: string | null;
+    due_end?: string | null;
+    occurrence_status?: 'pending' | 'fulfilled' | 'overdue' | 'cancelled' | null;
+    fulfilled_at?: string | null;
+  } | null;
+  grace_period_days: number;
   evidence: Evidence;
   title_convention?: TitleConvention | null;
   metadata_policy: MetadataPolicy;
@@ -203,6 +220,23 @@ interface ExternalSignalConnection {
 
 interface SuggestionDraft {
   mode: ExpectationMode | '';
+  importance: Importance;
+  monitoringMode: MonitoringMode;
+  frequency: Cadence['frequency'];
+  calendarRuleType: CalendarRuleType | '';
+  expectedMonth: string;
+  expectedQuarter: string;
+  taxYearOffset: string;
+  occurrenceId: string;
+  dueStart: string;
+  dueEnd: string;
+  availabilityEarliestDays: string;
+  availabilityLatestDays: string;
+  gracePeriodDays: string;
+  reminderDays: string;
+  overdueReminderIntervalDays: string;
+  maxOverdueReminders: string;
+  matchCalendarPeriod: boolean;
   seriesDiscriminator: string;
   titleTemplate: string;
   acquisitionSourceId: string;
@@ -212,12 +246,12 @@ interface SuggestionDraft {
   documentTypeId: string;
 }
 
-const MODE_OPTIONS: Array<{ value: ExpectationMode; label: string }> = [
-  { value: 'recurring', label: 'Recurring' },
-  { value: 'periodic', label: 'Periodic' },
-  { value: 'one_off', label: 'One-off' },
-  { value: 'irregular', label: 'Irregular' },
-  { value: 'not_expected', label: 'Not expected' },
+const MODE_OPTIONS: Array<{ value: ExpectationMode; label: string; consequence: string }> = [
+  { value: 'recurring', label: 'Recurring', consequence: 'Regular expectation; presence or deadline monitoring can alert.' },
+  { value: 'periodic', label: 'Periodic', consequence: 'Calendar-specific quarterly or annual expectation; monitoring can alert.' },
+  { value: 'one_off', label: 'One-off', consequence: 'One named occurrence and due window; it cannot recur after fulfillment or cancellation.' },
+  { value: 'irregular', label: 'Irregular', consequence: 'Keeps classification and metadata policy; absence never alerts.' },
+  { value: 'not_expected', label: 'Not expected', consequence: 'Durable negative policy for this candidate; absence never alerts.' },
 ];
 
 function getErrorMessage(error: unknown): string {
@@ -300,7 +334,43 @@ function buildExpectationBody(
   draft: SuggestionDraft,
   status: 'confirmed' | 'dismissed',
 ) {
-  const cadence = draft.mode === 'recurring' || draft.mode === 'periodic' ? suggestion.cadence : null;
+  const mode = draft.mode || 'irregular';
+  const activePolicy = status === 'confirmed';
+  const cadence = activePolicy && (mode === 'recurring' || mode === 'periodic')
+    ? {
+      frequency: draft.frequency,
+      expected_day: suggestion.cadence?.expected_day ?? null,
+      availability_delay_days: suggestion.cadence?.availability_delay_days ?? 0,
+      grace_period_days: Number(draft.gracePeriodDays) || 0,
+    }
+    : null;
+  const calendarRule = !activePolicy
+    ? null
+    : mode === 'one_off'
+      ? {
+        rule_type: 'one_off',
+        occurrence_id: draft.occurrenceId,
+        due_start: draft.dueStart,
+        due_end: draft.dueEnd,
+        occurrence_status: 'pending',
+      }
+      : draft.calendarRuleType === 'annual_month'
+        ? { rule_type: 'annual_month', expected_month: Number(draft.expectedMonth) }
+        : draft.calendarRuleType === 'quarter'
+          ? { rule_type: 'quarter', expected_quarter: Number(draft.expectedQuarter) }
+          : draft.calendarRuleType === 'tax_year'
+            ? {
+              rule_type: 'tax_year',
+              expected_month: Number(draft.expectedMonth),
+              tax_year_offset: Number(draft.taxYearOffset),
+            }
+            : null;
+  const reminderDays = [...new Set(
+    draft.reminderDays
+      .split(',')
+      .map((value) => Number(value.trim()))
+      .filter((value) => Number.isInteger(value) && value >= 0 && value <= 365),
+  )].sort((left, right) => right - left);
   const titleExample = suggestion.title.convention
     ? suggestion.title.examples
       .map((example) => renderDraftTitle(suggestion.title.convention!, draft.titleTemplate, example.after))
@@ -312,9 +382,33 @@ function buildExpectationBody(
     statement_series_id: suggestion.statement_series_id ?? null,
     document_ids: suggestion.document_ids,
     series_discriminator: draft.seriesDiscriminator || null,
-    expectation_mode: draft.mode,
+    expectation_mode: mode,
     status,
     cadence,
+    importance: draft.importance,
+    monitoring_mode: activePolicy ? draft.monitoringMode : 'none',
+    calendar_rule: calendarRule,
+    availability_window: activePolicy ? {
+      earliest_days: Number(draft.availabilityEarliestDays) || 0,
+      latest_days: Number(draft.availabilityLatestDays) || 0,
+    } : null,
+    grace_period_days: activePolicy ? Number(draft.gracePeriodDays) || 0 : 0,
+    escalation_policy: {
+      reminder_days_before_due: reminderDays,
+      overdue_reminder_interval_days: Number(draft.maxOverdueReminders) > 0
+        ? Number(draft.overdueReminderIntervalDays)
+        : null,
+      max_overdue_reminders: Number(draft.maxOverdueReminders) || 0,
+    },
+    fulfillment_rule: {
+      match_series: true,
+      match_kind: true,
+      match_calendar_period: mode === 'irregular' || mode === 'not_expected'
+        ? false
+        : draft.matchCalendarPeriod,
+      required_tag_ids: [...draft.allOf, ...draft.anyOf],
+      required_document_type_id: draft.documentTypeId ? Number(draft.documentTypeId) : null,
+    },
     evidence: {
       ...suggestion.evidence,
       reason_codes: [...suggestion.evidence.reason_codes, `user_${status}`],
@@ -351,6 +445,27 @@ function SuggestionCard({
 }) {
   const [draft, setDraft] = useState<SuggestionDraft>({
     mode: suggestion.expectation_mode === 'unknown' ? '' : suggestion.expectation_mode,
+    importance: 'routine',
+    monitoringMode: suggestion.expectation_mode === 'irregular'
+      || suggestion.expectation_mode === 'not_expected'
+      || suggestion.expectation_mode === 'unknown'
+      ? 'none'
+      : suggestion.expectation_mode === 'one_off' ? 'deadline' : 'presence',
+    frequency: suggestion.cadence?.frequency ?? 'monthly',
+    calendarRuleType: '',
+    expectedMonth: '',
+    expectedQuarter: '',
+    taxYearOffset: '-1',
+    occurrenceId: '',
+    dueStart: '',
+    dueEnd: '',
+    availabilityEarliestDays: '0',
+    availabilityLatestDays: String(suggestion.cadence?.availability_delay_days ?? 0),
+    gracePeriodDays: String(suggestion.cadence?.grace_period_days ?? 5),
+    reminderDays: '',
+    overdueReminderIntervalDays: '7',
+    maxOverdueReminders: '0',
+    matchCalendarPeriod: true,
     seriesDiscriminator: redactSensitiveNumbers(suggestion.series_discriminator),
     titleTemplate: suggestion.title.convention?.template ?? '',
     acquisitionSourceId: '',
@@ -382,15 +497,38 @@ function SuggestionCard({
     suggestion.metadata.required_document_type_name,
   ]);
   const needsSeries = suggestion.kind === 'statement' && !suggestion.statement_series_id;
-  const cadenceMissing =
-    (draft.mode === 'recurring' || draft.mode === 'periodic') && !suggestion.cadence;
+  const calendarMissing = draft.monitoringMode === 'deadline'
+    && draft.mode !== 'one_off'
+    && (
+      !draft.calendarRuleType
+      || (draft.calendarRuleType === 'annual_month' && !draft.expectedMonth)
+      || (draft.calendarRuleType === 'quarter' && !draft.expectedQuarter)
+      || (draft.calendarRuleType === 'tax_year' && (!draft.expectedMonth || !draft.taxYearOffset))
+    );
+  const occurrenceMissing = draft.mode === 'one_off'
+    && (!draft.occurrenceId.trim() || !draft.dueStart || !draft.dueEnd || draft.dueStart > draft.dueEnd);
+  const monitoringPolicyInvalid = draft.monitoringMode !== 'none' && (
+    Number(draft.availabilityEarliestDays) > Number(draft.availabilityLatestDays)
+    || Number(draft.gracePeriodDays) < 0
+    || Number(draft.maxOverdueReminders) < 0
+    || (
+      Number(draft.maxOverdueReminders) > 0
+      && Number(draft.overdueReminderIntervalDays) < 1
+    )
+  );
   const titlePreviews = suggestion.title.convention
     ? suggestion.title.examples.map((example) =>
       renderDraftTitle(suggestion.title.convention!, draft.titleTemplate, example.after))
     : [];
   const titleValid = !suggestion.title.convention
     || (titlePreviews.length > 0 && titlePreviews.every((preview) => preview.rendered));
-  const valid = Boolean(draft.mode) && !needsSeries && !cadenceMissing && titleValid;
+  const valid = Boolean(draft.mode)
+    && !needsSeries
+    && !calendarMissing
+    && !occurrenceMissing
+    && !monitoringPolicyInvalid
+    && titleValid;
+  const selectedMode = MODE_OPTIONS.find((option) => option.value === draft.mode);
 
   return (
     <article className="correspondent-suggestion">
@@ -433,12 +571,242 @@ function SuggestionCard({
           <select
             aria-label={`Expectation mode for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
             value={draft.mode}
-            onChange={(event) => setDraft({ ...draft, mode: event.target.value as ExpectationMode | '' })}
+            onChange={(event) => {
+              const mode = event.target.value as ExpectationMode | '';
+              setDraft({
+                ...draft,
+                mode,
+                monitoringMode: mode === 'irregular' || mode === 'not_expected' || !mode
+                  ? 'none'
+                  : mode === 'one_off' ? 'deadline' : draft.monitoringMode === 'none'
+                    ? 'presence'
+                    : draft.monitoringMode,
+              });
+            }}
           >
             <option value="">Select after review</option>
             {MODE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
+          <small>{selectedMode?.consequence ?? 'Choose a durable expectation policy after reviewing the evidence.'}</small>
         </label>
+        <label>
+          <span>Importance</span>
+          <select
+            aria-label={`Importance for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+            value={draft.importance}
+            onChange={(event) => {
+              const importance = event.target.value as Importance;
+              setDraft({
+                ...draft,
+                importance,
+                reminderDays: importance === 'critical' ? '14, 7, 1' : importance === 'important' ? '7, 1' : '',
+                maxOverdueReminders: importance === 'critical' ? '6' : importance === 'important' ? '3' : '0',
+              });
+            }}
+          >
+            <option value="routine">Routine</option>
+            <option value="important">Important</option>
+            <option value="critical">Critical</option>
+          </select>
+          <small>Changes priority and reminder intensity. It never creates an expectation by itself.</small>
+        </label>
+        <label>
+          <span>Monitoring</span>
+          <select
+            aria-label={`Monitoring for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+            value={draft.monitoringMode}
+            disabled={draft.mode === 'irregular' || draft.mode === 'not_expected' || draft.mode === 'one_off'}
+            onChange={(event) => setDraft({ ...draft, monitoringMode: event.target.value as MonitoringMode })}
+          >
+            <option value="none">None — never alert on absence</option>
+            <option value="presence">Presence — alert after the expected window</option>
+            <option value="deadline">Deadline — remind and escalate against a date</option>
+          </select>
+          <small>Only confirmed expectations with applicable monitoring feed missing-document analysis.</small>
+        </label>
+        {(draft.mode === 'recurring' || draft.mode === 'periodic') ? (
+          <label>
+            <span>Frequency</span>
+            <select
+              aria-label={`Frequency for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+              value={draft.frequency}
+              onChange={(event) => setDraft({ ...draft, frequency: event.target.value as Cadence['frequency'] })}
+            >
+              <option value="monthly">Monthly</option>
+              <option value="quarterly">Quarterly</option>
+              <option value="annual">Annual</option>
+            </select>
+            <small>User-defined schedules are allowed even when history is limited.</small>
+          </label>
+        ) : null}
+        {draft.monitoringMode === 'deadline' && draft.mode !== 'one_off' ? (
+          <>
+            <label>
+              <span>Calendar rule</span>
+              <select
+                aria-label={`Calendar rule for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+                value={draft.calendarRuleType}
+                onChange={(event) => setDraft({
+                  ...draft,
+                  calendarRuleType: event.target.value as CalendarRuleType | '',
+                })}
+              >
+                <option value="">Select a calendar anchor</option>
+                <option value="annual_month">Expected month</option>
+                <option value="quarter">Expected quarter</option>
+                <option value="tax_year">Tax-year document</option>
+              </select>
+            </label>
+            {draft.calendarRuleType === 'quarter' ? (
+              <label>
+                <span>Expected quarter</span>
+                <select
+                  aria-label={`Expected quarter for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+                  value={draft.expectedQuarter}
+                  onChange={(event) => setDraft({ ...draft, expectedQuarter: event.target.value })}
+                >
+                  <option value="">Select quarter</option>
+                  <option value="1">Q1</option>
+                  <option value="2">Q2</option>
+                  <option value="3">Q3</option>
+                  <option value="4">Q4</option>
+                </select>
+              </label>
+            ) : draft.calendarRuleType ? (
+              <label>
+                <span>Expected month</span>
+                <select
+                  aria-label={`Expected month for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+                  value={draft.expectedMonth}
+                  onChange={(event) => setDraft({ ...draft, expectedMonth: event.target.value })}
+                >
+                  <option value="">Select month</option>
+                  {Array.from({ length: 12 }, (_, index) => (
+                    <option key={index + 1} value={index + 1}>
+                      {new Date(2026, index, 1).toLocaleString(undefined, { month: 'long' })}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {draft.calendarRuleType === 'tax_year' ? (
+              <label>
+                <span>Tax year relative to arrival</span>
+                <select
+                  aria-label={`Tax year offset for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+                  value={draft.taxYearOffset}
+                  onChange={(event) => setDraft({ ...draft, taxYearOffset: event.target.value })}
+                >
+                  <option value="-1">Previous tax year</option>
+                  <option value="0">Current tax year</option>
+                </select>
+              </label>
+            ) : null}
+          </>
+        ) : null}
+        {draft.mode === 'one_off' ? (
+          <>
+            <label>
+              <span>Occurrence name</span>
+              <input
+                aria-label={`Occurrence name for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+                value={draft.occurrenceId}
+                placeholder="e.g. 2026 renewal notice"
+                onChange={(event) => setDraft({ ...draft, occurrenceId: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>Available from</span>
+              <input
+                aria-label={`Due window start for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+                type="date"
+                value={draft.dueStart}
+                onChange={(event) => setDraft({ ...draft, dueStart: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>Due by</span>
+              <input
+                aria-label={`Due window end for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+                type="date"
+                value={draft.dueEnd}
+                onChange={(event) => setDraft({ ...draft, dueEnd: event.target.value })}
+              />
+              <small>Saving creates one pending occurrence. Fulfilled or cancelled occurrences do not recur.</small>
+            </label>
+          </>
+        ) : null}
+        {draft.monitoringMode !== 'none' ? (
+          <>
+            <label>
+              <span>Earliest arrival offset</span>
+              <input
+                aria-label={`Earliest arrival offset for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+                type="number"
+                min="-365"
+                max="365"
+                value={draft.availabilityEarliestDays}
+                onChange={(event) => setDraft({ ...draft, availabilityEarliestDays: event.target.value })}
+              />
+              <small>Days relative to the covered period when availability can begin.</small>
+            </label>
+            <label>
+              <span>Latest arrival offset</span>
+              <input
+                aria-label={`Latest arrival offset for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+                type="number"
+                min="-365"
+                max="365"
+                value={draft.availabilityLatestDays}
+                onChange={(event) => setDraft({ ...draft, availabilityLatestDays: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>Grace period</span>
+              <input
+                aria-label={`Grace period for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+                type="number"
+                min="0"
+                max="365"
+                value={draft.gracePeriodDays}
+                onChange={(event) => setDraft({ ...draft, gracePeriodDays: event.target.value })}
+              />
+              <small>Days after the expected window before the document is considered missing.</small>
+            </label>
+            <label>
+              <span>Reminder days before due</span>
+              <input
+                aria-label={`Reminder days for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+                value={draft.reminderDays}
+                placeholder="e.g. 14, 7, 1"
+                onChange={(event) => setDraft({ ...draft, reminderDays: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>Overdue reminder interval</span>
+              <input
+                aria-label={`Overdue reminder interval for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+                type="number"
+                min="1"
+                max="365"
+                disabled={Number(draft.maxOverdueReminders) === 0}
+                value={draft.overdueReminderIntervalDays}
+                onChange={(event) => setDraft({ ...draft, overdueReminderIntervalDays: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>Maximum overdue reminders</span>
+              <input
+                aria-label={`Maximum overdue reminders for ${redactSensitiveNumbers(suggestion.series_discriminator)}`}
+                type="number"
+                min="0"
+                max="100"
+                value={draft.maxOverdueReminders}
+                onChange={(event) => setDraft({ ...draft, maxOverdueReminders: event.target.value })}
+              />
+            </label>
+          </>
+        ) : null}
         <label>
           <span>Series name</span>
           <input
@@ -475,6 +843,15 @@ function SuggestionCard({
           onChange={(allOf) => setDraft({ ...draft, allOf: allOf.map(Number) })}
           />
         </div>
+        <label className="correspondent-checkbox-field">
+          <input
+            type="checkbox"
+            checked={draft.matchCalendarPeriod}
+            disabled={draft.mode === 'irregular' || draft.mode === 'not_expected'}
+            onChange={(event) => setDraft({ ...draft, matchCalendarPeriod: event.target.checked })}
+          />
+          <span>Require the document to match this calendar period</span>
+        </label>
         <div className="correspondent-metadata-picker">
           <span>Any required tags</span>
           <MetadataMultiTypeahead
@@ -510,8 +887,14 @@ function SuggestionCard({
           This statement candidate is ambiguous. Group it into a statement series before confirming or dismissing policy.
         </div>
       ) : null}
-      {cadenceMissing ? (
-        <div className="correspondent-callout warning">Recurring and periodic expectations require established cadence evidence.</div>
+      {calendarMissing ? (
+        <div className="correspondent-callout warning">Deadline monitoring requires a complete calendar rule.</div>
+      ) : null}
+      {occurrenceMissing ? (
+        <div className="correspondent-callout warning">A one-off expectation needs a unique occurrence name and valid due window.</div>
+      ) : null}
+      {monitoringPolicyInvalid ? (
+        <div className="correspondent-callout warning">The availability and escalation windows must be valid before confirmation.</div>
       ) : null}
       {!titleValid ? (
         <div className="correspondent-callout warning">The title template must use available fields and render to 128 characters or fewer.</div>
@@ -552,9 +935,12 @@ function SuggestionCard({
         <Button variant="primary" disabled={!valid || busy} onClick={() => onDecision(suggestion, draft, 'confirmed')}>
           Confirm expectation
         </Button>
-        <Button disabled={!valid || busy} onClick={() => onDecision(suggestion, draft, 'dismissed')}>
+        <Button disabled={busy} onClick={() => onDecision(suggestion, draft, 'dismissed')}>
           Dismiss suggestion
         </Button>
+        <span className="correspondent-action-note">
+          Dismissal records this review decision only; it creates no active expectation or missing alert.
+        </span>
       </div>
     </article>
   );
@@ -1749,7 +2135,22 @@ export default function CorrespondentReview() {
                             <div className="correspondent-expectation">
                               <div>
                                 <strong>{redactSensitiveNumbers(expectation.series_discriminator ?? humanize(expectation.kind))}</strong>
-                                <span>{humanize(expectation.expectation_mode)} · {expectation.cadence?.frequency ?? 'no cadence'}</span>
+                                <span>
+                                  {humanize(expectation.expectation_mode)}
+                                  {' · '}{humanize(expectation.importance ?? 'routine')}
+                                  {' · '}{humanize(expectation.monitoring_mode ?? 'none')} monitoring
+                                </span>
+                                {expectation.calendar_rule ? (
+                                  <span>
+                                    {expectation.calendar_rule.rule_type === 'one_off'
+                                      ? `${expectation.calendar_rule.occurrence_id} · ${humanize(expectation.calendar_rule.occurrence_status ?? 'pending')}`
+                                      : expectation.calendar_rule.rule_type === 'quarter'
+                                        ? `Expected Q${expectation.calendar_rule.expected_quarter}`
+                                        : `Expected month ${expectation.calendar_rule.expected_month}`}
+                                  </span>
+                                ) : (
+                                  <span>{expectation.cadence?.frequency ?? 'No calendar rule'}</span>
+                                )}
                               </div>
                               <div className="correspondent-actions">
                                 <Badge tone={expectation.status === 'confirmed' ? 'ok' : expectation.status === 'dismissed' ? 'muted' : 'warning'}>
@@ -1764,6 +2165,70 @@ export default function CorrespondentReview() {
                                     Preview violations
                                   </Button>
                                 ) : null}
+                                {expectation.status === 'confirmed'
+                                  && expectation.calendar_rule?.rule_type === 'one_off'
+                                  && expectation.calendar_rule.occurrence_status !== 'fulfilled'
+                                  && expectation.calendar_rule.occurrence_status !== 'cancelled' ? (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        disabled={busy || selectedProfileTerminal}
+                                        onClick={() => void runAction(
+                                          () => endpoints.statements.updateDocumentExpectation(
+                                            expectation.id,
+                                            {
+                                              calendar_rule: {
+                                                ...expectation.calendar_rule,
+                                                occurrence_status: 'fulfilled',
+                                                fulfilled_at: new Date().toISOString(),
+                                              },
+                                            },
+                                          ),
+                                          'One-off expectation fulfilled.',
+                                        )}
+                                      >
+                                        Mark fulfilled
+                                      </Button>
+                                      {expectation.calendar_rule.occurrence_status === 'pending' ? (
+                                        <Button
+                                          size="sm"
+                                          disabled={busy || selectedProfileTerminal}
+                                          onClick={() => void runAction(
+                                            () => endpoints.statements.updateDocumentExpectation(
+                                              expectation.id,
+                                              {
+                                                calendar_rule: {
+                                                  ...expectation.calendar_rule,
+                                                  occurrence_status: 'overdue',
+                                                },
+                                              },
+                                            ),
+                                            'One-off expectation marked overdue.',
+                                          )}
+                                        >
+                                          Mark overdue
+                                        </Button>
+                                      ) : null}
+                                      <Button
+                                        size="sm"
+                                        disabled={busy || selectedProfileTerminal}
+                                        onClick={() => void runAction(
+                                          () => endpoints.statements.updateDocumentExpectation(
+                                            expectation.id,
+                                            {
+                                              calendar_rule: {
+                                                ...expectation.calendar_rule,
+                                                occurrence_status: 'cancelled',
+                                              },
+                                            },
+                                          ),
+                                          'One-off expectation cancelled.',
+                                        )}
+                                      >
+                                        Cancel occurrence
+                                      </Button>
+                                    </>
+                                  ) : null}
                                 {expectation.status !== 'retired' ? (
                                   <Button
                                     size="sm"

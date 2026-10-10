@@ -117,6 +117,25 @@ def test_profile_expectation_and_acquisition_contract(
                 "availability_delay_days": 2,
                 "grace_period_days": 5,
             },
+            "importance": "important",
+            "monitoring_mode": "presence",
+            "availability_window": {
+                "earliest_days": 0,
+                "latest_days": 5,
+            },
+            "grace_period_days": 7,
+            "escalation_policy": {
+                "reminder_days_before_due": [3],
+                "overdue_reminder_interval_days": 7,
+                "max_overdue_reminders": 2,
+            },
+            "fulfillment_rule": {
+                "match_series": True,
+                "match_kind": True,
+                "match_calendar_period": True,
+                "required_tag_ids": [7],
+                "required_document_type_id": 3,
+            },
             "evidence": {
                 "source": "user",
                 "reason_codes": ["user_confirmed"],
@@ -139,6 +158,12 @@ def test_profile_expectation_and_acquisition_contract(
     assert expectation.status_code == 201
     body = expectation.json()
     assert body["statement_series_id"] == "checking-series"
+    assert body["importance"] == "important"
+    assert body["monitoring_mode"] == "presence"
+    assert body["availability_window"]["latest_days"] == 5
+    assert body["grace_period_days"] == 7
+    assert body["escalation_policy"]["reminder_days_before_due"] == [3]
+    assert body["fulfillment_rule"]["required_tag_ids"] == [7]
     assert body["evidence"]["reason_codes"] == ["user_confirmed"]
     assert "deployment_id" not in body
 
