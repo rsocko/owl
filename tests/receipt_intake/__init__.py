@@ -1,0 +1,1 @@
+"""Receipt intake tests."""

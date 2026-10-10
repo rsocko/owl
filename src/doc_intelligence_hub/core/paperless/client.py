@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 import time
 from collections.abc import AsyncIterator, Callable, Coroutine
 from dataclasses import dataclass
@@ -33,6 +34,13 @@ from doc_intelligence_hub.core.resilience import (
 )
 
 logger = logging.getLogger(__name__)
+
+_SAFE_UPLOAD_EXTENSIONS = {
+    "application/pdf": ".pdf",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/tiff": ".tiff",
+}
 
 # HTTP methods that are safe to retry (idempotent)
 _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "PUT", "DELETE", "OPTIONS"})
@@ -877,6 +885,44 @@ class PaperlessClient:
                 status_code=None,
             )
         return verified
+
+    async def upload_document(self, path: Path, media_type: str | None = None) -> str:
+        """Submit one canonical document without retrying the multipart POST.
+
+        The caller owns temporary-file lifecycle. Only a generated safe filename
+        is sent to Paperless; the source filename never crosses this boundary.
+        """
+        resolved_media_type = media_type or mimetypes.guess_type(path.name)[0] or "application/pdf"
+        safe_filename = f"receipt-intake{_SAFE_UPLOAD_EXTENSIONS.get(resolved_media_type, '')}"
+        with path.open("rb") as document:
+            response = await self._request(
+                "POST",
+                "/api/documents/post_document/",
+                files={"document": (safe_filename, document, resolved_media_type)},
+                max_attempts=1,
+            )
+        response.raise_for_status()
+        task_id = response.json()
+        if not isinstance(task_id, str) or not task_id:
+            raise PaperlessError(
+                "Paperless document upload did not return a task id",
+                status_code=None,
+            )
+        return task_id
+
+    async def find_document_by_checksum(self, checksum: str) -> dict[str, Any] | None:
+        """Return one Paperless document with the exact checksum, if present."""
+        response = await self._request(
+            "GET",
+            "/api/documents/",
+            params={"checksum": checksum, "page_size": 2},
+        )
+        response.raise_for_status()
+        results = response.json().get("results", [])
+        exact = [document for document in results if document.get("checksum") == checksum]
+        if len(exact) > 1:
+            raise PaperlessError("Paperless returned multiple documents for an exact checksum")
+        return exact[0] if exact else None
 
     # ------------------------------------------------------------------
     # Document versions — issue #18 slice 2 (apply/rollback an OCR candidate)
