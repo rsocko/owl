@@ -51,7 +51,11 @@ class Obligation(Base):
     __tablename__ = "obligations"
 
     id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    identity_key = Column(String, nullable=True, index=True)
     primary_action_id = Column(Integer, nullable=True, index=True)
+    authoritative_document_id = Column(Integer, nullable=True, index=True)
+    relationship_explanation = Column(Text, nullable=True)
+    relationship_rules = Column(JSON, nullable=True)
     status = Column(String, nullable=False, default="open", index=True)
     completion_suggested = Column(Boolean, nullable=False, default=False)
     suggestion_reason = Column(Text, nullable=True)
@@ -104,6 +108,7 @@ class Action(Base):
     parent_action_id = Column(Integer, nullable=True, index=True)
     superseded_by_action_id = Column(Integer, nullable=True, index=True)
     obligation_id = Column(String, nullable=True, index=True)
+    relationship_base_snapshot = Column(JSON, nullable=True)
     version = Column(Integer, default=1, nullable=False)  # Optimistic locking
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -324,6 +329,19 @@ class PaymentActionReceipt(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class ObligationEvent(Base):
+    """Auditable history for relationship-driven obligation recalculation."""
+
+    __tablename__ = "obligation_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    obligation_id = Column(String, nullable=False, index=True)
+    event_type = Column(String, nullable=False, index=True)
+    relationship_id = Column(String, nullable=True, index=True)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class ActionFeedback(Base):
     """User feedback on action items — trains the classifier over time.
 
@@ -443,6 +461,10 @@ def _migrate_missing_columns(engine):
             ("expected_amount_minor", "INTEGER"),
             ("currency", "TEXT"),
             ("revision", "INTEGER DEFAULT 1 NOT NULL"),
+            ("identity_key", "TEXT"),
+            ("authoritative_document_id", "INTEGER"),
+            ("relationship_explanation", "TEXT"),
+            ("relationship_rules", "TEXT"),
         ],
         "actions": [
             ("risk_score", "INTEGER DEFAULT 0"),
@@ -466,6 +488,7 @@ def _migrate_missing_columns(engine):
             ("parent_action_id", "INTEGER"),
             ("superseded_by_action_id", "INTEGER"),
             ("obligation_id", "TEXT"),
+            ("relationship_base_snapshot", "TEXT"),
         ],
         "action_feedback": [
             ("original_urgency", "TEXT"),

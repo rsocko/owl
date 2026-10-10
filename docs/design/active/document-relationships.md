@@ -78,11 +78,27 @@ human-readable explanation.
 ## Obligation and queue behavior
 
 Relationship creation does not merge, archive, tag as duplicate, or otherwise alter
-either Paperless document. A related notice should update one obligation-level Action
-Queue item when a stable obligation key is available. Until obligation-level queue
-consolidation is implemented, relationship creation records the calculated adjustment
-and routes ambiguous/conflicting links to Needs Review; it must not create a second
-success-shaped action silently.
+either Paperless document. For `follows`, `supersedes`, and `same_sequence`, the active
+typed graph is the authoritative Action Queue consolidation input. Provider, invoice or
+claim, and account evidence validates that the linked documents can safely share an
+obligation; matching provider metadata alone never consolidates unrelated bills.
+
+Each consolidated obligation has a stable hashed identity, one primary action, one
+authoritative document, and an evidence timeline containing every preserved notice.
+Direction selects the newest source document as authoritative even when documents arrive
+out of order. Its balance and due date update the primary action. The highest
+relationship priority adjustment deterministically raises risk and urgency, while all
+fired rule codes and explanations remain available to the API and UI.
+
+Additional action records are retained as suppressed audit history rather than deleted.
+An acknowledged, snoozed, or completed primary action keeps its explicit lifecycle state
+when a later notice arrives. Relationship creation and soft removal immediately rebuild
+affected connected components, so a corrected or removed link can split obligations and
+restore each document action's pre-relationship values.
+
+Conflicting provider, invoice/claim, or account identities never merge. Each affected
+action is routed to Needs Review with the conflict reason. Obligation recalculation also
+records before/after audit events, including the triggering relationship ID.
 
 ## Paperless projection
 

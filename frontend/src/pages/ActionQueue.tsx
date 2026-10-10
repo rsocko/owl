@@ -105,6 +105,10 @@ interface ActionItem {
   parent_action_id?: number | null;
   superseded_by_action_id?: number | null;
   obligation_id?: string | null;
+  obligation_identity?: string | null;
+  authoritative_document_id?: number | null;
+  relationship_rules?: string[];
+  relationship_explanation?: string | null;
   linked_document_count?: number;
   linked_documents?: LinkedDocument[];
   completion_suggestion?: CompletionSuggestion | null;
@@ -121,6 +125,7 @@ interface LinkedDocument {
   reference_number?: string | null;
   confidence: number;
   source: string;
+  is_authoritative?: boolean;
   thumbnail_url: string;
   preview_url?: string | null;
   document_summary: DocumentSummaryModel;
@@ -1718,6 +1723,7 @@ export default function ActionQueue() {
                                         onClick={() => setTimelineViewer(document)}
                                       >
                                         <span className="aq-timeline-role">{linkedDocumentRoleLabel(document.role)}</span>
+                                        {document.is_authoritative && <Badge tone="warning">Current notice</Badge>}
                                         <DocumentSummary summary={document.document_summary} />
                                         <span className="aq-timeline-meta">
                                           {document.document_date ? formatDate(document.document_date) : 'Date unavailable'}

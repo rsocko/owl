@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from datetime import date, datetime
 from difflib import SequenceMatcher
@@ -9,14 +11,19 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from .database import Action, Obligation, ObligationDocument
+from .database import Action, Obligation, ObligationDocument, ObligationEvent
+from .risk_scoring import compute_risk_score
 
 ACTIVE_ACTION_STATUSES = {"pending", "acknowledged", "snoozed"}
 INVOICE_FEE_TOLERANCE = 5.0
 ACTION_LINK_THRESHOLD = 0.75
 RECEIPT_SUGGEST_THRESHOLD = 0.75
 
-_REMINDER_PATTERN = re.compile(r"\b(reminder|past due|overdue|second notice|2nd notice)\b", re.I)
+_REMINDER_PATTERN = re.compile(
+    r"\b(reminder|past due|overdue|second notice|2nd notice|final notice|collections?|"
+    r"disconnect(?:ion)?|shut[\s-]?off)\b",
+    re.I,
+)
 _REVISION_PATTERN = re.compile(r"\b(revised|updated|corrected|replacement|supersedes)\b", re.I)
 _AMOUNT_PATTERN = re.compile(r"(?:\$|USD\s*)\s*([0-9][0-9,]*(?:\.\d{2})?)", re.I)
 _REFERENCE_PATTERN = re.compile(
@@ -129,6 +136,485 @@ def ensure_obligation(db: Session, action: Action) -> Obligation:
     db.flush()
     action.obligation_id = obligation.id
     return obligation
+
+
+def _base_snapshot(action: Action) -> dict[str, Any]:
+    snapshot = action.relationship_base_snapshot
+    if isinstance(snapshot, dict):
+        return snapshot
+    snapshot = {
+        "title": action.title,
+        "summary": action.summary,
+        "due_date": action.due_date.isoformat() if action.due_date else None,
+        "amount": action.amount,
+        "urgency": action.urgency,
+        "severity": action.severity,
+        "risk_score": action.risk_score,
+        "ai_reasoning": action.ai_reasoning,
+    }
+    action.relationship_base_snapshot = snapshot
+    return snapshot
+
+
+def _restore_base(action: Action) -> None:
+    snapshot = _base_snapshot(action)
+    action.title = snapshot.get("title") or action.title
+    action.summary = snapshot.get("summary")
+    raw_due_date = snapshot.get("due_date")
+    action.due_date = date.fromisoformat(raw_due_date) if raw_due_date else None
+    action.amount = snapshot.get("amount")
+    action.urgency = snapshot.get("urgency") or "LOW"
+    action.severity = snapshot.get("severity") or "safe"
+    action.risk_score = int(snapshot.get("risk_score") or 0)
+    action.ai_reasoning = snapshot.get("ai_reasoning")
+
+
+def _action_identity(action: Action) -> tuple[str, str, str]:
+    data = action.extracted_data if isinstance(action.extracted_data, dict) else {}
+    reference = _normalized(
+        data.get("reference_number") or data.get("invoice_number") or data.get("claim_number")
+    )
+    account = _normalized(data.get("account_identifier") or data.get("account_hint"))
+    return _normalized(action.correspondent), reference, account
+
+
+def _identity_key(actions: list[Action], root_document_id: int) -> str:
+    providers = sorted(
+        {_action_identity(action)[0] for action in actions if _action_identity(action)[0]}
+    )
+    references = sorted(
+        {_action_identity(action)[1] for action in actions if _action_identity(action)[1]}
+    )
+    accounts = sorted(
+        {_action_identity(action)[2] for action in actions if _action_identity(action)[2]}
+    )
+    evidence = (
+        f"provider:{providers[0]}|reference:{references[0]}"
+        if providers and references
+        else (
+            f"provider:{providers[0]}|account:{accounts[0]}|root:{root_document_id}"
+            if providers and accounts
+            else f"relationship-root:{root_document_id}"
+        )
+    )
+    return hashlib.sha256(evidence.encode("utf-8")).hexdigest()
+
+
+def _identity_conflict(actions: list[Action]) -> str | None:
+    providers = {_action_identity(action)[0] for action in actions if _action_identity(action)[0]}
+    references = {_action_identity(action)[1] for action in actions if _action_identity(action)[1]}
+    accounts = {_action_identity(action)[2] for action in actions if _action_identity(action)[2]}
+    if len(providers) > 1:
+        return "Related documents have conflicting providers"
+    if len(references) > 1:
+        return "Related documents have conflicting invoice or claim identities"
+    if not references and len(accounts) > 1:
+        return "Related documents have conflicting account identities"
+    return None
+
+
+def _urgency_for_adjustment(base: str, adjustment: int) -> str:
+    ranks = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+    minimum = (
+        "CRITICAL"
+        if adjustment >= 35
+        else "HIGH"
+        if adjustment >= 18
+        else ("MEDIUM" if adjustment >= 12 else "LOW")
+    )
+    return max((base or "LOW").upper(), minimum, key=lambda value: ranks.get(value, 0))
+
+
+def _relationship_rows() -> list[Any]:
+    from doc_intelligence_hub.modules.triage.database import (
+        DocumentRelationship,
+    )
+    from doc_intelligence_hub.modules.triage.database import (
+        get_session as get_triage_session,
+    )
+
+    triage_db = get_triage_session()
+    try:
+        return (
+            triage_db.query(DocumentRelationship)
+            .filter(DocumentRelationship.removed_at.is_(None))
+            .order_by(DocumentRelationship.created_at.asc(), DocumentRelationship.id.asc())
+            .all()
+        )
+    finally:
+        triage_db.close()
+
+
+def _route_identity_conflict(db: Session, actions: list[Action], reason: str) -> None:
+    from .lifecycle import route_action_to_review
+
+    for action in actions:
+        _restore_base(action)
+        action.superseded_by_action_id = None
+        route_action_to_review(db, action, reason=reason)
+
+
+def _record_obligation_event(
+    db: Session,
+    obligation: Obligation,
+    *,
+    event_type: str,
+    relationship_id: str | None,
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> None:
+    if before == after:
+        return
+    db.add(
+        ObligationEvent(
+            obligation_id=obligation.id,
+            event_type=event_type,
+            relationship_id=relationship_id,
+            payload={"before": before, "after": after},
+        )
+    )
+
+
+def reconcile_relationship_obligations(
+    db: Session,
+    document_ids: set[int],
+    *,
+    relationship_id: str | None = None,
+    event_type: str = "relationship_recalculated",
+) -> int:
+    """Rebuild affected PAY obligations from the active typed relationship graph."""
+    if not document_ids:
+        return 0
+    relationships = [
+        row
+        for row in _relationship_rows()
+        if row.relationship_type in {"follows", "supersedes", "same_sequence"}
+    ]
+    adjacency: dict[int, set[int]] = {}
+    for row in relationships:
+        adjacency.setdefault(row.source_document_id, set()).add(row.target_document_id)
+        adjacency.setdefault(row.target_document_id, set()).add(row.source_document_id)
+
+    expanded = set(document_ids)
+    frontier = list(document_ids)
+    while frontier:
+        current = frontier.pop()
+        for neighbor in adjacency.get(current, set()):
+            if neighbor not in expanded:
+                expanded.add(neighbor)
+                frontier.append(neighbor)
+
+    existing_actions = (
+        db.query(Action)
+        .filter(Action.action_type == "PAY", Action.document_id.in_(expanded))
+        .order_by(Action.created_at.asc(), Action.id.asc())
+        .all()
+    )
+    obligation_ids = {action.obligation_id for action in existing_actions if action.obligation_id}
+    if obligation_ids:
+        prior_actions = (
+            db.query(Action)
+            .filter(Action.action_type == "PAY", Action.obligation_id.in_(obligation_ids))
+            .all()
+        )
+        existing_actions = list(
+            {action.id: action for action in [*existing_actions, *prior_actions]}.values()
+        )
+        expanded.update(action.document_id for action in prior_actions)
+
+    actions_by_document: dict[int, list[Action]] = {}
+    for action in existing_actions:
+        actions_by_document.setdefault(action.document_id, []).append(action)
+        _restore_base(action)
+
+    components: list[set[int]] = []
+    remaining = set(actions_by_document)
+    while remaining:
+        start = min(remaining)
+        component = {start}
+        stack = [start]
+        while stack:
+            current = stack.pop()
+            for neighbor in adjacency.get(current, set()):
+                if neighbor in actions_by_document and neighbor not in component:
+                    component.add(neighbor)
+                    stack.append(neighbor)
+        remaining -= component
+        components.append(component)
+
+    used_obligations: set[str] = set()
+    changed = 0
+    for component in components:
+        component_actions = [
+            action for document_id in component for action in actions_by_document[document_id]
+        ]
+        conflict = _identity_conflict(component_actions) if len(component) > 1 else None
+        if conflict:
+            _route_identity_conflict(db, component_actions, conflict)
+            continue
+
+        outgoing_targets = {
+            row.target_document_id
+            for row in relationships
+            if row.source_document_id in component and row.target_document_id in component
+        }
+        authoritative_candidates = component - outgoing_targets
+        authoritative_document_id = max(
+            authoritative_candidates or component,
+            key=lambda document_id: (
+                max(
+                    (
+                        action.document_date or date.min
+                        for action in actions_by_document[document_id]
+                    ),
+                    default=date.min,
+                ),
+                document_id,
+            ),
+        )
+        directed_targets = {
+            row.target_document_id
+            for row in relationships
+            if row.source_document_id in component
+            and row.target_document_id in component
+            and row.relationship_type in {"follows", "supersedes"}
+        }
+        roots = component - {
+            row.source_document_id
+            for row in relationships
+            if row.source_document_id in component
+            and row.target_document_id in component
+            and row.relationship_type in {"follows", "supersedes"}
+        }
+        root_document_id = min(roots or directed_targets or component)
+
+        existing_obligations = [
+            db.query(Obligation).filter_by(id=obligation_id).first()
+            for obligation_id in {
+                action.obligation_id for action in component_actions if action.obligation_id
+            }
+            if obligation_id not in used_obligations
+        ]
+        existing_obligations = [item for item in existing_obligations if item is not None]
+        existing_obligations.sort(key=lambda item: (item.created_at or datetime.min, item.id))
+        obligation = next(
+            (
+                item
+                for item in existing_obligations
+                if item.primary_action_id
+                and any(
+                    action.id == item.primary_action_id and action.document_id in component
+                    for action in component_actions
+                )
+            ),
+            existing_obligations[0] if existing_obligations else None,
+        )
+        if obligation is None:
+            obligation = Obligation(status="open")
+            db.add(obligation)
+            db.flush()
+        used_obligations.add(obligation.id)
+
+        lifecycle_actions = [
+            action
+            for action in component_actions
+            if action.status in {"completed", "acknowledged", "snoozed"}
+        ]
+        canonical = min(
+            lifecycle_actions or component_actions,
+            key=lambda action: (
+                {"completed": 0, "acknowledged": 1, "snoozed": 2}.get(action.status, 3),
+                0 if action.id == obligation.primary_action_id else 1,
+                action.created_at or datetime.min,
+                action.id,
+            ),
+        )
+        authoritative = min(
+            actions_by_document[authoritative_document_id],
+            key=lambda action: (0 if action.is_primary else 1, action.id),
+        )
+        component_relationships = [
+            row
+            for row in relationships
+            if row.source_document_id in component and row.target_document_id in component
+        ]
+        rules = sorted(
+            {
+                code
+                for row in component_relationships
+                for code in json.loads(row.reason_codes_json or "[]")
+                if code
+            }
+        )
+        stage_adjustments = {
+            "second_notice": 12,
+            "past_due": 18,
+            "final_notice": 28,
+            "collections_or_disconnect": 35,
+        }
+        calculated_adjustment = max(
+            (stage_adjustments.get(code, 0) for code in rules),
+            default=0,
+        )
+        if "explicit_supersession" in rules:
+            calculated_adjustment += 8
+        adjustment = min(
+            100,
+            max(
+                calculated_adjustment,
+                max(
+                    (row.priority_adjustment or 0 for row in component_relationships),
+                    default=0,
+                ),
+            ),
+        )
+        explanations = list(
+            dict.fromkeys(
+                row.priority_explanation
+                for row in component_relationships
+                if row.priority_explanation
+            )
+        )
+        explanation = "; ".join(explanations) or "No relationship priority adjustment"
+        before = {
+            "identity_key": obligation.identity_key,
+            "primary_action_id": obligation.primary_action_id,
+            "authoritative_document_id": obligation.authoritative_document_id,
+            "rules": obligation.relationship_rules or [],
+            "explanation": obligation.relationship_explanation,
+            "action": (
+                {
+                    "id": canonical.id,
+                    "amount": canonical.amount,
+                    "due_date": canonical.due_date.isoformat() if canonical.due_date else None,
+                    "urgency": canonical.urgency,
+                    "risk_score": canonical.risk_score,
+                }
+                if canonical
+                else None
+            ),
+        }
+
+        source = _base_snapshot(authoritative)
+        canonical.title = source.get("title") or canonical.title
+        canonical.summary = source.get("summary")
+        raw_due_date = source.get("due_date")
+        canonical.due_date = date.fromisoformat(raw_due_date) if raw_due_date else None
+        canonical.amount = source.get("amount")
+        canonical.urgency = _urgency_for_adjustment(source.get("urgency") or "LOW", adjustment)
+        canonical.severity = (
+            "critical"
+            if canonical.urgency == "CRITICAL"
+            else "focus"
+            if canonical.urgency in {"HIGH", "MEDIUM"}
+            else "safe"
+        )
+        canonical.risk_score = min(
+            100,
+            compute_risk_score(
+                urgency=source.get("urgency") or "LOW",
+                due_date=canonical.due_date,
+                amount=canonical.amount,
+                confidence=canonical.confidence or 0,
+                action_type=canonical.action_type,
+            )
+            + adjustment,
+        )
+        base_reasoning = source.get("ai_reasoning")
+        canonical.ai_reasoning = (
+            f"{base_reasoning}\n\nRelationship update: {explanation}"
+            if base_reasoning
+            else f"Relationship update: {explanation}"
+        )
+        canonical.action_ready = canonical.review_state != "needs_review"
+        if canonical.review_state == "linked_document":
+            canonical.review_state = "ready"
+        canonical.superseded_by_action_id = None
+        canonical.obligation_id = obligation.id
+        canonical.version = (canonical.version or 1) + 1
+
+        for action in component_actions:
+            action.obligation_id = obligation.id
+            if action.id != canonical.id:
+                action.superseded_by_action_id = canonical.id
+                action.action_ready = False
+                action.review_state = "linked_document"
+            _add_action_document(
+                db,
+                obligation,
+                action,
+                {},
+                confidence=1.0,
+                source="typed_relationship" if len(component) > 1 else "action_queue",
+            )
+        for linked in db.query(ObligationDocument).filter_by(obligation_id=obligation.id).all():
+            if linked.document_id not in component and linked.role != "receipt":
+                linked.excluded = True
+                linked.excluded_at = datetime.utcnow()
+
+        obligation.identity_key = _identity_key(component_actions, root_document_id)
+        obligation.primary_action_id = canonical.id
+        obligation.authoritative_document_id = authoritative_document_id
+        obligation.relationship_rules = rules
+        obligation.relationship_explanation = explanation
+        after = {
+            "identity_key": obligation.identity_key,
+            "primary_action_id": obligation.primary_action_id,
+            "authoritative_document_id": obligation.authoritative_document_id,
+            "rules": rules,
+            "explanation": explanation,
+            "action": {
+                "id": canonical.id,
+                "amount": canonical.amount,
+                "due_date": canonical.due_date.isoformat() if canonical.due_date else None,
+                "urgency": canonical.urgency,
+                "risk_score": canonical.risk_score,
+            },
+        }
+        _record_obligation_event(
+            db,
+            obligation,
+            event_type=event_type,
+            relationship_id=relationship_id,
+            before=before,
+            after=after,
+        )
+        changed += int(before != after)
+
+    for old_obligation in (
+        db.query(Obligation).filter(Obligation.id.in_(obligation_ids - used_obligations)).all()
+        if obligation_ids - used_obligations
+        else []
+    ):
+        if not db.query(Action).filter_by(obligation_id=old_obligation.id).first():
+            db.query(ObligationDocument).filter_by(obligation_id=old_obligation.id).delete()
+            db.delete(old_obligation)
+    db.flush()
+    return changed
+
+
+def reconcile_relationship_change(
+    document_ids: set[int],
+    *,
+    relationship_id: str,
+    event_type: str,
+) -> int:
+    """Reconcile a committed relationship change in the Action Queue database."""
+    from .database import get_session, init_db
+
+    init_db()
+    db = get_session()
+    try:
+        changed = reconcile_relationship_obligations(
+            db,
+            document_ids,
+            relationship_id=relationship_id,
+            event_type=event_type,
+        )
+        db.commit()
+        return changed
+    finally:
+        db.close()
 
 
 def add_document(
@@ -466,62 +952,13 @@ def manually_link_document(
 
 
 def associate_pay_action(db: Session, action: Action, document: dict[str, Any]) -> Obligation:
-    """Attach a PAY action to an existing obligation or create a new one."""
+    """Attach a PAY action, using typed relationships as the consolidation authority."""
     if action.action_type != "PAY":
         return ensure_obligation(db, action)
-
-    candidates = (
-        db.query(Action)
-        .filter(
-            Action.id != action.id,
-            Action.document_id != action.document_id,
-            Action.action_type == "PAY",
-            Action.status.in_(ACTIVE_ACTION_STATUSES),
-            Action.superseded_by_action_id.is_(None),
-        )
-        .order_by(Action.created_at.desc())
-        .all()
-    )
-    candidates = [
-        candidate
-        for candidate in candidates
-        if (
-            candidate.created_at is None
-            or action.created_at is None
-            or (candidate.created_at, candidate.id) < (action.created_at, action.id)
-        )
-    ]
-    scored = sorted(
-        ((_action_match_score(candidate, action), candidate) for candidate in candidates),
-        key=lambda item: item[0],
-        reverse=True,
-    )
-    best_score, canonical = scored[0] if scored else (0.0, None)
-
-    if canonical is not None and best_score >= ACTION_LINK_THRESHOLD:
-        obligation = ensure_obligation(db, canonical)
-        if _document_excluded(db, obligation.id, action.document_id):
-            obligation = ensure_obligation(db, action)
-            _add_action_document(db, obligation, action, document)
-            return obligation
-        _add_action_document(db, obligation, canonical, {}, source="action_queue")
-        action.obligation_id = obligation.id
-        action.superseded_by_action_id = canonical.id
-        action.action_ready = False
-        action.review_state = "linked_document"
-        _add_action_document(
-            db,
-            obligation,
-            action,
-            document,
-            confidence=best_score,
-            source="invoice_match",
-        )
-        return obligation
-
     obligation = ensure_obligation(db, action)
     _add_action_document(db, obligation, action, document)
-    return obligation
+    reconcile_relationship_obligations(db, {action.document_id})
+    return db.query(Obligation).filter_by(id=action.obligation_id).one()
 
 
 def backfill_obligations(db: Session) -> int:
@@ -797,6 +1234,11 @@ def sync_obligation_status(db: Session, action: Action) -> None:
 
 def linked_documents(db: Session, action: Action) -> list[dict[str, Any]]:
     """Return timeline documents for serialization, including legacy actions."""
+    obligation = (
+        db.query(Obligation).filter_by(id=action.obligation_id).first()
+        if action.obligation_id
+        else None
+    )
     rows = (
         db.query(ObligationDocument)
         .filter_by(obligation_id=action.obligation_id, excluded=False)
@@ -834,6 +1276,9 @@ def linked_documents(db: Session, action: Action) -> list[dict[str, Any]]:
             "reference_number": row.reference_number,
             "confidence": row.confidence,
             "source": row.source,
+            "is_authoritative": bool(
+                obligation and row.document_id == obligation.authoritative_document_id
+            ),
         }
         for row in rows
     ]
