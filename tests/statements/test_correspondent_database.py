@@ -25,6 +25,7 @@ from doc_intelligence_hub.modules.statements.database import SCHEMA_VERSION, Dat
 from doc_intelligence_hub.modules.statements.models import (
     AnalysisPattern,
     DiscoveryResult,
+    DocumentRecord,
     ProviderCandidate,
 )
 
@@ -126,6 +127,7 @@ def test_correspondent_schema_migration_preserves_series_history(tmp_path) -> No
         }
         assert {
             "correspondent_profiles",
+            "correspondent_analysis_snapshots",
             "document_expectations",
             "external_signal_sources",
             "external_signal_generations",
@@ -186,7 +188,49 @@ def test_schema_v12_migrates_alerting_contract_without_inventing_calendar(tmp_pa
         assert expectations["confirmed-recurring"].monitoring_mode == "presence"
         assert expectations["confirmed-recurring"].calendar_rule is None
         assert expectations["dismissed-recurring"].monitoring_mode == "none"
-        assert migrated.connect().execute("SELECT version FROM schema_version").fetchone()[0] == 12
+        assert migrated.connect().execute("SELECT version FROM schema_version").fetchone()[0] == 13
+    finally:
+        migrated.close()
+
+
+def test_schema_v13_adds_analysis_snapshots_to_v12_database(tmp_path) -> None:
+    path = str(tmp_path / "v12-statements.db")
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE schema_version (version INTEGER NOT NULL);
+        INSERT INTO schema_version VALUES (12);
+        CREATE TABLE correspondent_profiles (
+            deployment_id TEXT NOT NULL,
+            correspondent_id INTEGER NOT NULL,
+            current_name TEXT NOT NULL,
+            review_status TEXT NOT NULL DEFAULT 'unreviewed',
+            lifecycle_status TEXT NOT NULL DEFAULT 'active',
+            aliases_json TEXT NOT NULL DEFAULT '[]',
+            notes TEXT,
+            profile_defaults_json TEXT NOT NULL DEFAULT '{}',
+            observed_summary_json TEXT NOT NULL DEFAULT '{}',
+            last_analyzed_at TEXT,
+            last_reviewed_at TEXT,
+            orphaned_at TEXT,
+            relinked_from_correspondent_id INTEGER,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (deployment_id, correspondent_id)
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    migrated = Database(path)
+    try:
+        connection = migrated.connect()
+        assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 13
+        assert connection.execute(
+            """SELECT name FROM sqlite_master
+               WHERE type = 'table' AND name = 'correspondent_analysis_snapshots'"""
+        ).fetchone()
     finally:
         migrated.close()
 
@@ -255,6 +299,67 @@ def test_candidate_override_crud_roundtrip(tmp_path) -> None:
         assert db.clear_candidate_overrides(DEPLOYMENT_ID, 42, [999]) == 0
     finally:
         db.close()
+
+
+def test_analysis_snapshots_are_versioned_and_review_requires_resolution(tmp_path) -> None:
+    db = Database(str(tmp_path / "statements.db"))
+    service = CorrespondentPolicyService(db, DEPLOYMENT_ID)
+    documents = [
+        DocumentRecord(
+            id=1,
+            title="Example Bank monthly statement",
+            correspondent_id=42,
+            correspondent_name="Example Bank",
+            document_type_id=3,
+            document_type="Statement",
+            created=date(2026, 1, 3),
+            tag_ids=[7],
+            tags=["Finance"],
+        ),
+        DocumentRecord(
+            id=2,
+            title="Example Bank monthly statement",
+            correspondent_id=42,
+            correspondent_name="Example Bank",
+            document_type_id=3,
+            document_type="Statement",
+            created=date(2026, 2, 3),
+            tag_ids=[7],
+            tags=["Finance"],
+        ),
+    ]
+    try:
+        service.synchronize([{"id": 42, "name": "Example Bank"}])
+
+        first = service.analyze_profile(42, documents, reason="No saved analysis")
+        second = service.analyze_profile(42, documents, reason="manual_reanalysis")
+
+        latest = service.get_latest_snapshot(42)
+        assert latest is not None
+        assert latest.snapshot_version == 2
+        assert latest.result == second
+        assert latest.result.correspondent_id == first.correspondent_id
+        assert service.analysis_stale_reason(42, documents) is None
+        assert service.analysis_stale_reason(42, list(reversed(documents))) is None
+
+        workspace = service.get_review_workspace()
+        assert len(workspace.profiles) == 1
+        assert workspace.analysis_summaries[0].suggestion_count == 1
+        assert workspace.analysis_summaries[0].unresolved_suggestion_count == 1
+
+        with pytest.raises(ValueError, match="Resolve current suggestions"):
+            service.update_profile(42, CorrespondentProfileUpdate(review_status="reviewed"))
+
+        reviewed = service.update_profile(
+            42,
+            CorrespondentProfileUpdate(
+                review_status="reviewed",
+                acknowledge_unresolved_suggestions=True,
+            ),
+        )
+        assert reviewed.review_status == "reviewed"
+    finally:
+        service.close()
 
 
 def test_only_confirmed_cadenced_active_policy_is_alertable(tmp_path) -> None:

@@ -90,8 +90,11 @@ export const endpoints = {
     setProviderOverride: (key: string, body: unknown) => api.post(`/api/statements/providers/${key}/override`, body),
     clearProviderOverride: (key: string) => api.delete(`/api/statements/providers/${key}/override`),
     correspondentProfiles: () => api.get('/api/statements/correspondent-profiles'),
+    correspondentReviewWorkspace: () => api.get('/api/statements/correspondent-review-workspace'),
     correspondentProfile: (id: number) => api.get(`/api/statements/correspondent-profiles/${id}`),
-    syncCorrespondentProfiles: () => api.post('/api/statements/correspondent-profiles/sync'),
+    syncCorrespondentProfiles: () => api.post('/api/statements/correspondent-profiles/sync-and-analyze'),
+    correspondentAnalysisSnapshot: (id: number) =>
+      api.get(`/api/statements/correspondent-profiles/${id}/analysis-snapshot`),
     analyzeCorrespondentProfiles: () => api.post('/api/statements/correspondent-profiles/analyze'),
     analyzeCorrespondentProfile: (id: number, extractMissingAccountIdentifiers = false) =>
       api.post(

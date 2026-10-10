@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 from typing import Any
 
@@ -12,8 +14,11 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSourceUpdate,
     CandidateOverride,
     CorrespondentAnalysisResult,
+    CorrespondentAnalysisSnapshot,
+    CorrespondentAnalysisSummary,
     CorrespondentProfile,
     CorrespondentProfileUpdate,
+    CorrespondentReviewWorkspace,
     CorrespondentSyncResult,
     DocumentExpectation,
     DocumentExpectationCreate,
@@ -65,6 +70,7 @@ class CorrespondentPolicyService:
         *,
         analyzed_at: datetime | None = None,
         account_identifier_extraction_requested: bool = False,
+        reason: str = "manual_reanalysis",
     ) -> CorrespondentAnalysisResult:
         profile = self.get_profile(correspondent_id)
         if profile is None:
@@ -97,11 +103,154 @@ class CorrespondentPolicyService:
                 last_analyzed_at=result.analyzed_at,
             ),
         )
+        self.database.save_correspondent_analysis_snapshot(
+            self.deployment_id,
+            result,
+            algorithm_version="correspondent-analysis-v1",
+            reason=reason,
+            source_fingerprint=self.analysis_source_fingerprint(
+                correspondent_id, documents, statement_series, overrides
+            ),
+        )
         return result
+
+    def analysis_stale_reason(
+        self, correspondent_id: int, documents: list[DocumentRecord]
+    ) -> str | None:
+        snapshot = self.get_latest_snapshot(correspondent_id)
+        if snapshot is None:
+            return "No saved analysis"
+        if snapshot.algorithm_version != "correspondent-analysis-v1":
+            return "Analysis method changed"
+        statement_series = self.database.list_series()
+        for series in statement_series:
+            series["document_ids"] = [
+                document["document_id"]
+                for document in self.database.get_series_documents(series["id"])
+            ]
+        overrides = {
+            override.document_id: override
+            for override in self.database.list_candidate_overrides(
+                self.deployment_id, correspondent_id
+            )
+        }
+        fingerprint = self.analysis_source_fingerprint(
+            correspondent_id, documents, statement_series, overrides
+        )
+        if fingerprint != snapshot.source_fingerprint:
+            return "Paperless history or candidate grouping changed"
+        return None
+
+    @staticmethod
+    def analysis_source_fingerprint(
+        correspondent_id: int,
+        documents: list[DocumentRecord],
+        statement_series: list[dict[str, Any]],
+        overrides: dict[int, CandidateOverride],
+    ) -> str:
+        payload = {
+            "documents": [
+                document.model_dump(mode="json")
+                for document in sorted(documents, key=lambda item: item.id)
+                if document.correspondent_id == correspondent_id
+            ],
+            "series": [
+                {
+                    **series,
+                    "document_ids": sorted(series.get("document_ids", [])),
+                }
+                for series in sorted(statement_series, key=lambda item: str(item.get("id", "")))
+                if series.get("correspondent_id") == correspondent_id
+            ],
+            "overrides": [
+                override.model_dump(mode="json") for _, override in sorted(overrides.items())
+            ],
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _suggestion_is_resolved(suggestion: Any, expectations: list[DocumentExpectation]) -> bool:
+        return any(
+            expectation.status != "retired"
+            and expectation.kind == suggestion.kind
+            and (
+                (
+                    suggestion.statement_series_id is not None
+                    and expectation.statement_series_id == suggestion.statement_series_id
+                )
+                or (
+                    suggestion.statement_series_id is None
+                    and expectation.series_discriminator == suggestion.series_discriminator
+                )
+            )
+            for expectation in expectations
+        )
+
+    def unresolved_suggestion_count(self, correspondent_id: int) -> int:
+        snapshot = self.database.get_latest_correspondent_analysis_snapshot(
+            self.deployment_id, correspondent_id
+        )
+        if snapshot is None:
+            return 0
+        expectations = self.list_expectations(correspondent_id)
+        return sum(
+            not self._suggestion_is_resolved(suggestion, expectations)
+            for suggestion in snapshot.result.suggestions
+        )
+
+    def get_latest_snapshot(self, correspondent_id: int) -> CorrespondentAnalysisSnapshot | None:
+        return self.database.get_latest_correspondent_analysis_snapshot(
+            self.deployment_id, correspondent_id
+        )
+
+    def get_review_workspace(self) -> CorrespondentReviewWorkspace:
+        profiles = self.list_profiles()
+        expectations = self.list_expectations()
+        expectations_by_profile: dict[int, list[DocumentExpectation]] = {}
+        for expectation in expectations:
+            expectations_by_profile.setdefault(expectation.correspondent_id, []).append(expectation)
+        summaries = []
+        for snapshot in self.database.list_latest_correspondent_analysis_snapshots(
+            self.deployment_id
+        ):
+            unresolved = sum(
+                not self._suggestion_is_resolved(
+                    suggestion, expectations_by_profile.get(snapshot.correspondent_id, [])
+                )
+                for suggestion in snapshot.result.suggestions
+            )
+            stale = snapshot.algorithm_version != "correspondent-analysis-v1"
+            summaries.append(
+                CorrespondentAnalysisSummary(
+                    correspondent_id=snapshot.correspondent_id,
+                    snapshot_version=snapshot.snapshot_version,
+                    algorithm_version=snapshot.algorithm_version,
+                    reason=snapshot.reason,
+                    analyzed_at=snapshot.analyzed_at,
+                    suggestion_count=len(snapshot.result.suggestions),
+                    unresolved_suggestion_count=unresolved,
+                    freshness="stale" if stale else "fresh",
+                    stale_reason="Analysis method changed" if stale else None,
+                )
+            )
+        return CorrespondentReviewWorkspace(
+            profiles=profiles,
+            expectations=expectations,
+            analysis_summaries=summaries,
+        )
 
     def update_profile(
         self, correspondent_id: int, update: CorrespondentProfileUpdate
     ) -> CorrespondentProfile:
+        if (
+            update.review_status == "reviewed"
+            and not update.acknowledge_unresolved_suggestions
+            and self.unresolved_suggestion_count(correspondent_id) > 0
+        ):
+            raise ValueError(
+                "Resolve current suggestions or explicitly acknowledge unresolved suggestions"
+            )
         return self.database.update_correspondent_profile(
             self.deployment_id, correspondent_id, update
         )

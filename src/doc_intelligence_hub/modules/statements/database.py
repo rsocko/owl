@@ -22,6 +22,8 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     Cadence,
     CalendarRule,
     CandidateOverride,
+    CorrespondentAnalysisResult,
+    CorrespondentAnalysisSnapshot,
     CorrespondentProfile,
     CorrespondentProfileUpdate,
     CorrespondentSyncResult,
@@ -53,7 +55,7 @@ from doc_intelligence_hub.modules.statements.models import (
     RecommendationResult,
 )
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -224,6 +226,29 @@ CREATE TABLE IF NOT EXISTS correspondent_candidate_overrides (
 
 CREATE INDEX IF NOT EXISTS idx_candidate_overrides_group
     ON correspondent_candidate_overrides(deployment_id, correspondent_id, group_key);
+
+-- Persisted deterministic correspondent analysis (schema v13).
+CREATE TABLE IF NOT EXISTS correspondent_analysis_snapshots (
+    id TEXT PRIMARY KEY,
+    deployment_id TEXT NOT NULL,
+    correspondent_id INTEGER NOT NULL,
+    snapshot_version INTEGER NOT NULL,
+    algorithm_version TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    source_fingerprint TEXT NOT NULL,
+    analyzed_at TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (deployment_id, correspondent_id, snapshot_version),
+    FOREIGN KEY (deployment_id, correspondent_id)
+        REFERENCES correspondent_profiles(deployment_id, correspondent_id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_correspondent_analysis_latest
+    ON correspondent_analysis_snapshots(
+        deployment_id, correspondent_id, snapshot_version DESC
+    );
 
 CREATE TABLE IF NOT EXISTS acquisition_sources (
     id TEXT PRIMARY KEY,
@@ -1592,6 +1617,108 @@ class Database:
         profile = self.get_correspondent_profile(deployment_id, correspondent_id)
         assert profile is not None
         return profile
+
+    def save_correspondent_analysis_snapshot(
+        self,
+        deployment_id: str,
+        result: CorrespondentAnalysisResult,
+        *,
+        algorithm_version: str,
+        reason: str,
+        source_fingerprint: str,
+    ) -> CorrespondentAnalysisSnapshot:
+        conn = self.connect()
+        with conn:
+            next_version = conn.execute(
+                """SELECT COALESCE(MAX(snapshot_version), 0) + 1
+                   FROM correspondent_analysis_snapshots
+                   WHERE deployment_id = ? AND correspondent_id = ?""",
+                (deployment_id, result.correspondent_id),
+            ).fetchone()[0]
+            snapshot_id = str(uuid.uuid4())
+            conn.execute(
+                """INSERT INTO correspondent_analysis_snapshots (
+                       id, deployment_id, correspondent_id, snapshot_version,
+                       algorithm_version, reason, source_fingerprint, analyzed_at, result_json
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    snapshot_id,
+                    deployment_id,
+                    result.correspondent_id,
+                    next_version,
+                    algorithm_version,
+                    reason,
+                    source_fingerprint,
+                    result.analyzed_at,
+                    result.model_dump_json(),
+                ),
+            )
+        return CorrespondentAnalysisSnapshot(
+            id=snapshot_id,
+            correspondent_id=result.correspondent_id,
+            snapshot_version=next_version,
+            algorithm_version=algorithm_version,
+            reason=reason,
+            source_fingerprint=source_fingerprint,
+            analyzed_at=result.analyzed_at,
+            result=result,
+        )
+
+    def get_latest_correspondent_analysis_snapshot(
+        self, deployment_id: str, correspondent_id: int
+    ) -> CorrespondentAnalysisSnapshot | None:
+        conn = self.connect()
+        row = conn.execute(
+            """SELECT * FROM correspondent_analysis_snapshots
+               WHERE deployment_id = ? AND correspondent_id = ?
+               ORDER BY snapshot_version DESC LIMIT 1""",
+            (deployment_id, correspondent_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return CorrespondentAnalysisSnapshot(
+            id=row["id"],
+            correspondent_id=row["correspondent_id"],
+            snapshot_version=row["snapshot_version"],
+            algorithm_version=row["algorithm_version"],
+            reason=row["reason"],
+            source_fingerprint=row["source_fingerprint"],
+            analyzed_at=row["analyzed_at"],
+            result=CorrespondentAnalysisResult.model_validate_json(row["result_json"]),
+        )
+
+    def list_latest_correspondent_analysis_snapshots(
+        self, deployment_id: str
+    ) -> list[CorrespondentAnalysisSnapshot]:
+        conn = self.connect()
+        rows = conn.execute(
+            """SELECT snapshots.*
+               FROM correspondent_analysis_snapshots snapshots
+               JOIN (
+                   SELECT correspondent_id, MAX(snapshot_version) AS snapshot_version
+                   FROM correspondent_analysis_snapshots
+                   WHERE deployment_id = ?
+                   GROUP BY correspondent_id
+               ) latest
+                 ON latest.correspondent_id = snapshots.correspondent_id
+                AND latest.snapshot_version = snapshots.snapshot_version
+               WHERE snapshots.deployment_id = ?
+               ORDER BY snapshots.correspondent_id""",
+            (deployment_id, deployment_id),
+        ).fetchall()
+        return [
+            CorrespondentAnalysisSnapshot(
+                id=row["id"],
+                correspondent_id=row["correspondent_id"],
+                snapshot_version=row["snapshot_version"],
+                algorithm_version=row["algorithm_version"],
+                reason=row["reason"],
+                source_fingerprint=row["source_fingerprint"],
+                analyzed_at=row["analyzed_at"],
+                result=CorrespondentAnalysisResult.model_validate_json(row["result_json"]),
+            )
+            for row in rows
+        ]
 
     def relink_correspondent_profile(
         self,

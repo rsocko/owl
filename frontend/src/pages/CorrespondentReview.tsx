@@ -34,6 +34,29 @@ interface CorrespondentProfile {
   last_reviewed_at?: string | null;
 }
 
+interface AnalysisSummary {
+  correspondent_id: number;
+  snapshot_version: number;
+  algorithm_version: string;
+  reason: string;
+  analyzed_at: string;
+  suggestion_count: number;
+  unresolved_suggestion_count: number;
+  freshness: 'fresh' | 'stale';
+  stale_reason?: string | null;
+}
+
+interface AnalysisSnapshot {
+  id: string;
+  correspondent_id: number;
+  snapshot_version: number;
+  algorithm_version: string;
+  reason: string;
+  source_fingerprint: string;
+  analyzed_at: string;
+  result: AnalysisResult;
+}
+
 interface Cadence {
   frequency: 'monthly' | 'quarterly' | 'annual';
   expected_day?: number | null;
@@ -262,6 +285,16 @@ function formatDate(value?: string | null): string {
   if (!value) return 'Never';
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString();
+}
+
+function formatSnapshotAge(value?: string | null): string {
+  if (!value) return 'No saved analysis';
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return formatDate(value);
+  const days = Math.max(0, Math.floor((Date.now() - timestamp) / 86_400_000));
+  if (days === 0) return 'Analyzed today';
+  if (days === 1) return 'Analyzed yesterday';
+  return `Analyzed ${days} days ago`;
 }
 
 function humanize(value: string): string {
@@ -531,8 +564,8 @@ function SuggestionCard({
   const selectedMode = MODE_OPTIONS.find((option) => option.value === draft.mode);
 
   return (
-    <article className="correspondent-suggestion">
-      <div className="correspondent-suggestion-header">
+    <details className="correspondent-suggestion">
+      <summary className="correspondent-suggestion-header">
         <div>
           <div className="correspondent-suggestion-title">{redactSensitiveNumbers(suggestion.series_discriminator)}</div>
           <div className="correspondent-muted">{humanize(suggestion.kind)} · {suggestion.evidence.sample_size} documents</div>
@@ -545,8 +578,9 @@ function SuggestionCard({
             <ConfidenceBadge pct={Math.round(suggestion.evidence.confidence * 100)} />
           ) : null}
         </div>
-      </div>
+      </summary>
 
+      <div className="correspondent-suggestion-detail">
       <div className="correspondent-evidence-grid">
         <div>
           <span className="correspondent-label">Observed cadence</span>
@@ -942,7 +976,8 @@ function SuggestionCard({
           Dismissal records this review decision only; it creates no active expectation or missing alert.
         </span>
       </div>
-    </article>
+      </div>
+    </details>
   );
 }
 
@@ -1497,6 +1532,7 @@ export default function CorrespondentReview() {
   selectedIdRef.current = selectedId;
   const [profiles, setProfiles] = useState<CorrespondentProfile[]>([]);
   const [expectationsByProfile, setExpectationsByProfile] = useState<Record<number, DocumentExpectation[]>>({});
+  const [analysisSummaries, setAnalysisSummaries] = useState<Record<number, AnalysisSummary>>({});
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [policyPreviews, setPolicyPreviews] = useState<Record<string, ExpectationPolicyPreview>>({});
   const [selectedPolicyOperations, setSelectedPolicyOperations] = useState<Record<string, string[]>>({});
@@ -1518,6 +1554,17 @@ export default function CorrespondentReview() {
   const [externalSyncError, setExternalSyncError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
   const [relinkTarget, setRelinkTarget] = useState('');
+  const [profileSearch, setProfileSearch] = useState('');
+  const [reviewFilter, setReviewFilter] = useState('');
+  const [lifecycleFilter, setLifecycleFilter] = useState('');
+  const [freshnessFilter, setFreshnessFilter] = useState('');
+  const [candidateFilter, setCandidateFilter] = useState('');
+  const [modeFilter, setModeFilter] = useState('');
+  const [importanceFilter, setImportanceFilter] = useState('');
+  const [inventoryLimit, setInventoryLimit] = useState(100);
+  const [candidatePage, setCandidatePage] = useState(0);
+  const [acknowledgeUnresolved, setAcknowledgeUnresolved] = useState(false);
+  const inventoryButtonRefs = useRef(new Map<number, HTMLButtonElement>());
   const [sourceDraft, setSourceDraft] = useState({
     channel: 'portal_manual',
     delivery_mode: 'pull',
@@ -1536,7 +1583,7 @@ export default function CorrespondentReview() {
     setError(null);
     try {
       const [
-        profilePayload,
+        workspacePayload,
         sourcePayload,
         paperlessPayload,
         candidatePayload,
@@ -1544,7 +1591,11 @@ export default function CorrespondentReview() {
         tagsPayload,
         documentTypesPayload,
       ] = await Promise.all([
-        endpoints.statements.correspondentProfiles() as Promise<CorrespondentProfile[]>,
+        endpoints.statements.correspondentReviewWorkspace() as Promise<{
+          profiles: CorrespondentProfile[];
+          expectations: DocumentExpectation[];
+          analysis_summaries: AnalysisSummary[];
+        }>,
         endpoints.statements.acquisitionSources() as Promise<AcquisitionSource[]>,
         endpoints.statements.paperlessUrl() as Promise<{ paperless_url?: string | null }>,
         endpoints.statements.externalCandidates() as Promise<ExternalCandidate[]>,
@@ -1552,13 +1603,7 @@ export default function CorrespondentReview() {
         endpoints.actionQueue.metadataTags() as Promise<{ tags?: Array<{ id: number; name: string }> }>,
         endpoints.actionQueue.metadataDocumentTypes() as Promise<{ document_types?: Array<{ id: number; name: string }> }>,
       ]);
-      const expectationPairs = await Promise.all(
-        profilePayload.map(async (profile) => [
-          profile.correspondent_id,
-          await endpoints.statements.correspondentExpectations(profile.correspondent_id) as DocumentExpectation[],
-        ] as const),
-      );
-      setProfiles(profilePayload);
+      setProfiles(workspacePayload.profiles);
       setAcquisitionSources(sourcePayload);
       setTags((tagsPayload.tags ?? []).map((tag) => ({ value: String(tag.id), label: tag.name })));
       setDocumentTypes((documentTypesPayload.document_types ?? []).map((documentType) => ({
@@ -1568,7 +1613,16 @@ export default function CorrespondentReview() {
       setPaperlessUrl((paperlessPayload.paperless_url ?? '').replace(/\/$/, ''));
       setExternalCandidates(candidatePayload);
       setExternalConnection(connectionPayload);
-      setExpectationsByProfile(Object.fromEntries(expectationPairs));
+      setExpectationsByProfile(workspacePayload.expectations.reduce<Record<number, DocumentExpectation[]>>(
+        (groups, expectation) => {
+          (groups[expectation.correspondent_id] ??= []).push(expectation);
+          return groups;
+        },
+        {},
+      ));
+      setAnalysisSummaries(Object.fromEntries(
+        workspacePayload.analysis_summaries.map((summary) => [summary.correspondent_id, summary]),
+      ));
     } catch (requestError) {
       setError(getErrorMessage(requestError));
     } finally {
@@ -1581,13 +1635,35 @@ export default function CorrespondentReview() {
   }, [loadWorkspace]);
 
   useEffect(() => {
-    setAnalysis(null);
     setPolicyPreviews({});
     setSelectedPolicyOperations({});
     setPolicyReasons({});
     setPolicyResults({});
     setUndonePolicyOperations([]);
     setRelinkTarget('');
+    setAcknowledgeUnresolved(false);
+    setCandidatePage(0);
+    if (!selectedId) {
+      setAnalysis(null);
+      return;
+    }
+    setDetailLoading(true);
+    void (async () => {
+      try {
+        const snapshot = await endpoints.statements.correspondentAnalysisSnapshot(
+          selectedId,
+        ) as AnalysisSnapshot | null;
+        if (selectedIdRef.current === selectedId) {
+          setAnalysis(snapshot?.result ?? null);
+        }
+      } catch (requestError) {
+        if (selectedIdRef.current === selectedId) {
+          setToast({ message: getErrorMessage(requestError), tone: 'error' });
+        }
+      } finally {
+        if (selectedIdRef.current === selectedId) setDetailLoading(false);
+      }
+    })();
   }, [selectedId]);
 
   useEffect(() => {
@@ -1596,16 +1672,51 @@ export default function CorrespondentReview() {
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
+  const filteredProfiles = useMemo(() => {
+    const query = profileSearch.trim().toLocaleLowerCase();
+    return profiles.filter((profile) => {
+      const expectations = expectationsByProfile[profile.correspondent_id] ?? [];
+      const summary = analysisSummaries[profile.correspondent_id];
+      return (!query || profile.current_name.toLocaleLowerCase().includes(query))
+        && (!reviewFilter || profile.review_status === reviewFilter)
+        && (!lifecycleFilter || profile.lifecycle_status === lifecycleFilter)
+        && (!freshnessFilter || (
+          freshnessFilter === 'missing'
+            ? !summary
+            : summary?.freshness === freshnessFilter
+        ))
+        && (!candidateFilter || (
+          candidateFilter === 'unresolved'
+            ? (summary?.unresolved_suggestion_count ?? 0) > 0
+            : (summary?.unresolved_suggestion_count ?? 0) === 0
+        ))
+        && (!modeFilter || expectations.some((expectation) =>
+          expectation.expectation_mode === modeFilter))
+        && (!importanceFilter || expectations.some((expectation) =>
+          expectation.importance === importanceFilter));
+    });
+  }, [
+    analysisSummaries,
+    candidateFilter,
+    expectationsByProfile,
+    freshnessFilter,
+    importanceFilter,
+    lifecycleFilter,
+    modeFilter,
+    profileSearch,
+    profiles,
+    reviewFilter,
+  ]);
   const sortedProfiles = useMemo(
-    () => [...profiles].sort((left, right) => {
+    () => [...filteredProfiles].sort((left, right) => {
       const leftPriority = profilePriority(left, expectationsByProfile[left.correspondent_id]?.length ?? 0);
       const rightPriority = profilePriority(right, expectationsByProfile[right.correspondent_id]?.length ?? 0);
       return leftPriority.rank - rightPriority.rank || left.current_name.localeCompare(right.current_name);
     }),
-    [profiles, expectationsByProfile],
+    [filteredProfiles, expectationsByProfile],
   );
   const profileGroups = useMemo(
-    () => sortedProfiles.reduce<Array<{
+    () => sortedProfiles.slice(0, inventoryLimit).reduce<Array<{
       rank: number;
       label: string;
       profiles: CorrespondentProfile[];
@@ -1622,8 +1733,35 @@ export default function CorrespondentReview() {
       }
       return groups;
     }, []),
-    [expectationsByProfile, sortedProfiles],
+    [expectationsByProfile, inventoryLimit, sortedProfiles],
   );
+  const selectedSummary = selectedId ? analysisSummaries[selectedId] : undefined;
+  const unresolvedSuggestionCount = selectedSummary?.unresolved_suggestion_count
+    ?? (analysis?.suggestions.length ?? 0);
+  const importanceOptions: Importance[] = ['routine', 'important', 'critical'];
+  const currentFilteredIndex = sortedProfiles.findIndex(
+    (profile) => profile.correspondent_id === selectedId,
+  );
+  const candidatePageSize = 20;
+  const candidatePageCount = analysis
+    ? Math.max(1, Math.ceil(analysis.suggestions.length / candidatePageSize))
+    : 1;
+  const candidatePageSuggestions = analysis?.suggestions.slice(
+    candidatePage * candidatePageSize,
+    (candidatePage + 1) * candidatePageSize,
+  ) ?? [];
+  const navigateRelative = (offset: number) => {
+    const profile = sortedProfiles[currentFilteredIndex + offset];
+    if (profile) navigate(`/correspondents/${profile.correspondent_id}`);
+  };
+  const focusInventorySibling = (profileId: number, offset: number) => {
+    const index = sortedProfiles.findIndex((profile) => profile.correspondent_id === profileId);
+    const target = sortedProfiles[index + offset];
+    if (!target) return;
+    if (index + offset >= inventoryLimit) setInventoryLimit((current) => current + 100);
+    navigate(`/correspondents/${target.correspondent_id}`);
+    window.setTimeout(() => inventoryButtonRefs.current.get(target.correspondent_id)?.focus(), 0);
+  };
   const runAction = useCallback(async (action: () => Promise<unknown>, successMessage: string) => {
     setBusy(true);
     try {
@@ -1657,6 +1795,10 @@ export default function CorrespondentReview() {
         tone: 'success',
       });
       await loadWorkspace(false);
+      const snapshot = await endpoints.statements.correspondentAnalysisSnapshot(
+        selectedId,
+      ) as AnalysisSnapshot | null;
+      if (selectedIdRef.current === selectedId && snapshot) setAnalysis(snapshot.result);
     } catch (requestError) {
       setToast({ message: getErrorMessage(requestError), tone: 'error' });
     } finally {
@@ -1690,21 +1832,12 @@ export default function CorrespondentReview() {
         const { kind: _kind, statement_series_id: _seriesId, ...updateBody } = expectationBody;
         await endpoints.statements.updateDocumentExpectation(existing.id, updateBody);
       }
-      try {
-        await endpoints.statements.updateCorrespondentProfile(selectedId, {
-          review_status: 'reviewed',
-          last_reviewed_at: new Date().toISOString(),
-        });
-        setToast({
-          message: status === 'confirmed' ? 'Expectation confirmed.' : 'Suggestion dismissed.',
-          tone: 'success',
-        });
-      } catch (profileError) {
-        setToast({
-          message: `${status === 'confirmed' ? 'Expectation confirmed' : 'Suggestion dismissed'}, but the profile review status was not updated: ${getErrorMessage(profileError)}`,
-          tone: 'error',
-        });
-      }
+      setToast({
+        message: status === 'confirmed'
+          ? 'Expectation confirmed. Continue reviewing the remaining suggestions.'
+          : 'Suggestion dismissed. Continue reviewing the remaining suggestions.',
+        tone: 'success',
+      });
       await loadWorkspace(false);
     } catch (requestError) {
       setToast({ message: getErrorMessage(requestError), tone: 'error' });
@@ -1906,7 +2039,7 @@ export default function CorrespondentReview() {
                   'All active correspondents analyzed.',
                 )}
               >
-                Analyze all
+                Reanalyze all
               </Button>
             </div>
           }
@@ -1961,10 +2094,91 @@ export default function CorrespondentReview() {
         <div className="correspondent-workspace">
           <aside className="correspondent-inventory" aria-label="Correspondent inventory">
             <div className="correspondent-inventory-header">
-              <strong>Review queue</strong>
-              <span>{profiles.filter((profile) => profile.review_status === 'unreviewed').length} unreviewed</span>
+              <div>
+                <strong>Review queue</strong>
+                <span>{profiles.filter((profile) => profile.review_status === 'unreviewed').length} unreviewed</span>
+              </div>
+              <span>{sortedProfiles.length} shown</span>
+            </div>
+            <div className="correspondent-inventory-filters">
+              <label className="correspondent-search">
+                <span className="sr-only">Search correspondents</span>
+                <input
+                  value={profileSearch}
+                  placeholder="Search correspondents"
+                  onChange={(event) => {
+                    setProfileSearch(event.target.value);
+                    setInventoryLimit(100);
+                  }}
+                />
+              </label>
+              <select
+                aria-label="Filter by review status"
+                value={reviewFilter}
+                onChange={(event) => setReviewFilter(event.target.value)}
+              >
+                <option value="">All review states</option>
+                <option value="unreviewed">Unreviewed</option>
+                <option value="reviewed">Reviewed</option>
+                <option value="ignored">Ignored</option>
+              </select>
+              <select
+                aria-label="Filter by lifecycle"
+                value={lifecycleFilter}
+                onChange={(event) => setLifecycleFilter(event.target.value)}
+              >
+                <option value="">All lifecycle states</option>
+                <option value="active">Active</option>
+                <option value="orphaned">Orphaned</option>
+                <option value="retired">Retired</option>
+              </select>
+              <select
+                aria-label="Filter by analysis freshness"
+                value={freshnessFilter}
+                onChange={(event) => setFreshnessFilter(event.target.value)}
+              >
+                <option value="">Any analysis age</option>
+                <option value="fresh">Fresh</option>
+                <option value="stale">Stale</option>
+                <option value="missing">Not analyzed</option>
+              </select>
+              <select
+                aria-label="Filter by candidate state"
+                value={candidateFilter}
+                onChange={(event) => setCandidateFilter(event.target.value)}
+              >
+                <option value="">Any candidate state</option>
+                <option value="unresolved">Has unresolved candidates</option>
+                <option value="resolved">Candidates resolved</option>
+              </select>
+              <select
+                aria-label="Filter by expectation mode"
+                value={modeFilter}
+                onChange={(event) => setModeFilter(event.target.value)}
+              >
+                <option value="">Any expectation mode</option>
+                {MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <select
+                aria-label="Filter by importance"
+                value={importanceFilter}
+                onChange={(event) => setImportanceFilter(event.target.value)}
+              >
+                <option value="">Any importance</option>
+                {importanceOptions.map((importance) => (
+                  <option key={importance} value={importance}>{humanize(importance)}</option>
+                ))}
+              </select>
             </div>
             <div className="correspondent-inventory-list">
+              {sortedProfiles.length === 0 ? (
+                <div className="tyrion-empty compact">
+                  <strong>No matching correspondents</strong>
+                  <span>Clear one or more filters to restore the queue.</span>
+                </div>
+              ) : null}
               {profileGroups.map((group) => (
                 <section className="correspondent-inventory-group" key={group.rank}>
                   <div className="correspondent-inventory-group-header">
@@ -1980,11 +2194,30 @@ export default function CorrespondentReview() {
                         type="button"
                         className={`correspondent-inventory-item ${selectedId === profile.correspondent_id ? 'active' : ''}`}
                         onClick={() => navigate(`/correspondents/${profile.correspondent_id}`)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'ArrowDown') {
+                            event.preventDefault();
+                            focusInventorySibling(profile.correspondent_id, 1);
+                          }
+                          if (event.key === 'ArrowUp') {
+                            event.preventDefault();
+                            focusInventorySibling(profile.correspondent_id, -1);
+                          }
+                        }}
+                        ref={(node) => {
+                          if (node) inventoryButtonRefs.current.set(profile.correspondent_id, node);
+                          else inventoryButtonRefs.current.delete(profile.correspondent_id);
+                        }}
                         aria-current={selectedId === profile.correspondent_id ? 'true' : undefined}
                       >
                         <div>
                           <strong>{redactSensitiveNumbers(profile.current_name)}</strong>
-                          <span>{profile.observed_summary.document_count} docs · {expectations} expectations</span>
+                          <span>
+                            {profile.observed_summary.document_count} docs · {expectations} expectations
+                            {(analysisSummaries[profile.correspondent_id]?.unresolved_suggestion_count ?? 0) > 0
+                              ? ` · ${analysisSummaries[profile.correspondent_id].unresolved_suggestion_count} unresolved`
+                              : ''}
+                          </span>
                         </div>
                         <Badge tone={priority.tone}>{priority.label}</Badge>
                       </button>
@@ -1992,10 +2225,17 @@ export default function CorrespondentReview() {
                   })}
                 </section>
               ))}
+              {inventoryLimit < sortedProfiles.length ? (
+                <div className="correspondent-load-more">
+                  <Button onClick={() => setInventoryLimit((current) => current + 100)}>
+                    Load 100 more
+                  </Button>
+                </div>
+              ) : null}
             </div>
           </aside>
 
-          <section className="correspondent-detail">
+          <section className="correspondent-detail" aria-busy={detailLoading}>
             {!selectedProfile ? (
               <Card>
                 <EmptyState icon="👈" title="Select a correspondent" desc="Choose an item from the prioritized queue to inspect its evidence and policy." />
@@ -2019,32 +2259,86 @@ export default function CorrespondentReview() {
                         title="Extract masked account identifiers from OCR for this analysis only"
                         onClick={() => void analyzeSelected(true)}
                       >
-                        Analyze with account OCR
+                        Reanalyze with account OCR
                       </Button>
                       <Button
                         variant="primary"
                         disabled={detailLoading || busy || selectedProfileTerminal}
                         onClick={() => void analyzeSelected(false)}
                       >
-                        {detailLoading ? 'Analyzing…' : 'Analyze history'}
+                        {detailLoading ? 'Reanalyzing…' : 'Reanalyze'}
                       </Button>
                     </div>
                   }
                 >
+                  <div className="correspondent-analysis-status" role="status" aria-live="polite">
+                    <div>
+                      <strong>{formatSnapshotAge(selectedSummary?.analyzed_at ?? selectedProfile.last_analyzed_at)}</strong>
+                      <span>
+                        {selectedSummary?.stale_reason
+                          ?? selectedSummary?.reason
+                          ?? 'Reanalyze after Paperless history or grouping changes.'}
+                      </span>
+                    </div>
+                    {detailLoading ? <span className="correspondent-inline-loading">Updating analysis…</span> : null}
+                  </div>
                   <div className="correspondent-summary-grid">
                     <div><span>Documents</span><strong>{selectedProfile.observed_summary.document_count}</strong></div>
                     <div><span>Candidate series</span><strong>{selectedProfile.observed_summary.candidate_series_count}</strong></div>
                     <div><span>Title patterns</span><strong>{selectedProfile.observed_summary.title_pattern_count}</strong></div>
                     <div><span>Last analyzed</span><strong>{formatDate(selectedProfile.last_analyzed_at)}</strong></div>
                   </div>
+                  <div className="correspondent-review-navigation">
+                    <div>
+                      <strong>
+                        {profiles.filter((profile) => profile.review_status === 'reviewed').length}
+                        {' of '}
+                        {profiles.length} profiles reviewed
+                      </strong>
+                      <span>{unresolvedSuggestionCount} current suggestions unresolved</span>
+                    </div>
+                    <div className="correspondent-actions">
+                      <Button
+                        size="sm"
+                        disabled={currentFilteredIndex <= 0}
+                        onClick={() => navigateRelative(-1)}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={currentFilteredIndex < 0 || currentFilteredIndex >= sortedProfiles.length - 1}
+                        onClick={() => navigateRelative(1)}
+                      >
+                        Next in queue
+                      </Button>
+                    </div>
+                  </div>
                   <div className="correspondent-actions correspondent-profile-actions">
+                    {unresolvedSuggestionCount > 0 ? (
+                      <label className="correspondent-acknowledgement">
+                        <input
+                          type="checkbox"
+                          checked={acknowledgeUnresolved}
+                          onChange={(event) => setAcknowledgeUnresolved(event.target.checked)}
+                        />
+                        Mark reviewed with {unresolvedSuggestionCount} unresolved suggestion
+                        {unresolvedSuggestionCount === 1 ? '' : 's'}
+                      </label>
+                    ) : null}
                     <Button
                       variant="success"
-                      disabled={busy || selectedProfile.review_status === 'reviewed' || selectedProfileTerminal}
+                      disabled={
+                        busy
+                        || selectedProfile.review_status === 'reviewed'
+                        || selectedProfileTerminal
+                        || (unresolvedSuggestionCount > 0 && !acknowledgeUnresolved)
+                      }
                       onClick={() => void runAction(
                         () => endpoints.statements.updateCorrespondentProfile(selectedProfile.correspondent_id, {
                           review_status: 'reviewed',
                           last_reviewed_at: new Date().toISOString(),
+                          acknowledge_unresolved_suggestions: acknowledgeUnresolved,
                         }),
                         'Correspondent marked reviewed.',
                       )}
@@ -2362,15 +2656,36 @@ export default function CorrespondentReview() {
                 </Card>
                 </div>
 
-                {detailLoading ? <SkeletonLoader variant="cards" /> : null}
                 {analysis?.correspondent_id === selectedId && !selectedProfileTerminal ? (
                   <div id="correspondent-candidate-expectations" className="correspondent-section-anchor">
-                  <Card title={`Candidate expectations (${analysis.suggestions.length})`}>
+                  <Card
+                    title={`Candidate expectations (${analysis.suggestions.length})`}
+                    actions={analysis.suggestions.length > candidatePageSize ? (
+                      <div className="correspondent-candidate-pagination" aria-label="Candidate pages">
+                        <Button
+                          size="sm"
+                          disabled={candidatePage === 0}
+                          onClick={() => setCandidatePage((page) => Math.max(0, page - 1))}
+                        >
+                          Previous candidates
+                        </Button>
+                        <span>Page {candidatePage + 1} of {candidatePageCount}</span>
+                        <Button
+                          size="sm"
+                          disabled={candidatePage >= candidatePageCount - 1}
+                          onClick={() => setCandidatePage((page) =>
+                            Math.min(candidatePageCount - 1, page + 1))}
+                        >
+                          Next candidates
+                        </Button>
+                      </div>
+                    ) : null}
+                  >
                     {analysis.suggestions.length === 0 ? (
                       <EmptyState icon="✓" title="No policy candidates" desc="Paperless history did not contain enough bounded evidence for a suggestion." />
                     ) : (
                       <div className="correspondent-suggestions">
-                        {analysis.suggestions.map((suggestion) => (
+                        {candidatePageSuggestions.map((suggestion) => (
                           <SuggestionCard
                             key={suggestion.suggestion_key}
                             suggestion={suggestion}

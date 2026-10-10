@@ -7,7 +7,7 @@ from datetime import date
 from typing import Any, Literal
 
 import httpx
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from fastapi.responses import Response
 from starlette.responses import StreamingResponse
 
@@ -44,8 +44,10 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     CandidateOverrideClearRequest,
     CandidateOverrideRequest,
     CorrespondentAnalysisResult,
+    CorrespondentAnalysisSnapshot,
     CorrespondentProfile,
     CorrespondentProfileUpdate,
+    CorrespondentReviewWorkspace,
     CorrespondentSyncResult,
     DocumentExpectation,
     DocumentExpectationCreate,
@@ -426,6 +428,49 @@ async def sync_correspondent_profiles(request: Request) -> CorrespondentSyncResu
         service.close()
 
 
+async def _analyze_stale_correspondent_profiles(request: Request) -> None:
+    try:
+        _, documents = await _load_policy_analysis_documents(request)
+        service = _get_policy_service(request)
+        try:
+            for profile in service.list_profiles():
+                if profile.lifecycle_status != "active":
+                    continue
+                reason = service.analysis_stale_reason(profile.correspondent_id, documents)
+                if reason:
+                    service.analyze_profile(
+                        profile.correspondent_id,
+                        documents,
+                        reason=reason,
+                    )
+        finally:
+            service.close()
+    except Exception:
+        logger.exception("Queued correspondent analysis failed")
+
+
+@router.post(
+    "/correspondent-profiles/sync-and-analyze",
+    response_model=CorrespondentSyncResult,
+    summary="Synchronize correspondents and queue deterministic stale analysis",
+)
+async def sync_and_analyze_correspondent_profiles(
+    request: Request, background_tasks: BackgroundTasks
+) -> CorrespondentSyncResult:
+    client = make_paperless_client(request, timeout=30.0)
+    try:
+        correspondents = await client.list_correspondents()
+    finally:
+        await client.aclose()
+    service = _get_policy_service(request)
+    try:
+        result = service.synchronize(correspondents)
+    finally:
+        service.close()
+    background_tasks.add_task(_analyze_stale_correspondent_profiles, request)
+    return result
+
+
 @router.post(
     "/correspondent-profiles/analyze",
     response_model=list[CorrespondentAnalysisResult],
@@ -435,11 +480,20 @@ async def analyze_correspondent_profiles(request: Request) -> list[Correspondent
     _, documents = await _load_policy_analysis_documents(request)
     service = _get_policy_service(request)
     try:
-        return [
-            service.analyze_profile(profile.correspondent_id, documents)
-            for profile in service.list_profiles()
-            if profile.lifecycle_status == "active"
-        ]
+        results = []
+        for profile in service.list_profiles():
+            if profile.lifecycle_status != "active":
+                continue
+            reason = service.analysis_stale_reason(profile.correspondent_id, documents)
+            if reason:
+                results.append(
+                    service.analyze_profile(
+                        profile.correspondent_id,
+                        documents,
+                        reason=reason,
+                    )
+                )
+        return results
     finally:
         service.close()
 
@@ -489,6 +543,42 @@ async def list_correspondent_profiles(request: Request) -> list[CorrespondentPro
     service = _get_policy_service(request)
     try:
         return service.list_profiles()
+    finally:
+        service.close()
+
+
+@router.get(
+    "/correspondent-review-workspace",
+    response_model=CorrespondentReviewWorkspace,
+    summary="Load the bounded correspondent review inventory",
+)
+async def get_correspondent_review_workspace(
+    request: Request,
+) -> CorrespondentReviewWorkspace:
+    service = _get_policy_service(request)
+    try:
+        return service.get_review_workspace()
+    finally:
+        service.close()
+
+
+@router.get(
+    "/correspondent-profiles/{correspondent_id}/analysis-snapshot",
+    response_model=CorrespondentAnalysisSnapshot | None,
+    summary="Get the latest persisted correspondent analysis",
+)
+async def get_correspondent_analysis_snapshot(
+    request: Request, correspondent_id: int
+) -> CorrespondentAnalysisSnapshot | None:
+    service = _get_policy_service(request)
+    try:
+        if service.get_profile(correspondent_id) is None:
+            raise_api_error(
+                404,
+                "correspondent_profile_not_found",
+                "Correspondent profile not found.",
+            )
+        return service.get_latest_snapshot(correspondent_id)
     finally:
         service.close()
 

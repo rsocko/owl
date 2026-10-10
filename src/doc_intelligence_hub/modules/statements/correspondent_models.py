@@ -555,6 +555,7 @@ class AcquisitionSource(AcquisitionSourceBase):
 
 class CorrespondentProfileUpdate(PolicyModel):
     review_status: ProfileReviewStatus | None = None
+    acknowledge_unresolved_suggestions: bool = False
     lifecycle_status: Literal["retired"] | None = None
     aliases: list[str] | None = None
     notes: str | None = Field(default=None, max_length=4000)
@@ -961,6 +962,35 @@ class CorrespondentAnalysisResult(PolicyModel):
         default_factory=AccountIdentifierAnalysis
     )
     suggestions: list[ExpectationPolicySuggestion] = Field(default_factory=list)
+
+
+class CorrespondentAnalysisSnapshot(PolicyModel):
+    id: str
+    correspondent_id: int = Field(gt=0)
+    snapshot_version: int = Field(gt=0)
+    algorithm_version: str
+    reason: str
+    source_fingerprint: str
+    analyzed_at: str
+    result: CorrespondentAnalysisResult
+
+
+class CorrespondentAnalysisSummary(PolicyModel):
+    correspondent_id: int = Field(gt=0)
+    snapshot_version: int = Field(gt=0)
+    algorithm_version: str
+    reason: str
+    analyzed_at: str
+    suggestion_count: int = Field(ge=0)
+    unresolved_suggestion_count: int = Field(ge=0)
+    freshness: Literal["fresh", "stale"]
+    stale_reason: str | None = None
+
+
+class CorrespondentReviewWorkspace(PolicyModel):
+    profiles: list[CorrespondentProfile] = Field(default_factory=list)
+    expectations: list[DocumentExpectation] = Field(default_factory=list)
+    analysis_summaries: list[CorrespondentAnalysisSummary] = Field(default_factory=list)
 
 
 def json_model(model_type: type[PolicyModel], value: str | None, default: Any) -> Any:
