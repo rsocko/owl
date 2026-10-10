@@ -34,6 +34,7 @@ from doc_intelligence_hub.api.routers import (
     metadata,
     ocr_quality,
     ocr_quality_candidates,
+    payment_reconciliation,
     receipt_intake,
     relationships,
     statements,
@@ -426,6 +427,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(ocr_quality_candidates.router)
     app.include_router(analysis_invalidation.router)
     app.include_router(receipt_intake.router)
+    app.include_router(payment_reconciliation.router)
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:

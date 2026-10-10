@@ -59,6 +59,9 @@ class Obligation(Base):
     status = Column(String, nullable=False, default="open", index=True)
     completion_suggested = Column(Boolean, nullable=False, default=False)
     suggestion_reason = Column(Text, nullable=True)
+    expected_amount_minor = Column(Integer, nullable=True)
+    currency = Column(String, nullable=True)
+    revision = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -137,6 +140,193 @@ class ObligationDocument(Base):
     excluded = Column(Boolean, nullable=False, default=False)
     excluded_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PaymentEvidence(Base):
+    """Privacy-bounded payment evidence owned by the Action Queue aggregate."""
+
+    __tablename__ = "payment_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_system",
+            "connector_ref",
+            "evidence_ref",
+            name="uq_payment_evidence_source_identity",
+        ),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    source_system = Column(String, nullable=False, index=True)
+    connector_ref = Column(String, nullable=False)
+    evidence_ref = Column(String, nullable=False)
+    canonical_document_ref = Column(String, nullable=True, index=True)
+    transaction_ref = Column(String, nullable=True)
+    receipt_ref = Column(String, nullable=True)
+    kind = Column(String, nullable=False)
+    payee_hint = Column(String, nullable=True)
+    amount_minor = Column(Integer, nullable=True)
+    currency = Column(String, nullable=True)
+    evidence_date = Column(Date, nullable=True)
+    reference_present = Column(Boolean, nullable=False, default=False)
+    reference_digest = Column(String, nullable=True)
+    source_state = Column(String, nullable=False)
+    match_state = Column(String, nullable=False)
+    payment_status = Column(String, nullable=False)
+    confidence = Column(String, nullable=True)
+    reason_codes = Column(JSON, nullable=False, default=list)
+    source_generation = Column(String, nullable=False)
+    source_revision = Column(String, nullable=True)
+    source_as_of = Column(DateTime, nullable=False, index=True)
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    payload_digest = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ObligationPaymentEdge(Base):
+    """Current and historical association between an obligation and payment evidence."""
+
+    __tablename__ = "obligation_payment_edges"
+    __table_args__ = (
+        UniqueConstraint("obligation_id", "evidence_id", name="uq_obligation_payment_evidence"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    obligation_id = Column(String, nullable=False, index=True)
+    evidence_id = Column(String, nullable=False, index=True)
+    state = Column(String, nullable=False, default="proposed", index=True)
+    provenance = Column(String, nullable=False, default="automatic")
+    allocated_amount_minor = Column(Integer, nullable=True)
+    confidence = Column(String, nullable=True)
+    reason_codes = Column(JSON, nullable=False, default=list)
+    manual_precedence = Column(Boolean, nullable=False, default=False)
+    revision = Column(Integer, nullable=False, default=1)
+    replaced_by_edge_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    removed_at = Column(DateTime, nullable=True)
+
+
+class PaymentRelationshipEvent(Base):
+    """Immutable audit event for one payment reconciliation transition."""
+
+    __tablename__ = "payment_relationship_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "action_scope",
+            "idempotency_key",
+            name="uq_payment_event_idempotency",
+        ),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    action_scope = Column(String, nullable=False)
+    idempotency_key = Column(String, nullable=False)
+    edge_id = Column(String, nullable=True, index=True)
+    obligation_id = Column(String, nullable=False, index=True)
+    evidence_id = Column(String, nullable=True, index=True)
+    action = Column(String, nullable=False)
+    actor = Column(String, nullable=False)
+    provenance = Column(String, nullable=False)
+    previous_state = Column(JSON, nullable=False, default=dict)
+    new_state = Column(JSON, nullable=False, default=dict)
+    source_generation = Column(String, nullable=True)
+    source_revision = Column(String, nullable=True)
+    expected_revision = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class PaymentEvidenceGeneration(Base):
+    """Processed source generation used for replay and payload-collision protection."""
+
+    __tablename__ = "payment_evidence_generations"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_system",
+            "connector_ref",
+            "obligation_id",
+            "source_generation",
+            name="uq_payment_evidence_generation",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_system = Column(String, nullable=False)
+    connector_ref = Column(String, nullable=False)
+    obligation_id = Column(String, nullable=False, index=True)
+    source_generation = Column(String, nullable=False)
+    source_as_of = Column(DateTime, nullable=False)
+    payload_digest = Column(String, nullable=False)
+    disposition = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class PaymentEvidenceSource(Base):
+    """Latest accepted cursor for one payment-evidence source."""
+
+    __tablename__ = "payment_evidence_sources"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_system",
+            "connector_ref",
+            "obligation_id",
+            name="uq_payment_evidence_source",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_system = Column(String, nullable=False)
+    connector_ref = Column(String, nullable=False)
+    obligation_id = Column(String, nullable=False, index=True)
+    source_generation = Column(String, nullable=False)
+    source_as_of = Column(DateTime, nullable=False)
+    source_revision = Column(String, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PaymentReconciliationCase(Base):
+    """Revisioned review aggregate exposed to specialist and Mission Control APIs."""
+
+    __tablename__ = "payment_reconciliation_cases"
+    __table_args__ = (
+        UniqueConstraint(
+            "obligation_id",
+            "evidence_id",
+            "case_kind",
+            name="uq_payment_reconciliation_case",
+        ),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    obligation_id = Column(String, nullable=False, index=True)
+    evidence_id = Column(String, nullable=True, index=True)
+    case_kind = Column(String, nullable=False, index=True)
+    state = Column(String, nullable=False, default="open", index=True)
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    revision = Column(Integer, nullable=False, default=1)
+    summary = Column(JSON, nullable=False, default=dict)
+    attention_state = Column(String, nullable=False, default="pending", index=True)
+    attention_delivery_ref = Column(String, nullable=True)
+    deferred_until = Column(DateTime, nullable=True)
+    source_as_of = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PaymentActionReceipt(Base):
+    """Durable idempotency receipt for externally invoked aggregate actions."""
+
+    __tablename__ = "payment_action_receipts"
+    __table_args__ = (
+        UniqueConstraint("case_id", "idempotency_key", name="uq_payment_case_action_key"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    case_id = Column(String, nullable=False, index=True)
+    idempotency_key = Column(String, nullable=False)
+    payload_digest = Column(String, nullable=False)
+    result = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class ObligationEvent(Base):
@@ -248,6 +438,11 @@ def init_db():
     engine = get_engine()
     Base.metadata.create_all(engine)
     _migrate_missing_columns(engine)
+    from .payment_reconciliation import PaymentReconciliationService
+
+    with Session(engine) as session:
+        PaymentReconciliationService(session).backfill_legacy_receipts()
+        session.commit()
 
 
 def _migrate_missing_columns(engine):
@@ -262,6 +457,15 @@ def _migrate_missing_columns(engine):
     inspector = sa_inspect(engine)
 
     _expected_additions: dict[str, list[tuple[str, str]]] = {
+        "obligations": [
+            ("expected_amount_minor", "INTEGER"),
+            ("currency", "TEXT"),
+            ("revision", "INTEGER DEFAULT 1 NOT NULL"),
+            ("identity_key", "TEXT"),
+            ("authoritative_document_id", "INTEGER"),
+            ("relationship_explanation", "TEXT"),
+            ("relationship_rules", "TEXT"),
+        ],
         "actions": [
             ("risk_score", "INTEGER DEFAULT 0"),
             ("version", "INTEGER DEFAULT 1 NOT NULL"),
@@ -285,12 +489,6 @@ def _migrate_missing_columns(engine):
             ("superseded_by_action_id", "INTEGER"),
             ("obligation_id", "TEXT"),
             ("relationship_base_snapshot", "TEXT"),
-        ],
-        "obligations": [
-            ("identity_key", "TEXT"),
-            ("authoritative_document_id", "INTEGER"),
-            ("relationship_explanation", "TEXT"),
-            ("relationship_rules", "TEXT"),
         ],
         "action_feedback": [
             ("original_urgency", "TEXT"),
