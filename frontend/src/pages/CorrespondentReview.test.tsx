@@ -6,6 +6,7 @@ import CorrespondentReview from './CorrespondentReview';
 const mocks = vi.hoisted(() => ({
   profiles: vi.fn(),
   analyze: vi.fn(),
+  snapshot: vi.fn(),
   createExpectation: vi.fn(),
   updateProfile: vi.fn(),
   externalCandidates: vi.fn(),
@@ -35,6 +36,12 @@ vi.mock('../lib/api', () => ({
     },
     statements: {
       correspondentProfiles: mocks.profiles,
+      correspondentReviewWorkspace: vi.fn(async () => ({
+        profiles: await mocks.profiles(),
+        expectations: await mocks.expectations(),
+        analysis_summaries: [],
+      })),
+      correspondentAnalysisSnapshot: mocks.snapshot,
       acquisitionSources: vi.fn().mockResolvedValue([]),
       paperlessUrl: vi.fn().mockResolvedValue({ paperless_url: 'https://paperless.test' }),
       correspondentExpectations: mocks.expectations,
@@ -140,6 +147,7 @@ beforeEach(() => {
     },
     suggestions: [suggestion],
   });
+  mocks.snapshot.mockResolvedValue(null);
   mocks.createExpectation.mockResolvedValue({ id: 'expectation-1' });
   mocks.updateProfile.mockResolvedValue({});
   mocks.externalCandidates.mockResolvedValue([]);
@@ -216,13 +224,73 @@ function renderPage() {
 }
 
 describe('Correspondent Review', () => {
+  it('loads a persisted analysis without requiring a first analysis action', async () => {
+    const persistedResult = await mocks.analyze();
+    mocks.analyze.mockClear();
+    mocks.snapshot.mockResolvedValue({
+      id: 'snapshot-1',
+      correspondent_id: 42,
+      snapshot_version: 1,
+      algorithm_version: 'correspondent-analysis-v1',
+      reason: 'No saved analysis',
+      source_fingerprint: 'stable',
+      analyzed_at: persistedResult.analyzed_at,
+      result: persistedResult,
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Checking')).toBeInTheDocument();
+    expect(mocks.analyze).not.toHaveBeenCalled();
+  });
+
+  it('keeps a 500-profile inventory bounded and searchable', async () => {
+    const baseProfile = (await mocks.profiles())[0];
+    mocks.profiles.mockResolvedValue(Array.from({ length: 500 }, (_, index) => ({
+      ...baseProfile,
+      correspondent_id: index + 1,
+      current_name: `Correspondent ${String(index + 1).padStart(3, '0')}`,
+    })));
+
+    const { container } = renderPage();
+
+    expect((await screen.findAllByText('Correspondent 042')).length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('.correspondent-inventory-item')).toHaveLength(100);
+    expect(mocks.expectations).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByLabelText('Search correspondents'), {
+      target: { value: 'Correspondent 500' },
+    });
+    expect(await screen.findByText('Correspondent 500')).toBeInTheDocument();
+    expect(container.querySelectorAll('.correspondent-inventory-item')).toHaveLength(1);
+  });
+
+  it('renders 100 candidates as collapsed summaries in bounded pages', async () => {
+    mocks.analyze.mockResolvedValue({
+      ...(await mocks.analyze()),
+      suggestions: Array.from({ length: 100 }, (_, index) => ({
+        ...suggestion,
+        suggestion_key: `candidate-${index}`,
+        series_discriminator: `Candidate ${index + 1}`,
+      })),
+    });
+
+    const { container } = renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /^reanalyze$/i }));
+
+    await screen.findByText('Candidate 1');
+    expect(container.querySelectorAll('details.correspondent-suggestion')).toHaveLength(20);
+    expect(container.querySelectorAll('details.correspondent-suggestion[open]')).toHaveLength(0);
+    expect(screen.getByText('Page 1 of 5')).toBeInTheDocument();
+  });
+
   it('shows prioritized profiles and explainable review evidence', async () => {
     renderPage();
 
     expect((await screen.findAllByText('Example Bank')).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole('button', { name: /analyze history/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^reanalyze$/i }));
 
     expect(await screen.findByText('Checking')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Checking'));
     expect(screen.getByText('100% coverage · 0 exceptions')).toBeInTheDocument();
     expect(screen.getAllByText('Finance').length).toBeGreaterThan(0);
     expect(screen.getByRole('combobox', { name: 'Required document type' })).toHaveValue('Statement');
@@ -296,21 +364,22 @@ describe('Correspondent Review', () => {
       finishRefresh = resolve;
     }));
 
-    fireEvent.click(screen.getByRole('button', { name: /analyze history/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^reanalyze$/i }));
 
     expect(await screen.findByText('Checking')).toBeInTheDocument();
-    expect(container.querySelector('.skeleton-cards')).toBeInTheDocument();
+    expect(screen.getByText(/updating analysis/i)).toBeInTheDocument();
     expect(container.querySelector('.skeleton-detail-panel')).not.toBeInTheDocument();
 
     finishRefresh(profilePayload);
     await waitFor(() => {
-      expect(container.querySelector('.skeleton-cards')).not.toBeInTheDocument();
+      expect(screen.queryByText(/updating analysis/i)).not.toBeInTheDocument();
     });
   });
 
   it('submits selected metadata names as Paperless IDs', async () => {
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /analyze history/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^reanalyze$/i }));
+    fireEvent.click(await screen.findByText('Checking'));
     fireEvent.change(await screen.findByRole('combobox', { name: 'Any required tags' }), {
       target: { value: 'work' },
     });
@@ -337,10 +406,7 @@ describe('Correspondent Review', () => {
           },
         }),
       );
-      expect(mocks.updateProfile).toHaveBeenCalledWith(
-        42,
-        expect.objectContaining({ review_status: 'reviewed' }),
-      );
+      expect(mocks.updateProfile).not.toHaveBeenCalled();
     });
   });
 
@@ -430,7 +496,7 @@ describe('Correspondent Review', () => {
 
     expect((await screen.findAllByText('Example Bank [redacted]')).length).toBeGreaterThan(0);
     expect(screen.queryByText('1234567890123456')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /analyze history/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^reanalyze$/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /mark reviewed/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /return to review/i })).toBeEnabled();
   });
