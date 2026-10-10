@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from threading import Barrier
@@ -8,6 +9,7 @@ import pytest
 
 from doc_intelligence_hub.modules.statements.correspondent_models import (
     Cadence,
+    CalendarRule,
     CorrespondentProfileUpdate,
     DocumentExpectationCreate,
     DocumentExpectationSignalsV1,
@@ -134,6 +136,61 @@ def test_correspondent_schema_migration_preserves_series_history(tmp_path) -> No
         migrated.close()
 
 
+def test_schema_v12_migrates_alerting_contract_without_inventing_calendar(tmp_path) -> None:
+    path = str(tmp_path / "legacy-statements.db")
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE schema_version (version INTEGER NOT NULL);
+        INSERT INTO schema_version VALUES (11);
+        CREATE TABLE document_expectations (
+            id TEXT PRIMARY KEY,
+            deployment_id TEXT NOT NULL,
+            correspondent_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            document_type_id INTEGER,
+            statement_series_id TEXT,
+            document_ids_json TEXT NOT NULL DEFAULT '[]',
+            series_discriminator TEXT,
+            expectation_mode TEXT NOT NULL,
+            status TEXT NOT NULL,
+            cadence_json TEXT,
+            evidence_json TEXT NOT NULL,
+            title_convention_json TEXT,
+            metadata_policy_json TEXT NOT NULL DEFAULT '{}',
+            acquisition_source_id TEXT,
+            legacy_provider_key TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO document_expectations (
+            id, deployment_id, correspondent_id, kind, document_ids_json,
+            expectation_mode, status, cadence_json, evidence_json
+        ) VALUES
+            ('confirmed-recurring', 'paperless:test-deployment', 42, 'invoice', '[1]',
+             'recurring', 'confirmed', '{"frequency":"monthly"}', '{"source":"user"}'),
+            ('dismissed-recurring', 'paperless:test-deployment', 42, 'invoice', '[]',
+             'recurring', 'dismissed', '{"frequency":"monthly"}', '{"source":"user"}');
+        """
+    )
+    conn.close()
+
+    migrated = Database(path)
+    try:
+        expectations = {
+            expectation.id: expectation
+            for expectation in migrated.list_document_expectations(DEPLOYMENT_ID)
+        }
+
+        assert expectations["confirmed-recurring"].importance == "routine"
+        assert expectations["confirmed-recurring"].monitoring_mode == "presence"
+        assert expectations["confirmed-recurring"].calendar_rule is None
+        assert expectations["dismissed-recurring"].monitoring_mode == "none"
+        assert migrated.connect().execute("SELECT version FROM schema_version").fetchone()[0] == 12
+    finally:
+        migrated.close()
+
+
 def test_correspondent_sync_marks_orphans_and_requires_explicit_relink(tmp_path) -> None:
     db = Database(str(tmp_path / "statements.db"))
     try:
@@ -232,6 +289,61 @@ def test_only_confirmed_cadenced_active_policy_is_alertable(tmp_path) -> None:
 
         db.reconcile_correspondents(DEPLOYMENT_ID, [])
         assert not db.expectation_can_emit_missing_alert(DEPLOYMENT_ID, alertable.id)
+    finally:
+        db.close()
+
+
+def test_calendar_monitoring_policy_round_trips_and_one_off_stops_alerting(tmp_path) -> None:
+    db = Database(str(tmp_path / "statements.db"))
+    try:
+        db.reconcile_correspondents(DEPLOYMENT_ID, [{"id": 42, "name": "Example Bank"}])
+        expectation = db.create_document_expectation(
+            DEPLOYMENT_ID,
+            42,
+            DocumentExpectationCreate(
+                kind="record",
+                document_ids=[101],
+                series_discriminator="Legal response",
+                expectation_mode="one_off",
+                status="confirmed",
+                importance="critical",
+                monitoring_mode="deadline",
+                calendar_rule=CalendarRule(
+                    rule_type="one_off",
+                    occurrence_id="legal-response-2026",
+                    due_start=date(2026, 10, 1),
+                    due_end=date(2026, 10, 31),
+                    occurrence_status="pending",
+                ),
+                grace_period_days=0,
+                evidence=ExpectationEvidence(source="user"),
+            ),
+        )
+
+        assert expectation.importance == "critical"
+        assert expectation.calendar_rule is not None
+        assert expectation.calendar_rule.occurrence_id == "legal-response-2026"
+        assert [item.id for item in db.list_alertable_expectations(DEPLOYMENT_ID)] == [
+            expectation.id
+        ]
+
+        cancelled = db.update_document_expectation(
+            DEPLOYMENT_ID,
+            expectation.id,
+            DocumentExpectationUpdate(
+                calendar_rule=CalendarRule(
+                    rule_type="one_off",
+                    occurrence_id="legal-response-2026",
+                    due_start=date(2026, 10, 1),
+                    due_end=date(2026, 10, 31),
+                    occurrence_status="cancelled",
+                )
+            ),
+        )
+
+        assert cancelled.calendar_rule is not None
+        assert cancelled.calendar_rule.occurrence_status == "cancelled"
+        assert db.list_alertable_expectations(DEPLOYMENT_ID) == []
     finally:
         db.close()
 

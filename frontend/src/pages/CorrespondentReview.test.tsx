@@ -344,6 +344,71 @@ describe('Correspondent Review', () => {
     });
   });
 
+  it('defines an important annual tax-year deadline without inferred annual history', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /analyze history/i }));
+
+    fireEvent.change(await screen.findByRole('combobox', { name: /expectation mode for checking/i }), {
+      target: { value: 'periodic' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: /importance for checking/i }), {
+      target: { value: 'important' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: /monitoring for checking/i }), {
+      target: { value: 'deadline' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: /frequency for checking/i }), {
+      target: { value: 'annual' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: /calendar rule for checking/i }), {
+      target: { value: 'tax_year' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: /expected month for checking/i }), {
+      target: { value: '2' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /confirm expectation/i }));
+
+    await waitFor(() => {
+      expect(mocks.createExpectation).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({
+          expectation_mode: 'periodic',
+          importance: 'important',
+          monitoring_mode: 'deadline',
+          cadence: expect.objectContaining({ frequency: 'annual' }),
+          calendar_rule: {
+            rule_type: 'tax_year',
+            expected_month: 2,
+            tax_year_offset: -1,
+          },
+          escalation_policy: {
+            reminder_days_before_due: [7, 1],
+            overdue_reminder_interval_days: 7,
+            max_overdue_reminders: 3,
+          },
+        }),
+      );
+    });
+  });
+
+  it('dismisses a suggestion without creating monitored policy', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /analyze history/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /dismiss suggestion/i }));
+
+    await waitFor(() => {
+      expect(mocks.createExpectation).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({
+          status: 'dismissed',
+          monitoring_mode: 'none',
+          calendar_rule: null,
+        }),
+      );
+    });
+    expect(screen.getByText(/creates no active expectation or missing alert/i)).toBeInTheDocument();
+  });
+
   it('masks long account-like values and locks ignored profiles', async () => {
     mocks.profiles.mockResolvedValue([{
       correspondent_id: 42,

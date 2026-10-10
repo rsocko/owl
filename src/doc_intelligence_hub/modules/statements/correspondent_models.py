@@ -21,6 +21,10 @@ ProfileLifecycleStatus = Literal["active", "orphaned", "retired"]
 DocumentKind = Literal["statement", "invoice", "bill", "receipt", "record", "other"]
 ExpectationMode = Literal["recurring", "periodic", "one_off", "irregular", "not_expected"]
 ExpectationStatus = Literal["suggested", "confirmed", "dismissed", "retired"]
+ExpectationImportance = Literal["routine", "important", "critical"]
+MonitoringMode = Literal["none", "presence", "deadline"]
+CalendarRuleType = Literal["annual_month", "quarter", "tax_year", "one_off"]
+OneOffStatus = Literal["pending", "fulfilled", "overdue", "cancelled"]
 CadenceFrequency = Literal["monthly", "quarterly", "annual"]
 EvidenceSource = Literal["paperless", "user", "legacy_override"]
 ExternalSignalKind = Literal["accountStatementCandidate", "recurringDocumentCandidate"]
@@ -371,6 +375,99 @@ class Cadence(PolicyModel):
     grace_period_days: int = Field(default=5, ge=0, le=90)
 
 
+class CalendarRule(PolicyModel):
+    rule_type: CalendarRuleType
+    expected_month: int | None = Field(default=None, ge=1, le=12)
+    expected_quarter: int | None = Field(default=None, ge=1, le=4)
+    tax_year_offset: int | None = Field(default=None, ge=-10, le=10)
+    occurrence_id: str | None = Field(default=None, min_length=1, max_length=200)
+    due_start: date | None = None
+    due_end: date | None = None
+    occurrence_status: OneOffStatus | None = None
+    fulfilled_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_rule_shape(self) -> CalendarRule:
+        fields_by_type = {
+            "annual_month": {"expected_month"},
+            "quarter": {"expected_quarter"},
+            "tax_year": {"expected_month", "tax_year_offset"},
+            "one_off": {"occurrence_id", "due_start", "due_end", "occurrence_status"},
+        }
+        values = {
+            "expected_month": self.expected_month,
+            "expected_quarter": self.expected_quarter,
+            "tax_year_offset": self.tax_year_offset,
+            "occurrence_id": self.occurrence_id,
+            "due_start": self.due_start,
+            "due_end": self.due_end,
+            "occurrence_status": self.occurrence_status,
+        }
+        required = fields_by_type[self.rule_type]
+        missing = sorted(field for field in required if values[field] is None)
+        if missing:
+            raise ValueError(f"{self.rule_type} calendar rules require {', '.join(missing)}")
+        unexpected = sorted(
+            field for field, value in values.items() if value is not None and field not in required
+        )
+        if unexpected:
+            raise ValueError(
+                f"{self.rule_type} calendar rules cannot define {', '.join(unexpected)}"
+            )
+        if self.due_start and self.due_end and self.due_start > self.due_end:
+            raise ValueError("due_start must not be after due_end")
+        if self.fulfilled_at is not None and self.occurrence_status != "fulfilled":
+            raise ValueError("fulfilled_at requires a fulfilled one-off occurrence")
+        if self.occurrence_status == "fulfilled" and self.fulfilled_at is None:
+            raise ValueError("fulfilled one-off occurrences require fulfilled_at")
+        return self
+
+
+class AvailabilityWindow(PolicyModel):
+    earliest_days: int = Field(default=0, ge=-365, le=365)
+    latest_days: int = Field(default=0, ge=-365, le=365)
+
+    @model_validator(mode="after")
+    def validate_window(self) -> AvailabilityWindow:
+        if self.earliest_days > self.latest_days:
+            raise ValueError("earliest_days must not be after latest_days")
+        return self
+
+
+class EscalationPolicy(PolicyModel):
+    reminder_days_before_due: list[int] = Field(default_factory=list, max_length=20)
+    overdue_reminder_interval_days: int | None = Field(default=None, ge=1, le=365)
+    max_overdue_reminders: int = Field(default=0, ge=0, le=100)
+
+    @field_validator("reminder_days_before_due")
+    @classmethod
+    def normalize_reminders(cls, value: list[int]) -> list[int]:
+        if any(day < 0 or day > 365 for day in value):
+            raise ValueError("reminder days must be between 0 and 365")
+        return sorted(set(value), reverse=True)
+
+    @model_validator(mode="after")
+    def validate_overdue_reminders(self) -> EscalationPolicy:
+        if self.max_overdue_reminders and self.overdue_reminder_interval_days is None:
+            raise ValueError("max_overdue_reminders requires overdue_reminder_interval_days")
+        return self
+
+
+class FulfillmentRule(PolicyModel):
+    match_series: bool = True
+    match_kind: bool = True
+    match_calendar_period: bool = True
+    required_tag_ids: list[int] = Field(default_factory=list, max_length=100)
+    required_document_type_id: int | None = Field(default=None, gt=0)
+
+    @field_validator("required_tag_ids")
+    @classmethod
+    def normalize_required_tag_ids(cls, value: list[int]) -> list[int]:
+        if any(tag_id <= 0 for tag_id in value):
+            raise ValueError("Paperless tag IDs must be positive")
+        return sorted(set(value))
+
+
 class ExpectationEvidence(PolicyModel):
     source: EvidenceSource
     reason_codes: list[str] = Field(default_factory=list, max_length=20)
@@ -503,6 +600,13 @@ class DocumentExpectationBase(PolicyModel):
     expectation_mode: ExpectationMode
     status: ExpectationStatus = "suggested"
     cadence: Cadence | None = None
+    importance: ExpectationImportance = "routine"
+    monitoring_mode: MonitoringMode = "none"
+    calendar_rule: CalendarRule | None = None
+    availability_window: AvailabilityWindow | None = None
+    grace_period_days: int = Field(default=0, ge=0, le=365)
+    escalation_policy: EscalationPolicy = Field(default_factory=EscalationPolicy)
+    fulfillment_rule: FulfillmentRule = Field(default_factory=FulfillmentRule)
     evidence: ExpectationEvidence
     title_convention: TitleConvention | None = None
     metadata_policy: MetadataPolicy = Field(default_factory=MetadataPolicy)
@@ -518,6 +622,12 @@ class DocumentExpectationBase(PolicyModel):
     @model_validator(mode="after")
     def validate_policy_shape(self) -> DocumentExpectationBase:
         if (
+            "monitoring_mode" not in self.model_fields_set
+            and self.status == "confirmed"
+            and self.expectation_mode in {"recurring", "periodic"}
+        ):
+            self.monitoring_mode = "presence"
+        if (
             self.kind == "statement"
             and self.expectation_mode != "not_expected"
             and self.statement_series_id is None
@@ -528,6 +638,22 @@ class DocumentExpectationBase(PolicyModel):
         if self.status == "confirmed" and self.expectation_mode in {"recurring", "periodic"}:
             if self.cadence is None:
                 raise ValueError("Confirmed recurring or periodic expectations require cadence")
+        if (
+            self.expectation_mode in {"irregular", "not_expected"}
+            and self.monitoring_mode != "none"
+        ):
+            raise ValueError(f"{self.expectation_mode} expectations cannot enable monitoring")
+        if self.expectation_mode == "one_off":
+            if self.status == "confirmed" and (
+                self.calendar_rule is None or self.calendar_rule.rule_type != "one_off"
+            ):
+                raise ValueError("One-off expectations require a one_off calendar rule")
+            if self.monitoring_mode == "presence":
+                raise ValueError("One-off expectations use deadline monitoring, not presence")
+        elif self.calendar_rule and self.calendar_rule.rule_type == "one_off":
+            raise ValueError("Only one-off expectations can use a one_off calendar rule")
+        if self.monitoring_mode == "deadline" and self.calendar_rule is None:
+            raise ValueError("Deadline monitoring requires a calendar rule")
         if (
             self.status == "confirmed"
             and self.kind != "statement"
@@ -543,8 +669,17 @@ class DocumentExpectationBase(PolicyModel):
         return (
             profile_lifecycle == "active"
             and self.status == "confirmed"
-            and self.expectation_mode in {"recurring", "periodic"}
-            and self.cadence is not None
+            and self.monitoring_mode != "none"
+            and (
+                (self.expectation_mode in {"recurring", "periodic"} and self.cadence is not None)
+                or (
+                    self.expectation_mode == "one_off"
+                    and self.monitoring_mode == "deadline"
+                    and self.calendar_rule is not None
+                    and self.calendar_rule.rule_type == "one_off"
+                    and self.calendar_rule.occurrence_status in {"pending", "overdue"}
+                )
+            )
         )
 
 
@@ -559,6 +694,13 @@ class DocumentExpectationUpdate(PolicyModel):
     expectation_mode: ExpectationMode | None = None
     status: ExpectationStatus | None = None
     cadence: Cadence | None = None
+    importance: ExpectationImportance | None = None
+    monitoring_mode: MonitoringMode | None = None
+    calendar_rule: CalendarRule | None = None
+    availability_window: AvailabilityWindow | None = None
+    grace_period_days: int | None = Field(default=None, ge=0, le=365)
+    escalation_policy: EscalationPolicy | None = None
+    fulfillment_rule: FulfillmentRule | None = None
     evidence: ExpectationEvidence | None = None
     title_convention: TitleConvention | None = None
     metadata_policy: MetadataPolicy | None = None
