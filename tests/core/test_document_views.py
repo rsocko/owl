@@ -30,11 +30,11 @@ def test_paperless_view_can_launch_internal_owl_workflow():
         provider="paperless",
         source_id=18,
         launch="owl",
-        owl_route="/triage?type=account-review",
+        owl_route="/needs-review?type=account-review",
     )
 
     assert view.resolved_launch is ViewLaunch.OWL
-    assert view.resolved_owl_route == "/triage?type=account-review"
+    assert view.resolved_owl_route == "/needs-review?type=account-review"
 
 
 @pytest.mark.parametrize(

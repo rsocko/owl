@@ -177,7 +177,10 @@ class TestMcListActions:
         action = seeded_client.get("/api/action-queue/actions?include_not_ready=true").json()[0]
         assert action["action_ready"] is False
         assert action["review_state"] == "needs_review"
-        assert action["needs_review_url"].endswith("item=review-123")
+        assert (
+            action["needs_review_url"]
+            == "#/needs-review?type=action_classification&item=review-123"
+        )
         assert action["source_actions"] == []
 
     def test_connector_exposes_document_group_and_sibling_context(self, seeded_client):

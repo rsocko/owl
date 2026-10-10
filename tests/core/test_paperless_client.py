@@ -749,6 +749,63 @@ async def test_get_task_returns_none_when_no_results(monkeypatch):
     assert await client.get_task("unknown-task-id") is None
 
 
+@pytest.mark.asyncio
+async def test_receipt_upload_uses_generated_safe_filename(monkeypatch, tmp_path):
+    requests_seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests_seen.append(request)
+        return httpx.Response(200, json="task-fixture")
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    client = PaperlessClient(base_url="https://test.local", token="t")
+    path = tmp_path / "private-source-name.tmp"
+    path.write_bytes(b"invented receipt")
+
+    assert await client.upload_document(path, "application/pdf") == "task-fixture"
+    request = requests_seen[0]
+    assert request.url.path == "/api/documents/post_document/"
+    assert b'filename="receipt-intake.pdf"' in request.content
+    assert b"private-source-name" not in request.content
+
+
+@pytest.mark.asyncio
+async def test_find_document_by_checksum_requires_exact_match(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["checksum"] == "a" * 64
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"id": 1, "checksum": "b" * 64},
+                    {"id": 2, "checksum": "a" * 64},
+                ]
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    client = PaperlessClient(base_url="https://test.local", token="t")
+
+    assert await client.find_document_by_checksum("a" * 64) == {
+        "id": 2,
+        "checksum": "a" * 64,
+    }
+
+
 def _make_client_with_pages(monkeypatch, num_docs: int, page_size: int = 100):
     """Build a PaperlessClient whose /api/documents/ endpoint is backed by a
     large, paginated result set — used to test limit/early-stop behavior and

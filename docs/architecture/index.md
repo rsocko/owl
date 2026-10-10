@@ -137,7 +137,7 @@ This establishes the product rule:
 - Most confidently understood documents never enter Needs Review.
 - Resolving an item in Needs Review does not always create an action.
 
-The existing `/triage` route, API namespace, database tables, and internal code identifiers retain the `triage` name for compatibility. **Needs Review** is the user-facing product name.
+`/needs-review` is the canonical user-facing route. The legacy `/triage` route redirects to it for compatibility, while the API namespace, database tables, and internal code identifiers retain the `triage` name.
 
 ## Technology Stack
 
