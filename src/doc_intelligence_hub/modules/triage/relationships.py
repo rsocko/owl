@@ -386,7 +386,17 @@ def create_document_relationship(
         )
         session.commit()
         session.refresh(relationship)
-        return _relationship_to_dict(relationship), True
+        result = _relationship_to_dict(relationship)
+        from doc_intelligence_hub.modules.action_queue.obligations import (
+            reconcile_relationship_change,
+        )
+
+        reconcile_relationship_change(
+            {source_document_id, target_document_id},
+            relationship_id=relationship.id,
+            event_type="relationship_created",
+        )
+        return result, True
     finally:
         session.close()
 
@@ -423,6 +433,18 @@ def remove_document_relationship(
                 )
             )
             session.commit()
+            from doc_intelligence_hub.modules.action_queue.obligations import (
+                reconcile_relationship_change,
+            )
+
+            reconcile_relationship_change(
+                {
+                    relationship.source_document_id,
+                    relationship.target_document_id,
+                },
+                relationship_id=relationship.id,
+                event_type="relationship_removed",
+            )
         return _relationship_to_dict(relationship)
     finally:
         session.close()

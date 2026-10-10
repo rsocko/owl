@@ -29,6 +29,7 @@ from doc_intelligence_hub.modules.action_queue.database import (
     VALID_ACTION_TYPES,
     Action,
     ActionFeedback,
+    Obligation,
     QueueConfiguration,
     get_session,
     init_db,
@@ -470,6 +471,19 @@ def _serialize_action_with_siblings(db: Session, action: Action) -> dict[str, An
     )
     documents = linked_documents(db, action)
     serialized["obligation_id"] = action.obligation_id
+    obligation = (
+        db.query(Obligation).filter_by(id=action.obligation_id).first()
+        if action.obligation_id
+        else None
+    )
+    serialized["obligation_identity"] = obligation.identity_key if obligation else None
+    serialized["authoritative_document_id"] = (
+        obligation.authoritative_document_id if obligation else None
+    )
+    serialized["relationship_rules"] = obligation.relationship_rules if obligation else []
+    serialized["relationship_explanation"] = (
+        obligation.relationship_explanation if obligation else None
+    )
     serialized["linked_documents"] = [
         {
             **document,
