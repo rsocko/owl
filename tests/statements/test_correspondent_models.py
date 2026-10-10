@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 from pydantic import ValidationError
 
 from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSourceCreate,
+    AvailabilityWindow,
     Cadence,
+    CalendarRule,
     DocumentExpectationCreate,
+    EscalationPolicy,
     ExpectationEvidence,
     MetadataPolicy,
     TitleConvention,
@@ -108,6 +111,101 @@ def test_confirmed_non_statement_expectation_requires_document_membership() -> N
             kind="invoice",
             expectation_mode="irregular",
             status="confirmed",
+            evidence=ExpectationEvidence(source="user"),
+        )
+
+
+def test_user_can_define_important_annual_tax_form_from_one_example() -> None:
+    expectation = DocumentExpectationCreate(
+        kind="record",
+        document_ids=[101],
+        series_discriminator="Annual tax form",
+        expectation_mode="periodic",
+        status="confirmed",
+        cadence=Cadence(frequency="annual"),
+        importance="important",
+        monitoring_mode="deadline",
+        calendar_rule=CalendarRule(
+            rule_type="tax_year",
+            expected_month=2,
+            tax_year_offset=-1,
+        ),
+        availability_window=AvailabilityWindow(earliest_days=0, latest_days=28),
+        grace_period_days=7,
+        escalation_policy=EscalationPolicy(
+            reminder_days_before_due=[7, 1],
+            overdue_reminder_interval_days=7,
+            max_overdue_reminders=3,
+        ),
+        evidence=ExpectationEvidence(source="user", sample_size=1),
+    )
+
+    assert expectation.importance == "important"
+    assert expectation.calendar_rule.expected_month == 2
+    assert expectation.can_emit_missing_alert()
+
+
+@pytest.mark.parametrize(
+    ("occurrence_status", "eligible"),
+    [
+        ("pending", True),
+        ("overdue", True),
+        ("cancelled", False),
+        ("fulfilled", False),
+    ],
+)
+def test_one_off_occurrence_alert_lifecycle(
+    occurrence_status: str, eligible: bool
+) -> None:
+    fulfilled_at = (
+        datetime(2026, 10, 10, tzinfo=timezone.utc)
+        if occurrence_status == "fulfilled"
+        else None
+    )
+    expectation = DocumentExpectationCreate(
+        kind="record",
+        document_ids=[101],
+        expectation_mode="one_off",
+        status="confirmed",
+        monitoring_mode="deadline",
+        calendar_rule=CalendarRule(
+            rule_type="one_off",
+            occurrence_id="tax-notice-2026",
+            due_start=date(2026, 10, 1),
+            due_end=date(2026, 10, 31),
+            occurrence_status=occurrence_status,
+            fulfilled_at=fulfilled_at,
+        ),
+        evidence=ExpectationEvidence(source="user"),
+    )
+
+    assert expectation.can_emit_missing_alert() is eligible
+
+
+def test_importance_does_not_make_suggestion_alertable() -> None:
+    expectation = DocumentExpectationCreate(
+        kind="record",
+        document_ids=[101],
+        expectation_mode="periodic",
+        status="suggested",
+        cadence=Cadence(frequency="annual"),
+        importance="critical",
+        monitoring_mode="deadline",
+        calendar_rule=CalendarRule(rule_type="annual_month", expected_month=2),
+        evidence=ExpectationEvidence(source="user"),
+    )
+
+    assert not expectation.can_emit_missing_alert()
+
+
+def test_irregular_policy_rejects_monitoring() -> None:
+    with pytest.raises(ValidationError, match="cannot enable monitoring"):
+        DocumentExpectationCreate(
+            kind="record",
+            document_ids=[101],
+            expectation_mode="irregular",
+            status="confirmed",
+            monitoring_mode="presence",
             evidence=ExpectationEvidence(source="user"),
         )
 

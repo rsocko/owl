@@ -132,9 +132,9 @@ separately tracked candidate-curation lifecycle, where merge/split/membership de
 define material evidence changes. Until that lifecycle lands, dismissed suggestion records
 remain non-policy review history and must not be interpreted as durable `not_expected` policy.
 
-A one-off expectation requires an occurrence identity and due window. Until those fields are
-implemented, the UI must not imply that choosing `one_off` will generate a useful missing-item
-alert.
+A one-off expectation requires an occurrence identity, due window, and occurrence status.
+`pending` and `overdue` occurrences remain eligible for deadline monitoring; `fulfilled` and
+`cancelled` occurrences cannot recur or emit another missing-item alert.
 
 ### Importance and monitoring policy
 
@@ -155,6 +155,27 @@ The review UI must let the user edit these fields rather than requiring enough h
 documents to infer them. Suggested values remain advisory. For example, a user can define an
 important annual tax form expected each February even when Paperless contains only one prior
 year.
+
+The persisted/API contract uses explicit, typed policy objects:
+
+- `calendar_rule.rule_type` is `annual_month`, `quarter`, `tax_year`, or `one_off`;
+- tax-year rules store both `expected_month` and a bounded `tax_year_offset`;
+- one-off rules store `occurrence_id`, `due_start`, `due_end`, `occurrence_status`, and
+  `fulfilled_at` when fulfilled;
+- `availability_window` stores bounded earliest/latest day offsets;
+- `escalation_policy` stores pre-due reminder offsets plus optional bounded overdue repeats;
+- `fulfillment_rule` records the required series, kind, calendar-period, document type, and
+  tags.
+
+Only an active profile's confirmed expectation with `monitoring_mode` other than `none` is
+eligible for missing-document analysis. Recurring and periodic expectations additionally need
+cadence. One-off expectations additionally need deadline monitoring and a pending or overdue
+occurrence. Importance is deliberately absent from this eligibility decision.
+
+Schema version 12 adds these policy fields without inventing calendar data. Existing rows
+migrate to `routine` importance and empty calendar, availability, escalation, and fulfillment
+policy. Previously alertable confirmed recurring or periodic rows migrate to `presence`
+monitoring; every other existing row migrates to `none`.
 
 ### Metadata Policy
 
@@ -384,8 +405,8 @@ OWL expectation; it creates a review finding.
 
 The V1 payload is advisory evidence only. Account and recurring signals never establish
 document existence, cadence, importance, monitoring mode, or deadline. Recurring income is not
-a bill. Future importance and calendar policy can be added to confirmed expectations without
-changing this finalized signal contract. Tyrion's fixed `0.60` confidence is source
+a bill. Importance and calendar policy can be added to confirmed expectations without changing
+this finalized signal contract. Tyrion's fixed `0.60` confidence is source
 classification confidence only, and `cadence` / `nextExpectedDate` remain required `null`.
 
 An unseen generation older than the connector's current `sourceAsOf` is recorded as processed
@@ -559,7 +580,7 @@ shared connector contract and at least two real providers require browser automa
 - Persist analysis snapshots and analyze new/stale profiles without a mandatory first-click.
 - Add user-defined, merge, split, add/remove, and noise decisions for candidate membership.
 - Replace title-primary grouping with explainable multi-signal candidate generation.
-- Add importance, calendar, one-off occurrence, fulfillment, and escalation policy.
+- Add importance, calendar, one-off occurrence, fulfillment, and escalation policy. (Complete)
 - Make the large review workspace searchable, independently scrollable, collapsible, and
   progress-oriented.
 

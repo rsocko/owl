@@ -18,7 +18,9 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSource,
     AcquisitionSourceCreate,
     AcquisitionSourceUpdate,
+    AvailabilityWindow,
     Cadence,
+    CalendarRule,
     CandidateOverride,
     CorrespondentProfile,
     CorrespondentProfileUpdate,
@@ -27,12 +29,14 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     DocumentExpectationCreate,
     DocumentExpectationSignalsV1,
     DocumentExpectationUpdate,
+    EscalationPolicy,
     ExpectationEvidence,
     ExternalCandidateReview,
     ExternalCandidateSnapshotResult,
     ExternalDocumentCandidate,
     ExternalSignalConnection,
     ExternalSignalConnectionUpdate,
+    FulfillmentRule,
     IdentityResolution,
     LegacyOverrideReviewItem,
     MetadataPolicy,
@@ -49,7 +53,7 @@ from doc_intelligence_hub.modules.statements.models import (
     RecommendationResult,
 )
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -256,6 +260,15 @@ CREATE TABLE IF NOT EXISTS document_expectations (
     status TEXT NOT NULL
         CHECK (status IN ('suggested', 'confirmed', 'dismissed', 'retired')),
     cadence_json TEXT,
+    importance TEXT NOT NULL DEFAULT 'routine'
+        CHECK (importance IN ('routine', 'important', 'critical')),
+    monitoring_mode TEXT NOT NULL DEFAULT 'none'
+        CHECK (monitoring_mode IN ('none', 'presence', 'deadline')),
+    calendar_rule_json TEXT,
+    availability_window_json TEXT,
+    grace_period_days INTEGER NOT NULL DEFAULT 0,
+    escalation_policy_json TEXT NOT NULL DEFAULT '{}',
+    fulfillment_rule_json TEXT NOT NULL DEFAULT '{}',
     evidence_json TEXT NOT NULL,
     title_convention_json TEXT,
     metadata_policy_json TEXT NOT NULL DEFAULT '{}',
@@ -507,6 +520,29 @@ class Database:
             conn.execute(
                 "ALTER TABLE document_expectations "
                 "ADD COLUMN document_ids_json TEXT NOT NULL DEFAULT '[]'"
+            )
+        expectation_migrations = {
+            "importance": "TEXT NOT NULL DEFAULT 'routine'",
+            "monitoring_mode": "TEXT NOT NULL DEFAULT 'none'",
+            "calendar_rule_json": "TEXT",
+            "availability_window_json": "TEXT",
+            "grace_period_days": "INTEGER NOT NULL DEFAULT 0",
+            "escalation_policy_json": "TEXT NOT NULL DEFAULT '{}'",
+            "fulfillment_rule_json": "TEXT NOT NULL DEFAULT '{}'",
+        }
+        added_monitoring_mode = "monitoring_mode" not in expectation_columns
+        for column, definition in expectation_migrations.items():
+            if column not in expectation_columns:
+                conn.execute(
+                    f"ALTER TABLE document_expectations ADD COLUMN {column} {definition}"
+                )
+        if added_monitoring_mode:
+            conn.execute(
+                """UPDATE document_expectations
+                   SET monitoring_mode = 'presence'
+                   WHERE status = 'confirmed'
+                     AND expectation_mode IN ('recurring', 'periodic')
+                     AND cadence_json IS NOT NULL"""
             )
         connection_columns = {
             row["name"]
@@ -1368,6 +1404,21 @@ class Database:
             cadence=Cadence.model_validate_json(row["cadence_json"])
             if row["cadence_json"]
             else None,
+            importance=row["importance"],
+            monitoring_mode=row["monitoring_mode"],
+            calendar_rule=CalendarRule.model_validate_json(row["calendar_rule_json"])
+            if row["calendar_rule_json"]
+            else None,
+            availability_window=AvailabilityWindow.model_validate_json(
+                row["availability_window_json"]
+            )
+            if row["availability_window_json"]
+            else None,
+            grace_period_days=row["grace_period_days"],
+            escalation_policy=EscalationPolicy.model_validate_json(
+                row["escalation_policy_json"]
+            ),
+            fulfillment_rule=FulfillmentRule.model_validate_json(row["fulfillment_rule_json"]),
             evidence=ExpectationEvidence.model_validate_json(row["evidence_json"]),
             title_convention=TitleConvention.model_validate_json(row["title_convention_json"])
             if row["title_convention_json"]
@@ -1866,9 +1917,11 @@ class Database:
                 id, deployment_id, correspondent_id, kind, document_type_id,
                 statement_series_id, document_ids_json, series_discriminator,
                 expectation_mode, status,
-                cadence_json, evidence_json, title_convention_json, metadata_policy_json,
-                acquisition_source_id, legacy_provider_key
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                cadence_json, importance, monitoring_mode, calendar_rule_json,
+                availability_window_json, grace_period_days, escalation_policy_json,
+                fulfillment_rule_json, evidence_json, title_convention_json,
+                metadata_policy_json, acquisition_source_id, legacy_provider_key
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 expectation_id,
                 deployment_id,
@@ -1881,6 +1934,17 @@ class Database:
                 expectation.expectation_mode,
                 expectation.status,
                 expectation.cadence.model_dump_json() if expectation.cadence else None,
+                expectation.importance,
+                expectation.monitoring_mode,
+                expectation.calendar_rule.model_dump_json()
+                if expectation.calendar_rule
+                else None,
+                expectation.availability_window.model_dump_json()
+                if expectation.availability_window
+                else None,
+                expectation.grace_period_days,
+                expectation.escalation_policy.model_dump_json(),
+                expectation.fulfillment_rule.model_dump_json(),
                 expectation.evidence.model_dump_json(),
                 expectation.title_convention.model_dump_json()
                 if expectation.title_convention
@@ -1936,7 +2000,10 @@ class Database:
                 """UPDATE document_expectations SET
                     document_type_id = ?, document_ids_json = ?, series_discriminator = ?,
                     expectation_mode = ?,
-                    status = ?, cadence_json = ?, evidence_json = ?,
+                    status = ?, cadence_json = ?, importance = ?, monitoring_mode = ?,
+                    calendar_rule_json = ?, availability_window_json = ?,
+                    grace_period_days = ?, escalation_policy_json = ?,
+                    fulfillment_rule_json = ?, evidence_json = ?,
                     title_convention_json = ?, metadata_policy_json = ?,
                     acquisition_source_id = ?, updated_at = datetime('now')
                    WHERE deployment_id = ? AND id = ?""",
@@ -1947,6 +2014,17 @@ class Database:
                     validated.expectation_mode,
                     validated.status,
                     validated.cadence.model_dump_json() if validated.cadence else None,
+                    validated.importance,
+                    validated.monitoring_mode,
+                    validated.calendar_rule.model_dump_json()
+                    if validated.calendar_rule
+                    else None,
+                    validated.availability_window.model_dump_json()
+                    if validated.availability_window
+                    else None,
+                    validated.grace_period_days,
+                    validated.escalation_policy.model_dump_json(),
+                    validated.fulfillment_rule.model_dump_json(),
                     validated.evidence.model_dump_json(),
                     validated.title_convention.model_dump_json()
                     if validated.title_convention
@@ -2075,12 +2153,17 @@ class Database:
                 AND p.correspondent_id = e.correspondent_id
                WHERE e.deployment_id = ?
                  AND e.status = 'confirmed'
-                 AND e.expectation_mode IN ('recurring', 'periodic')
-                 AND e.cadence_json IS NOT NULL
+                 AND e.monitoring_mode != 'none'
                  AND p.lifecycle_status = 'active'""",
             (deployment_id,),
         ).fetchall()
-        return [self._expectation_row_to_model(row) for row in rows]
+        return [
+            expectation
+            for row in rows
+            if (
+                expectation := self._expectation_row_to_model(row)
+            ).can_emit_missing_alert(row["profile_lifecycle"])
+        ]
 
     def expectation_can_emit_missing_alert(self, deployment_id: str, expectation_id: str) -> bool:
         conn = self.connect()
