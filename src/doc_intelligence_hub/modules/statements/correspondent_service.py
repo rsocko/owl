@@ -163,17 +163,14 @@ class CorrespondentPolicyService:
                 if series.get("correspondent_id") == correspondent_id
             ],
             "overrides": [
-                override.model_dump(mode="json")
-                for _, override in sorted(overrides.items())
+                override.model_dump(mode="json") for _, override in sorted(overrides.items())
             ],
         }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def _suggestion_is_resolved(
-        suggestion: Any, expectations: list[DocumentExpectation]
-    ) -> bool:
+    def _suggestion_is_resolved(suggestion: Any, expectations: list[DocumentExpectation]) -> bool:
         return any(
             expectation.status != "retired"
             and expectation.kind == suggestion.kind
@@ -202,9 +199,7 @@ class CorrespondentPolicyService:
             for suggestion in snapshot.result.suggestions
         )
 
-    def get_latest_snapshot(
-        self, correspondent_id: int
-    ) -> CorrespondentAnalysisSnapshot | None:
+    def get_latest_snapshot(self, correspondent_id: int) -> CorrespondentAnalysisSnapshot | None:
         return self.database.get_latest_correspondent_analysis_snapshot(
             self.deployment_id, correspondent_id
         )
@@ -220,9 +215,9 @@ class CorrespondentPolicyService:
             self.deployment_id
         ):
             unresolved = sum(
-                not self._suggestion_is_resolved(suggestion, expectations_by_profile.get(
-                    snapshot.correspondent_id, []
-                ))
+                not self._suggestion_is_resolved(
+                    suggestion, expectations_by_profile.get(snapshot.correspondent_id, [])
+                )
                 for suggestion in snapshot.result.suggestions
             )
             stale = snapshot.algorithm_version != "correspondent-analysis-v1"

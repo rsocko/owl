@@ -55,7 +55,7 @@ from doc_intelligence_hub.modules.statements.models import (
     RecommendationResult,
 )
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -227,6 +227,7 @@ CREATE TABLE IF NOT EXISTS correspondent_candidate_overrides (
 CREATE INDEX IF NOT EXISTS idx_candidate_overrides_group
     ON correspondent_candidate_overrides(deployment_id, correspondent_id, group_key);
 
+-- Persisted deterministic correspondent analysis (schema v13).
 CREATE TABLE IF NOT EXISTS correspondent_analysis_snapshots (
     id TEXT PRIMARY KEY,
     deployment_id TEXT NOT NULL,

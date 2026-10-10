@@ -127,6 +127,7 @@ def test_correspondent_schema_migration_preserves_series_history(tmp_path) -> No
         }
         assert {
             "correspondent_profiles",
+            "correspondent_analysis_snapshots",
             "document_expectations",
             "external_signal_sources",
             "external_signal_generations",
@@ -187,7 +188,49 @@ def test_schema_v12_migrates_alerting_contract_without_inventing_calendar(tmp_pa
         assert expectations["confirmed-recurring"].monitoring_mode == "presence"
         assert expectations["confirmed-recurring"].calendar_rule is None
         assert expectations["dismissed-recurring"].monitoring_mode == "none"
-        assert migrated.connect().execute("SELECT version FROM schema_version").fetchone()[0] == 12
+        assert migrated.connect().execute("SELECT version FROM schema_version").fetchone()[0] == 13
+    finally:
+        migrated.close()
+
+
+def test_schema_v13_adds_analysis_snapshots_to_v12_database(tmp_path) -> None:
+    path = str(tmp_path / "v12-statements.db")
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE schema_version (version INTEGER NOT NULL);
+        INSERT INTO schema_version VALUES (12);
+        CREATE TABLE correspondent_profiles (
+            deployment_id TEXT NOT NULL,
+            correspondent_id INTEGER NOT NULL,
+            current_name TEXT NOT NULL,
+            review_status TEXT NOT NULL DEFAULT 'unreviewed',
+            lifecycle_status TEXT NOT NULL DEFAULT 'active',
+            aliases_json TEXT NOT NULL DEFAULT '[]',
+            notes TEXT,
+            profile_defaults_json TEXT NOT NULL DEFAULT '{}',
+            observed_summary_json TEXT NOT NULL DEFAULT '{}',
+            last_analyzed_at TEXT,
+            last_reviewed_at TEXT,
+            orphaned_at TEXT,
+            relinked_from_correspondent_id INTEGER,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (deployment_id, correspondent_id)
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    migrated = Database(path)
+    try:
+        connection = migrated.connect()
+        assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 13
+        assert connection.execute(
+            """SELECT name FROM sqlite_master
+               WHERE type = 'table' AND name = 'correspondent_analysis_snapshots'"""
+        ).fetchone()
     finally:
         migrated.close()
 

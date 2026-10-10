@@ -412,7 +412,8 @@ describe('Correspondent Review', () => {
 
   it('defines an important annual tax-year deadline without inferred annual history', async () => {
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /analyze history/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^reanalyze$/i }));
+    fireEvent.click(await screen.findByText('Checking'));
 
     fireEvent.change(await screen.findByRole('combobox', { name: /expectation mode for checking/i }), {
       target: { value: 'periodic' },
@@ -459,7 +460,8 @@ describe('Correspondent Review', () => {
 
   it('dismisses a suggestion without creating monitored policy', async () => {
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /analyze history/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^reanalyze$/i }));
+    fireEvent.click(await screen.findByText('Checking'));
     fireEvent.click(await screen.findByRole('button', { name: /dismiss suggestion/i }));
 
     await waitFor(() => {

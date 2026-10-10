@@ -159,7 +159,6 @@ interface DocumentExpectation {
   title_convention?: TitleConvention | null;
   metadata_policy: MetadataPolicy;
   acquisition_source_id?: string | null;
-  importance?: string | null;
 }
 
 interface DocumentMetadataSnapshot {
@@ -1739,13 +1738,7 @@ export default function CorrespondentReview() {
   const selectedSummary = selectedId ? analysisSummaries[selectedId] : undefined;
   const unresolvedSuggestionCount = selectedSummary?.unresolved_suggestion_count
     ?? (analysis?.suggestions.length ?? 0);
-  const importanceOptions = useMemo(
-    () => Array.from(new Set(
-      Object.values(expectationsByProfile).flat().flatMap((expectation) =>
-        expectation.importance ? [expectation.importance] : []),
-    )).sort(),
-    [expectationsByProfile],
-  );
+  const importanceOptions: Importance[] = ['routine', 'important', 'critical'];
   const currentFilteredIndex = sortedProfiles.findIndex(
     (profile) => profile.correspondent_id === selectedId,
   );
@@ -2171,12 +2164,9 @@ export default function CorrespondentReview() {
               <select
                 aria-label="Filter by importance"
                 value={importanceFilter}
-                disabled={importanceOptions.length === 0}
                 onChange={(event) => setImportanceFilter(event.target.value)}
               >
-                <option value="">
-                  {importanceOptions.length === 0 ? 'Importance available after policy upgrade' : 'Any importance'}
-                </option>
+                <option value="">Any importance</option>
                 {importanceOptions.map((importance) => (
                   <option key={importance} value={importance}>{humanize(importance)}</option>
                 ))}
