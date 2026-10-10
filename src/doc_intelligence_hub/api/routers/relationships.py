@@ -19,6 +19,7 @@ from doc_intelligence_hub.modules.triage.relationships import (
     classify_related_notice,
     create_document_relationship,
     list_document_relationships,
+    list_pending_projection_relationships,
     remove_document_relationship,
     set_projection_result,
 )
@@ -129,6 +130,53 @@ async def get_document_relationships(
         include_removed=include_removed,
     )
     return {"relationships": relationships, "count": len(relationships)}
+
+
+@router.post("/reconcile-projections")
+async def reconcile_relationship_projections(
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> dict[str, Any]:
+    """Retry durable Paperless projections that did not previously sync."""
+    relationships = list_pending_projection_relationships(limit)
+    if not relationships:
+        return {
+            "attempted": 0,
+            "synced": True,
+            "documents": [],
+            "error": None,
+        }
+
+    document_ids = {
+        document_id
+        for relationship in relationships
+        for document_id in (
+            relationship["source_document_id"],
+            relationship["target_document_id"],
+        )
+    }
+    try:
+        projection = await project_relationships_to_paperless(document_ids)
+    except Exception:
+        logger.exception("Failed to reconcile document relationship projections")
+        projection = {
+            "synced": False,
+            "documents": sorted(document_ids),
+            "error": "Failed to sync relationship projection to Paperless",
+        }
+
+    for relationship in relationships:
+        set_projection_result(
+            relationship["id"],
+            synced=bool(projection["synced"]),
+            error=projection["error"],
+        )
+    logger.info(
+        "Relationship projection reconciliation completed: relationships=%d documents=%d synced=%s",
+        len(relationships),
+        len(document_ids),
+        bool(projection["synced"]),
+    )
+    return {"attempted": len(relationships), **projection}
 
 
 @router.delete("/{relationship_id}")

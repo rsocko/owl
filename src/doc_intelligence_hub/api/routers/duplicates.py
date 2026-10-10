@@ -129,6 +129,14 @@ async def check_single_document(body: CheckSingleRequest) -> dict[str, Any]:
     return result
 
 
+@router.post("/document-ingested")
+async def document_ingested(body: CheckSingleRequest) -> dict[str, Any]:
+    """Process a Paperless post-consumption event after document metadata is available."""
+    result = on_document_ingested(body.document_id)
+    await _project_automatic_relationships(result)
+    return result
+
+
 async def _project_automatic_relationships(result: dict[str, Any]) -> None:
     relationship_ids = result.get("relationship_ids", [])
     if not relationship_ids:
@@ -162,6 +170,12 @@ async def _project_automatic_relationships(result: dict[str, Any]) -> None:
             error=projection["error"],
         )
     result["projection"] = projection
+    logger.info(
+        "Relationship projection completed: relationships=%d documents=%d synced=%s",
+        len(relationships),
+        len(document_ids),
+        bool(projection["synced"]),
+    )
 
 
 @router.get("/{pair_id}")

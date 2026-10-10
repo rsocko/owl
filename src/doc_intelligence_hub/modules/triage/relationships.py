@@ -276,6 +276,24 @@ def get_document_relationship(relationship_id: str) -> dict[str, Any] | None:
         session.close()
 
 
+def list_pending_projection_relationships(limit: int = 100) -> list[dict[str, Any]]:
+    """Return relationships whose Paperless projection still needs rebuilding."""
+    if limit < 1:
+        raise ValueError("limit must be at least 1")
+    session = get_session()
+    try:
+        relationships = (
+            session.query(DocumentRelationship)
+            .filter(DocumentRelationship.paperless_synced == 0)
+            .order_by(DocumentRelationship.created_at)
+            .limit(limit)
+            .all()
+        )
+        return [_relationship_to_dict(relationship) for relationship in relationships]
+    finally:
+        session.close()
+
+
 def create_document_relationship(
     *,
     source_document_id: int,
