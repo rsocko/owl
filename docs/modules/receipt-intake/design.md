@@ -80,6 +80,37 @@ or `review_required`.
 is the structural loop-prevention signal: recovered artifacts must never be
 submitted back to Monarch.
 
+## Payment reconciliation boundary
+
+Canonical intake ends after OWL establishes an accepted canonical document and,
+when eligible, a byte-free external-replica lifecycle. Payment reconciliation is
+a separate Action Queue-owned aggregate:
+
+- `payment_evidence` stores normalized evidence from Tyrion native receipt
+  evidence, Bill Matching v1, or legacy OWL receipt links.
+- `obligation_payment_edges` stores proposed, active, rejected, removed, and
+  replaced obligation/evidence relationships. Manual decisions outrank source
+  refreshes.
+- `payment_relationship_events` is append-only audit history.
+- `payment_evidence_generations` and `payment_evidence_sources` prevent replay
+  and stale overwrite.
+- `payment_reconciliation_cases` is the revisioned exception and attention
+  aggregate.
+
+These tables live in the Action Queue database. They do not overload
+`ObligationDocument` and are not stored in the separate document-relationship
+database. `ObligationDocument` remains a compatibility timeline projection.
+
+Tyrion writes Monarch replica lifecycle through protected
+`POST /api/receipt-intake/v1/external-replicas`, supplying its independent
+`source_revision` and OWL's `expected_revision`. OWL rejects stale revisions.
+
+Native Tyrion receipt evidence may prove that Monarch linked a receipt to a
+transaction, but its v1 contract does not expose posted-versus-pending
+transaction state. OWL records it as relationship evidence without treating it
+as paid. Bill Matching v1 remains the only deterministic candidate-ranking
+contract and supplies explicit payment state for completion suggestions.
+
 The response excludes bytes, OCR, filenames, email body/subject, signed URLs, raw
 Paperless/Monarch/account identifiers, credentials, and upstream exception text.
 

@@ -135,3 +135,16 @@ class ExternalReplicaResult(BaseModel):
     canonical_document_ref: str
     lifecycle_state: ExternalReplicaState
     revision: int
+
+
+class ExternalReplicaUpdate(BaseModel):
+    """Strict Tyrion-to-OWL replica lifecycle write-back."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    canonical_document_ref: str = Field(min_length=1, max_length=200)
+    external_system: str = Field(pattern=r"^monarch$")
+    external_replica_ref: str = Field(min_length=1, max_length=200)
+    lifecycle_state: ExternalReplicaState
+    source_revision: int = Field(ge=0)
+    expected_revision: int = Field(ge=0)

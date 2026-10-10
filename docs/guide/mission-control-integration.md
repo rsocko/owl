@@ -15,6 +15,66 @@ enabled.
 MC owns cross-system prioritization only. OWL owns classification, readiness,
 document/Paperless metadata, lifecycle transitions, and correction history.
 
+## Payment reconciliation review
+
+OWL owns the durable relationship between an Action Queue obligation and normalized
+payment evidence. Paperless remains the canonical artifact store, Monarch remains the
+transaction authority, and Tyrion supplies bounded native receipt evidence or the
+existing Bill Matching v1 decision. Receipt evidence never completes an obligation:
+only the explicit Action Queue completion transition changes an obligation to
+`settled`.
+
+All payment-review routes require `Authorization: Bearer
+<OWL_MISSION_CONTROL_API_TOKEN>`. List active exceptions with:
+
+```http
+GET /api/mc/v1/payment-reconciliation-reviews?active_only=true&limit=100&offset=0
+```
+
+Read one aggregate, including immutable relationship history, with:
+
+```http
+GET /api/mc/v1/payment-reconciliation-reviews/{id}
+```
+
+The strict response contains the review ID and revision, exception and attention
+states, a bounded obligation coverage summary, one privacy-scoped evidence summary,
+safe OWL deep link, and allowlisted `source_actions`. It excludes canonical document,
+receipt, and transaction source references; OCR; filenames; email content; line items;
+account identifiers; signed URLs; bytes; credentials; and upstream payloads.
+
+Invoke an allowlisted action at:
+
+```http
+POST /api/mc/v1/payment-reconciliation-reviews/{id}/actions
+Content-Type: application/json
+
+{
+  "contract_version": "1.0",
+  "action": "confirm",
+  "expected_revision": 4,
+  "idempotency_key": "mc:payment-review:example:confirm",
+  "evidence_id": "evidence_opaque",
+  "allocated_amount_minor": 12550
+}
+```
+
+Actions are `confirm`, `reject`, `replace`, `clear`, `defer`, `reopen`,
+`mark_not_applicable`, `deliver_attention`, and `acknowledge_attention`. Every mutation
+requires the current `expected_revision` and a durable `idempotency_key`. A stale
+revision or key reused with another payload returns `409`. Retrying the same key and
+payload returns the prior authoritative result with `idempotent=true`.
+
+OWL appends an immutable event and performs an authoritative local read-back before
+returning success. `deliver_attention` records the Mission Control delivery reference;
+`acknowledge_attention` records delivery acknowledgement. Mission Control snooze or
+dismissal is never represented as payment settlement.
+
+Review states include unmatched, ambiguous, source unavailable, projection failed,
+stale, conflict, not applicable, partial payment, and double payment. Multiple posted
+payments may cover one obligation. Evidence beyond a settled obligation creates a
+double-payment review instead of reopening, completing, or deduplicating anything.
+
 ## Payee and document review
 
 The versioned payee-review contract requires

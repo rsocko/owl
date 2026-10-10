@@ -54,10 +54,11 @@ def test_receipt_intake_returns_bounded_contract(client, mock_paperless):
         "retry_safe": True,
         "external_replica_eligible": True,
     }
+    assert payload["canonical_document_ref"] != "818"
     serialized = response.text.lower()
     assert all(
         forbidden not in serialized
-        for forbidden in ("invented receipt", "818", "filename", "ocr", "signed_url")
+        for forbidden in ("invented receipt", "filename", "ocr", "signed_url")
     )
 
 

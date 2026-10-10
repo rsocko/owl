@@ -451,6 +451,16 @@ def manually_link_document(
         obligation.suggestion_reason = (
             f"Payment receipt #{document_id} was manually linked to this obligation."
         )
+        from .payment_reconciliation import PaymentReconciliationService
+
+        PaymentReconciliationService(db).record_legacy_receipt(
+            obligation,
+            document_id=document_id,
+            amount_minor=round(linked.amount * 100) if linked.amount is not None else None,
+            evidence_date=linked.document_date,
+            confidence=linked.confidence,
+            manual=True,
+        )
     db.flush()
     return linked
 
@@ -537,6 +547,9 @@ def backfill_obligations(db: Session) -> int:
                 "created": action.document_date,
             },
         )
+    from .payment_reconciliation import PaymentReconciliationService
+
+    PaymentReconciliationService(db).backfill_legacy_receipts()
     db.flush()
     return len(actions)
 
@@ -630,6 +643,16 @@ def associate_receipt(
         confidence=best_score,
         source="receipt_match",
     )
+    from .payment_reconciliation import PaymentReconciliationService
+
+    PaymentReconciliationService(db).record_legacy_receipt(
+        obligation,
+        document_id=document_id,
+        amount_minor=round(amount * 100) if amount is not None else None,
+        evidence_date=_document_date(document),
+        confidence=best_score,
+        manual=False,
+    )
     obligation.status = "payment_detected"
     obligation.completion_suggested = True
     obligation.suggestion_reason = (
@@ -661,6 +684,28 @@ def unlink_document(db: Session, action: Action, document_id: int) -> list[Actio
 
     linked.excluded = True
     linked.excluded_at = datetime.utcnow()
+    if linked.role == "receipt":
+        from .database import ObligationPaymentEdge, PaymentEvidence
+
+        evidence = (
+            db.query(PaymentEvidence)
+            .filter_by(
+                source_system="legacy_receipt",
+                connector_ref="owl-action-queue",
+                evidence_ref=f"legacy-receipt-{document_id}",
+            )
+            .first()
+        )
+        if evidence:
+            edge = (
+                db.query(ObligationPaymentEdge)
+                .filter_by(obligation_id=obligation.id, evidence_id=evidence.id)
+                .first()
+            )
+            if edge:
+                edge.state = "rejected"
+                edge.manual_precedence = True
+                edge.removed_at = datetime.utcnow()
 
     restored = (
         db.query(Action)
@@ -717,6 +762,25 @@ def sync_obligation_status(db: Session, action: Action) -> None:
         obligation.status = "settled"
         obligation.completion_suggested = False
     elif action.status == "pending" and obligation.status == "settled":
+        from .database import ObligationPaymentEdge, PaymentEvidence
+
+        normalized = (
+            db.query(ObligationPaymentEdge)
+            .join(PaymentEvidence, PaymentEvidence.id == ObligationPaymentEdge.evidence_id)
+            .filter(
+                ObligationPaymentEdge.obligation_id == obligation.id,
+                ObligationPaymentEdge.state == "active",
+                PaymentEvidence.active.is_(True),
+                PaymentEvidence.source_system != "legacy_receipt",
+            )
+            .first()
+        )
+        if normalized:
+            from .payment_reconciliation import PaymentReconciliationService
+
+            obligation.status = "open"
+            PaymentReconciliationService(db).recompute_obligation(obligation)
+            return
         receipt = (
             db.query(ObligationDocument)
             .filter_by(obligation_id=obligation.id, role="receipt")
@@ -782,6 +846,32 @@ def completion_suggestion(db: Session, action: Action) -> dict[str, Any] | None:
     obligation = db.query(Obligation).filter_by(id=action.obligation_id).first()
     if not obligation or not obligation.completion_suggested:
         return None
+    from .database import ObligationPaymentEdge, PaymentEvidence
+
+    normalized = (
+        db.query(PaymentEvidence, ObligationPaymentEdge)
+        .join(ObligationPaymentEdge, ObligationPaymentEdge.evidence_id == PaymentEvidence.id)
+        .filter(
+            ObligationPaymentEdge.obligation_id == obligation.id,
+            ObligationPaymentEdge.state == "active",
+            PaymentEvidence.source_system != "legacy_receipt",
+            PaymentEvidence.active.is_(True),
+        )
+        .order_by(PaymentEvidence.source_as_of.desc())
+        .first()
+    )
+    if normalized:
+        evidence, edge = normalized
+        return {
+            "type": "payment_evidence",
+            "reason": obligation.suggestion_reason,
+            "receipt_document_id": None,
+            "confidence": evidence.confidence,
+            "evidence_id": evidence.id,
+            "payment_status": evidence.payment_status,
+            "allocated_amount_minor": edge.allocated_amount_minor,
+            "currency": evidence.currency,
+        }
     receipt = (
         db.query(ObligationDocument)
         .filter_by(obligation_id=obligation.id, role="receipt")

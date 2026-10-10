@@ -12,6 +12,8 @@ from doc_intelligence_hub.api.routers import (
     require_receipt_intake_auth,
 )
 from doc_intelligence_hub.modules.receipt_intake.models import (
+    ExternalReplicaResult,
+    ExternalReplicaUpdate,
     IntakeMetadata,
     IntakeResult,
     SourceChannel,
@@ -152,4 +154,38 @@ async def reconcile_unknown(request: Request, intake_ref: str) -> IntakeResult:
         raise HTTPException(
             status_code=404,
             detail={"code": "intake_not_found", "message": "Receipt intake was not found."},
+        ) from exc
+
+
+@router.post("/external-replicas", response_model=ExternalReplicaResult)
+async def record_external_replica(
+    request: Request,
+    body: ExternalReplicaUpdate,
+) -> ExternalReplicaResult:
+    """Record Tyrion/Monarch lifecycle using OWL's independent replica revision."""
+    try:
+        return _service(request).record_external_replica(
+            canonical_ref=body.canonical_document_ref,
+            external_system=body.external_system,
+            external_replica_ref=body.external_replica_ref,
+            lifecycle_state=body.lifecycle_state,
+            source_revision=str(body.source_revision),
+            expected_revision=body.expected_revision,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "canonical_receipt_not_found",
+                "message": "Canonical receipt was not found.",
+            },
+        ) from exc
+    except ValueError as exc:
+        code = str(exc)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": code,
+                "message": "External replica revision or identity conflicted.",
+            },
         ) from exc
