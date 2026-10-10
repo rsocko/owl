@@ -907,7 +907,10 @@ class TestUpdateAction:
         assert response.status_code == 200
         assert response.json()["action_ready"] is False
         assert response.json()["review_state"] == "needs_review"
-        assert response.json()["needs_review_url"].endswith("item=review-1")
+        assert (
+            response.json()["needs_review_url"]
+            == "#/needs-review?type=action_classification&item=review-1"
+        )
 
     def test_file_action_cannot_use_generic_completion(self, seeded_client):
         db = get_session()

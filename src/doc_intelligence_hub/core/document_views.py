@@ -29,17 +29,17 @@ class OwlViewDefinition(BaseModel):
 
 
 OWL_VIEW_DEFINITIONS: dict[str, OwlViewDefinition] = {
-    "triage.pending": OwlViewDefinition(route="/triage"),
+    "triage.pending": OwlViewDefinition(route="/needs-review"),
     "triage.eob-match-review": OwlViewDefinition(
-        route="/triage?type=eob_match_review",
+        route="/needs-review?type=eob_match_review",
         item_type="eob_match_review",
     ),
     "triage.grouping-anomaly": OwlViewDefinition(
-        route="/triage?type=grouping_anomaly",
+        route="/needs-review?type=grouping_anomaly",
         item_type="grouping_anomaly",
     ),
     "triage.orphan-document": OwlViewDefinition(
-        route="/triage?type=orphan_document",
+        route="/needs-review?type=orphan_document",
         item_type="orphan_document",
     ),
 }

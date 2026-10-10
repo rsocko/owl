@@ -42,7 +42,7 @@ const catalog = {
           provider: 'owl',
           source_id: 'triage.pending',
           launch: 'owl',
-          href: '/triage',
+          href: '/needs-review',
           count: 3,
           availability: 'ready',
           checked_at: '2026-08-19T19:00:00Z',
@@ -96,7 +96,7 @@ describe('DocumentViews', () => {
       'href',
       'https://paperless.test/view/7',
     );
-    expect(screen.getByRole('link', { name: /Open OWL review/ })).toHaveAttribute('href', '/triage');
+    expect(screen.getByRole('link', { name: /Open OWL review/ })).toHaveAttribute('href', '/needs-review');
     expect(screen.getAllByText('Paperless')).toHaveLength(1);
     expect(screen.getByText('OWL')).toBeInTheDocument();
   });

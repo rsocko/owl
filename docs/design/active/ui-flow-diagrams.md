@@ -112,7 +112,7 @@ flowchart LR
         DASH["/eob — EOB Dashboard"]
         UNMATCHED["/eob/unmatched — Unmatched List"]
         REVIEW["/eob/matches/:id — Match Review"]
-        MANUAL["/triage/manual-search — Manual Search"]
+        MANUAL["/needs-review/manual-search — Manual Search"]
 
         ENTRY --> DASH
         DASH -.->|"unclear link"| UNMATCHED
@@ -129,7 +129,7 @@ flowchart LR
 
 **Problems:**
 - No clear entry point or flow direction
-- Manual Match Search lives under `/triage` despite being an EOB feature
+- Manual Match Search lives under `/needs-review` despite being an EOB feature
 - No breadcrumbs or back navigation between pages
 - Users lose context when moving between views
 
@@ -195,7 +195,7 @@ flowchart TD
             TQ_LIST["Document List<br/>(list + detail)"]
             TQ_DETAIL["Detail Panel<br/>(5 content types!)"]
             TQ_LIST --> TQ_DETAIL
-            TQ_DETAIL --> TQ_MANUAL["/triage/manual-search<br/>❌ Dead end"]
+            TQ_DETAIL --> TQ_MANUAL["/needs-review/manual-search<br/>❌ Dead end"]
         end
 
         USER -->|"Which one do I check?"| aq

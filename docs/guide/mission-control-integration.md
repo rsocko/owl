@@ -146,7 +146,7 @@ ingestion must use `action_ready` as its sole trust gate.
 |-------|-------|-----------|
 | `action_ready` | boolean | `true` only when OWL trusts the action and critical details are present |
 | `review_state` | `ready \| needs_review \| resolved_no_action` | Human-readable readiness lifecycle |
-| `needs_review_url` | string or null | OWL deep link `#/triage?type=action_classification&item={id}` for the current review item |
+| `needs_review_url` | string or null | OWL deep link `#/needs-review?type=action_classification&item={id}` for the current review item |
 | `recommended_cta` | object or null | `{id, label, url?: string|null, phone?: string|null, metadata?: object}`; fields are additive and must not be narrowed |
 | `source_actions` | array | OWL-owned mutations available for this item |
 

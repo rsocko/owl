@@ -9,16 +9,19 @@ describe('TopNav', () => {
     localStorage.clear();
   });
 
-  it('uses the user-facing Needs Review label for the triage route', () => {
+  it('uses the user-facing Needs Review label and route', () => {
     render(
-      <MemoryRouter initialEntries={['/triage']}>
+      <MemoryRouter initialEntries={['/needs-review']}>
         <TopNav />
       </MemoryRouter>,
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Workflow' }));
 
-    expect(screen.getByRole('menuitem', { name: 'Needs Review' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Needs Review' })).toHaveAttribute(
+      'href',
+      '/needs-review',
+    );
     expect(screen.queryByText('Triage')).not.toBeInTheDocument();
   });
 
