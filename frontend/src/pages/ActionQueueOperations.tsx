@@ -3,6 +3,7 @@ import { Badge, Button, Card, ErrorState, PageHeader, Toast } from '../component
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import { buildBackfillBody, buildQueueRunBody } from './actionQueueRunBody';
+import '../styles/relationship-maintenance.css';
 
 type Health = {
   status?: string;
@@ -13,11 +14,29 @@ type Health = {
 
 type ToastState = { message: string; tone?: 'success' | 'error' } | null;
 
+type ProjectionHealth = {
+  pending: number;
+  failed: number;
+  not_intended: number;
+  last_error: { relationship_id: string; message: string; recorded_at: string | null } | null;
+};
+
+type ProjectionRepairResult = {
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  remaining: number;
+  errors: Array<{ relationship_id: string; message: string }>;
+};
+
 export default function ActionQueueOperations() {
   const [health, setHealth] = useState<Health | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
+  const [projectionHealth, setProjectionHealth] = useState<ProjectionHealth | null>(null);
+  const [projectionHealthError, setProjectionHealthError] = useState<string | null>(null);
+  const [projectionRepair, setProjectionRepair] = useState<ProjectionRepairResult | null>(null);
   const [filters, setFilters] = useState({
     document_id: '',
     tag_override: '',
@@ -39,6 +58,23 @@ export default function ActionQueueOperations() {
     );
     return () => window.clearTimeout(timeout);
   }, [toast]);
+
+  const loadProjectionHealth = async () => {
+    setProjectionHealthError(null);
+    try {
+      setProjectionHealth(
+        await endpoints.relationships.projectionHealth() as ProjectionHealth,
+      );
+    } catch (err) {
+      setProjectionHealthError(
+        err instanceof Error ? err.message : 'Projection health could not be loaded.',
+      );
+    }
+  };
+
+  useEffect(() => {
+    void loadProjectionHealth();
+  }, []);
 
   const execute = async (key: string, operation: () => Promise<unknown>, success: string) => {
     setBusy(key);
@@ -75,6 +111,31 @@ export default function ActionQueueOperations() {
       () => endpoints.actionQueue.run(body),
       dryRun ? 'Dry run completed.' : 'Custom run completed.',
     );
+  };
+
+  const repairRelationshipProjections = async () => {
+    setBusy('relationship-projections');
+    setError(null);
+    setProjectionRepair(null);
+    try {
+      const result = (
+        await endpoints.relationships.reconcileProjections()
+      ) as ProjectionRepairResult;
+      setProjectionRepair(result);
+      await loadProjectionHealth();
+      setToast({
+        message: result.failed
+          ? `Repair completed with ${result.failed} failed projection${result.failed === 1 ? '' : 's'}.`
+          : 'Paperless relationship sync repaired.',
+        tone: result.failed ? 'error' : 'success',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Relationship sync repair failed.';
+      setError(message);
+      setToast({ message, tone: 'error' });
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (
@@ -296,6 +357,80 @@ export default function ActionQueueOperations() {
             >
               Refresh all metadata
             </Button>
+          </div>
+          <div className="relationship-maintenance">
+            <div className="relationship-maintenance__intro">
+              <strong>Paperless relationship sync</strong>
+              <span className="text-muted">
+                Repair relationship fields that have not reached Paperless. OWL remains
+                authoritative.
+              </span>
+            </div>
+            {projectionHealth ? (
+              <dl className="relationship-maintenance__metrics">
+                <div className="relationship-maintenance__metric">
+                  <dt>Pending</dt>
+                  <dd>{projectionHealth.pending}</dd>
+                </div>
+                <div className="relationship-maintenance__metric">
+                  <dt>Failed</dt>
+                  <dd>{projectionHealth.failed}</dd>
+                </div>
+              </dl>
+            ) : (
+              <span className="relationship-maintenance__status">
+                {projectionHealthError ?? 'Loading projection health…'}
+              </span>
+            )}
+            {projectionHealth?.last_error && (
+              <p className="relationship-maintenance__status">
+                Last error: {projectionHealth.last_error.message}
+              </p>
+            )}
+            <Button
+              onClick={() => void repairRelationshipProjections()}
+              disabled={
+                busy !== null
+                || !projectionHealth
+                || projectionHealth.pending + projectionHealth.failed === 0
+              }
+            >
+              {busy === 'relationship-projections'
+                ? 'Repairing relationship sync…'
+                : 'Retry failed Paperless relationship sync'}
+            </Button>
+            {projectionHealth
+              && projectionHealth.pending + projectionHealth.failed === 0
+              && (
+                <span className="relationship-maintenance__status">
+                  No relationship projections need repair.
+                </span>
+              )}
+            {projectionRepair && (
+              <div className="relationship-maintenance__panel" aria-live="polite">
+                <dl className="relationship-maintenance__metrics">
+                  <div className="relationship-maintenance__metric">
+                    <dt>Attempted</dt>
+                    <dd>{projectionRepair.attempted}</dd>
+                  </div>
+                  <div className="relationship-maintenance__metric">
+                    <dt>Succeeded</dt>
+                    <dd>{projectionRepair.succeeded}</dd>
+                  </div>
+                  <div className="relationship-maintenance__metric">
+                    <dt>Remaining</dt>
+                    <dd>{projectionRepair.remaining}</dd>
+                  </div>
+                </dl>
+                {projectionRepair.errors.length > 0 && (
+                  <ul className="relationship-maintenance__errors">
+                    {projectionRepair.errors.map((item) => (
+                      <li key={item.relationship_id}>{item.message}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
         </Card>
       </div>

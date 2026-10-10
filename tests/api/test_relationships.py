@@ -16,12 +16,19 @@ from doc_intelligence_hub.modules.action_queue.database import (
     get_session as get_action_queue_session,
 )
 from doc_intelligence_hub.modules.triage.database import (
+    DocumentDuplicate,
     DocumentRelationship,
+    TriageQueueItem,
     create_duplicate_pair,
     set_triage_setting,
 )
 from doc_intelligence_hub.modules.triage.database import (
     get_session as get_triage_session,
+)
+from doc_intelligence_hub.modules.triage.relationship_scans import (
+    create_scan_run,
+    get_scan_run,
+    update_scan_run,
 )
 from doc_intelligence_hub.modules.triage.relationships import (
     create_document_relationship,
@@ -200,8 +207,244 @@ def test_reconcile_projection_failures_after_restart(client):
 
     assert response.status_code == 200
     assert response.json()["attempted"] == 1
-    assert response.json()["synced"] is True
+    assert response.json()["succeeded"] == 1
+    assert response.json()["failed"] == 0
+    assert response.json()["remaining"] == 0
+    assert response.json()["errors"] == []
     assert get_document_relationship(relationship["id"])["paperless_synced"] is True
+
+
+def test_projection_health_distinguishes_opt_out_pending_and_failed(client):
+    opted_out = client.post(
+        "/api/relationships",
+        json={
+            "source_document_id": 20,
+            "target_document_id": 10,
+            "relationship_type": "follows",
+            "project_to_paperless": False,
+        },
+    ).json()["relationship"]
+    pending, _ = create_document_relationship(
+        source_document_id=30,
+        target_document_id=10,
+        relationship_type="supports",
+        provenance="automatic",
+    )
+    failed, _ = create_document_relationship(
+        source_document_id=40,
+        target_document_id=10,
+        relationship_type="supports",
+        provenance="automatic",
+    )
+    set_projection_result(failed["id"], synced=False, error="Paperless unavailable")
+
+    response = client.get("/api/relationships/projection-health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "pending": 1,
+        "failed": 1,
+        "not_intended": 1,
+        "last_error": {
+            "relationship_id": failed["id"],
+            "message": "Paperless unavailable",
+            "recorded_at": response.json()["last_error"]["recorded_at"],
+        },
+    }
+    assert get_document_relationship(opted_out["id"])["paperless_projection_enabled"] is False
+
+
+def test_reconcile_projection_reports_partial_failure(client):
+    first, _ = create_document_relationship(
+        source_document_id=2,
+        target_document_id=1,
+        relationship_type="follows",
+        provenance="automatic",
+    )
+    second, _ = create_document_relationship(
+        source_document_id=3,
+        target_document_id=1,
+        relationship_type="supports",
+        provenance="automatic",
+    )
+    projection = AsyncMock(
+        side_effect=[
+            {"synced": True, "documents": [1, 2], "error": None},
+            {"synced": False, "documents": [1, 3], "error": "Paperless unavailable"},
+        ]
+    )
+    with patch(
+        "doc_intelligence_hub.api.routers.relationships.project_relationships_to_paperless",
+        new=projection,
+    ):
+        response = client.post("/api/relationships/reconcile-projections")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "attempted": 2,
+        "succeeded": 1,
+        "failed": 1,
+        "remaining": 1,
+        "errors": [
+            {
+                "relationship_id": second["id"],
+                "message": "Paperless unavailable",
+            }
+        ],
+    }
+    assert get_document_relationship(first["id"])["paperless_synced"] is True
+    assert get_document_relationship(second["id"])["paperless_synced"] is False
+
+
+def test_historical_scan_preview_does_not_mutate(client, seed_eob):
+    metadata = {
+        200: {
+            "title": "Original utility bill",
+            "provider": "Utility",
+            "invoice_number": "INV-001",
+            "amount": 150,
+            "document_date": "2026-06-01",
+        },
+        201: {
+            "title": "Second notice utility bill",
+            "provider": "Utility",
+            "invoice_number": "INV-001",
+            "amount": 150,
+            "document_date": "2026-07-01",
+        },
+    }
+    with patch(
+        "doc_intelligence_hub.modules.triage.duplicates.get_document_metadata",
+        side_effect=lambda document_id: metadata.get(document_id),
+    ):
+        response = client.post("/api/duplicates/scan/preview")
+
+    assert response.status_code == 200
+    assert response.json()["dry_run"] is True
+    assert response.json()["documents_examined"] == 2
+    assert response.json()["relationships_created"] == 1
+    db = get_triage_session()
+    try:
+        assert db.query(DocumentRelationship).count() == 0
+        assert db.query(DocumentDuplicate).count() == 0
+        assert db.query(TriageQueueItem).count() == 0
+    finally:
+        db.close()
+
+
+def test_historical_scan_application_is_idempotent(client, seed_eob):
+    metadata = {
+        200: {
+            "title": "Original utility bill",
+            "provider": "Utility",
+            "invoice_number": "INV-001",
+            "amount": 150,
+            "document_date": "2026-06-01",
+        },
+        201: {
+            "title": "Second notice utility bill",
+            "provider": "Utility",
+            "invoice_number": "INV-001",
+            "amount": 150,
+            "document_date": "2026-07-01",
+        },
+    }
+    projection = AsyncMock(return_value={"synced": True, "documents": [200, 201], "error": None})
+    with (
+        patch(
+            "doc_intelligence_hub.modules.triage.duplicates.get_document_metadata",
+            side_effect=lambda document_id: metadata.get(document_id),
+        ),
+        patch(
+            "doc_intelligence_hub.api.routers.duplicates.project_relationships_to_paperless",
+            new=projection,
+        ),
+    ):
+        first = client.post("/api/duplicates/scan")
+        second = client.post("/api/duplicates/scan")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["relationships_created"] == 1
+    assert second.json()["relationships_created"] == 0
+    assert second.json()["relationships_reused"] == 1
+    db = get_triage_session()
+    try:
+        assert db.query(DocumentRelationship).count() == 1
+    finally:
+        db.close()
+
+
+def test_tracked_scan_persists_completed_status(client):
+    result = {
+        "documents_examined": 12,
+        "relationships_created": 2,
+        "relationships_reused": 1,
+        "triage_items_created": 3,
+        "conflicts": 0,
+        "failures": 0,
+        "errors": [],
+        "relationship_ids": [],
+    }
+    with patch(
+        "doc_intelligence_hub.api.routers.duplicates.scan_all_duplicates",
+        return_value=result,
+    ):
+        started = client.post("/api/duplicates/scan/runs")
+
+    assert started.status_code == 202
+    status = client.get(f"/api/duplicates/scan/runs/{started.json()['run_id']}")
+    assert status.status_code == 200
+    assert status.json()["status"] == "completed"
+    assert status.json()["counts"]["documents_examined"] == 12
+
+
+def test_tracked_scan_persists_running_progress(client):
+    run = create_scan_run()
+
+    update_scan_run(
+        run["run_id"],
+        status="running",
+        counts={"documents_examined": 4, "documents_total": 12},
+    )
+
+    stored = get_scan_run(run["run_id"])
+    assert stored is not None
+    assert stored["status"] == "running"
+    assert stored["started_at"] is not None
+    assert stored["counts"] == {"documents_examined": 4, "documents_total": 12}
+
+
+def test_tracked_scan_surfaces_failure(client):
+    with patch(
+        "doc_intelligence_hub.api.routers.duplicates.scan_all_duplicates",
+        side_effect=RuntimeError("private connector detail"),
+    ):
+        started = client.post("/api/duplicates/scan/runs")
+
+    status = client.get(f"/api/duplicates/scan/runs/{started.json()['run_id']}")
+    assert status.json()["status"] == "failed"
+    assert status.json()["errors"] == [
+        {
+            "code": "RuntimeError",
+            "message": "The relationship scan could not be completed.",
+        }
+    ]
+    assert "private connector detail" not in str(status.json())
+
+
+def test_tracked_scan_rejects_concurrent_run(client):
+    from doc_intelligence_hub.api.routers import duplicates as duplicates_router
+
+    active = create_scan_run()
+    duplicates_router._active_scan_run_ids.add(active["run_id"])
+    try:
+        response = client.post("/api/duplicates/scan/runs")
+    finally:
+        duplicates_router._active_scan_run_ids.discard(active["run_id"])
+
+    assert response.status_code == 409
+    assert response.json()["error"]["run_id"] == active["run_id"]
 
 
 def test_duplicate_review_related_resolution_applies_notice_priority(client):

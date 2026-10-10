@@ -93,11 +93,26 @@ class DocumentRelationship(Base):
     priority_adjustment = Column(Integer, nullable=False, default=0)
     priority_explanation = Column(Text, nullable=False, default="")
     source_duplicate_pair_id = Column(String, nullable=True)
+    paperless_projection_enabled = Column(Integer, nullable=False, default=1)
     paperless_synced = Column(Integer, nullable=False, default=0)
     projection_error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     removed_at = Column(DateTime, nullable=True)
     removed_by = Column(String, nullable=True)
+
+
+class RelationshipScanRun(Base):
+    """Durable status and aggregate results for a historical relationship scan."""
+
+    __tablename__ = "relationship_scan_runs"
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    status = Column(String, nullable=False, default="queued", index=True)
+    counts_json = Column("counts", Text, nullable=False, default="{}")
+    errors_json = Column("errors", Text, nullable=False, default="[]")
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), index=True)
 
 
 class CorrectionEvent(Base):
@@ -232,6 +247,9 @@ def _migrate_missing_columns(engine):
         "extraction_corrections": [
             ("correspondent", "VARCHAR"),
             ("label_anchor", "TEXT"),
+        ],
+        "document_relationships": [
+            ("paperless_projection_enabled", "INTEGER NOT NULL DEFAULT 1"),
         ],
     }
 

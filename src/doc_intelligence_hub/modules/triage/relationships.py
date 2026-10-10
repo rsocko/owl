@@ -90,6 +90,7 @@ def _relationship_to_dict(relationship: DocumentRelationship) -> dict[str, Any]:
         "priority_adjustment": relationship.priority_adjustment,
         "priority_explanation": relationship.priority_explanation,
         "source_duplicate_pair_id": relationship.source_duplicate_pair_id,
+        "paperless_projection_enabled": bool(relationship.paperless_projection_enabled),
         "paperless_synced": bool(relationship.paperless_synced),
         "projection_error": relationship.projection_error,
         "created_at": relationship.created_at.isoformat() if relationship.created_at else None,
@@ -284,12 +285,97 @@ def list_pending_projection_relationships(limit: int = 100) -> list[dict[str, An
     try:
         relationships = (
             session.query(DocumentRelationship)
-            .filter(DocumentRelationship.paperless_synced == 0)
+            .filter(
+                DocumentRelationship.paperless_projection_enabled == 1,
+                DocumentRelationship.paperless_synced == 0,
+            )
             .order_by(DocumentRelationship.created_at)
             .limit(limit)
             .all()
         )
         return [_relationship_to_dict(relationship) for relationship in relationships]
+    finally:
+        session.close()
+
+
+def get_projection_health() -> dict[str, Any]:
+    """Return privacy-bounded Paperless projection health aggregates."""
+    session = get_session()
+    try:
+        enabled_unsynced = session.query(DocumentRelationship).filter(
+            DocumentRelationship.paperless_projection_enabled == 1,
+            DocumentRelationship.paperless_synced == 0,
+        )
+        pending = enabled_unsynced.filter(DocumentRelationship.projection_error.is_(None)).count()
+        failed = enabled_unsynced.filter(DocumentRelationship.projection_error.is_not(None)).count()
+        not_intended = (
+            session.query(DocumentRelationship)
+            .filter(DocumentRelationship.paperless_projection_enabled == 0)
+            .count()
+        )
+        latest_failure = (
+            enabled_unsynced.filter(DocumentRelationship.projection_error.is_not(None))
+            .order_by(DocumentRelationship.created_at.desc())
+            .first()
+        )
+        return {
+            "pending": pending,
+            "failed": failed,
+            "not_intended": not_intended,
+            "last_error": (
+                {
+                    "relationship_id": latest_failure.id,
+                    "message": latest_failure.projection_error,
+                    "recorded_at": (
+                        latest_failure.created_at.isoformat() if latest_failure.created_at else None
+                    ),
+                }
+                if latest_failure
+                else None
+            ),
+        }
+    finally:
+        session.close()
+
+
+def inspect_relationship_candidate(
+    source_document_id: int,
+    target_document_id: int,
+    relationship_type: str,
+) -> str:
+    """Return create, reuse, or conflict without mutating relationship state."""
+    session = get_session()
+    try:
+        active = (
+            session.query(DocumentRelationship)
+            .filter(
+                DocumentRelationship.removed_at.is_(None),
+                (
+                    (DocumentRelationship.source_document_id == source_document_id)
+                    & (DocumentRelationship.target_document_id == target_document_id)
+                )
+                | (
+                    (DocumentRelationship.source_document_id == target_document_id)
+                    & (DocumentRelationship.target_document_id == source_document_id)
+                ),
+            )
+            .all()
+        )
+        for existing in active:
+            same_direction = (
+                existing.source_document_id == source_document_id
+                and existing.target_document_id == target_document_id
+            )
+            if existing.relationship_type == relationship_type and (
+                same_direction or relationship_type in SYMMETRIC_TYPES
+            ):
+                return "reuse"
+            if relationship_type in {"follows", "supersedes"} and existing.relationship_type in {
+                "follows",
+                "supersedes",
+            }:
+                return "conflict"
+        return "create"
     finally:
         session.close()
 
@@ -305,6 +391,7 @@ def create_document_relationship(
     priority_adjustment: int = 0,
     priority_explanation: str = "",
     source_duplicate_pair_id: str | None = None,
+    project_to_paperless: bool = True,
 ) -> tuple[dict[str, Any], bool]:
     if source_document_id == target_document_id:
         raise ValueError("A document cannot be related to itself")
@@ -364,6 +451,8 @@ def create_document_relationship(
             priority_adjustment=priority_adjustment,
             priority_explanation=priority_explanation,
             source_duplicate_pair_id=source_duplicate_pair_id,
+            paperless_projection_enabled=int(project_to_paperless),
+            paperless_synced=0,
         )
         session.add(relationship)
         session.flush()

@@ -16,6 +16,7 @@ import {
 import OrphanDetail from '../components/triage/OrphanDetail';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
+import '../styles/relationship-maintenance.css';
 
 type ToastState = {
   message: string;
@@ -72,6 +73,25 @@ type AlertItem = {
 
 type AlertsResponse = {
   alerts?: AlertItem[];
+};
+
+type RelationshipScanCounts = {
+  documents_examined?: number;
+  documents_total?: number;
+  candidate_pairs?: number;
+  relationships_created?: number;
+  relationships_reused?: number;
+  review_candidates?: number;
+  triage_items_created?: number;
+  conflicts?: number;
+  failures?: number;
+};
+
+type RelationshipScanRun = {
+  run_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  counts: RelationshipScanCounts;
+  errors: Array<{ code: string; message: string }>;
 };
 
 type OrphanItem = {
@@ -143,6 +163,11 @@ export default function OrphansDupes() {
   const [orphanFilter, setOrphanFilter] = useState<'all' | 'eob' | 'bill'>('all');
   const [autoDetectEnabled, setAutoDetectEnabled] = useState(false);
   const [autoDetectLoading, setAutoDetectLoading] = useState(false);
+  const [scanPanelOpen, setScanPanelOpen] = useState(false);
+  const [scanPreview, setScanPreview] = useState<RelationshipScanCounts | null>(null);
+  const [scanPreviewLoading, setScanPreviewLoading] = useState(false);
+  const [scanRun, setScanRun] = useState<RelationshipScanRun | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -235,6 +260,26 @@ export default function OrphansDupes() {
     );
   }, []);
 
+  useEffect(() => {
+    if (!scanRun || !['queued', 'running'].includes(scanRun.status)) return undefined;
+    const interval = window.setInterval(async () => {
+      try {
+        const next = await endpoints.duplicates.relationshipScanStatus(
+          scanRun.run_id,
+        ) as RelationshipScanRun;
+        setScanRun(next);
+        if (next.status === 'completed') {
+          setToast({ message: 'Relationship scan completed.', tone: 'success' });
+        } else if (next.status === 'failed') {
+          setScanError(next.errors[0]?.message ?? 'The relationship scan failed.');
+        }
+      } catch (err) {
+        setScanError(getErrorMessage(err));
+      }
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [scanRun]);
+
   const filteredOrphans = useMemo(
     () => orphanFilter === 'all' ? orphans : orphans.filter((o) => o.kind === orphanFilter),
     [orphans, orphanFilter],
@@ -257,6 +302,32 @@ export default function OrphansDupes() {
       setToast({ message: getErrorMessage(err), tone: 'error' });
     } finally {
       setAutoDetectLoading(false);
+    }
+  };
+
+  const handleRevealRelationshipScan = async () => {
+    setScanPanelOpen(true);
+    if (scanPreview || scanPreviewLoading) return;
+    setScanPreviewLoading(true);
+    setScanError(null);
+    try {
+      setScanPreview(
+        await endpoints.duplicates.previewRelationshipScan() as RelationshipScanCounts,
+      );
+    } catch (err) {
+      setScanError(getErrorMessage(err));
+    } finally {
+      setScanPreviewLoading(false);
+    }
+  };
+
+  const handleStartRelationshipScan = async () => {
+    setScanError(null);
+    try {
+      const run = await endpoints.duplicates.startRelationshipScan() as RelationshipScanRun;
+      setScanRun(run);
+    } catch (err) {
+      setScanError(getErrorMessage(err));
     }
   };
 
@@ -331,6 +402,128 @@ export default function OrphansDupes() {
                     />
                     Auto-detect duplicates on ingestion
                   </label>
+                  <div className="relationship-maintenance">
+                    <div className="relationship-maintenance__intro">
+                      <strong>Historical relationship maintenance</strong>
+                      <span className="text-muted">
+                        Find links and review candidates in documents already stored by OWL.
+                      </span>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => void handleRevealRelationshipScan()}
+                      aria-expanded={scanPanelOpen}
+                      aria-controls="historical-relationship-scan"
+                    >
+                      Scan existing documents for relationships
+                    </Button>
+                    {scanPanelOpen && (
+                      <div
+                        id="historical-relationship-scan"
+                        className="relationship-maintenance__panel"
+                        aria-live="polite"
+                      >
+                        <p>
+                          OWL will examine existing documents. Documents are preserved, but
+                          relationship links and Needs Review items may be created when you
+                          start the scan.
+                        </p>
+                        {scanPreviewLoading && (
+                          <span className="relationship-maintenance__status">
+                            Estimating scan scope…
+                          </span>
+                        )}
+                        {scanPreview && (
+                          <dl className="relationship-maintenance__metrics">
+                            <div className="relationship-maintenance__metric">
+                              <dt>Documents in scope</dt>
+                              <dd>{scanPreview.documents_examined ?? 0}</dd>
+                            </div>
+                            <div className="relationship-maintenance__metric">
+                              <dt>Relationship candidates</dt>
+                              <dd>{scanPreview.relationships_created ?? 0}</dd>
+                            </div>
+                            <div className="relationship-maintenance__metric">
+                              <dt>Existing links reused</dt>
+                              <dd>{scanPreview.relationships_reused ?? 0}</dd>
+                            </div>
+                            <div className="relationship-maintenance__metric">
+                              <dt>Review candidates</dt>
+                              <dd>{scanPreview.review_candidates ?? 0}</dd>
+                            </div>
+                          </dl>
+                        )}
+                        {scanRun && (
+                          <>
+                            <div className="relationship-maintenance__status">
+                              {scanRun.status === 'queued' && 'Scan queued.'}
+                              {scanRun.status === 'running' && (
+                                `Examining ${scanRun.counts.documents_examined ?? 0} of `
+                                + `${scanRun.counts.documents_total ?? '—'} documents…`
+                              )}
+                              {scanRun.status === 'completed' && 'Scan completed.'}
+                              {scanRun.status === 'failed' && 'Scan failed.'}
+                            </div>
+                            <dl className="relationship-maintenance__metrics">
+                              <div className="relationship-maintenance__metric">
+                                <dt>Documents examined</dt>
+                                <dd>{scanRun.counts.documents_examined ?? 0}</dd>
+                              </div>
+                              <div className="relationship-maintenance__metric">
+                                <dt>Relationships created</dt>
+                                <dd>{scanRun.counts.relationships_created ?? 0}</dd>
+                              </div>
+                              <div className="relationship-maintenance__metric">
+                                <dt>Relationships reused</dt>
+                                <dd>{scanRun.counts.relationships_reused ?? 0}</dd>
+                              </div>
+                              <div className="relationship-maintenance__metric">
+                                <dt>Review items created</dt>
+                                <dd>{scanRun.counts.triage_items_created ?? 0}</dd>
+                              </div>
+                              <div className="relationship-maintenance__metric">
+                                <dt>Conflicts</dt>
+                                <dd>{scanRun.counts.conflicts ?? 0}</dd>
+                              </div>
+                              <div className="relationship-maintenance__metric">
+                                <dt>Failures</dt>
+                                <dd>{scanRun.counts.failures ?? 0}</dd>
+                              </div>
+                            </dl>
+                          </>
+                        )}
+                        {scanError && <ErrorState message={scanError} />}
+                        {scanRun?.errors.length ? (
+                          <ul className="relationship-maintenance__errors">
+                            {scanRun.errors.map((item, index) => (
+                              <li key={`${item.code}-${index}`}>{item.message}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        <div className="btn-group">
+                          <Button
+                            variant="primary"
+                            onClick={() => void handleStartRelationshipScan()}
+                            disabled={
+                              scanPreviewLoading
+                              || scanRun?.status === 'queued'
+                              || scanRun?.status === 'running'
+                            }
+                          >
+                            {scanRun?.status === 'queued' || scanRun?.status === 'running'
+                              ? 'Scan in progress…'
+                              : 'Start relationship scan'}
+                          </Button>
+                          <Button
+                            onClick={() => setScanPanelOpen(false)}
+                            disabled={scanRun?.status === 'queued' || scanRun?.status === 'running'}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </Card>
             </div>

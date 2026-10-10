@@ -119,9 +119,29 @@ When **automatic duplicate detection** is enabled, Paperless post-consumption au
 calls `POST /api/duplicates/document-ingested` with `{"document_id": 123}` after metadata
 extraction completes. Delivery retries are idempotent: an existing relationship or
 Needs Review item is reused, and an unsynced relationship projection is attempted again.
-`POST /api/relationships/reconcile-projections` retries any durable projection failures,
-including failures left by a service restart. Automatic detection remains disabled by
-default and can be controlled through `PUT /api/duplicates/settings`.
+Automatic detection remains disabled by default and can be controlled through
+`PUT /api/duplicates/settings`.
+
+Historical maintenance is a separate, secondary operation:
+
+- `POST /api/duplicates/scan/preview` evaluates the full existing-document scope without
+  creating relationships, duplicate pairs, Needs Review items, obligation changes, or
+  Paperless projections.
+- `POST /api/duplicates/scan/runs` starts one background application run and immediately
+  returns its durable run ID.
+- `GET /api/duplicates/scan/runs/{run_id}` reports `queued`, `running`, `completed`, or
+  `failed` state with aggregate progress, safe failure details, and result counts.
+- A second applied scan is rejected while one is active. Repeated completed scans reuse
+  existing relationship identities and review records rather than duplicating them.
+- The synchronous `POST /api/duplicates/scan` endpoint remains available for compatible
+  callers.
+
+`GET /api/relationships/projection-health` reports pending, failed, and explicitly
+not-intended projection counts plus the latest safe error. Projection intent is durable:
+relationships created with `project_to_paperless=false` are excluded from reconciliation.
+`POST /api/relationships/reconcile-projections` retries intended projections
+idempotently and returns attempted, succeeded, failed, remaining, and per-relationship
+errors. OWL remains authoritative when any Paperless retry fails.
 
 ## UX
 
@@ -129,6 +149,12 @@ Duplicate review offers **Keep both and link** separately from **Not duplicate**
 reviewer sees the proposed type, direction, evidence, confidence, and priority effect
 before confirming. Document context shows incoming and outgoing relationships and
 supports removal. Uncertain or conflicting proposals appear in Needs Review.
+
+The Orphans & Duplicates surface reveals historical relationship scan scope inline before
+an applied run can start. It explains that documents are preserved and reports documents
+examined, relationships created or reused, Needs Review items, conflicts, and failures.
+Action Queue Operations exposes Paperless relationship retry as a repair action under
+Backfill and repair, disabled when projection health has no pending or failed work.
 
 ### Visual projection contract
 
