@@ -17,6 +17,7 @@ import {
 } from '../components/ui';
 import DocumentViewerModal from '../components/DocumentViewerModal';
 import DocumentSummary from '../components/DocumentSummary';
+import { ObligationRelationshipView } from '../components/ObligationRelationshipView';
 import { MetadataTypeahead } from '../components/MetadataTypeahead';
 import { useStreamingAction } from '../hooks/useStreamingAction';
 import { endpoints, type DocumentSummaryModel } from '../lib/api';
@@ -1706,48 +1707,23 @@ export default function ActionQueue() {
                             </div>
                             {expandedTimelines.has(action.id) && action.linked_documents && (
                               <div className="aq-linked-documents">
-                                <div className="aq-linked-documents-heading">
-                                  <div>
-                                    <strong>Obligation timeline</strong>
-                                    <span>Invoices, notices, revisions, and payment evidence</span>
-                                  </div>
-                                  <Badge tone="info">{action.linked_documents.length} linked</Badge>
-                                </div>
-                                <div className="aq-document-timeline">
-                                  {action.linked_documents.map((document) => (
-                                    <div className={`aq-timeline-entry role-${document.role}`} key={document.document_id}>
-                                      <span className="aq-timeline-dot" aria-hidden="true" />
-                                      <button
-                                        type="button"
-                                        className="aq-timeline-document"
-                                        onClick={() => setTimelineViewer(document)}
-                                      >
-                                        <span className="aq-timeline-role">{linkedDocumentRoleLabel(document.role)}</span>
-                                        {document.is_authoritative && <Badge tone="warning">Current notice</Badge>}
-                                        <DocumentSummary summary={document.document_summary} />
-                                        <span className="aq-timeline-meta">
-                                          {document.document_date ? formatDate(document.document_date) : 'Date unavailable'}
-                                          {document.amount != null ? ` · ${formatCurrency(document.amount)}` : ''}
-                                        </span>
-                                        <span className="aq-document-hover-preview">
-                                          <img
-                                            src={document.thumbnail_url}
-                                            alt=""
-                                            loading="lazy"
-                                          />
-                                          <span>
-                                            <strong>{document.title || `Document #${document.document_id}`}</strong>
-                                            <small>
-                                              {linkedDocumentRoleLabel(document.role)}
-                                              {document.correspondent ? ` · ${document.correspondent}` : ''}
-                                            </small>
-                                            <small>Click to open the full document</small>
-                                          </span>
-                                        </span>
-                                      </button>
-                                    </div>
-                                  ))}
-                                </div>
+                                <ObligationRelationshipView
+                                  actionId={action.id}
+                                  onOpenDocument={(documentId, title) => {
+                                    const document = action.linked_documents?.find(
+                                      (candidate) => candidate.document_id === documentId,
+                                    );
+                                    setTimelineViewer(document ?? {
+                                      document_id: documentId,
+                                      role: 'supporting',
+                                      title,
+                                      confidence: 1,
+                                      source: 'relationship_graph',
+                                      thumbnail_url: endpoints.statements.documentThumb(String(documentId)),
+                                      document_summary: { document_id: documentId, title },
+                                    });
+                                  }}
+                                />
                                 {action.completion_suggestion && (
                                   <div className="aq-payment-suggestion">
                                     <div>
