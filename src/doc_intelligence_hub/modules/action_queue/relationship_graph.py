@@ -181,7 +181,9 @@ def build_relationship_graph(action_id: int) -> dict[str, Any]:
         if obligation:
             payment_rows = (
                 db.query(PaymentEvidence, ObligationPaymentEdge)
-                .join(ObligationPaymentEdge, ObligationPaymentEdge.evidence_id == PaymentEvidence.id)
+                .join(
+                    ObligationPaymentEdge, ObligationPaymentEdge.evidence_id == PaymentEvidence.id
+                )
                 .filter(
                     ObligationPaymentEdge.obligation_id == obligation.id,
                     ObligationPaymentEdge.removed_at.is_(None),

@@ -344,9 +344,7 @@ def test_graph_projects_only_durable_owl_relationship_identities(client):
         "document:20",
         "payment-evidence:evidence-graph",
     }
-    assert "document-relationship:relationship-graph" in {
-        edge["id"] for edge in body["edges"]
-    }
+    assert "document-relationship:relationship-graph" in {edge["id"] for edge in body["edges"]}
     payment_node = next(
         node for node in body["nodes"] if node["id"] == "payment-evidence:evidence-graph"
     )
