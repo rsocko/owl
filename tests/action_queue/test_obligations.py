@@ -21,6 +21,7 @@ from doc_intelligence_hub.modules.action_queue.obligations import (
     linked_documents,
     manually_link_actions,
     manually_link_document,
+    reconcile_deleted_source_documents,
     reconcile_relationship_obligations,
     suggest_related_actions,
     sync_obligation_status,
@@ -144,6 +145,58 @@ def test_recurring_invoices_with_only_same_account_are_not_collapsed(db):
     assert august.superseded_by_action_id is None
 
 
+def test_exact_duplicate_invoice_documents_share_one_obligation(db):
+    original = _pay_action(1, "Town tax bill")
+    duplicate = _pay_action(2, "Town taxes - duplicate scan")
+    original.document_date = duplicate.document_date = date(2026, 9, 30)
+    original.due_date = duplicate.due_date = date(2026, 11, 2)
+    db.add_all([original, duplicate])
+    db.flush()
+
+    associate_pay_action(
+        db,
+        original,
+        {"id": original.document_id, "title": original.document_title},
+    )
+    matched = associate_pay_action(
+        db,
+        duplicate,
+        {"id": duplicate.document_id, "title": duplicate.document_title},
+    )
+
+    assert matched.id == original.obligation_id
+    assert matched.id == duplicate.obligation_id
+    assert duplicate.obligation_id == original.obligation_id
+    assert duplicate.superseded_by_action_id == original.id
+    assert duplicate.action_ready is False
+    assert {document["document_id"] for document in linked_documents(db, original)} == {1, 2}
+
+
+def test_reused_reference_with_different_due_date_stays_separate(db):
+    first = _pay_action(1, "First tax installment")
+    second = _pay_action(2, "Second tax installment")
+    first.document_date = second.document_date = date(2026, 9, 30)
+    first.due_date = date(2026, 11, 2)
+    second.due_date = date(2027, 2, 1)
+    db.add_all([first, second])
+    db.flush()
+
+    first_obligation = associate_pay_action(
+        db,
+        first,
+        {"id": first.document_id, "title": first.document_title},
+    )
+    second_obligation = associate_pay_action(
+        db,
+        second,
+        {"id": second.document_id, "title": second.document_title},
+    )
+
+    assert second_obligation.id != first_obligation.id
+    assert first.superseded_by_action_id is None
+    assert second.superseded_by_action_id is None
+
+
 def test_backfill_groups_legacy_invoice_actions(db):
     _relationship(2, 1)
     original = _pay_action(1, "Utility invoice")
@@ -155,6 +208,77 @@ def test_backfill_groups_legacy_invoice_actions(db):
     assert original.obligation_id is not None
     assert reminder.obligation_id == original.obligation_id
     assert reminder.superseded_by_action_id == original.id
+
+
+def test_backfill_consolidates_existing_duplicate_obligations(db):
+    original = _pay_action(1, "Town tax bill")
+    duplicate = _pay_action(2, "Town taxes - duplicate scan")
+    original.document_date = duplicate.document_date = date(2026, 9, 30)
+    original.due_date = duplicate.due_date = date(2026, 11, 2)
+    db.add_all([original, duplicate])
+    db.flush()
+    original_obligation = Obligation(primary_action_id=original.id, status="open")
+    duplicate_obligation = Obligation(primary_action_id=duplicate.id, status="open")
+    db.add_all([original_obligation, duplicate_obligation])
+    db.flush()
+    original.obligation_id = original_obligation.id
+    duplicate.obligation_id = duplicate_obligation.id
+
+    assert backfill_obligations(db) == 0
+
+    assert duplicate.obligation_id == original.obligation_id
+    assert duplicate.superseded_by_action_id == original.id
+    assert duplicate.action_ready is False
+
+
+def test_deleted_primary_source_promotes_surviving_duplicate(db):
+    original = _pay_action(1, "Town tax bill")
+    duplicate = _pay_action(2, "Town taxes - duplicate scan")
+    original.document_date = duplicate.document_date = date(2026, 9, 30)
+    original.due_date = duplicate.due_date = date(2026, 11, 2)
+    db.add_all([original, duplicate])
+    db.flush()
+    associate_pay_action(
+        db,
+        original,
+        {"id": original.document_id, "title": original.document_title},
+    )
+    associate_pay_action(
+        db,
+        duplicate,
+        {"id": duplicate.document_id, "title": duplicate.document_title},
+    )
+
+    assert reconcile_deleted_source_documents(db, {1}) == 1
+
+    assert original.status == "source_deleted"
+    assert original.action_ready is False
+    assert duplicate.status == "pending"
+    assert duplicate.action_ready is True
+    assert duplicate.superseded_by_action_id is None
+    obligation = db.query(Obligation).filter_by(id=duplicate.obligation_id).one()
+    assert obligation.primary_action_id == duplicate.id
+    assert obligation.authoritative_document_id == duplicate.document_id
+    assert [document["document_id"] for document in linked_documents(db, duplicate)] == [2]
+
+
+def test_deleted_only_source_hides_action_and_tombstones_obligation(db):
+    action = _pay_action(1, "Town tax bill")
+    db.add(action)
+    db.flush()
+    obligation = associate_pay_action(
+        db,
+        action,
+        {"id": action.document_id, "title": action.document_title},
+    )
+
+    assert reconcile_deleted_source_documents(db, {1}) == 1
+
+    assert action.status == "source_deleted"
+    assert action.action_ready is False
+    assert obligation.status == "source_deleted"
+    assert obligation.primary_action_id is None
+    assert obligation.authoritative_document_id is None
 
 
 def test_notice_sequence_uses_final_notice_as_authority_and_preserves_timeline(db):

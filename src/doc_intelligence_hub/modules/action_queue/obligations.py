@@ -178,6 +178,26 @@ def _action_identity(action: Action) -> tuple[str, str, str]:
     return _normalized(action.correspondent), reference, account
 
 
+def _exact_invoice_signature(action: Action) -> tuple[str, str, float, date, date] | None:
+    """Return a conservative identity for duplicate invoice documents."""
+    provider, reference, _account = _action_identity(action)
+    if (
+        not provider
+        or not reference
+        or action.amount is None
+        or action.due_date is None
+        or action.document_date is None
+    ):
+        return None
+    return (
+        provider,
+        reference,
+        round(float(action.amount), 2),
+        action.due_date,
+        action.document_date,
+    )
+
+
 def _identity_key(actions: list[Action], root_document_id: int) -> str:
     providers = sorted(
         {_action_identity(action)[0] for action in actions if _action_identity(action)[0]}
@@ -294,6 +314,26 @@ def reconcile_relationship_obligations(
     for row in relationships:
         adjacency.setdefault(row.source_document_id, set()).add(row.target_document_id)
         adjacency.setdefault(row.target_document_id, set()).add(row.source_document_id)
+
+    active_actions = (
+        db.query(Action)
+        .filter(
+            Action.action_type == "PAY",
+            Action.status.in_(ACTIVE_ACTION_STATUSES),
+        )
+        .all()
+    )
+    actions_by_signature: dict[tuple[str, str, float, date, date], list[Action]] = {}
+    for action in active_actions:
+        signature = _exact_invoice_signature(action)
+        if signature is not None:
+            actions_by_signature.setdefault(signature, []).append(action)
+    for matching_actions in actions_by_signature.values():
+        matching_documents = {action.document_id for action in matching_actions}
+        if len(matching_documents) < 2:
+            continue
+        for document_id in matching_documents:
+            adjacency.setdefault(document_id, set()).update(matching_documents - {document_id})
 
     expanded = set(document_ids)
     frontier = list(document_ids)
@@ -984,11 +1024,143 @@ def backfill_obligations(db: Session) -> int:
                 "created": action.document_date,
             },
         )
+    duplicate_documents: dict[tuple[str, str, float, date, date], set[int]] = {}
+    active_actions = (
+        db.query(Action)
+        .filter(
+            Action.action_type == "PAY",
+            Action.status.in_(ACTIVE_ACTION_STATUSES),
+            Action.superseded_by_action_id.is_(None),
+        )
+        .all()
+    )
+    for action in active_actions:
+        signature = _exact_invoice_signature(action)
+        if signature is not None:
+            duplicate_documents.setdefault(signature, set()).add(action.document_id)
+    for document_ids in duplicate_documents.values():
+        if len(document_ids) > 1:
+            reconcile_relationship_obligations(
+                db,
+                document_ids,
+                event_type="duplicate_invoice_consolidated",
+            )
     from .payment_reconciliation import PaymentReconciliationService
 
     PaymentReconciliationService(db).backfill_legacy_receipts()
     db.flush()
     return len(actions)
+
+
+def reconcile_deleted_source_documents(db: Session, document_ids: set[int]) -> int:
+    """Hide actions whose source documents were confirmed deleted in Paperless."""
+    if not document_ids:
+        return 0
+
+    deleted_actions = (
+        db.query(Action)
+        .filter(
+            Action.document_id.in_(document_ids),
+            Action.status != "source_deleted",
+        )
+        .all()
+    )
+    affected_obligation_ids = {
+        action.obligation_id for action in deleted_actions if action.obligation_id
+    }
+    now = datetime.utcnow()
+
+    for action in deleted_actions:
+        action.status = "source_deleted"
+        action.action_ready = False
+        action.review_state = "source_deleted"
+        action.updated_at = now
+        if action.obligation_id:
+            linked = (
+                db.query(ObligationDocument)
+                .filter_by(
+                    obligation_id=action.obligation_id,
+                    document_id=action.document_id,
+                )
+                .first()
+            )
+            if linked:
+                linked.excluded = True
+                linked.excluded_at = now
+
+    for obligation_id in affected_obligation_ids:
+        obligation = db.query(Obligation).filter_by(id=obligation_id).first()
+        if obligation is None:
+            continue
+        surviving_actions = (
+            db.query(Action)
+            .filter(
+                Action.obligation_id == obligation_id,
+                Action.status != "source_deleted",
+            )
+            .order_by(Action.created_at.asc(), Action.id.asc())
+            .all()
+        )
+        before = {
+            "primary_action_id": obligation.primary_action_id,
+            "authoritative_document_id": obligation.authoritative_document_id,
+            "status": obligation.status,
+        }
+        if surviving_actions:
+            lifecycle_actions = [
+                action
+                for action in surviving_actions
+                if action.status in {"completed", "acknowledged", "snoozed"}
+            ]
+            canonical = min(
+                lifecycle_actions or surviving_actions,
+                key=lambda action: (
+                    {"completed": 0, "acknowledged": 1, "snoozed": 2}.get(action.status, 3),
+                    action.created_at or datetime.min,
+                    action.id,
+                ),
+            )
+            for action in surviving_actions:
+                action.obligation_id = obligation.id
+                if action.id == canonical.id:
+                    _restore_base(action)
+                    action.superseded_by_action_id = None
+                    action.action_ready = True
+                    if action.review_state == "linked_document":
+                        action.review_state = "ready"
+                else:
+                    action.superseded_by_action_id = canonical.id
+                    action.action_ready = False
+                    action.review_state = "linked_document"
+            obligation.primary_action_id = canonical.id
+            obligation.authoritative_document_id = canonical.document_id
+            if obligation.status == "source_deleted":
+                obligation.status = "settled" if canonical.status == "completed" else "open"
+            obligation.identity_key = _identity_key(surviving_actions, canonical.document_id)
+        else:
+            obligation.primary_action_id = None
+            obligation.authoritative_document_id = None
+            obligation.status = "source_deleted"
+            obligation.completion_suggested = False
+            obligation.suggestion_reason = None
+
+        after = {
+            "primary_action_id": obligation.primary_action_id,
+            "authoritative_document_id": obligation.authoritative_document_id,
+            "status": obligation.status,
+            "deleted_document_ids": sorted(document_ids),
+        }
+        _record_obligation_event(
+            db,
+            obligation,
+            event_type="source_document_deleted",
+            relationship_id=None,
+            before=before,
+            after=after,
+        )
+
+    db.flush()
+    return len({action.document_id for action in deleted_actions})
 
 
 def _receipt_match_score(

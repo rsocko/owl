@@ -6,11 +6,17 @@ import asyncio
 import time
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from doc_intelligence_hub.modules.action_queue import analyzer as analyzer_module
 from doc_intelligence_hub.modules.action_queue.config import settings as aq_settings
-from doc_intelligence_hub.modules.action_queue.database import Action, get_session, init_db
+from doc_intelligence_hub.modules.action_queue.database import (
+    Action,
+    ProcessingHistory,
+    get_session,
+    init_db,
+)
 from doc_intelligence_hub.modules.action_queue.pipeline import Pipeline
 
 VALID_EXTRACTION = {
@@ -201,6 +207,78 @@ class TestPipelineErrorIsolation:
 
         assert journal_mode == "wal"
         assert busy_timeout == 30_000
+
+    @pytest.mark.asyncio
+    async def test_deleted_source_is_confirmed_before_action_is_hidden(self, db):
+        session = get_session()
+        try:
+            session.add(
+                Action(
+                    document_id=42,
+                    document_title="Deleted bill",
+                    action_type="PAY",
+                    title="Pay deleted bill",
+                    status="pending",
+                )
+            )
+            session.add(ProcessingHistory(document_id=42, success=1))
+            session.commit()
+        finally:
+            session.close()
+
+        pipeline = Pipeline()
+        request = httpx.Request("GET", "http://paperless.test/api/documents/42/")
+        response = httpx.Response(404, request=request)
+        pipeline.paperless.get_document = AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "not found",
+                request=request,
+                response=response,
+            )
+        )
+
+        assert await pipeline._reconcile_deleted_sources(set()) == 1
+
+        session = get_session()
+        try:
+            action = session.query(Action).filter_by(document_id=42).one()
+            assert action.status == "source_deleted"
+            assert action.action_ready is False
+            assert session.query(ProcessingHistory).filter_by(document_id=42).first() is None
+        finally:
+            session.close()
+
+    @pytest.mark.asyncio
+    async def test_transient_source_lookup_failure_preserves_action(self, db):
+        session = get_session()
+        try:
+            session.add(
+                Action(
+                    document_id=42,
+                    document_title="Temporarily unavailable bill",
+                    action_type="PAY",
+                    title="Pay bill",
+                    status="pending",
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        pipeline = Pipeline()
+        pipeline.paperless.get_document = AsyncMock(
+            side_effect=httpx.ConnectError("Paperless unavailable")
+        )
+
+        assert await pipeline._reconcile_deleted_sources(set()) == 0
+
+        session = get_session()
+        try:
+            action = session.query(Action).filter_by(document_id=42).one()
+            assert action.status == "pending"
+            assert action.action_ready is True
+        finally:
+            session.close()
 
     def test_resolves_paperless_metadata_for_analysis(self):
         pipeline = Pipeline()

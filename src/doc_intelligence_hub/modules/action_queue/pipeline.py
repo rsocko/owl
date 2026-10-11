@@ -34,7 +34,11 @@ from .lifecycle import (
     route_action_to_review,
     transition_action_status,
 )
-from .obligations import associate_pay_action, associate_receipt
+from .obligations import (
+    associate_pay_action,
+    associate_receipt,
+    reconcile_deleted_source_documents,
+)
 from .risk_scoring import compute_risk_score
 
 logger = logging.getLogger(__name__)
@@ -146,6 +150,76 @@ class Pipeline:
         self.freshness = AnalysisFreshnessService()
         self._ollama_available: bool | None = None
         self._enrichment_available: bool = True
+
+    async def _reconcile_deleted_sources(self, visible_document_ids: set[int]) -> int:
+        """Confirm absent action sources with Paperless and tombstone actual deletions."""
+        init_db()
+        db = get_session()
+        try:
+            candidate_ids = {
+                document_id
+                for (document_id,) in db.query(Action.document_id)
+                .filter(
+                    Action.document_id.notin_(visible_document_ids),
+                    Action.status != "source_deleted",
+                )
+                .distinct()
+                .all()
+            }
+        finally:
+            db.close()
+        if not candidate_ids:
+            return 0
+
+        semaphore = asyncio.Semaphore(10)
+
+        async def check_deleted(document_id: int) -> int | None:
+            async with semaphore:
+                try:
+                    await self.paperless.get_document(document_id)
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 404:
+                        return document_id
+                    logger.warning(
+                        "Could not verify Paperless document %s (HTTP %s); preserving its action",
+                        document_id,
+                        exc.response.status_code,
+                    )
+                except (httpx.TimeoutException, httpx.ConnectError, OSError) as exc:
+                    logger.warning(
+                        "Could not verify Paperless document %s; preserving its action: %s",
+                        document_id,
+                        exc,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Unexpected error verifying Paperless document %s; preserving its action",
+                        document_id,
+                    )
+                return None
+
+        results = await asyncio.gather(
+            *(check_deleted(document_id) for document_id in sorted(candidate_ids))
+        )
+        deleted_ids = {document_id for document_id in results if document_id is not None}
+        if not deleted_ids:
+            return 0
+
+        db = get_session()
+        try:
+            reconciled = reconcile_deleted_source_documents(db, deleted_ids)
+            db.query(ProcessingHistory).filter(
+                ProcessingHistory.document_id.in_(deleted_ids)
+            ).delete(synchronize_session=False)
+            db.commit()
+        finally:
+            db.close()
+        logger.info(
+            "Reconciled %d deleted Paperless source document(s): %s",
+            reconciled,
+            sorted(deleted_ids),
+        )
+        return reconciled
 
     async def run(
         self,
@@ -297,10 +371,34 @@ class Pipeline:
 
         console.print()
 
+        deleted_sources = 0
+        is_full_source_run = (
+            not dry_run
+            and limit is None
+            and document_id is None
+            and tag_override is None
+            and saved_view_id is None
+            and created_after is None
+            and created_before is None
+            and added_after is None
+            and added_before is None
+            and correspondent is None
+            and document_type is None
+        )
+        if is_full_source_run:
+            deleted_sources = await self._reconcile_deleted_sources(
+                {int(document["id"]) for document in documents}
+            )
+
         if not documents:
             console.print("[yellow]No documents to process.[/yellow]")
             _set_progress(current_step="complete", progress="0/0 documents processed")
-            return {"processed": 0, "skipped": 0, "failed": 0}
+            return {
+                "processed": 0,
+                "skipped": 0,
+                "failed": 0,
+                "deleted_sources": deleted_sources,
+            }
 
         # Filter out already-processed documents (unless force re-scan).
         # "Already processed" now also requires the cached analysis to still
@@ -371,6 +469,7 @@ class Pipeline:
                 "skipped": skipped_count if not force else 0,
                 "failed": 0,
                 "no_action": 0,
+                "deleted_sources": deleted_sources,
             }
 
         # Dry-run: just list what would be processed
@@ -411,6 +510,7 @@ class Pipeline:
             "failed": 0,
             "no_action": 0,
             "enrichment_failed": 0,
+            "deleted_sources": deleted_sources,
             "errors": [],
             "timed_out": False,
         }
@@ -1037,6 +1137,11 @@ class Pipeline:
         )
 
         if existing:
+            if existing.status == "source_deleted":
+                existing.status = "pending"
+                existing.action_ready = True
+                existing.review_state = "ready"
+                existing.superseded_by_action_id = None
             existing.action_type = action_data["action_type"]
             existing.title = action_data["title"]
             existing.summary = action_data.get("summary")
