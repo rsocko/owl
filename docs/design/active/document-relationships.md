@@ -124,9 +124,16 @@ Automatic detection remains disabled by default and can be controlled through
 
 Historical maintenance is a separate, secondary operation:
 
-- `POST /api/duplicates/scan/preview` evaluates the full existing-document scope without
+- Every scan accepts a Paperless scope. The safe default reuses the configured Action
+  Queue source (monitored tags or saved view). Explicit alternatives are one or more
+  Paperless tags, a saved view, a document date range, or all Paperless documents.
+  The all-documents option is intentionally advanced and always runs as a tracked
+  background scan when applied.
+- `POST /api/duplicates/scan/preview` evaluates the selected Paperless scope without
   creating relationships, duplicate pairs, Needs Review items, obligation changes, or
-  Paperless projections.
+  Paperless projections. It reports the human-readable scope, discovered and
+  metadata-eligible documents, bounded exclusion reason counts, candidate groups and
+  pairs, reusable links, and review candidates.
 - `POST /api/duplicates/scan/runs` starts one background application run and immediately
   returns its durable run ID.
 - `GET /api/duplicates/scan/runs/{run_id}` reports `queued`, `running`, `completed`, or
@@ -135,6 +142,14 @@ Historical maintenance is a separate, secondary operation:
   existing relationship identities and review records rather than duplicating them.
 - The synchronous `POST /api/duplicates/scan` endpoint remains available for compatible
   callers.
+
+Discovery uses the shared Paperless client and bounded pagination. The scanner creates
+deterministic indexes from the classifier's required structured evidence: normalized
+provider/correspondent plus exact invoice or claim identity, account identity with a
+close amount, or service date with a close amount. Only documents in compatible buckets
+are compared, and document pairs produced by multiple keys are deduplicated. OCR content
+for notice-stage phrases is fetched only for documents already present in candidate
+pairs; it is never persisted in scan status or errors.
 
 `GET /api/relationships/projection-health` reports pending, failed, and explicitly
 not-intended projection counts plus the latest safe error. Projection intent is durable:
@@ -150,9 +165,13 @@ reviewer sees the proposed type, direction, evidence, confidence, and priority e
 before confirming. Document context shows incoming and outgoing relationships and
 supports removal. Uncertain or conflicting proposals appear in Needs Review.
 
-The Orphans & Duplicates surface reveals historical relationship scan scope inline before
-an applied run can start. It explains that documents are preserved and reports documents
-examined, relationships created or reused, Needs Review items, conflicts, and failures.
+The Orphans & Duplicates surface reveals a compact scope selector and non-mutating
+preview inline before an applied run can start. Scope-specific controls are shown only
+when relevant. It explains that documents are preserved and reports discovery,
+eligibility, exclusions, candidate groups and pairs, relationships created or reused,
+Needs Review items, conflicts, and failures. Empty, loading, validation, warning,
+progress, completion, and failure states remain in the inline panel. The all-documents
+warning is restrained and explains that the tracked scan may take longer.
 Action Queue Operations exposes Paperless relationship retry as a repair action under
 Backfill and repair, disabled when projection health has no pending or failed work.
 

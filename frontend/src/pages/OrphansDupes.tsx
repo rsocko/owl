@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Badge,
   Button,
@@ -76,8 +76,15 @@ type AlertsResponse = {
 };
 
 type RelationshipScanCounts = {
+  scan_stage?: 'discovering';
+  scope?: { kind: string; description: string };
+  documents_discovered?: number;
+  metadata_eligible_documents?: number;
+  documents_excluded?: number;
+  exclusion_reasons?: Record<string, number>;
   documents_examined?: number;
   documents_total?: number;
+  candidate_groups?: number;
   candidate_pairs?: number;
   relationships_created?: number;
   relationships_reused?: number;
@@ -86,6 +93,18 @@ type RelationshipScanCounts = {
   conflicts?: number;
   failures?: number;
 };
+
+type RelationshipScanScopeKind = 'action_queue' | 'tag' | 'saved_view' | 'date_range' | 'all';
+
+type RelationshipScanScope = {
+  kind: RelationshipScanScopeKind;
+  tags: string[];
+  saved_view_id: number | null;
+  created_after: string;
+  created_before: string;
+};
+
+type PaperlessOption = { id: number; name: string };
 
 type RelationshipScanRun = {
   run_id: string;
@@ -168,6 +187,17 @@ export default function OrphansDupes() {
   const [scanPreviewLoading, setScanPreviewLoading] = useState(false);
   const [scanRun, setScanRun] = useState<RelationshipScanRun | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [scanScope, setScanScope] = useState<RelationshipScanScope>({
+    kind: 'action_queue',
+    tags: [],
+    saved_view_id: null,
+    created_after: '',
+    created_before: '',
+  });
+  const [paperlessTags, setPaperlessTags] = useState<PaperlessOption[]>([]);
+  const [paperlessViews, setPaperlessViews] = useState<PaperlessOption[]>([]);
+  const [scopeOptionsLoading, setScopeOptionsLoading] = useState(false);
+  const previewRequest = useRef(0);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -305,26 +335,86 @@ export default function OrphansDupes() {
     }
   };
 
+  const scanScopePayload = useMemo(() => ({
+    kind: scanScope.kind,
+    ...(scanScope.kind === 'tag' ? { tags: scanScope.tags } : {}),
+    ...(scanScope.kind === 'saved_view' ? { saved_view_id: scanScope.saved_view_id } : {}),
+    ...(scanScope.kind === 'date_range' ? {
+      created_after: scanScope.created_after || null,
+      created_before: scanScope.created_before || null,
+    } : {}),
+  }), [scanScope]);
+
+  const scanScopeValidation = useMemo(() => {
+    if (scanScope.kind === 'tag' && scanScope.tags.length === 0) {
+      return 'Choose at least one Paperless tag.';
+    }
+    if (scanScope.kind === 'saved_view' && !scanScope.saved_view_id) {
+      return 'Choose a Paperless saved view.';
+    }
+    if (scanScope.kind === 'date_range') {
+      if (!scanScope.created_after && !scanScope.created_before) {
+        return 'Enter a start date, an end date, or both.';
+      }
+      if (
+        scanScope.created_after
+        && scanScope.created_before
+        && scanScope.created_after > scanScope.created_before
+      ) {
+        return 'The start date must be on or before the end date.';
+      }
+    }
+    return null;
+  }, [scanScope]);
+
   const handleRevealRelationshipScan = async () => {
     setScanPanelOpen(true);
-    if (scanPreview || scanPreviewLoading) return;
-    setScanPreviewLoading(true);
-    setScanError(null);
+    if (scopeOptionsLoading || paperlessTags.length || paperlessViews.length) return;
+    setScopeOptionsLoading(true);
     try {
-      setScanPreview(
-        await endpoints.duplicates.previewRelationshipScan() as RelationshipScanCounts,
-      );
-    } catch (err) {
-      setScanError(getErrorMessage(err));
+      const [tags, views] = await Promise.all([
+        endpoints.actionQueue.metadataTags() as Promise<{ tags?: PaperlessOption[] } | PaperlessOption[]>,
+        endpoints.actionQueue.metadataSavedViews() as Promise<{ saved_views?: PaperlessOption[] } | PaperlessOption[]>,
+      ]);
+      setPaperlessTags(Array.isArray(tags) ? tags : (tags.tags ?? []));
+      setPaperlessViews(Array.isArray(views) ? views : (views.saved_views ?? []));
+    } catch {
+      // Scope metadata is optional; Action Queue and date scopes remain available.
     } finally {
-      setScanPreviewLoading(false);
+      setScopeOptionsLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!scanPanelOpen || scanScopeValidation) {
+      setScanPreview(null);
+      return undefined;
+    }
+    const requestId = ++previewRequest.current;
+    const timeout = window.setTimeout(async () => {
+      setScanPreviewLoading(true);
+      setScanError(null);
+      setScanPreview(null);
+      try {
+        const preview = await endpoints.duplicates.previewRelationshipScan(
+          scanScopePayload,
+        ) as RelationshipScanCounts;
+        if (requestId === previewRequest.current) setScanPreview(preview);
+      } catch (err) {
+        if (requestId === previewRequest.current) setScanError(getErrorMessage(err));
+      } finally {
+        if (requestId === previewRequest.current) setScanPreviewLoading(false);
+      }
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [scanPanelOpen, scanScopePayload, scanScopeValidation]);
 
   const handleStartRelationshipScan = async () => {
     setScanError(null);
     try {
-      const run = await endpoints.duplicates.startRelationshipScan() as RelationshipScanRun;
+      const run = await endpoints.duplicates.startRelationshipScan(
+        scanScopePayload,
+      ) as RelationshipScanRun;
       setScanRun(run);
     } catch (err) {
       setScanError(getErrorMessage(err));
@@ -424,41 +514,174 @@ export default function OrphansDupes() {
                         aria-live="polite"
                       >
                         <p>
-                          OWL will examine existing documents. Documents are preserved, but
+                          Choose which Paperless documents OWL should examine. Documents are preserved, but
                           relationship links and Needs Review items may be created when you
                           start the scan.
                         </p>
+                        <div className="relationship-maintenance__scope">
+                          <label htmlFor="relationship-scan-scope">Scan scope</label>
+                          <select
+                            id="relationship-scan-scope"
+                            value={scanScope.kind}
+                            disabled={scanRun?.status === 'queued' || scanRun?.status === 'running'}
+                            onChange={(event) => {
+                              setScanRun(null);
+                              setScanScope((current) => ({
+                                ...current,
+                                kind: event.target.value as RelationshipScanScopeKind,
+                              }));
+                            }}
+                          >
+                            <option value="action_queue">Configured Action Queue source</option>
+                            <option value="tag">Paperless tag</option>
+                            <option value="saved_view">Paperless saved view</option>
+                            <option value="date_range">Document date range</option>
+                            <option value="all">All Paperless documents</option>
+                          </select>
+                          {scanScope.kind === 'tag' && (
+                            <select
+                              aria-label="Paperless tag"
+                              value={scanScope.tags[0] ?? ''}
+                              disabled={scopeOptionsLoading}
+                              onChange={(event) => setScanScope((current) => ({
+                                ...current,
+                                tags: event.target.value ? [event.target.value] : [],
+                              }))}
+                            >
+                              <option value="">
+                                {scopeOptionsLoading ? 'Loading tags…' : 'Choose a tag'}
+                              </option>
+                              {paperlessTags.map((tag) => (
+                                <option key={tag.id} value={tag.name}>{tag.name}</option>
+                              ))}
+                            </select>
+                          )}
+                          {scanScope.kind === 'saved_view' && (
+                            <select
+                              aria-label="Paperless saved view"
+                              value={scanScope.saved_view_id ?? ''}
+                              disabled={scopeOptionsLoading}
+                              onChange={(event) => setScanScope((current) => ({
+                                ...current,
+                                saved_view_id: event.target.value ? Number(event.target.value) : null,
+                              }))}
+                            >
+                              <option value="">
+                                {scopeOptionsLoading ? 'Loading saved views…' : 'Choose a saved view'}
+                              </option>
+                              {paperlessViews.map((view) => (
+                                <option key={view.id} value={view.id}>{view.name}</option>
+                              ))}
+                            </select>
+                          )}
+                          {scanScope.kind === 'date_range' && (
+                            <div className="relationship-maintenance__date-range">
+                              <label>
+                                From
+                                <input
+                                  type="date"
+                                  value={scanScope.created_after}
+                                  onChange={(event) => setScanScope((current) => ({
+                                    ...current,
+                                    created_after: event.target.value,
+                                  }))}
+                                />
+                              </label>
+                              <label>
+                                Through
+                                <input
+                                  type="date"
+                                  value={scanScope.created_before}
+                                  onChange={(event) => setScanScope((current) => ({
+                                    ...current,
+                                    created_before: event.target.value,
+                                  }))}
+                                />
+                              </label>
+                            </div>
+                          )}
+                          {scanScope.kind === 'all' && (
+                            <p className="relationship-maintenance__warning">
+                              This scope may take a while for a large library. The scan will run
+                              in the background and report progress here.
+                            </p>
+                          )}
+                          {scanScopeValidation && (
+                            <span className="relationship-maintenance__validation" role="alert">
+                              {scanScopeValidation}
+                            </span>
+                          )}
+                        </div>
                         {scanPreviewLoading && (
                           <span className="relationship-maintenance__status">
-                            Estimating scan scope…
+                            Discovering documents and estimating candidates…
                           </span>
                         )}
                         {scanPreview && (
-                          <dl className="relationship-maintenance__metrics">
-                            <div className="relationship-maintenance__metric">
-                              <dt>Documents in scope</dt>
-                              <dd>{scanPreview.documents_examined ?? 0}</dd>
-                            </div>
-                            <div className="relationship-maintenance__metric">
-                              <dt>Relationship candidates</dt>
-                              <dd>{scanPreview.relationships_created ?? 0}</dd>
-                            </div>
-                            <div className="relationship-maintenance__metric">
-                              <dt>Existing links reused</dt>
-                              <dd>{scanPreview.relationships_reused ?? 0}</dd>
-                            </div>
-                            <div className="relationship-maintenance__metric">
-                              <dt>Review candidates</dt>
-                              <dd>{scanPreview.review_candidates ?? 0}</dd>
-                            </div>
-                          </dl>
+                          <>
+                            <strong className="relationship-maintenance__scope-description">
+                              {scanPreview.scope?.description ?? 'Selected Paperless scope'}
+                            </strong>
+                            <dl className="relationship-maintenance__metrics">
+                              <div className="relationship-maintenance__metric">
+                                <dt>Discovered documents</dt>
+                                <dd>{scanPreview.documents_discovered ?? 0}</dd>
+                              </div>
+                              <div className="relationship-maintenance__metric">
+                                <dt>Metadata eligible</dt>
+                                <dd>{scanPreview.metadata_eligible_documents ?? 0}</dd>
+                              </div>
+                              <div className="relationship-maintenance__metric">
+                                <dt>Excluded documents</dt>
+                                <dd>{scanPreview.documents_excluded ?? 0}</dd>
+                              </div>
+                              <div className="relationship-maintenance__metric">
+                                <dt>Candidate groups</dt>
+                                <dd>{scanPreview.candidate_groups ?? 0}</dd>
+                              </div>
+                              <div className="relationship-maintenance__metric">
+                                <dt>Candidate pairs</dt>
+                                <dd>{scanPreview.candidate_pairs ?? 0}</dd>
+                              </div>
+                              <div className="relationship-maintenance__metric">
+                                <dt>Existing links reusable</dt>
+                                <dd>{scanPreview.relationships_reused ?? 0}</dd>
+                              </div>
+                              <div className="relationship-maintenance__metric">
+                                <dt>Review candidates</dt>
+                                <dd>{scanPreview.review_candidates ?? 0}</dd>
+                              </div>
+                            </dl>
+                            {Object.keys(scanPreview.exclusion_reasons ?? {}).length > 0 && (
+                              <div className="relationship-maintenance__exclusions">
+                                <span>Exclusions</span>
+                                <ul>
+                                  {Object.entries(scanPreview.exclusion_reasons ?? {}).map(
+                                    ([reason, count]) => (
+                                      <li key={reason}>
+                                        {reason.replaceAll('_', ' ')}: {count}
+                                      </li>
+                                    ),
+                                  )}
+                                </ul>
+                              </div>
+                            )}
+                            {(scanPreview.documents_discovered ?? 0) === 0 && (
+                              <span className="relationship-maintenance__status">
+                                No documents match this scope. Choose another scope to continue.
+                              </span>
+                            )}
+                          </>
                         )}
                         {scanRun && (
                           <>
                             <div className="relationship-maintenance__status">
                               {scanRun.status === 'queued' && 'Scan queued.'}
                               {scanRun.status === 'running' && (
-                                `Examining ${scanRun.counts.documents_examined ?? 0} of `
+                                `${scanRun.counts.scan_stage === 'discovering' ? 'Discovering' : 'Examining'} `
+                                + `${scanRun.counts.scan_stage === 'discovering'
+                                  ? scanRun.counts.documents_discovered ?? 0
+                                  : scanRun.counts.documents_examined ?? 0} of `
                                 + `${scanRun.counts.documents_total ?? '—'} documents…`
                               )}
                               {scanRun.status === 'completed' && 'Scan completed.'}
@@ -506,6 +729,9 @@ export default function OrphansDupes() {
                             onClick={() => void handleStartRelationshipScan()}
                             disabled={
                               scanPreviewLoading
+                              || Boolean(scanScopeValidation)
+                              || !scanPreview
+                              || (scanPreview.documents_discovered ?? 0) === 0
                               || scanRun?.status === 'queued'
                               || scanRun?.status === 'running'
                             }
