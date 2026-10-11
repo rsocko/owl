@@ -184,6 +184,32 @@ class TestFileDetection:
         assert result["actions"] == []
         assert result["document_assessment"]["requires_action"] is False
 
+    def test_payment_confirmation_without_receipt_metadata_is_not_a_pay_action(self, analyzer):
+        result = analyzer.analyze_document(
+            {
+                "title": "Payment confirmation",
+                "content": "Your payment was processed successfully. Total $142.50.",
+                "document_type_name": "Correspondence",
+                "tag_names": ["Inbox"],
+            }
+        )
+
+        assert result["actions"] == []
+        assert result["document_assessment"]["requires_action"] is False
+
+    def test_payment_confirmation_with_balance_due_remains_actionable(self, analyzer):
+        result = analyzer.analyze_document(
+            {
+                "title": "Payment update",
+                "content": "We received your payment. Remaining balance due: $42.00.",
+                "document_type_name": "Correspondence",
+                "tag_names": ["Inbox"],
+            }
+        )
+
+        assert result["actions"][0]["action_type"] == "PAY"
+        assert result["document_assessment"]["requires_action"] is True
+
     def test_tax_form(self, analyzer):
         result = analyzer.analyze_document(
             {

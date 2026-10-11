@@ -11,6 +11,7 @@ from datetime import date, timedelta
 from doc_intelligence_hub.core.extractors.correction_hints import pick_nearest_to_anchor
 
 from .analyzer import (
+    _OUTSTANDING_PAYMENT_REQUEST,
     _normalize_cta,
     normalize_extracted_data,
     receipt_no_action_result,
@@ -256,6 +257,8 @@ class RuleBasedAnalyzer:
             "RENEW": len(_RENEW_KEYWORDS.findall(text)) * 17,
             "DISPUTE": len(_DISPUTE_KEYWORDS.findall(text)) * 19,
         }
+        if _OUTSTANDING_PAYMENT_REQUEST.search(text):
+            scores["PAY"] += 25
 
         # Boost from tags
         tag_str = " ".join(str(t) for t in tags).lower()
