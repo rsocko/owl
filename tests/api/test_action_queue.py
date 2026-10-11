@@ -64,6 +64,38 @@ class TestQueueRunSettings:
         assert resp.json()["limit"] == 12
         assert mock_run.await_args.kwargs["limit"] == 12
 
+    def test_all_documents_bypasses_persisted_saved_view(self, client, mock_paperless):
+        from unittest.mock import AsyncMock, patch
+
+        settings_resp = client.put(
+            "/api/queue/settings",
+            json={"scan_mode": "saved_view", "saved_view_id": 5},
+        )
+        assert settings_resp.status_code == 200
+
+        mock_run = AsyncMock(return_value={"processed": 0})
+        with patch(
+            "doc_intelligence_hub.api.routers.action_queue.run_pipeline",
+            mock_run,
+        ):
+            resp = client.post(
+                "/api/queue/run",
+                json={"dry_run": False, "force": True, "all_documents": True},
+            )
+
+        assert resp.status_code == 200
+        assert mock_run.await_args.kwargs["all_documents"] is True
+        assert mock_run.await_args.kwargs["saved_view_id"] is None
+        assert mock_run.await_args.kwargs["limit"] is None
+
+    def test_all_documents_rejects_another_primary_source(self, client):
+        resp = client.post(
+            "/api/queue/run",
+            json={"all_documents": True, "saved_view_id": 5},
+        )
+
+        assert resp.status_code == 422
+
 
 class TestListActions:
     """Tests for GET /api/queue/actions."""

@@ -13,6 +13,7 @@ type Health = {
 };
 
 type ToastState = { message: string; tone?: 'success' | 'error' } | null;
+type RescanScope = 'configured' | 'all' | 'document' | 'tags' | 'saved_view';
 
 type ProjectionHealth = {
   pending: number;
@@ -51,6 +52,7 @@ export default function ActionQueueOperations() {
   const [projectionHealth, setProjectionHealth] = useState<ProjectionHealth | null>(null);
   const [projectionHealthError, setProjectionHealthError] = useState<string | null>(null);
   const [projectionRepair, setProjectionRepair] = useState<ProjectionRepairResult | null>(null);
+  const [rescanScope, setRescanScope] = useState<RescanScope>('configured');
   const [metadataReadiness, setMetadataReadiness] = useState<RelationshipMetadataReadiness | null>(
     null,
   );
@@ -125,25 +127,49 @@ export default function ActionQueueOperations() {
     }
   };
 
-  const runCustom = (dryRun: boolean) => {
-    const body: Record<string, unknown> = buildQueueRunBody(
-      dryRun,
-      filters.document_id,
-    );
-    if (filters.document_id) body.document_id = Number(filters.document_id);
-    if (filters.tag_override) body.tag_override = filters.tag_override;
-    if (filters.saved_view_id) body.saved_view_id = Number(filters.saved_view_id);
-    if (filters.correspondent) body.correspondent = filters.correspondent;
-    if (filters.document_type) body.document_type = filters.document_type;
-    if (filters.created_after) body.created_after = filters.created_after;
-    if (filters.created_before) body.created_before = filters.created_before;
-    if (filters.added_after) body.added_after = filters.added_after;
-    if (filters.added_before) body.added_before = filters.added_before;
-    if (filters.limit) body.limit = Number(filters.limit);
+  const buildScopedRunBody = (dryRun: boolean, force: boolean) => {
+    const documentId = rescanScope === 'document' ? filters.document_id : '';
+    const body: Record<string, unknown> = buildQueueRunBody(dryRun, documentId);
+    if (force) body.force = true;
+    if (rescanScope === 'all') body.all_documents = true;
+    if (rescanScope === 'document' && documentId) body.document_id = Number(documentId);
+    if (rescanScope === 'tags' && filters.tag_override) {
+      body.tag_override = filters.tag_override;
+    }
+    if (rescanScope === 'saved_view' && filters.saved_view_id) {
+      body.saved_view_id = Number(filters.saved_view_id);
+    }
+    if (rescanScope === 'all' || rescanScope === 'tags') {
+      if (filters.correspondent) body.correspondent = filters.correspondent;
+      if (filters.document_type) body.document_type = filters.document_type;
+      if (filters.created_after) body.created_after = filters.created_after;
+      if (filters.created_before) body.created_before = filters.created_before;
+      if (filters.added_after) body.added_after = filters.added_after;
+      if (filters.added_before) body.added_before = filters.added_before;
+    }
+    if (rescanScope !== 'document' && filters.limit) body.limit = Number(filters.limit);
+    return body;
+  };
+
+  const runScoped = (dryRun: boolean, force: boolean) => {
+    if (
+      force
+      && !dryRun
+      && !window.confirm(
+        'Force reanalysis for the selected scope? Existing actions may be updated or resolved.',
+      )
+    ) {
+      return;
+    }
+    const body = buildScopedRunBody(dryRun, force);
     return execute(
-      dryRun ? 'custom-dry' : 'custom-run',
+      dryRun ? 'rescan-preview' : force ? 'force-rescan' : 'scoped-run',
       () => endpoints.actionQueue.run(body),
-      dryRun ? 'Dry run completed.' : 'Custom run completed.',
+      dryRun
+        ? 'Force-rescan preview completed.'
+        : force
+          ? 'Forced rescan completed.'
+          : 'Scoped run completed.',
     );
   };
 
@@ -171,6 +197,12 @@ export default function ActionQueueOperations() {
       setBusy(null);
     }
   };
+
+  const scopeReady = (
+    (rescanScope !== 'document' || Boolean(filters.document_id))
+    && (rescanScope !== 'tags' || Boolean(filters.tag_override.trim()))
+    && (rescanScope !== 'saved_view' || Boolean(filters.saved_view_id))
+  );
 
   return (
     <>
@@ -240,132 +272,189 @@ export default function ActionQueueOperations() {
           )}
         </Card>
 
-        <Card title="Custom run">
+        <Card title="Scoped run and rescan">
+          <p className="text-muted">
+            Run new or stale documents normally, or force OWL to reanalyze every document in
+            the selected scope. Preview shows the forced candidate set without changing actions.
+          </p>
           <div className="form-row">
             <div className="form-group">
-              <label htmlFor="ops-document-id">Document ID</label>
-              <input
-                id="ops-document-id"
-                type="number"
-                value={filters.document_id}
-                onChange={(event) => setFilters((current) => ({
-                  ...current,
-                  document_id: event.target.value,
-                }))}
-              />
+              <label htmlFor="ops-rescan-scope">Scope</label>
+              <select
+                id="ops-rescan-scope"
+                value={rescanScope}
+                onChange={(event) => setRescanScope(event.target.value as RescanScope)}
+              >
+                <option value="configured">Configured Action Queue source</option>
+                <option value="all">All Paperless documents</option>
+                <option value="document">Single document</option>
+                <option value="tags">Tag or tags</option>
+                <option value="saved_view">Saved view</option>
+              </select>
             </div>
-            <div className="form-group">
-              <label htmlFor="ops-tags">Tag override</label>
-              <input
-                id="ops-tags"
-                value={filters.tag_override}
-                onChange={(event) => setFilters((current) => ({
-                  ...current,
-                  tag_override: event.target.value,
-                }))}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="ops-saved-view">Saved view ID</label>
-              <input
-                id="ops-saved-view"
-                type="number"
-                value={filters.saved_view_id}
-                onChange={(event) => setFilters((current) => ({
-                  ...current,
-                  saved_view_id: event.target.value,
-                }))}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="ops-correspondent">Correspondent</label>
-              <input
-                id="ops-correspondent"
-                value={filters.correspondent}
-                onChange={(event) => setFilters((current) => ({
-                  ...current,
-                  correspondent: event.target.value,
-                }))}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="ops-document-type">Document type</label>
-              <input
-                id="ops-document-type"
-                value={filters.document_type}
-                onChange={(event) => setFilters((current) => ({
-                  ...current,
-                  document_type: event.target.value,
-                }))}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="ops-limit">Limit</label>
-              <input
-                id="ops-limit"
-                type="number"
-                min={1}
-                max={500}
-                value={filters.limit}
-                onChange={(event) => setFilters((current) => ({
-                  ...current,
-                  limit: event.target.value,
-                }))}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="ops-created-after">Created after</label>
-              <input
-                id="ops-created-after"
-                type="date"
-                value={filters.created_after}
-                onChange={(event) => setFilters((current) => ({
-                  ...current,
-                  created_after: event.target.value,
-                }))}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="ops-created-before">Created before</label>
-              <input
-                id="ops-created-before"
-                type="date"
-                value={filters.created_before}
-                onChange={(event) => setFilters((current) => ({
-                  ...current,
-                  created_before: event.target.value,
-                }))}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="ops-added-after">Added after</label>
-              <input
-                id="ops-added-after"
-                type="date"
-                value={filters.added_after}
-                onChange={(event) => setFilters((current) => ({
-                  ...current,
-                  added_after: event.target.value,
-                }))}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="ops-added-before">Added before</label>
-              <input
-                id="ops-added-before"
-                type="date"
-                value={filters.added_before}
-                onChange={(event) => setFilters((current) => ({
-                  ...current,
-                  added_before: event.target.value,
-                }))}
-              />
-            </div>
+            {rescanScope === 'document' && (
+              <div className="form-group">
+                <label htmlFor="ops-document-id">Document ID</label>
+                <input
+                  id="ops-document-id"
+                  type="number"
+                  min={1}
+                  required
+                  value={filters.document_id}
+                  onChange={(event) => setFilters((current) => ({
+                    ...current,
+                    document_id: event.target.value,
+                  }))}
+                />
+              </div>
+            )}
+            {rescanScope === 'tags' && (
+              <div className="form-group">
+                <label htmlFor="ops-tags">Tags</label>
+                <input
+                  id="ops-tags"
+                  placeholder="Inbox, Receipt"
+                  required
+                  value={filters.tag_override}
+                  onChange={(event) => setFilters((current) => ({
+                    ...current,
+                    tag_override: event.target.value,
+                  }))}
+                />
+              </div>
+            )}
+            {rescanScope === 'saved_view' && (
+              <div className="form-group">
+                <label htmlFor="ops-saved-view">Saved view ID</label>
+                <input
+                  id="ops-saved-view"
+                  type="number"
+                  min={1}
+                  required
+                  value={filters.saved_view_id}
+                  onChange={(event) => setFilters((current) => ({
+                    ...current,
+                    saved_view_id: event.target.value,
+                  }))}
+                />
+              </div>
+            )}
+            {(rescanScope === 'all' || rescanScope === 'tags') && (
+              <>
+                <div className="form-group">
+                  <label htmlFor="ops-correspondent">Correspondent</label>
+                  <input
+                    id="ops-correspondent"
+                    value={filters.correspondent}
+                    onChange={(event) => setFilters((current) => ({
+                      ...current,
+                      correspondent: event.target.value,
+                    }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="ops-document-type">Document type</label>
+                  <input
+                    id="ops-document-type"
+                    value={filters.document_type}
+                    onChange={(event) => setFilters((current) => ({
+                      ...current,
+                      document_type: event.target.value,
+                    }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="ops-created-after">Created after</label>
+                  <input
+                    id="ops-created-after"
+                    type="date"
+                    value={filters.created_after}
+                    onChange={(event) => setFilters((current) => ({
+                      ...current,
+                      created_after: event.target.value,
+                    }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="ops-created-before">Created before</label>
+                  <input
+                    id="ops-created-before"
+                    type="date"
+                    value={filters.created_before}
+                    onChange={(event) => setFilters((current) => ({
+                      ...current,
+                      created_before: event.target.value,
+                    }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="ops-added-after">Added after</label>
+                  <input
+                    id="ops-added-after"
+                    type="date"
+                    value={filters.added_after}
+                    onChange={(event) => setFilters((current) => ({
+                      ...current,
+                      added_after: event.target.value,
+                    }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="ops-added-before">Added before</label>
+                  <input
+                    id="ops-added-before"
+                    type="date"
+                    value={filters.added_before}
+                    onChange={(event) => setFilters((current) => ({
+                      ...current,
+                      added_before: event.target.value,
+                    }))}
+                  />
+                </div>
+              </>
+            )}
+            {rescanScope !== 'document' && (
+              <div className="form-group">
+                <label htmlFor="ops-limit">Limit</label>
+                <input
+                  id="ops-limit"
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={filters.limit}
+                  onChange={(event) => setFilters((current) => ({
+                    ...current,
+                    limit: event.target.value,
+                  }))}
+                />
+              </div>
+            )}
           </div>
+          {rescanScope === 'all' && (
+            <p className="relationship-maintenance__warning" role="alert">
+              All-document rescans can be expensive. Use filters, a limit, and Preview scope
+              before starting a large run.
+            </p>
+          )}
           <div className="btn-group">
-            <Button onClick={() => void runCustom(true)} disabled={busy !== null}>Dry run</Button>
-            <Button variant="primary" onClick={() => void runCustom(false)} disabled={busy !== null}>
-              Run custom
+            <Button
+              onClick={() => void runScoped(true, true)}
+              disabled={busy !== null || !scopeReady}
+            >
+              Preview scope
+            </Button>
+            <Button
+              onClick={() => void runScoped(false, false)}
+              disabled={busy !== null || !scopeReady}
+            >
+              Run new or stale
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => void runScoped(false, true)}
+              disabled={busy !== null || !scopeReady}
+            >
+              Force rescan
             </Button>
           </div>
         </Card>

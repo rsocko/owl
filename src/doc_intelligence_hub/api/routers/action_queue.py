@@ -154,6 +154,9 @@ class QueueRunRequest(BaseModel):
     saved_view_id: int | None = Field(
         default=None, description="Paperless saved view ID to use as document source"
     )
+    all_documents: bool = Field(
+        default=False, description="Use all Paperless documents instead of the configured source"
+    )
     document_id: int | None = Field(default=None, description="Analyze a specific document by ID")
     created_after: str | None = Field(
         default=None, description="Filter: document created after (YYYY-MM-DD)"
@@ -169,6 +172,36 @@ class QueueRunRequest(BaseModel):
     )
     correspondent: str | None = Field(default=None, description="Filter by correspondent name")
     document_type: str | None = Field(default=None, description="Filter by document type name")
+
+    @model_validator(mode="after")
+    def validate_source_scope(self) -> QueueRunRequest:
+        if self.all_documents and any(
+            (self.document_id is not None, self.saved_view_id is not None, bool(self.tag_override))
+        ):
+            raise ValueError(
+                "all_documents cannot be combined with document_id, saved_view_id, or tag_override"
+            )
+        return self
+
+
+def _effective_run_limit(body: QueueRunRequest, source_settings: dict[str, Any]) -> int | None:
+    if body.limit is not None:
+        return body.limit
+    has_explicit_scope = any(
+        (
+            body.all_documents,
+            body.document_id is not None,
+            body.saved_view_id is not None,
+            bool(body.tag_override),
+            bool(body.created_after),
+            bool(body.created_before),
+            bool(body.added_after),
+            bool(body.added_before),
+            bool(body.correspondent),
+            bool(body.document_type),
+        )
+    )
+    return None if has_explicit_scope else source_settings.get("document_limit")
 
 
 class ActionUpdateRequest(BaseModel):
@@ -859,9 +892,7 @@ async def queue_setup_custom_fields(request: Request) -> dict[str, Any]:
 async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
     _sync_action_queue_settings(request)
     source_settings = _get_queue_settings(request)
-    effective_limit = (
-        body.limit if body.limit is not None else source_settings.get("document_limit")
-    )
+    effective_limit = _effective_run_limit(body, source_settings)
     started_at = datetime.utcnow().isoformat()
     request.app.state.last_queue_status = {
         "status": "running",
@@ -873,7 +904,12 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
 
     # Apply persisted source settings when no explicit overrides are provided
     saved_view_id = body.saved_view_id
-    if not saved_view_id and not body.tag_override and not body.document_id:
+    if (
+        not body.all_documents
+        and not saved_view_id
+        and not body.tag_override
+        and not body.document_id
+    ):
         if source_settings.get("scan_mode") == "saved_view" and source_settings.get(
             "saved_view_id"
         ):
@@ -885,6 +921,7 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
         force=body.force,
         tag_override=body.tag_override,
         saved_view_id=saved_view_id,
+        all_documents=body.all_documents,
         document_id=body.document_id,
         created_after=body.created_after,
         created_before=body.created_before,
@@ -946,9 +983,7 @@ async def queue_run_stream(
     """SSE endpoint that runs the pipeline and streams progress events."""
     _sync_action_queue_settings(request)
     source_settings = _get_queue_settings(request)
-    effective_limit = (
-        body.limit if body.limit is not None else source_settings.get("document_limit")
-    )
+    effective_limit = _effective_run_limit(body, source_settings)
 
     # Reject if a pipeline is already running
     current_status = getattr(request.app.state, "last_queue_status", None) or {}
@@ -962,7 +997,12 @@ async def queue_run_stream(
 
     # Apply persisted source settings when no explicit overrides are provided
     effective_saved_view_id = body.saved_view_id
-    if not effective_saved_view_id and not body.tag_override and not body.document_id:
+    if (
+        not body.all_documents
+        and not effective_saved_view_id
+        and not body.tag_override
+        and not body.document_id
+    ):
         if source_settings.get("scan_mode") == "saved_view" and source_settings.get(
             "saved_view_id"
         ):
@@ -989,6 +1029,7 @@ async def queue_run_stream(
                 force=body.force,
                 tag_override=body.tag_override,
                 saved_view_id=effective_saved_view_id,
+                all_documents=body.all_documents,
                 document_id=body.document_id,
                 created_after=body.created_after,
                 created_before=body.created_before,
