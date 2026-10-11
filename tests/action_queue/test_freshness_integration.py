@@ -114,9 +114,7 @@ def _wire_pipeline(
 class TestActionQueueFreshnessIntegration:
     @pytest.mark.asyncio
     async def test_analyzer_version_bump_reprocesses_previous_results(self, db, monkeypatch):
-        docs = {
-            1: {"id": 1, "title": "Doc 1", "checksum": "chk-1", "tag_names": ["Inbox"]}
-        }
+        docs = {1: {"id": 1, "title": "Doc 1", "checksum": "chk-1", "tag_names": ["Inbox"]}}
         pipeline = Pipeline()
         _wire_pipeline(monkeypatch, pipeline, docs)
         first = await pipeline.run(force=False, dry_run=False)
