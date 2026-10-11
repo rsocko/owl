@@ -285,6 +285,84 @@
   background: var(--surface-hover);
 }
 
+.doc-viewer-header-actions button:focus-visible,
+.doc-viewer-header-actions a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.doc-viewer-header-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.monarch-delivery-control {
+  display: inline-flex;
+}
+
+.monarch-delivery-control .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.doc-viewer-header-actions .monarch-delivery-action {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-bg);
+  color: var(--text);
+}
+
+.doc-viewer-header-actions .monarch-delivery-action.state-acknowledged {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  background: var(--success-bg);
+}
+
+.doc-viewer-header-actions .monarch-delivery-action.state-unknown,
+.doc-viewer-header-actions .monarch-delivery-action.state-retryable {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  background: var(--warning-bg);
+}
+
+.doc-viewer-header-actions .monarch-delivery-action.state-failed,
+.doc-viewer-header-actions .monarch-delivery-action.monarch-delivery-error {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: var(--danger-bg);
+}
+
+@media (max-width: 900px) {
+  .doc-viewer-overlay {
+    padding: 0;
+  }
+
+  .doc-viewer-container {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+  }
+
+  .doc-viewer-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .doc-viewer-title {
+    flex-basis: calc(100% - 44px);
+  }
+
+  .doc-viewer-header-actions {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+  }
+}
+
 .doc-viewer-close-btn {
   width: 32px;
   height: 32px;

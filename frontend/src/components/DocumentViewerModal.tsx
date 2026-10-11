@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import { endpoints, type DocumentSummaryModel } from '../lib/api';
 import DocumentSummary from './DocumentSummary';
+import MonarchDeliveryAction from './MonarchDeliveryAction';
 import { documentSummaryLabel } from './documentSummaryFormat';
 import '../styles/document-preview.css';
 
@@ -62,6 +63,7 @@ export default function DocumentViewerModal({
             {summary ? <DocumentSummary summary={summary} /> : title ?? `Document #${documentId}`}
           </div>
           <div className="doc-viewer-header-actions">
+            <MonarchDeliveryAction documentId={documentId} />
             {paperlessUrl && (
               <a href={paperlessUrl} target="_blank" rel="noreferrer">
                 📄 View in Paperless
