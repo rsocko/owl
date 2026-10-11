@@ -30,6 +30,84 @@
   line-height: 1.5;
 }
 
+.relationship-maintenance__scope {
+  display: grid;
+  gap: 8px;
+  max-width: 560px;
+}
+
+.relationship-maintenance__scope > label,
+.relationship-maintenance__date-range label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.relationship-maintenance__scope select,
+.relationship-maintenance__scope input {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.relationship-maintenance__scope select:focus-visible,
+.relationship-maintenance__scope input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.relationship-maintenance__date-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.relationship-maintenance__warning {
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.relationship-maintenance__validation {
+  color: var(--danger);
+  font-size: 0.8rem;
+}
+
+.relationship-maintenance__scope-description {
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
+.relationship-maintenance__exclusions {
+  display: grid;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.relationship-maintenance__exclusions ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding-inline-start: 18px;
+}
+
+@media (max-width: 560px) {
+  .relationship-maintenance__date-range {
+    grid-template-columns: 1fr;
+  }
+}
+
 .relationship-maintenance__metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));

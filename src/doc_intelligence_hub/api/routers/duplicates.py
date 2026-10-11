@@ -13,12 +13,25 @@ Endpoints:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from datetime import date
+from typing import Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from pydantic import BaseModel, Field, model_validator
 
 from doc_intelligence_hub.api.document_summary import build_document_summary
+from doc_intelligence_hub.api.routers import make_paperless_client
+from doc_intelligence_hub.core.paperless.client import ProgressCallback
+from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
+from doc_intelligence_hub.modules.action_queue.database import (
+    QueueConfiguration,
+)
+from doc_intelligence_hub.modules.action_queue.database import (
+    get_session as get_action_queue_session,
+)
+from doc_intelligence_hub.modules.action_queue.database import (
+    init_db as init_action_queue_db,
+)
 from doc_intelligence_hub.modules.triage.database import (
     get_duplicate_pair,
     get_triage_setting,
@@ -31,6 +44,10 @@ from doc_intelligence_hub.modules.triage.duplicates import (
     on_document_ingested,
     resolve_not_duplicate,
     scan_all_duplicates,
+)
+from doc_intelligence_hub.modules.triage.relationship_discovery import (
+    discover_paperless_documents,
+    validate_date_range,
 )
 from doc_intelligence_hub.modules.triage.relationship_projection import (
     project_relationships_to_paperless,
@@ -90,6 +107,96 @@ class CheckSingleRequest(BaseModel):
     )
 
 
+class RelationshipScanScope(BaseModel):
+    kind: Literal["action_queue", "tag", "saved_view", "date_range", "all"] = "action_queue"
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    saved_view_id: int | None = Field(default=None, gt=0)
+    created_after: date | None = None
+    created_before: date | None = None
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> RelationshipScanScope:
+        self.tags = [tag.strip() for tag in self.tags if tag.strip()]
+        if self.kind == "tag" and not self.tags:
+            raise ValueError("At least one Paperless tag is required")
+        if self.kind == "saved_view" and self.saved_view_id is None:
+            raise ValueError("A Paperless saved view is required")
+        if self.kind == "date_range":
+            if self.created_after is None and self.created_before is None:
+                raise ValueError("At least one date boundary is required")
+            validate_date_range(self.created_after, self.created_before)
+        return self
+
+    def discovery_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "tags": self.tags,
+            "saved_view_id": self.saved_view_id,
+            "created_after": self.created_after.isoformat() if self.created_after else None,
+            "created_before": self.created_before.isoformat() if self.created_before else None,
+        }
+
+
+def _action_queue_source() -> dict[str, Any]:
+    init_action_queue_db()
+    session = get_action_queue_session()
+    try:
+        stored = session.get(QueueConfiguration, 1)
+        if stored is None:
+            return {
+                "scan_mode": "tags",
+                "monitor_tags": list(action_queue_settings.monitor_tags),
+                "saved_view_id": None,
+                "document_limit": None,
+            }
+        return {
+            "scan_mode": stored.scan_mode,
+            "monitor_tags": list(stored.monitor_tags or []),
+            "saved_view_id": stored.saved_view_id,
+            "document_limit": stored.document_limit,
+        }
+    finally:
+        session.close()
+
+
+async def _discover_scan_documents(
+    request: Request,
+    scope: RelationshipScanScope,
+    *,
+    on_progress: ProgressCallback | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    client = make_paperless_client(request, timeout=60.0)
+    try:
+        discovery_scope = scope.discovery_dict()
+        discovery_scope["on_progress"] = on_progress
+        return await discover_paperless_documents(
+            client,
+            scope=discovery_scope,
+            action_queue_source=_action_queue_source(),
+        )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "relationship_scan_scope_invalid",
+                "message": str(exc),
+            },
+        ) from exc
+    except Exception as exc:
+        logger.exception("Paperless relationship scan discovery failed")
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "relationship_scan_discovery_failed",
+                "message": "Paperless documents could not be discovered for this scope.",
+            },
+        ) from exc
+    finally:
+        await client.aclose()
+
+
 # ------------------------------------------------------------------
 # Endpoints
 # ------------------------------------------------------------------
@@ -121,29 +228,77 @@ async def update_duplicate_settings(body: DuplicateSettingsRequest) -> dict[str,
 
 
 @router.post("/scan")
-async def trigger_scan() -> dict[str, Any]:
-    """Trigger a full duplicate detection scan."""
-    result = scan_all_duplicates()
+async def trigger_scan(
+    request: Request, body: RelationshipScanScope | None = None
+) -> dict[str, Any]:
+    """Run a compatible synchronous relationship scan for one Paperless scope."""
+    scope = body or RelationshipScanScope()
+    documents, discovery = await _discover_scan_documents(request, scope)
+    result = scan_all_duplicates(documents=documents, discovery=discovery)
     await _project_automatic_relationships(result)
     return result
 
 
 @router.post("/scan/preview")
-async def preview_historical_relationship_scan() -> dict[str, Any]:
+async def preview_historical_relationship_scan(
+    request: Request, body: RelationshipScanScope | None = None
+) -> dict[str, Any]:
     """Estimate the historical scan without changing OWL or Paperless state."""
-    return scan_all_duplicates(dry_run=True)
+    scope = body or RelationshipScanScope()
+    documents, discovery = await _discover_scan_documents(request, scope)
+    return scan_all_duplicates(
+        dry_run=True,
+        documents=documents,
+        discovery=discovery,
+    )
 
 
-async def _run_tracked_scan(run_id: str) -> None:
+async def _run_tracked_scan(
+    run_id: str,
+    request: Request,
+    scope: RelationshipScanScope,
+) -> None:
     counts: dict[str, Any] = {}
 
     def record_progress(progress: dict[str, int]) -> None:
         counts.update(progress)
         update_scan_run(run_id, counts=counts)
 
+    async def record_discovery_progress(
+        _stage: str,
+        _message: str,
+        current: int,
+        total: int,
+    ) -> None:
+        counts.update(
+            {
+                "documents_discovered": current,
+                "documents_total": total,
+                "scan_stage": "discovering",
+            }
+        )
+        update_scan_run(run_id, counts=counts)
+
     try:
         update_scan_run(run_id, status="running", counts=counts)
-        result = scan_all_duplicates(on_progress=record_progress)
+        documents, discovery = await _discover_scan_documents(
+            request,
+            scope,
+            on_progress=record_discovery_progress,
+        )
+        counts.update(
+            {
+                "documents_discovered": discovery["documents_discovered"],
+                "documents_total": discovery["documents_discovered"],
+                "scope": discovery["scope"],
+            }
+        )
+        update_scan_run(run_id, counts=counts)
+        result = scan_all_duplicates(
+            on_progress=record_progress,
+            documents=documents,
+            discovery=discovery,
+        )
         projection = await _project_automatic_relationships(result)
         if projection and not projection["synced"]:
             result["failures"] = int(result.get("failures", 0)) + 1
@@ -181,6 +336,8 @@ async def _run_tracked_scan(run_id: str) -> None:
 @router.post("/scan/runs", status_code=202)
 async def start_historical_relationship_scan(
     background_tasks: BackgroundTasks,
+    request: Request,
+    body: RelationshipScanScope | None = None,
 ) -> dict[str, Any]:
     """Start one durable, tracked historical relationship scan."""
     recover_abandoned_runs(_active_scan_run_ids)
@@ -198,7 +355,10 @@ async def start_historical_relationship_scan(
         ) from exc
     run_id = run["run_id"]
     _active_scan_run_ids.add(run_id)
-    background_tasks.add_task(_run_tracked_scan, run_id)
+    scope = body or RelationshipScanScope()
+    run["counts"] = {"scope": {"kind": scope.kind}}
+    update_scan_run(run_id, counts=run["counts"])
+    background_tasks.add_task(_run_tracked_scan, run_id, request, scope)
     return run
 
 
