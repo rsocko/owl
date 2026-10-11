@@ -34,6 +34,7 @@ interface QueueDatabaseCounts {
   dismissed?: number;
   snoozed?: number;
   not_an_action?: number;
+  needs_review?: number;
   total?: number;
 }
 
@@ -530,10 +531,24 @@ function linkedDocumentRoleLabel(role: LinkedDocument['role']): string {
 }
 
 export default function ActionQueue() {
+  const searchParams = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
+  const linkedActionId = Number(searchParams.get('action')) || null;
+  const linkedStatus = searchParams.get('status');
   const [status, setStatus] = useState<QueueStatus | null>(null);
   const [actions, setActions] = useState<ActionItem[]>([]);
   const [tagMetadata, setTagMetadata] = useState<PaperlessTag[]>([]);
-  const [filter, setFilter] = useState<ActionFilter>('pending');
+  const [filter, setFilter] = useState<ActionFilter>(() => (
+    linkedStatus && [
+      'pending',
+      'acknowledged',
+      'completed',
+      'dismissed',
+      'snoozed',
+      'not_an_action',
+    ].includes(linkedStatus)
+      ? linkedStatus as ActionFilter
+      : 'pending'
+  ));
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [quickTypeFilter, setQuickTypeFilter] = useState<QuickTypeFilter>(() => {
@@ -554,7 +569,7 @@ export default function ActionQueue() {
     later: ACTION_GROUP_BATCH_SIZE,
     no_due_date: ACTION_GROUP_BATCH_SIZE,
   });
-  const [selectedActionId, setSelectedActionId] = useState<number | null>(null);
+  const [selectedActionId, setSelectedActionId] = useState<number | null>(linkedActionId);
   const [drawerExpanded, setDrawerExpanded] = useState(false);
   const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
   const [timelineViewer, setTimelineViewer] = useState<LinkedDocument | null>(null);
@@ -695,6 +710,20 @@ export default function ActionQueue() {
       if (requestId === actionRequestRef.current) setLoadingMore(false);
     }
   }, [actionParams, actionTotal, actions.length, loadingMore]);
+
+  useEffect(() => {
+    if (linkedActionId === null) return;
+    void endpoints.actionQueue.action(String(linkedActionId))
+      .then((response) => {
+        const action = response as ActionItem;
+        setCachedAction(action);
+        setSelectedActionId(action.id);
+      })
+      .catch((err) => setToast({
+        message: err instanceof Error ? err.message : 'Could not open the linked action.',
+        tone: 'error',
+      }));
+  }, [linkedActionId]);
 
   useEffect(() => {
     void loadData();
@@ -1519,6 +1548,9 @@ export default function ActionQueue() {
               : 'No recorded run'}
         </span>
         <span>{status?.read_only ? 'Read only' : 'Paperless writeback enabled'}</span>
+        <a href="#/needs-review?type=action_classification">
+          Needs Review ({counts.needs_review ?? 0})
+        </a>
         <a href="#/action-queue/operations">Operations</a>
       </div>
 
@@ -1545,7 +1577,7 @@ export default function ActionQueue() {
             { key: 'completed', label: `Done (${counts.completed ?? 0})` },
             { key: 'dismissed', label: `Won't do (${counts.dismissed ?? 0})` },
             { key: 'not_an_action', label: `No action needed (${counts.not_an_action ?? 0})` },
-            { key: 'all', label: `All (${totalActions})` },
+            { key: 'all', label: `Action history (${totalActions})` },
           ]}
         />
         <div className="aq-search">

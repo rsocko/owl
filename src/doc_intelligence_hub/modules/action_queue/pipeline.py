@@ -30,6 +30,7 @@ from .enricher import PaperlessEnricher
 from .fallback_analyzer import RuleBasedAnalyzer
 from .lifecycle import (
     action_has_critical_details,
+    action_has_human_classification,
     mark_action_ready,
     route_action_to_review,
     transition_action_status,
@@ -103,6 +104,15 @@ def _serialize_cta(cta: dict | str | None) -> str | None:
     if isinstance(cta, dict):
         return json.dumps(cta)
     return None
+
+
+def _action_analysis_identity(action_data: dict[str, Any]) -> str:
+    """Return the model-owned identity used to match an inferred action across runs."""
+    payload = {
+        "action_type": str(action_data.get("action_type") or "").strip().upper(),
+        "title": " ".join(str(action_data.get("title") or "").lower().split()),
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -694,6 +704,53 @@ class Pipeline:
                         )
                         .all()
                     )
+                    protected_actions = [
+                        action
+                        for action in existing_actions
+                        if action_has_human_classification(action)
+                    ]
+                    if protected_actions:
+                        logger.info(
+                            "doc_id=%s: preserving %d human-corrected classification(s) despite "
+                            "automated no-action result; demoting %d unreviewed sibling(s)",
+                            doc_id,
+                            len(protected_actions),
+                            len(existing_actions) - len(protected_actions),
+                        )
+                        for existing_action in existing_actions:
+                            if existing_action in protected_actions:
+                                continue
+                            previous_state = (
+                                existing_action.status,
+                                existing_action.action_ready,
+                                existing_action.review_state,
+                                existing_action.review_item_id,
+                            )
+                            lifecycle_changed = transition_action_status(
+                                existing_action, "not_an_action"
+                            )
+                            existing_action.action_ready = False
+                            existing_action.review_state = "resolved_no_action"
+                            existing_action.review_item_id = None
+                            current_state = (
+                                existing_action.status,
+                                existing_action.action_ready,
+                                existing_action.review_state,
+                                existing_action.review_item_id,
+                            )
+                            if lifecycle_changed or current_state != previous_state:
+                                existing_action.version = (existing_action.version or 1) + 1
+                        self._record_history(
+                            db,
+                            doc_id,
+                            success=True,
+                            disposition="action_created",
+                            text_metrics=text_metrics,
+                            doc=doc,
+                        )
+                        db.commit()
+                        stats["processed"] += 1
+                        continue
                     for existing_action in existing_actions:
                         previous_state = (
                             existing_action.status,
@@ -812,6 +869,20 @@ class Pipeline:
                     .update({"is_primary": False}, synchronize_session=False)
                 )
                 stored_actions = []
+                active_existing_actions = (
+                    db.query(Action)
+                    .filter(
+                        Action.document_id == doc["id"],
+                        Action.parent_action_id.is_(None),
+                        Action.superseded_by_action_id.is_(None),
+                    )
+                    .all()
+                )
+                allow_single_protected_match = (
+                    len(active_existing_actions) == 1
+                    and len(actions) == 1
+                    and action_has_human_classification(active_existing_actions[0])
+                )
                 for i, action_data in enumerate(actions):
                     action = self._store_action(
                         db,
@@ -820,8 +891,15 @@ class Pipeline:
                         assessment,
                         action_index=i,
                         is_primary=(action_data is primary_action_data),
+                        allow_protected_index_match=allow_single_protected_match,
                     )
                     stored_actions.append(action)
+                for existing_action in active_existing_actions:
+                    if (
+                        action_has_human_classification(existing_action)
+                        and existing_action not in stored_actions
+                    ):
+                        stored_actions.append(existing_action)
                 document_amount_overridden = bool(
                     existing_document_action and existing_document_action.document_amount_overridden
                 )
@@ -854,21 +932,42 @@ class Pipeline:
                     document_action.document_due_date_overridden = document_due_date_overridden
                 db.flush()
 
-                review_reasons: list[str] = []
-                if overall_confidence < settings.confidence_threshold:
-                    review_reasons.append(
-                        f"Confidence {overall_confidence}% is below the configured "
-                        f"{settings.confidence_threshold}% threshold"
-                    )
+                all_review_reasons: list[str] = []
                 for stored_action in stored_actions:
+                    review_reasons: list[str] = []
+                    if (
+                        not action_has_human_classification(stored_action)
+                        and overall_confidence < settings.confidence_threshold
+                    ):
+                        review_reasons.append(
+                            f"Confidence {overall_confidence}% is below the configured "
+                            f"{settings.confidence_threshold}% threshold"
+                        )
                     if not action_has_critical_details(stored_action):
                         review_reasons.append(
                             f"{stored_action.action_type} is missing critical action details"
                         )
-                if review_reasons:
-                    reason = "; ".join(dict.fromkeys(review_reasons))
-                    for stored_action in stored_actions:
+                    if review_reasons:
+                        reason = "; ".join(dict.fromkeys(review_reasons))
                         route_action_to_review(db, stored_action, reason=reason)
+                        all_review_reasons.extend(review_reasons)
+                    else:
+                        previous_review_item_id = stored_action.review_item_id
+                        mark_action_ready(stored_action)
+                        if previous_review_item_id:
+                            from doc_intelligence_hub.modules.triage.database import (
+                                resolve_queue_item,
+                            )
+
+                            resolve_queue_item(
+                                previous_review_item_id,
+                                "re_evaluated",
+                            )
+                actions_requiring_review = [
+                    action for action in stored_actions if action.review_state == "needs_review"
+                ]
+                if actions_requiring_review:
+                    reason = "; ".join(dict.fromkeys(all_review_reasons))
                     db.commit()
                     if settings.write_to_paperless and self._enrichment_available:
                         primary_action = (
@@ -1106,6 +1205,7 @@ class Pipeline:
         assessment: dict,
         action_index: int = 0,
         is_primary: bool = True,
+        allow_protected_index_match: bool = False,
     ) -> Action:
         """Store or update an action in the internal database.
 
@@ -1149,11 +1249,10 @@ class Pipeline:
         # Extract document date (Paperless "created" field)
         document_date = self._parse_date(document.get("created"))
 
-        # Stable analyzer position preserves one row per inferred action, even
-        # when a document contains multiple actions of the same type.
+        analysis_identity = _action_analysis_identity(action_data)
         existing = (
             db.query(Action)
-            .filter_by(document_id=doc_id, action_index=action_index)
+            .filter_by(document_id=doc_id, analysis_identity=analysis_identity)
             .filter(
                 Action.parent_action_id.is_(None),
                 Action.superseded_by_action_id.is_(None),
@@ -1161,13 +1260,32 @@ class Pipeline:
             .first()
         )
 
-        # Compatibility fallback for rows created before action ordinals existed.
+        # Compatibility fallback for rows created before semantic identities existed.
+        if not existing:
+            indexed = (
+                db.query(Action)
+                .filter_by(document_id=doc_id, action_index=action_index)
+                .filter(
+                    Action.parent_action_id.is_(None),
+                    Action.superseded_by_action_id.is_(None),
+                )
+                .first()
+            )
+            if indexed and (
+                not action_has_human_classification(indexed)
+                or allow_protected_index_match
+                or (
+                    indexed.action_type == action_data["action_type"]
+                    and indexed.title == action_data["title"]
+                )
+            ):
+                existing = indexed
+
         if not existing:
             existing = (
                 db.query(Action)
                 .filter_by(document_id=doc_id, title=action_data["title"])
                 .filter(
-                    Action.action_index.is_(None),
                     Action.parent_action_id.is_(None),
                     Action.superseded_by_action_id.is_(None),
                 )
@@ -1195,21 +1313,38 @@ class Pipeline:
         )
 
         if existing:
+            corrected_fields = {
+                str(field)
+                for field in (existing.human_corrected_fields or [])
+                if isinstance(field, str)
+            }
             if existing.status == "source_deleted":
                 existing.status = "pending"
                 existing.action_ready = True
                 existing.review_state = "ready"
                 existing.superseded_by_action_id = None
-            existing.action_type = action_data["action_type"]
-            existing.title = action_data["title"]
-            existing.summary = action_data.get("summary")
-            existing.due_date = self._parse_date(action_data.get("due_date"))
-            existing.amount = action_data.get("amount")
-            existing.urgency = action_data["urgency"]
-            existing.severity = urgency_to_severity(action_data["urgency"])
+            inferred_values = {
+                "action_type": action_data["action_type"],
+                "title": action_data["title"],
+                "summary": action_data.get("summary"),
+                "due_date": self._parse_date(action_data.get("due_date")),
+                "amount": action_data.get("amount"),
+                "urgency": action_data["urgency"],
+            }
+            for field, value in inferred_values.items():
+                if field not in corrected_fields:
+                    setattr(existing, field, value)
+            existing.severity = urgency_to_severity(existing.urgency)
             existing.confidence = action_data.get("confidence", 0)
-            existing.risk_score = risk
-            existing.correspondent = correspondent_name
+            existing.risk_score = compute_risk_score(
+                urgency=existing.urgency,
+                due_date=existing.due_date,
+                amount=existing.amount,
+                confidence=action_data.get("confidence", 0),
+                action_type=existing.action_type,
+            )
+            if "correspondent" not in corrected_fields:
+                existing.correspondent = correspondent_name
             existing.document_date = document_date
             existing.document_type = document_type_name
             existing.tags = tag_names or None
@@ -1217,10 +1352,34 @@ class Pipeline:
             existing.ai_reasoning = assessment.get("reasoning")
             existing.recommended_cta = _serialize_cta(action_data.get("recommended_cta"))
             existing.action_index = action_index
+            if existing.analysis_identity is None:
+                existing.analysis_identity = analysis_identity
             existing.is_primary = is_primary
             existing.updated_at = datetime.utcnow()
             return existing
         else:
+            occupied_index = (
+                db.query(Action.id)
+                .filter(
+                    Action.document_id == doc_id,
+                    Action.action_index == action_index,
+                    Action.parent_action_id.is_(None),
+                    Action.superseded_by_action_id.is_(None),
+                )
+                .first()
+            )
+            if occupied_index:
+                maximum_index = (
+                    db.query(Action.action_index)
+                    .filter(
+                        Action.document_id == doc_id,
+                        Action.parent_action_id.is_(None),
+                        Action.superseded_by_action_id.is_(None),
+                    )
+                    .order_by(Action.action_index.desc())
+                    .first()
+                )
+                action_index = ((maximum_index or (action_index,))[0] or 0) + 1
             action = Action(
                 document_id=doc_id,
                 document_title=document.get("title", f"Document #{doc_id}"),
@@ -1241,6 +1400,7 @@ class Pipeline:
                 ai_reasoning=assessment.get("reasoning"),
                 recommended_cta=_serialize_cta(action_data.get("recommended_cta")),
                 action_index=action_index,
+                analysis_identity=analysis_identity,
                 is_primary=is_primary,
                 action_ready=True,
                 review_state="ready",

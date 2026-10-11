@@ -42,6 +42,7 @@ from doc_intelligence_hub.modules.action_queue.lifecycle import (
     document_action_status,
     file_action_in_paperless,
     mark_action_ready,
+    mark_human_corrections,
     project_action_metadata,
     recalculate_action_risk,
     record_action_feedback,
@@ -509,6 +510,7 @@ def _serialize_action(a: Action) -> dict[str, Any]:
             if a.review_item_id
             else None
         ),
+        "action_url": f"#/actions/{a.id}",
         "correspondent": a.correspondent,
         "document_date": a.document_date.isoformat() if a.document_date else None,
         "document_created_at": a.document_date.isoformat() if a.document_date else None,
@@ -643,6 +645,12 @@ async def _database_counts() -> dict[str, int]:
             "dismissed": dismissed,
             "snoozed": snoozed,
             "not_an_action": not_an_action,
+            "needs_review": db.query(Action)
+            .filter(
+                Action.review_state == "needs_review",
+                Action.superseded_by_action_id.is_(None),
+            )
+            .count(),
             "total": pending + acknowledged + completed + dismissed + snoozed + not_an_action,
         }
     finally:
@@ -1272,6 +1280,21 @@ async def expired_snoozes(request: Request) -> dict[str, Any]:
         db.close()
 
 
+@router.get("/actions/{action_id}")
+async def get_action(request: Request, action_id: int) -> dict[str, Any]:
+    """Return one action by its durable identity, regardless of its current surface."""
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        action = db.query(Action).filter_by(id=action_id).first()
+        if not action:
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        return _serialize_action_with_siblings(db, action)
+    finally:
+        db.close()
+
+
 @router.patch("/actions/{action_id}")
 async def update_action(
     request: Request, action_id: int, body: ActionUpdateRequest
@@ -1406,6 +1429,13 @@ async def update_action(
             siblings = db.query(Action).filter_by(document_id=action.document_id).all()
             for sibling in siblings:
                 sibling.correspondent = body.correspondent
+                mark_human_corrections(sibling, {"correspondent"})
+
+        corrected_fields = supplied_fields.intersection(
+            {"action_type", "title", "summary", "due_date", "amount", "urgency", "correspondent"}
+        )
+        if corrected_fields:
+            mark_human_corrections(action, corrected_fields)
 
         if "status" in supplied_fields or "snoozed_until" in supplied_fields:
             effective_status = body.status or action.status

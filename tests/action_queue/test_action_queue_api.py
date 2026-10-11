@@ -550,6 +550,7 @@ class TestListActions:
             "action_ready",
             "review_state",
             "needs_review_url",
+            "action_url",
             "correspondent",
             "document_date",
             "document_created_at",
@@ -582,6 +583,15 @@ class TestListActions:
             "snoozed_until",
         }
         assert set(action.keys()) == expected_fields
+        assert action["action_url"] == "#/actions/1"
+
+    def test_get_action_by_durable_identity_includes_canonical_url(self, seeded_client):
+        response = seeded_client.get("/api/queue/actions/1")
+
+        assert response.status_code == 200
+        action = response.json()
+        assert action["id"] == 1
+        assert action["action_url"] == "#/actions/1"
         assert action["recommended_cta"]["url"] == "https://billing.example/pay"
         assert action["extracted_data"]["reference_number"] == "INV-42"
 
@@ -1192,6 +1202,23 @@ class TestUpdateAction:
     ):
         from unittest.mock import AsyncMock, patch
 
+        db = get_session()
+        try:
+            db.add(
+                Action(
+                    document_id=42,
+                    document_title="Electric Bill Jan 2026",
+                    action_type="RESPOND",
+                    title="Dispute late fee",
+                    status="pending",
+                    action_index=1,
+                    is_primary=False,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
         projection = AsyncMock()
         enricher = AsyncMock()
         with (
@@ -1215,6 +1242,16 @@ class TestUpdateAction:
         projection.assert_awaited_once()
         assert projection.await_args.kwargs["action_status"] is None
         enricher.sync_document_amount.assert_awaited_once_with(42, None, source="action_queue")
+        db = get_session()
+        try:
+            siblings = db.query(Action).filter_by(document_id=42).all()
+            corrected = next(action for action in siblings if action.id == 1)
+            untouched = next(action for action in siblings if action.id != 1)
+            assert "amount" in corrected.human_corrected_fields
+            assert "amount" not in untouched.human_corrected_fields
+            assert all(action.document_amount_overridden for action in siblings)
+        finally:
+            db.close()
 
     def test_split_creates_stable_sibling_identity(self, seeded_client):
         response = seeded_client.post(

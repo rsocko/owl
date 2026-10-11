@@ -420,7 +420,23 @@ class TestTriageResolve:
         saved_review = client.get(f"/api/triage/queue/{item['id']}").json()
         assert saved_review["metadata"]["amount"] == 395.0
         queue = client.get("/api/queue/actions?status=pending").json()
-        assert any(candidate["id"] == action_id for candidate in queue["actions"])
+        promoted = next(candidate for candidate in queue["actions"] if candidate["id"] == action_id)
+        assert promoted["amount"] == 395.0
+        assert promoted["action_url"] == f"#/actions/{action_id}"
+        session = get_action_session()
+        try:
+            accepted = session.get(Action, action_id)
+            assert accepted is not None
+            assert accepted.human_reviewed is True
+            assert set(accepted.human_corrected_fields) >= {
+                "action_type",
+                "title",
+                "summary",
+                "due_date",
+                "amount",
+            }
+        finally:
+            session.close()
 
     def test_resolved_action_classification_cannot_be_resolved_again(self, client, action_review):
         from unittest.mock import AsyncMock, patch

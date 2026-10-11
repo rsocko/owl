@@ -111,6 +111,9 @@ class Action(Base):
     action_ready = Column(Boolean, nullable=False, default=True, index=True)
     review_state = Column(String, nullable=False, default="ready", index=True)
     review_item_id = Column(String, nullable=True, index=True)
+    human_reviewed = Column(Boolean, nullable=False, default=False, index=True)
+    human_corrected_fields = Column(JSON, nullable=False, default=list)
+    analysis_identity = Column(String, nullable=True, index=True)
     action_index = Column(Integer, nullable=True)
     is_primary = Column(Boolean, nullable=False, default=True)
     parent_action_id = Column(Integer, nullable=True, index=True)
@@ -482,6 +485,9 @@ def _migrate_missing_columns(engine):
             ("action_ready", "BOOLEAN DEFAULT 1 NOT NULL"),
             ("review_state", "TEXT DEFAULT 'ready' NOT NULL"),
             ("review_item_id", "TEXT"),
+            ("human_reviewed", "BOOLEAN DEFAULT 0 NOT NULL"),
+            ("human_corrected_fields", "TEXT DEFAULT '[]' NOT NULL"),
+            ("analysis_identity", "TEXT"),
             ("acknowledged_at", "TIMESTAMP"),
             ("snoozed_until", "TIMESTAMP"),
             ("document_date", "DATE"),

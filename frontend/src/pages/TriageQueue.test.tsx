@@ -305,9 +305,9 @@ describe('Needs Review actions', () => {
 
     expect(await screen.findByText('Corrections saved')).toBeTruthy();
     expect(screen.getByText('395')).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'View in Action Queue' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'View action' })).toHaveAttribute(
       'href',
-      '#/action-queue',
+      '#/actions/42',
     );
     expect(screen.queryByLabelText('Corrected amount')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Save corrections' })).toBeNull();
