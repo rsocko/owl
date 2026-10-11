@@ -5,12 +5,16 @@ import ActionQueueOperations from './ActionQueueOperations';
 const {
   projectionHealthMock,
   reconcileProjectionsMock,
+  relationshipMetadataMock,
+  setupRelationshipMetadataMock,
   refreshMetadataMock,
   runMock,
   setupCustomFieldsMock,
 } = vi.hoisted(() => ({
   projectionHealthMock: vi.fn(),
   reconcileProjectionsMock: vi.fn(),
+  relationshipMetadataMock: vi.fn(),
+  setupRelationshipMetadataMock: vi.fn(),
   refreshMetadataMock: vi.fn(),
   runMock: vi.fn(),
   setupCustomFieldsMock: vi.fn(),
@@ -23,6 +27,8 @@ vi.mock('../lib/api', () => ({
       check: vi.fn(),
       checkCustomFields: vi.fn(),
       setupCustomFields: setupCustomFieldsMock,
+      checkRelationshipMetadata: relationshipMetadataMock,
+      setupRelationshipMetadata: setupRelationshipMetadataMock,
       backfill: vi.fn(),
       refreshMetadata: refreshMetadataMock,
     },
@@ -55,6 +61,22 @@ describe('ActionQueueOperations', () => {
       failed: 0,
       remaining: 0,
       errors: [],
+    });
+    relationshipMetadataMock.mockReset();
+    relationshipMetadataMock.mockResolvedValue({
+      status: 'ready',
+      category: null,
+      write_enabled: true,
+      can_setup: false,
+      fields: [],
+    });
+    setupRelationshipMetadataMock.mockReset();
+    setupRelationshipMetadataMock.mockResolvedValue({
+      status: 'ready',
+      category: null,
+      write_enabled: true,
+      can_setup: false,
+      fields: [],
     });
   });
 
@@ -121,7 +143,8 @@ describe('ActionQueueOperations', () => {
         not_intended: 2,
         last_error: {
           relationship_id: 'rel-2',
-          message: 'Paperless unavailable',
+          code: 'paperless_not_configured',
+          message: 'Paperless is not configured.',
           recorded_at: null,
         },
       })
@@ -131,7 +154,8 @@ describe('ActionQueueOperations', () => {
         not_intended: 2,
         last_error: {
           relationship_id: 'rel-2',
-          message: 'Paperless unavailable',
+          code: 'paperless_not_configured',
+          message: 'Paperless is not configured.',
           recorded_at: null,
         },
       });
@@ -140,7 +164,11 @@ describe('ActionQueueOperations', () => {
       succeeded: 1,
       failed: 1,
       remaining: 1,
-      errors: [{ relationship_id: 'rel-2', message: 'Paperless unavailable' }],
+      errors: [{
+        relationship_id: 'rel-2',
+        code: 'paperless_not_configured',
+        message: 'Paperless is not configured.',
+      }],
     });
     render(<ActionQueueOperations />);
 
@@ -154,6 +182,29 @@ describe('ActionQueueOperations', () => {
     await waitFor(() => expect(reconcileProjectionsMock).toHaveBeenCalledTimes(1));
     expect(await screen.findByText('Attempted')).toBeInTheDocument();
     expect(screen.getByText('Succeeded')).toBeInTheDocument();
-    expect(screen.getAllByText('Paperless unavailable').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Paperless is not configured/).length).toBeGreaterThan(0);
+    expect(projectionHealthMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('offers safe setup when relationship metadata is missing', async () => {
+    relationshipMetadataMock.mockResolvedValue({
+      status: 'missing',
+      category: 'paperless_schema_setup_required',
+      write_enabled: true,
+      can_setup: true,
+      fields: [
+        { key: 'related_documents', name: 'Related Document IDs', status: 'missing' },
+      ],
+    });
+    render(<ActionQueueOperations />);
+
+    const setup = await screen.findByRole(
+      'button',
+      { name: 'Set up relationship metadata' },
+    );
+    fireEvent.click(setup);
+
+    await waitFor(() => expect(setupRelationshipMetadataMock).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('Relationship metadata fields are ready.')).toBeInTheDocument();
   });
 });

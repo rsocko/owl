@@ -93,6 +93,7 @@ def _relationship_to_dict(relationship: DocumentRelationship) -> dict[str, Any]:
         "paperless_projection_enabled": bool(relationship.paperless_projection_enabled),
         "paperless_synced": bool(relationship.paperless_synced),
         "projection_error": relationship.projection_error,
+        "projection_error_code": relationship.projection_error_code,
         "created_at": relationship.created_at.isoformat() if relationship.created_at else None,
         "removed_at": relationship.removed_at.isoformat() if relationship.removed_at else None,
         "removed_by": relationship.removed_by,
@@ -325,6 +326,7 @@ def get_projection_health() -> dict[str, Any]:
             "last_error": (
                 {
                     "relationship_id": latest_failure.id,
+                    "code": latest_failure.projection_error_code or "paperless_projection_failed",
                     "message": latest_failure.projection_error,
                     "recorded_at": (
                         latest_failure.created_at.isoformat() if latest_failure.created_at else None
@@ -540,7 +542,11 @@ def remove_document_relationship(
 
 
 def set_projection_result(
-    relationship_id: str, *, synced: bool, error: str | None
+    relationship_id: str,
+    *,
+    synced: bool,
+    error: str | None,
+    error_code: str | None = None,
 ) -> dict[str, Any] | None:
     session = get_session()
     try:
@@ -553,6 +559,7 @@ def set_projection_result(
             return None
         relationship.paperless_synced = int(synced)
         relationship.projection_error = error
+        relationship.projection_error_code = error_code
         session.commit()
         return _relationship_to_dict(relationship)
     finally:

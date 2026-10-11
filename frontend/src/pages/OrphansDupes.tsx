@@ -109,8 +109,14 @@ type PaperlessOption = { id: number; name: string };
 type RelationshipScanRun = {
   run_id: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
+  attached?: boolean;
   counts: RelationshipScanCounts;
   errors: Array<{ code: string; message: string }>;
+  projection: {
+    status: 'not_required' | 'synced' | 'partial' | 'failed';
+    error_code: string | null;
+    message: string | null;
+  } | null;
 };
 
 type OrphanItem = {
@@ -186,6 +192,7 @@ export default function OrphansDupes() {
   const [scanPreview, setScanPreview] = useState<RelationshipScanCounts | null>(null);
   const [scanPreviewLoading, setScanPreviewLoading] = useState(false);
   const [scanRun, setScanRun] = useState<RelationshipScanRun | null>(null);
+  const [scanStartPending, setScanStartPending] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [scanScope, setScanScope] = useState<RelationshipScanScope>({
     kind: 'action_queue',
@@ -198,6 +205,7 @@ export default function OrphansDupes() {
   const [paperlessViews, setPaperlessViews] = useState<PaperlessOption[]>([]);
   const [scopeOptionsLoading, setScopeOptionsLoading] = useState(false);
   const previewRequest = useRef(0);
+  const scanStartPendingRef = useRef(false);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -298,6 +306,7 @@ export default function OrphansDupes() {
           scanRun.run_id,
         ) as RelationshipScanRun;
         setScanRun(next);
+        setScanError(null);
         if (next.status === 'completed') {
           setToast({ message: 'Relationship scan completed.', tone: 'success' });
         } else if (next.status === 'failed') {
@@ -410,14 +419,21 @@ export default function OrphansDupes() {
   }, [scanPanelOpen, scanScopePayload, scanScopeValidation]);
 
   const handleStartRelationshipScan = async () => {
+    if (scanStartPendingRef.current) return;
+    scanStartPendingRef.current = true;
+    setScanStartPending(true);
     setScanError(null);
     try {
       const run = await endpoints.duplicates.startRelationshipScan(
         scanScopePayload,
       ) as RelationshipScanRun;
       setScanRun(run);
+      setScanError(null);
     } catch (err) {
       setScanError(getErrorMessage(err));
+    } finally {
+      scanStartPendingRef.current = false;
+      setScanStartPending(false);
     }
   };
 
@@ -523,7 +539,11 @@ export default function OrphansDupes() {
                           <select
                             id="relationship-scan-scope"
                             value={scanScope.kind}
-                            disabled={scanRun?.status === 'queued' || scanRun?.status === 'running'}
+                            disabled={
+                              scanStartPending
+                              || scanRun?.status === 'queued'
+                              || scanRun?.status === 'running'
+                            }
                             onChange={(event) => {
                               setScanRun(null);
                               setScanScope((current) => ({
@@ -713,6 +733,21 @@ export default function OrphansDupes() {
                                 <dd>{scanRun.counts.failures ?? 0}</dd>
                               </div>
                             </dl>
+                            {scanRun.status === 'completed'
+                              && scanRun.projection
+                              && !['synced', 'not_required'].includes(scanRun.projection.status)
+                              && (
+                                <div className="relationship-maintenance__projection-notice">
+                                  <strong>Relationships are safely stored in OWL.</strong>
+                                  <span>
+                                    Paperless metadata sync requires repair
+                                    {scanRun.projection.error_code
+                                      ? ` (${scanRun.projection.error_code.replaceAll('_', ' ')})`
+                                      : ''}.
+                                  </span>
+                                  <a href="#/action-queue/operations">Repair Paperless sync</a>
+                                </div>
+                              )}
                           </>
                         )}
                         {scanError && <ErrorState message={scanError} />}
@@ -729,6 +764,7 @@ export default function OrphansDupes() {
                             onClick={() => void handleStartRelationshipScan()}
                             disabled={
                               scanPreviewLoading
+                              || scanStartPending
                               || Boolean(scanScopeValidation)
                               || !scanPreview
                               || (scanPreview.documents_discovered ?? 0) === 0
@@ -736,13 +772,19 @@ export default function OrphansDupes() {
                               || scanRun?.status === 'running'
                             }
                           >
-                            {scanRun?.status === 'queued' || scanRun?.status === 'running'
-                              ? 'Scan in progress…'
-                              : 'Start relationship scan'}
+                            {scanStartPending
+                              ? 'Starting relationship scan…'
+                              : scanRun?.status === 'queued' || scanRun?.status === 'running'
+                                ? 'Scan in progress…'
+                                : 'Start relationship scan'}
                           </Button>
                           <Button
                             onClick={() => setScanPanelOpen(false)}
-                            disabled={scanRun?.status === 'queued' || scanRun?.status === 'running'}
+                            disabled={
+                              scanStartPending
+                              || scanRun?.status === 'queued'
+                              || scanRun?.status === 'running'
+                            }
                           >
                             Cancel
                           </Button>

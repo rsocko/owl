@@ -243,7 +243,14 @@ async def test_partial_paperless_failure_reports_failed_document_and_continues(d
     assert result["synced"] is False
     assert result["succeeded"] == 1
     assert result["failed"] == 1
-    assert result["errors"] == [{"document_id": 10, "message": "Paperless permission denied"}]
+    assert result["errors"] == [
+        {
+            "document_id": 10,
+            "code": "paperless_obligation_projection_failed",
+            "message": "Paperless obligation fields could not be updated.",
+        }
+    ]
+    assert "Paperless permission denied" not in str(result)
     assert client.update_custom_fields_verified.await_count == 2
 
 

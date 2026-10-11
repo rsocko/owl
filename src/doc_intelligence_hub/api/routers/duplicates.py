@@ -12,6 +12,8 @@ Endpoints:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from datetime import date
 from typing import Any, Literal
@@ -53,6 +55,7 @@ from doc_intelligence_hub.modules.triage.relationship_projection import (
     project_relationships_to_paperless,
 )
 from doc_intelligence_hub.modules.triage.relationship_scans import (
+    ScanAlreadyActiveError,
     create_scan_run,
     get_scan_run,
     recover_abandoned_runs,
@@ -159,6 +162,21 @@ def _action_queue_source() -> dict[str, Any]:
         session.close()
 
 
+def _scan_scope_key(scope: RelationshipScanScope) -> str:
+    payload = json.dumps(scope.discovery_dict(), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _safe_projection_summary(projection: dict[str, Any] | None) -> dict[str, Any] | None:
+    if projection is None:
+        return {"status": "not_required", "error_code": None, "message": None}
+    return {
+        "status": projection.get("status", "synced" if projection.get("synced") else "failed"),
+        "error_code": projection.get("error_code"),
+        "message": projection.get("error"),
+    }
+
+
 async def _discover_scan_documents(
     request: Request,
     scope: RelationshipScanScope,
@@ -235,7 +253,7 @@ async def trigger_scan(
     scope = body or RelationshipScanScope()
     documents, discovery = await _discover_scan_documents(request, scope)
     result = scan_all_duplicates(documents=documents, discovery=discovery)
-    await _project_automatic_relationships(result)
+    await _project_automatic_relationships(result, request)
     return result
 
 
@@ -299,22 +317,20 @@ async def _run_tracked_scan(
             documents=documents,
             discovery=discovery,
         )
-        projection = await _project_automatic_relationships(result)
-        if projection and not projection["synced"]:
-            result["failures"] = int(result.get("failures", 0)) + 1
-            result.setdefault("errors", []).append(
-                {
-                    "code": "paperless_projection_failed",
-                    "message": projection["error"]
-                    or "Relationship links could not be synced to Paperless.",
-                }
-            )
-        counts.update({key: value for key, value in result.items() if key != "relationship_ids"})
+        projection = await _project_automatic_relationships(result, request)
+        counts.update(
+            {
+                key: value
+                for key, value in result.items()
+                if key not in {"relationship_ids", "projection"}
+            }
+        )
         update_scan_run(
             run_id,
             status="completed",
             counts=counts,
             errors=result.get("errors", []),
+            projection=_safe_projection_summary(projection),
         )
     except Exception as exc:
         logger.exception("Tracked historical relationship scan failed")
@@ -341,22 +357,31 @@ async def start_historical_relationship_scan(
 ) -> dict[str, Any]:
     """Start one durable, tracked historical relationship scan."""
     recover_abandoned_runs(_active_scan_run_ids)
+    scope = body or RelationshipScanScope()
+    scope_key = _scan_scope_key(scope)
     try:
-        run = create_scan_run()
-    except RuntimeError as exc:
-        active_run_id = str(exc)
+        run = create_scan_run(scope_key=scope_key, scope_kind=scope.kind)
+    except ScanAlreadyActiveError as exc:
+        active = exc.run
+        if exc.scope_key == scope_key:
+            stored = get_scan_run(active["run_id"])
+            if stored is not None:
+                return {**stored, "attached": True}
         raise HTTPException(
             status_code=409,
             detail={
-                "code": "relationship_scan_in_progress",
-                "message": "A historical relationship scan is already in progress.",
-                "run_id": active_run_id,
+                "code": "relationship_scan_scope_conflict",
+                "message": (
+                    "A historical relationship scan is already in progress for another scope."
+                ),
+                "run_id": active["run_id"],
+                "active_scope": active.get("scope", {"kind": "unknown"}),
             },
         ) from exc
     run_id = run["run_id"]
     _active_scan_run_ids.add(run_id)
-    scope = body or RelationshipScanScope()
     run["counts"] = {"scope": {"kind": scope.kind}}
+    run["attached"] = False
     update_scan_run(run_id, counts=run["counts"])
     background_tasks.add_task(_run_tracked_scan, run_id, request, scope)
     return run
@@ -364,7 +389,6 @@ async def start_historical_relationship_scan(
 
 @router.get("/scan/runs/{run_id}")
 async def historical_relationship_scan_status(run_id: str) -> dict[str, Any]:
-    recover_abandoned_runs(_active_scan_run_ids)
     run = get_scan_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Relationship scan run not found")
@@ -372,22 +396,25 @@ async def historical_relationship_scan_status(run_id: str) -> dict[str, Any]:
 
 
 @router.post("/check-single")
-async def check_single_document(body: CheckSingleRequest) -> dict[str, Any]:
+async def check_single_document(request: Request, body: CheckSingleRequest) -> dict[str, Any]:
     """Run duplicate detection for a single document (as if it were just ingested)."""
     result = on_document_ingested(body.document_id)
-    await _project_automatic_relationships(result)
+    await _project_automatic_relationships(result, request)
     return result
 
 
 @router.post("/document-ingested")
-async def document_ingested(body: CheckSingleRequest) -> dict[str, Any]:
+async def document_ingested(request: Request, body: CheckSingleRequest) -> dict[str, Any]:
     """Process a Paperless post-consumption event after document metadata is available."""
     result = on_document_ingested(body.document_id)
-    await _project_automatic_relationships(result)
+    await _project_automatic_relationships(result, request)
     return result
 
 
-async def _project_automatic_relationships(result: dict[str, Any]) -> dict[str, Any] | None:
+async def _project_automatic_relationships(
+    result: dict[str, Any],
+    request: Request,
+) -> dict[str, Any] | None:
     relationship_ids = result.get("relationship_ids", [])
     if not relationship_ids:
         return None
@@ -405,19 +432,43 @@ async def _project_automatic_relationships(result: dict[str, Any]) -> dict[str, 
             )
     if not relationships:
         return None
+    client = None
     try:
-        projection = await project_relationships_to_paperless(document_ids)
+        client = make_paperless_client(request, timeout=30.0)
+        projection = await project_relationships_to_paperless(client, document_ids)
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        projection = {
+            "synced": False,
+            "status": "failed",
+            "failed_documents": sorted(document_ids),
+            "error_code": detail.get("code", "paperless_not_configured"),
+            "error": detail.get("message", "Paperless connection settings are incomplete."),
+        }
     except Exception:
         logger.exception("Failed to project automatic relationships to Paperless")
         projection = {
             "synced": False,
-            "error": "Failed to sync relationship projection to Paperless",
+            "status": "failed",
+            "failed_documents": sorted(document_ids),
+            "error_code": "paperless_document_update_failed",
+            "error": "Paperless relationship fields could not be updated.",
         }
+    finally:
+        if client is not None:
+            await client.aclose()
+    failed_documents = set(projection.get("failed_documents", []))
     for relationship in relationships:
+        relationship_documents = {
+            relationship["source_document_id"],
+            relationship["target_document_id"],
+        }
+        synced = bool(projection["synced"]) or not (relationship_documents & failed_documents)
         set_projection_result(
             relationship["id"],
-            synced=bool(projection["synced"]),
-            error=projection["error"],
+            synced=synced,
+            error=None if synced else projection["error"],
+            error_code=None if synced else projection.get("error_code"),
         )
     result["projection"] = projection
     logger.info(
