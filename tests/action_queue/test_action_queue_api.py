@@ -247,9 +247,7 @@ class TestListActions:
         assert data["actions"][0]["status"] == "pending"
         assert data["actions"][0]["preview_url"] is not None
 
-    def test_list_actions_filters_search_and_action_type_before_pagination(
-        self, seeded_client
-    ):
+    def test_list_actions_filters_search_and_action_type_before_pagination(self, seeded_client):
         search = seeded_client.get("/api/queue/actions?search=blue%20shield&limit=1").json()
         assert search["total"] == 1
         assert search["actions"][0]["title"] == "File insurance EOB"

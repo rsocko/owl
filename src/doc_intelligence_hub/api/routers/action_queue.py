@@ -1158,7 +1158,10 @@ async def list_actions(
             )
             query = query.filter(
                 or_(
-                    *(func.lower(func.coalesce(field, "")).contains(needle) for field in searchable_fields),
+                    *(
+                        func.lower(func.coalesce(field, "")).contains(needle)
+                        for field in searchable_fields
+                    ),
                     Action.document_id.cast(SAString).contains(needle),
                     func.lower(func.coalesce(Action.tags.cast(SAString), "")).contains(needle),
                 )
