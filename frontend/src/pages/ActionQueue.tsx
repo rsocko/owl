@@ -201,6 +201,7 @@ export type DeadlineBucket = 'overdue' | 'today' | 'next7' | 'later' | 'no_due_d
 const ACTION_TYPE_OPTIONS = ['ARCHIVE', 'FILE', 'PAY', 'RESPOND', 'REVIEW', 'SCHEDULE', 'SHARE', 'SIGN', 'TASK'] as const;
 const URGENCY_OPTIONS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
 export const ACTION_GROUP_BATCH_SIZE = 15;
+const ACTION_PAGE_SIZE = 50;
 const ACTION_TYPE_PRIORITY: Record<string, number> = {
   PAY: 0,
   RESPOND: 1,
@@ -534,6 +535,7 @@ export default function ActionQueue() {
   const [tagMetadata, setTagMetadata] = useState<PaperlessTag[]>([]);
   const [filter, setFilter] = useState<ActionFilter>('pending');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [quickTypeFilter, setQuickTypeFilter] = useState<QuickTypeFilter>(() => {
     const stored = window.localStorage.getItem('owl.actionQueue.typeFilter');
     return ['all', 'pay', 'respond', 'sign', 'schedule', 'file_archive'].includes(stored || '')
@@ -558,7 +560,10 @@ export default function ActionQueue() {
   const [timelineViewer, setTimelineViewer] = useState<LinkedDocument | null>(null);
   const [expandedTimelines, setExpandedTimelines] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const [actionTotal, setActionTotal] = useState(0);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
 
@@ -589,6 +594,7 @@ export default function ActionQueue() {
   const [noteDraft, setNoteDraft] = useState('');
   const [pendingUnlinkDocument, setPendingUnlinkDocument] = useState<LinkedDocument | null>(null);
   const linkRequestRef = useRef(0);
+  const actionRequestRef = useRef(0);
 
   const [correspondents, setCorrespondents] = useState<Array<{
     id: number;
@@ -626,32 +632,78 @@ export default function ActionQueue() {
     tags: action.tags?.map((value) => tagsByValue.get(String(value))?.name ?? String(value)),
   })), [actions, tagsByValue]);
 
+  const actionParams = useCallback((offset: number) => {
+    const params = new URLSearchParams({
+      limit: String(ACTION_PAGE_SIZE),
+      offset: String(offset),
+    });
+    if (filter === 'all') {
+      params.set('include_resolved_no_action', 'true');
+    } else {
+      params.set('status', filter);
+      if (filter === 'not_an_action') params.set('include_not_ready', 'true');
+    }
+    if (quickTypeFilter !== 'all') params.set('action_type', quickTypeFilter);
+    if (debouncedSearch) params.set('search', debouncedSearch);
+    return params.toString();
+  }, [debouncedSearch, filter, quickTypeFilter]);
+
   const loadData = useCallback(async () => {
+    const requestId = ++actionRequestRef.current;
     setLoading(true);
     setError(null);
+    setLoadMoreError(null);
     try {
-      const params = filter === 'all'
-        ? 'limit=200&include_resolved_no_action=true'
-        : `status=${filter}&limit=200${filter === 'not_an_action' ? '&include_not_ready=true' : ''}`;
       const [statusResponse, actionsResponse, tagsResponse] = await Promise.all([
         endpoints.actionQueue.status() as Promise<QueueStatus>,
-        endpoints.actionQueue.actions(params) as Promise<ActionListResponse>,
+        endpoints.actionQueue.actions(actionParams(0)) as Promise<ActionListResponse>,
         endpoints.actionQueue.metadataTags() as Promise<{ tags?: PaperlessTag[] }>,
       ]);
 
+      if (requestId !== actionRequestRef.current) return;
       setStatus(statusResponse ?? null);
       setActions(actionsResponse?.actions ?? []);
+      setActionTotal(actionsResponse?.total ?? 0);
       setTagMetadata(tagsResponse?.tags ?? []);
     } catch (err) {
+      if (requestId !== actionRequestRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load action queue.');
     } finally {
-      setLoading(false);
+      if (requestId === actionRequestRef.current) setLoading(false);
     }
-  }, [filter]);
+  }, [actionParams]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || actions.length >= actionTotal) return;
+    const requestId = actionRequestRef.current;
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const response = await endpoints.actionQueue.actions(
+        actionParams(actions.length),
+      ) as ActionListResponse;
+      if (requestId !== actionRequestRef.current) return;
+      setActions((current) => {
+        const knownIds = new Set(current.map((action) => action.id));
+        return [...current, ...(response.actions ?? []).filter((action) => !knownIds.has(action.id))];
+      });
+      setActionTotal(response.total ?? actionTotal);
+    } catch (err) {
+      if (requestId !== actionRequestRef.current) return;
+      setLoadMoreError(err instanceof Error ? err.message : 'Could not load more actions.');
+    } finally {
+      if (requestId === actionRequestRef.current) setLoadingMore(false);
+    }
+  }, [actionParams, actionTotal, actions.length, loadingMore]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => window.clearTimeout(timeout);
+  }, [search]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -669,31 +721,7 @@ export default function ActionQueue() {
     }
   }, [pipelineState.error]);
 
-  const filteredActions = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return displayActions.filter((action) => {
-      const type = normalizeType(action.action_type);
-      const matchesType = quickTypeFilter === 'all'
-        || type === quickTypeFilter.toUpperCase()
-        || (quickTypeFilter === 'file_archive' && ['FILE', 'ARCHIVE'].includes(type));
-      if (!matchesType) return false;
-      if (!needle) return true;
-      const haystack = [
-        action.title,
-        action.document_title,
-        action.summary,
-        action.correspondent,
-        action.action_type,
-        action.document_id,
-        action.document_type,
-        ...(action.tags || []),
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return haystack.includes(needle);
-    });
-  }, [displayActions, quickTypeFilter, search]);
+  const filteredActions = displayActions;
 
   useEffect(() => {
     window.localStorage.setItem('owl.actionQueue.typeFilter', quickTypeFilter);
@@ -709,6 +737,7 @@ export default function ActionQueue() {
   }, [filter]);
 
   const groupedActions = useMemo(() => groupAndSortActions(filteredActions), [filteredActions]);
+  const hasMoreActions = actions.length < actionTotal;
   const canGroup = GROUPABLE_FILTERS.has(filter);
   const effectiveView: QueueView = canGroup ? viewPreference : 'table';
   const checkedActions = useMemo(
@@ -1526,6 +1555,7 @@ export default function ActionQueue() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
+          {search.trim() !== debouncedSearch && <span role="status">Updating results…</span>}
         </div>
         <div className="aq-view-toggle" role="group" aria-label="Action Queue view">
           <Button
@@ -1565,6 +1595,14 @@ export default function ActionQueue() {
       ) : (
         <div className="action-queue-layout">
           <div className="aq-deadline-groups">
+            <div className="aq-results-summary" role="status" aria-live="polite">
+              <span>
+                {actionTotal === 0
+                  ? 'No matching actions'
+                  : `Showing 1–${actions.length} of ${actionTotal} matching actions`}
+              </span>
+              {hasMoreActions && <span>Load additional pages to reach every result.</span>}
+            </div>
             {/* [ARCH-01] Bulk action bar */}
             {checkedIds.size > 0 && (
               <div className="aq-bulk-bar">
@@ -1778,6 +1816,26 @@ export default function ActionQueue() {
                 </section>
               );
             })}
+            {hasMoreActions && (
+              <div className="aq-pagination">
+                <Button
+                  onClick={() => void loadMore()}
+                  disabled={loadingMore}
+                  aria-busy={loadingMore}
+                >
+                  {loadingMore
+                    ? `Loading ${Math.min(ACTION_PAGE_SIZE, actionTotal - actions.length)} more…`
+                    : `Load next ${Math.min(ACTION_PAGE_SIZE, actionTotal - actions.length)}`}
+                </Button>
+                <span>{actions.length} loaded · {actionTotal - actions.length} remaining</span>
+              </div>
+            )}
+            {loadMoreError && (
+              <div className="aq-pagination-error" role="alert">
+                <span>{loadMoreError}</span>
+                <Button size="sm" onClick={() => void loadMore()}>Try again</Button>
+              </div>
+            )}
           </div>
         </div>
       )}

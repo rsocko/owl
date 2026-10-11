@@ -7,7 +7,7 @@ from datetime import date, datetime
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 from sqlalchemy import String as SAString
@@ -1110,8 +1110,13 @@ async def list_actions(
     status: str | None = None,
     document_type: str | None = None,
     tag: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    search: str | None = Query(default=None, max_length=200),
+    action_type: str | None = Query(
+        default=None,
+        pattern=r"^(pay|respond|sign|schedule|file_archive)$",
+    ),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     include_not_ready: bool = False,
     include_resolved_no_action: bool = False,
 ) -> dict[str, Any]:
@@ -1138,16 +1143,40 @@ async def list_actions(
             # SQLite JSON: check if tag appears in the JSON array
             query = query.filter(Action.tags.isnot(None))
             query = query.filter(Action.tags.cast(SAString).contains(f'"{tag}"'))
+        if action_type == "file_archive":
+            query = query.filter(func.upper(Action.action_type).in_(("FILE", "ARCHIVE")))
+        elif action_type:
+            query = query.filter(func.upper(Action.action_type) == action_type.upper())
+        if search and (needle := search.strip().lower()):
+            searchable_fields = (
+                Action.title,
+                Action.document_title,
+                Action.summary,
+                Action.correspondent,
+                Action.action_type,
+                Action.document_type,
+            )
+            query = query.filter(
+                or_(
+                    *(func.lower(func.coalesce(field, "")).contains(needle) for field in searchable_fields),
+                    Action.document_id.cast(SAString).contains(needle),
+                    func.lower(func.coalesce(Action.tags.cast(SAString), "")).contains(needle),
+                )
+            )
         # Sort before pagination so history views receive the newest lifecycle changes.
         if status == "pending":
-            query = query.order_by(Action.risk_score.desc(), Action.created_at.desc())
+            query = query.order_by(
+                Action.risk_score.desc(),
+                Action.created_at.desc(),
+                Action.id.desc(),
+            )
         elif status in {"completed", "dismissed", "not_an_action"} or status is None:
             query = query.order_by(
                 func.coalesce(Action.completed_at, Action.updated_at, Action.created_at).desc(),
                 Action.id.desc(),
             )
         else:
-            query = query.order_by(Action.created_at.desc())
+            query = query.order_by(Action.created_at.desc(), Action.id.desc())
         total = query.count()
         actions = query.offset(offset).limit(limit).all()
 

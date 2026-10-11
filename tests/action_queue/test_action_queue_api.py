@@ -247,6 +247,29 @@ class TestListActions:
         assert data["actions"][0]["status"] == "pending"
         assert data["actions"][0]["preview_url"] is not None
 
+    def test_list_actions_filters_search_and_action_type_before_pagination(
+        self, seeded_client
+    ):
+        search = seeded_client.get("/api/queue/actions?search=blue%20shield&limit=1").json()
+        assert search["total"] == 1
+        assert search["actions"][0]["title"] == "File insurance EOB"
+
+        action_type = seeded_client.get(
+            "/api/queue/actions?action_type=file_archive&limit=1"
+        ).json()
+        assert action_type["total"] == 1
+        assert action_type["actions"][0]["action_type"] == "FILE"
+
+        no_match = seeded_client.get(
+            "/api/queue/actions?status=pending&action_type=file_archive&search=electric"
+        ).json()
+        assert no_match["total"] == 0
+        assert no_match["actions"] == []
+
+    def test_list_actions_rejects_unbounded_page_sizes(self, seeded_client):
+        response = seeded_client.get("/api/queue/actions?limit=201")
+        assert response.status_code == 422
+
     def test_terminal_actions_are_paginated_by_latest_lifecycle_change(self, seeded_client):
         db = get_session()
         try:

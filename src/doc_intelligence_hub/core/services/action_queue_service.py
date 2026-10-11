@@ -81,9 +81,13 @@ class ActionQueueService(BaseService):
             if status:
                 query = query.filter_by(status=status)
             if status == "pending":
-                query = query.order_by(Action.risk_score.desc(), Action.created_at.desc())
+                query = query.order_by(
+                    Action.risk_score.desc(),
+                    Action.created_at.desc(),
+                    Action.id.desc(),
+                )
             else:
-                query = query.order_by(Action.created_at.desc())
+                query = query.order_by(Action.created_at.desc(), Action.id.desc())
             total = query.count()
             actions = query.offset(offset).limit(limit).all()
             return {"actions": actions, "total": total, "limit": limit, "offset": offset}
