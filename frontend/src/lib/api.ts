@@ -351,8 +351,8 @@ export const endpoints = {
     resolve: (id: string, body: { resolution: string; primary_doc_id?: number; relationship_type?: string }) =>
       api.post(`/api/duplicates/${id}/resolve`, body),
     scan: () => api.post('/api/duplicates/scan'),
-    previewRelationshipScan: () => api.post('/api/duplicates/scan/preview'),
-    startRelationshipScan: () => api.post('/api/duplicates/scan/runs'),
+    previewRelationshipScan: (body?: unknown) => api.post('/api/duplicates/scan/preview', body),
+    startRelationshipScan: (body?: unknown) => api.post('/api/duplicates/scan/runs', body),
     relationshipScanStatus: (runId: string) => api.get(`/api/duplicates/scan/runs/${runId}`),
     settings: () => api.get<{ auto_detect_enabled: boolean }>('/api/duplicates/settings'),
     updateSettings: (body: { auto_detect_enabled: boolean }) =>

@@ -156,6 +156,11 @@ async def test_resolve_tag_ids_is_case_insensitive(client):
 
 
 @pytest.mark.asyncio
+async def test_list_documents_with_unknown_tag_returns_empty(client):
+    assert await client.list_documents(tags=["Not configured"]) == []
+
+
+@pytest.mark.asyncio
 async def test_list_documents_filters_by_correspondent_id_without_name_lookup(monkeypatch):
     requests_seen: list[httpx.Request] = []
 

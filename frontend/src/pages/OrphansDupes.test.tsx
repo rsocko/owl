@@ -10,12 +10,19 @@ const mocks = vi.hoisted(() => ({
   preview: vi.fn(),
   start: vi.fn(),
   status: vi.fn(),
+  metadataTags: vi.fn(),
+  metadataSavedViews: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
   endpoints: {
     triage: { queue: mocks.triageQueue },
-    actionQueue: { actions: mocks.actions, updateAction: vi.fn() },
+    actionQueue: {
+      actions: mocks.actions,
+      updateAction: vi.fn(),
+      metadataTags: mocks.metadataTags,
+      metadataSavedViews: mocks.metadataSavedViews,
+    },
     alerts: { list: mocks.alerts },
     duplicates: {
       settings: mocks.settings,
@@ -33,8 +40,18 @@ describe('OrphansDupes relationship maintenance', () => {
     mocks.actions.mockResolvedValue({ actions: [] });
     mocks.alerts.mockResolvedValue({ alerts: [] });
     mocks.settings.mockResolvedValue({ auto_detect_enabled: false });
+    mocks.metadataTags.mockResolvedValue({ tags: [{ id: 1, name: 'Bills' }] });
+    mocks.metadataSavedViews.mockResolvedValue({
+      saved_views: [{ id: 7, name: 'Relationship candidates' }],
+    });
     mocks.preview.mockResolvedValue({
-      documents_examined: 12,
+      scope: { kind: 'action_queue', description: 'Action Queue tags: Inbox' },
+      documents_discovered: 12,
+      metadata_eligible_documents: 10,
+      documents_excluded: 2,
+      exclusion_reasons: { missing_obligation_identity: 2 },
+      candidate_groups: 2,
+      candidate_pairs: 3,
       relationships_created: 2,
       relationships_reused: 1,
       review_candidates: 3,
@@ -66,7 +83,8 @@ describe('OrphansDupes relationship maintenance', () => {
     expect(screen.getByText(/Documents are preserved/)).toBeInTheDocument();
     await waitFor(() => expect(mocks.preview).toHaveBeenCalledTimes(1));
     expect(mocks.start).not.toHaveBeenCalled();
-    expect(await screen.findByText('12')).toBeInTheDocument();
+    expect(await screen.findByText('Action Queue tags: Inbox')).toBeInTheDocument();
+    expect(screen.getByText('Discovered documents')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Start relationship scan' }));
 
@@ -75,5 +93,33 @@ describe('OrphansDupes relationship maintenance', () => {
     expect(screen.getByText('Review items created')).toBeInTheDocument();
     expect(screen.getByText('Conflicts')).toBeInTheDocument();
     expect(screen.getByText('Failures')).toBeInTheDocument();
+  });
+
+  it('refreshes preview and reveals only fields for the selected scope', async () => {
+    render(<OrphansDupes />);
+    fireEvent.click(await screen.findByRole(
+      'button',
+      { name: 'Scan existing documents for relationships' },
+    ));
+    await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith({ kind: 'action_queue' }));
+
+    fireEvent.change(screen.getByLabelText('Scan scope'), {
+      target: { value: 'saved_view' },
+    });
+    expect(await screen.findByLabelText('Paperless saved view')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Paperless tag')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Paperless saved view'), {
+      target: { value: '7' },
+    });
+    await waitFor(() => expect(mocks.preview).toHaveBeenLastCalledWith({
+      kind: 'saved_view',
+      saved_view_id: 7,
+    }));
+
+    fireEvent.change(screen.getByLabelText('Scan scope'), {
+      target: { value: 'all' },
+    });
+    expect(screen.getByText(/may take a while for a large library/i)).toBeInTheDocument();
   });
 });

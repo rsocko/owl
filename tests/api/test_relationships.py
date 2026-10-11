@@ -314,8 +314,16 @@ def test_historical_scan_preview_does_not_mutate(client, seed_eob):
         },
     }
     with patch(
-        "doc_intelligence_hub.modules.triage.duplicates.get_document_metadata",
-        side_effect=lambda document_id: metadata.get(document_id),
+        "doc_intelligence_hub.api.routers.duplicates._discover_scan_documents",
+        new=AsyncMock(
+            return_value=(
+                [{**value, "document_id": key} for key, value in metadata.items()],
+                {
+                    "documents_discovered": 2,
+                    "scope": {"kind": "action_queue", "description": "Action Queue tags: Inbox"},
+                },
+            )
+        ),
     ):
         response = client.post("/api/duplicates/scan/preview")
 
@@ -352,8 +360,19 @@ def test_historical_scan_application_is_idempotent(client, seed_eob):
     projection = AsyncMock(return_value={"synced": True, "documents": [200, 201], "error": None})
     with (
         patch(
-            "doc_intelligence_hub.modules.triage.duplicates.get_document_metadata",
-            side_effect=lambda document_id: metadata.get(document_id),
+            "doc_intelligence_hub.api.routers.duplicates._discover_scan_documents",
+            new=AsyncMock(
+                return_value=(
+                    [{**value, "document_id": key} for key, value in metadata.items()],
+                    {
+                        "documents_discovered": 2,
+                        "scope": {
+                            "kind": "action_queue",
+                            "description": "Action Queue tags: Inbox",
+                        },
+                    },
+                )
+            ),
         ),
         patch(
             "doc_intelligence_hub.api.routers.duplicates.project_relationships_to_paperless",
@@ -386,9 +405,26 @@ def test_tracked_scan_persists_completed_status(client):
         "errors": [],
         "relationship_ids": [],
     }
-    with patch(
-        "doc_intelligence_hub.api.routers.duplicates.scan_all_duplicates",
-        return_value=result,
+    with (
+        patch(
+            "doc_intelligence_hub.api.routers.duplicates._discover_scan_documents",
+            new=AsyncMock(
+                return_value=(
+                    [],
+                    {
+                        "documents_discovered": 0,
+                        "scope": {
+                            "kind": "action_queue",
+                            "description": "Action Queue tags: Inbox",
+                        },
+                    },
+                )
+            ),
+        ),
+        patch(
+            "doc_intelligence_hub.api.routers.duplicates.scan_all_duplicates",
+            return_value=result,
+        ),
     ):
         started = client.post("/api/duplicates/scan/runs")
 
@@ -416,9 +452,26 @@ def test_tracked_scan_persists_running_progress(client):
 
 
 def test_tracked_scan_surfaces_failure(client):
-    with patch(
-        "doc_intelligence_hub.api.routers.duplicates.scan_all_duplicates",
-        side_effect=RuntimeError("private connector detail"),
+    with (
+        patch(
+            "doc_intelligence_hub.api.routers.duplicates._discover_scan_documents",
+            new=AsyncMock(
+                return_value=(
+                    [],
+                    {
+                        "documents_discovered": 0,
+                        "scope": {
+                            "kind": "action_queue",
+                            "description": "Action Queue tags: Inbox",
+                        },
+                    },
+                )
+            ),
+        ),
+        patch(
+            "doc_intelligence_hub.api.routers.duplicates.scan_all_duplicates",
+            side_effect=RuntimeError("private connector detail"),
+        ),
     ):
         started = client.post("/api/duplicates/scan/runs")
 

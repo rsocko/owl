@@ -628,9 +628,10 @@ class PaperlessClient:
 
         if tags:
             tag_ids = await self._resolve_tag_ids(client, tags)
-            if tag_ids:
-                # Use __in for OR logic (docs with ANY of these tags)
-                params["tags__id__in"] = ",".join(str(t) for t in tag_ids)
+            if not tag_ids:
+                return []
+            # Use __in for OR logic (docs with ANY of these tags)
+            params["tags__id__in"] = ",".join(str(t) for t in tag_ids)
 
         if correspondent:
             if correspondent_id is not None:
