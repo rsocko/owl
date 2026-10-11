@@ -463,7 +463,7 @@ describe('ActionQueue', () => {
     };
     actionsMock.mockReset();
     actionsMock.mockImplementation(async (params: string) => (
-      params.startsWith('limit=200')
+      params.includes('include_resolved_no_action=true')
         ? { actions: [initialAction, noAction], total: 2 }
         : { actions: [initialAction], total: 1 }
     ));
@@ -472,7 +472,54 @@ describe('ActionQueue', () => {
     fireEvent.click(await screen.findByRole('radio', { name: /All \(1\)/i }));
 
     expect(await screen.findByText('Informational document')).toBeTruthy();
-    expect(actionsMock).toHaveBeenCalledWith('limit=200&include_resolved_no_action=true');
+    expect(actionsMock).toHaveBeenCalledWith(
+      'limit=50&offset=0&include_resolved_no_action=true',
+    );
+  });
+
+  it('pages through every server-filtered result without an unbounded request', async () => {
+    window.localStorage.setItem('owl.actionQueue.view', 'table');
+    const firstPage = Array.from({ length: 50 }, (_, index) => ({
+      ...initialAction,
+      id: index + 1,
+      title: `Action ${index + 1}`,
+    }));
+    const finalAction = { ...initialAction, id: 51, title: 'Action 51' };
+    actionsMock.mockReset();
+    actionsMock.mockImplementation(async (params: string) => (
+      params.includes('offset=50')
+        ? { actions: [finalAction], total: 51 }
+        : { actions: firstPage, total: 51 }
+    ));
+
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    expect(await screen.findByText('Showing 1–50 of 51 matching actions')).toBeTruthy();
+    expect(actionsMock).toHaveBeenCalledWith('limit=50&offset=0&status=pending');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load next 1' }));
+
+    expect(await screen.findByText('Showing 1–51 of 51 matching actions')).toBeTruthy();
+    expect(screen.getByText('Action 51')).toBeTruthy();
+    expect(actionsMock).toHaveBeenCalledWith('limit=50&offset=50&status=pending');
+    expect(screen.queryByRole('button', { name: /Load next/i })).toBeNull();
+  });
+
+  it('sends search and type filters to the server before paging', async () => {
+    actionsMock.mockReset().mockResolvedValue({ actions: [], total: 0 });
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+    await screen.findByText('No matching actions');
+
+    fireEvent.change(screen.getByLabelText('Search actions'), {
+      target: { value: 'Power Co' },
+    });
+    fireEvent.click(screen.getByRole('radio', { name: 'Pay' }));
+
+    await waitFor(() => {
+      expect(actionsMock).toHaveBeenCalledWith(
+        'limit=50&offset=0&status=pending&action_type=pay&search=Power+Co',
+      );
+    });
   });
 
   it('shows safe extracted links and useful action details', async () => {

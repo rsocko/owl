@@ -11,9 +11,9 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 
 from doc_intelligence_hub.api.routers import (
     get_loaded_statement_config,
@@ -258,6 +258,7 @@ async def mc_mark_no_documents_expected(
 @router.get("/api/action-queue/actions")
 async def mc_list_actions(
     request: Request,
+    response: Response,
     status: str | None = None,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -288,11 +289,22 @@ async def mc_list_actions(
             query = query.filter(Action.status.in_(stored_status_values(normalized_filter)))
         if updated_since:
             query = query.filter(Action.updated_at >= normalize_utc_datetime(updated_since))
-        actions = (
-            query.order_by(Action.created_at.desc(), Action.id.desc())
-            .offset(offset)
-            .limit(limit)
-            .all()
+        total = query.count()
+        if updated_since:
+            query = query.order_by(
+                func.coalesce(Action.updated_at, Action.created_at).asc(),
+                Action.id.asc(),
+            )
+        else:
+            query = query.order_by(Action.created_at.desc(), Action.id.desc())
+        actions = query.offset(offset).limit(limit).all()
+
+        response.headers["X-Total-Count"] = str(total)
+        response.headers["X-Page-Limit"] = str(limit)
+        response.headers["X-Page-Offset"] = str(offset)
+        response.headers["X-Has-More"] = str(offset + len(actions) < total).lower()
+        response.headers["Access-Control-Expose-Headers"] = (
+            "X-Total-Count, X-Page-Limit, X-Page-Offset, X-Has-More"
         )
 
         paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""

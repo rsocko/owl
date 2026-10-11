@@ -176,11 +176,17 @@ The response remains a flat JSON array for backward compatibility. Each item
 includes `id`, normalized lowercase `action_type` and `urgency`, normalized OWL
 `status`, `document_created_at`, `created_at`, `updated_at`, `completed_at`,
 `snoozed_until`, and the existing document/action metadata.
+Every page also includes `X-Total-Count`, `X-Page-Limit`, `X-Page-Offset`, and
+`X-Has-More` response headers. Continue increasing `offset` by the number of
+returned items while `X-Has-More` is `true`; this reaches the full result set
+without requiring an unbounded response.
 `document_created_at` is the authoritative Paperless `created` calendar date as
 an ISO `YYYY-MM-DD` string, or `null` when Paperless did not provide a valid
 date. It never falls back to the OWL action's `created_at` lifecycle timestamp.
 Results preserve the legacy newest-first order by action `created_at`, then
-`id`, so unpaginated clients continue to receive the newest actions.
+`id`, so unpaginated clients continue to receive the newest actions. Incremental
+`updated_since` queries use oldest-update-first order, then `id`, so consumers
+can process each bounded change page in checkpoint order.
 
 OWL creates one MC item per action, not one per Paperless document. Additive
 grouping fields let MC present related work without collapsing task identity:

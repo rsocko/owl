@@ -62,11 +62,19 @@ class TestMCListActions:
 
     def test_all_status_alias_and_deterministic_pagination(self, client, seed_actions):
         all_actions = client.get("/api/action-queue/actions?status=all").json()
-        first_page = client.get("/api/action-queue/actions?status=all&limit=2&offset=0").json()
-        second_page = client.get("/api/action-queue/actions?status=all&limit=2&offset=2").json()
+        first_response = client.get("/api/action-queue/actions?status=all&limit=2&offset=0")
+        second_response = client.get("/api/action-queue/actions?status=all&limit=2&offset=2")
+        first_page = first_response.json()
+        second_page = second_response.json()
 
         assert first_page + second_page == all_actions
         assert len({action["id"] for action in all_actions}) == 3
+        assert first_response.headers["x-total-count"] == "3"
+        assert first_response.headers["x-page-limit"] == "2"
+        assert first_response.headers["x-page-offset"] == "0"
+        assert first_response.headers["x-has-more"] == "true"
+        assert second_response.headers["x-has-more"] == "false"
+        assert "X-Total-Count" in first_response.headers["access-control-expose-headers"]
 
     def test_updated_since_filter(self, client, seed_actions):
         assert (
