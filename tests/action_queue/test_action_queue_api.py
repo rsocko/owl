@@ -108,6 +108,88 @@ def seeded_client(client):
 
 
 class TestListActions:
+    def test_relationship_metadata_readiness_reports_safe_missing_fields(self, client):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from doc_intelligence_hub.core.paperless import (
+            MetadataFieldKey,
+            resolve_metadata_schema,
+        )
+
+        paperless = MagicMock()
+        paperless.aclose = AsyncMock()
+        resolver = MagicMock()
+        resolver.resolve = AsyncMock(
+            return_value=resolve_metadata_schema(
+                [],
+                (
+                    MetadataFieldKey.RELATED_DOCUMENTS,
+                    MetadataFieldKey.RELATIONSHIP_SUMMARY,
+                    MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS,
+                    MetadataFieldKey.OBLIGATION_ID,
+                    MetadataFieldKey.OBLIGATION_ROLE,
+                ),
+            )
+        )
+        with (
+            patch(
+                "doc_intelligence_hub.api.routers.action_queue.make_paperless_client",
+                return_value=paperless,
+            ),
+            patch(
+                "doc_intelligence_hub.api.routers.action_queue.PaperlessMetadataResolver",
+                return_value=resolver,
+            ),
+        ):
+            response = client.get("/api/queue/check/relationship-metadata")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "missing"
+        assert response.json()["category"] == "paperless_schema_setup_required"
+        assert response.json()["can_setup"] is True
+        assert {field["name"] for field in response.json()["fields"]} == {
+            "Related Document IDs",
+            "Relationship Summary",
+            "Related Documents",
+            "Obligation ID",
+            "Obligation Role",
+        }
+        paperless.aclose.assert_awaited_once()
+
+    def test_relationship_metadata_setup_provisions_all_five_fields(self, client):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        paperless = MagicMock()
+        paperless.aclose = AsyncMock()
+        missing_schema = MagicMock()
+        missing_schema.diagnostics = []
+        missing_schema.field.return_value = MagicMock(
+            is_compatible=False,
+            diagnostics=[MagicMock(code="missing_field")],
+        )
+        ready_schema = MagicMock()
+        ready_schema.diagnostics = []
+        ready_schema.field.return_value = MagicMock(is_compatible=True, diagnostics=[])
+        resolver = MagicMock()
+        resolver.resolve = AsyncMock(return_value=missing_schema)
+        resolver.ensure = AsyncMock(return_value=ready_schema)
+        with (
+            patch(
+                "doc_intelligence_hub.api.routers.action_queue.make_paperless_client",
+                return_value=paperless,
+            ),
+            patch(
+                "doc_intelligence_hub.api.routers.action_queue.PaperlessMetadataResolver",
+                return_value=resolver,
+            ),
+        ):
+            response = client.post("/api/queue/setup/relationship-metadata")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "ready"
+        assert len(response.json()["fields"]) == 5
+        assert len(resolver.ensure.await_args.args[0]) == 5
+
     def test_sets_up_action_and_obligation_metadata_fields(self, client):
         from unittest.mock import AsyncMock, MagicMock, patch
 

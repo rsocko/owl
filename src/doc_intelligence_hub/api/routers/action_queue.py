@@ -7,7 +7,7 @@ from datetime import date, datetime
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 from sqlalchemy import String as SAString
@@ -18,8 +18,11 @@ from starlette.responses import StreamingResponse
 from doc_intelligence_hub.api.document_summary import build_document_summary
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
 from doc_intelligence_hub.core.paperless import (
+    MetadataDiagnosticCode,
     MetadataFieldKey,
+    PaperlessMetadataResolver,
     ResolvedMetadataSchema,
+    get_metadata_field_spec,
     resolve_metadata_schema,
     resolve_metadata_value,
 )
@@ -66,6 +69,15 @@ from doc_intelligence_hub.modules.action_queue.risk_scoring import recalculate_r
 from doc_intelligence_hub.modules.statements.config import resolve_api_token
 
 router = APIRouter(prefix="/api/queue", tags=["action-queue"])
+logger = logging.getLogger(__name__)
+
+_RELATIONSHIP_PROJECTION_FIELDS = (
+    MetadataFieldKey.RELATED_DOCUMENTS,
+    MetadataFieldKey.RELATIONSHIP_SUMMARY,
+    MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS,
+    MetadataFieldKey.OBLIGATION_ID,
+    MetadataFieldKey.OBLIGATION_ROLE,
+)
 
 _INITIAL_QUEUE_SETTINGS = {
     "scan_mode": "tags",
@@ -630,6 +642,184 @@ async def queue_check_custom_fields(request: Request) -> dict[str, Any]:
     _sync_action_queue_settings(request)
     client = make_paperless_client(request, timeout=15.0)
     return await client.check_custom_fields()
+
+
+def _relationship_metadata_readiness(
+    schema: ResolvedMetadataSchema,
+    *,
+    write_enabled: bool,
+) -> dict[str, Any]:
+    hard_codes = {
+        MetadataDiagnosticCode.DUPLICATE_FIELD,
+        MetadataDiagnosticCode.INCOMPATIBLE_TYPE,
+        MetadataDiagnosticCode.INVALID_SELECT_OPTION,
+    }
+    hard_diagnostics = [
+        diagnostic for diagnostic in schema.diagnostics if diagnostic.code in hard_codes
+    ]
+    setup_diagnostics = [
+        diagnostic
+        for diagnostic in schema.diagnostics
+        if diagnostic.code
+        in {
+            MetadataDiagnosticCode.MISSING_FIELD,
+            MetadataDiagnosticCode.MISSING_SELECT_OPTION,
+        }
+    ]
+    if hard_diagnostics:
+        status = "incompatible"
+        category = "paperless_schema_incompatible"
+    elif setup_diagnostics:
+        status = "missing"
+        category = "paperless_schema_setup_required"
+    elif not write_enabled:
+        status = "write_disabled"
+        category = "paperless_writes_disabled"
+    else:
+        status = "ready"
+        category = None
+    return {
+        "status": status,
+        "category": category,
+        "write_enabled": write_enabled,
+        "can_setup": bool(setup_diagnostics) and not hard_diagnostics and write_enabled,
+        "fields": [
+            {
+                "key": key.value,
+                "name": get_metadata_field_spec(key).canonical_name,
+                "status": (
+                    "ready"
+                    if schema.field(key).is_compatible
+                    else (
+                        "missing"
+                        if any(
+                            diagnostic.code
+                            in {
+                                MetadataDiagnosticCode.MISSING_FIELD,
+                                MetadataDiagnosticCode.MISSING_SELECT_OPTION,
+                            }
+                            for diagnostic in schema.field(key).diagnostics
+                        )
+                        else "incompatible"
+                    )
+                ),
+            }
+            for key in _RELATIONSHIP_PROJECTION_FIELDS
+        ],
+    }
+
+
+@router.get("/check/relationship-metadata")
+async def queue_check_relationship_metadata(request: Request) -> dict[str, Any]:
+    """Validate the five canonical relationship and obligation projection fields."""
+    _sync_action_queue_settings(request)
+    client = None
+    try:
+        client = make_paperless_client(request, timeout=15.0)
+        schema = await PaperlessMetadataResolver(client).resolve(_RELATIONSHIP_PROJECTION_FIELDS)
+        return _relationship_metadata_readiness(
+            schema,
+            write_enabled=action_queue_settings.write_to_paperless,
+        )
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        return {
+            "status": "not_configured",
+            "category": detail.get("code", "paperless_not_configured"),
+            "write_enabled": action_queue_settings.write_to_paperless,
+            "can_setup": False,
+            "fields": [],
+        }
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Paperless relationship metadata readiness check failed")
+        permission_denied = exc.response.status_code in {401, 403}
+        return {
+            "status": "permission_denied" if permission_denied else "endpoint_unavailable",
+            "category": (
+                "paperless_permission_denied"
+                if permission_denied
+                else "paperless_custom_fields_unavailable"
+            ),
+            "write_enabled": action_queue_settings.write_to_paperless,
+            "can_setup": False,
+            "fields": [],
+        }
+    except Exception:
+        logger.exception("Paperless relationship metadata readiness check failed")
+        return {
+            "status": "endpoint_unavailable",
+            "category": "paperless_custom_fields_unavailable",
+            "write_enabled": action_queue_settings.write_to_paperless,
+            "can_setup": False,
+            "fields": [],
+        }
+    finally:
+        if client is not None:
+            await client.aclose()
+
+
+@router.post("/setup/relationship-metadata")
+async def queue_setup_relationship_metadata(request: Request) -> dict[str, Any]:
+    """Safely provision missing relationship and obligation projection fields."""
+    _sync_action_queue_settings(request)
+    if not action_queue_settings.write_to_paperless:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "paperless_writes_disabled",
+                "message": "Enable Paperless writeback before provisioning metadata fields.",
+            },
+        )
+
+    client = make_paperless_client(request, timeout=30.0)
+    try:
+        resolver = PaperlessMetadataResolver(client)
+        current = await resolver.resolve(_RELATIONSHIP_PROJECTION_FIELDS)
+        readiness = _relationship_metadata_readiness(current, write_enabled=True)
+        if readiness["status"] == "incompatible":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "paperless_schema_incompatible",
+                    "message": (
+                        "Existing Paperless fields have incompatible types or options; "
+                        "no fields were changed."
+                    ),
+                },
+            )
+        schema = await resolver.ensure(_RELATIONSHIP_PROJECTION_FIELDS)
+        return _relationship_metadata_readiness(schema, write_enabled=True)
+    except HTTPException:
+        raise
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Paperless relationship metadata setup failed")
+        permission_denied = exc.response.status_code in {401, 403}
+        raise HTTPException(
+            status_code=exc.response.status_code if permission_denied else 502,
+            detail={
+                "code": (
+                    "paperless_permission_denied"
+                    if permission_denied
+                    else "paperless_custom_fields_unavailable"
+                ),
+                "message": (
+                    "Paperless denied metadata setup."
+                    if permission_denied
+                    else "Paperless custom fields could not be provisioned."
+                ),
+            },
+        ) from exc
+    except Exception as exc:
+        logger.exception("Paperless relationship metadata setup failed")
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "paperless_custom_fields_unavailable",
+                "message": "Paperless custom fields could not be provisioned.",
+            },
+        ) from exc
+    finally:
+        await client.aclose()
 
 
 @router.post("/setup/custom-fields")

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from doc_intelligence_hub.modules.action_queue.database import (
     Action,
@@ -24,6 +26,9 @@ from doc_intelligence_hub.modules.triage.database import (
 )
 from doc_intelligence_hub.modules.triage.database import (
     get_session as get_triage_session,
+)
+from doc_intelligence_hub.modules.triage.relationship_projection import (
+    project_relationships_to_paperless,
 )
 from doc_intelligence_hub.modules.triage.relationship_scans import (
     create_scan_run,
@@ -136,7 +141,8 @@ def test_projection_failure_is_reported_without_losing_relationship(client):
     assert response.status_code == 200
     body = response.json()
     assert body["relationship"]["paperless_synced"] is False
-    assert body["projection"]["error"] == "Failed to sync relationship projection to Paperless"
+    assert body["projection"]["error"] == "Paperless relationship fields could not be updated."
+    assert body["projection"]["error_code"] == "paperless_document_update_failed"
     assert client.get("/api/relationships/documents/1").json()["count"] == 1
 
 
@@ -197,7 +203,12 @@ def test_reconcile_projection_failures_after_restart(client):
         relationship_type="follows",
         provenance="automatic",
     )
-    set_projection_result(relationship["id"], synced=False, error="Paperless unavailable")
+    set_projection_result(
+        relationship["id"],
+        synced=False,
+        error="Paperless connection settings are incomplete.",
+        error_code="paperless_not_configured",
+    )
     projection = AsyncMock(return_value={"synced": True, "documents": [1, 2], "error": None})
     with patch(
         "doc_intelligence_hub.api.routers.relationships.project_relationships_to_paperless",
@@ -236,7 +247,12 @@ def test_projection_health_distinguishes_opt_out_pending_and_failed(client):
         relationship_type="supports",
         provenance="automatic",
     )
-    set_projection_result(failed["id"], synced=False, error="Paperless unavailable")
+    set_projection_result(
+        failed["id"],
+        synced=False,
+        error="Paperless connection settings are incomplete.",
+        error_code="paperless_not_configured",
+    )
 
     response = client.get("/api/relationships/projection-health")
 
@@ -247,7 +263,8 @@ def test_projection_health_distinguishes_opt_out_pending_and_failed(client):
         "not_intended": 1,
         "last_error": {
             "relationship_id": failed["id"],
-            "message": "Paperless unavailable",
+            "code": "paperless_not_configured",
+            "message": "Paperless connection settings are incomplete.",
             "recorded_at": response.json()["last_error"]["recorded_at"],
         },
     }
@@ -270,7 +287,12 @@ def test_reconcile_projection_reports_partial_failure(client):
     projection = AsyncMock(
         side_effect=[
             {"synced": True, "documents": [1, 2], "error": None},
-            {"synced": False, "documents": [1, 3], "error": "Paperless unavailable"},
+            {
+                "synced": False,
+                "documents": [1, 3],
+                "error_code": "paperless_document_update_failed",
+                "error": "Paperless relationship fields could not be updated.",
+            },
         ]
     )
     with patch(
@@ -288,12 +310,120 @@ def test_reconcile_projection_reports_partial_failure(client):
         "errors": [
             {
                 "relationship_id": second["id"],
-                "message": "Paperless unavailable",
+                "code": "paperless_document_update_failed",
+                "message": "Paperless relationship fields could not be updated.",
             }
         ],
     }
     assert get_document_relationship(first["id"])["paperless_synced"] is True
     assert get_document_relationship(second["id"])["paperless_synced"] is False
+
+
+@pytest.mark.asyncio
+async def test_projection_uses_injected_runtime_client_without_loading_statement_config():
+    client = MagicMock()
+    client.update_custom_fields_verified = AsyncMock()
+    resolver = MagicMock()
+    resolver.ensure = AsyncMock(return_value=MagicMock())
+    db = MagicMock()
+    (db.query.return_value.filter.return_value.distinct.return_value.all).return_value = []
+    obligation_projection = {
+        "synced": True,
+        "attempted": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "documents": [],
+        "errors": [],
+        "error": None,
+    }
+    with (
+        patch(
+            "doc_intelligence_hub.modules.triage.relationship_projection.PaperlessMetadataResolver",
+            return_value=resolver,
+        ),
+        patch(
+            "doc_intelligence_hub.modules.triage.relationship_projection._projection_values",
+            return_value=([], ""),
+        ),
+        patch(
+            "doc_intelligence_hub.modules.triage.relationship_projection.build_metadata_update",
+            return_value={"field": 1, "value": ""},
+        ),
+        patch(
+            "doc_intelligence_hub.modules.triage.relationship_projection.get_action_queue_session",
+            return_value=db,
+        ),
+        patch(
+            "doc_intelligence_hub.modules.triage.relationship_projection."
+            "obligation_projection_document_ids",
+            return_value=set(),
+        ),
+        patch(
+            "doc_intelligence_hub.modules.triage.relationship_projection."
+            "project_obligations_to_paperless",
+            new=AsyncMock(return_value=obligation_projection),
+        ),
+    ):
+        result = await project_relationships_to_paperless(client, {1})
+
+    assert result["synced"] is True
+    client.update_custom_fields_verified.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_projection_isolates_one_failed_paperless_document():
+    client = MagicMock()
+    client.update_custom_fields_verified = AsyncMock(
+        side_effect=[None, RuntimeError("private Paperless response")]
+    )
+    resolver = MagicMock()
+    resolver.ensure = AsyncMock(return_value=MagicMock())
+    db = MagicMock()
+    (db.query.return_value.filter.return_value.distinct.return_value.all).return_value = []
+    obligation_projection = {
+        "synced": True,
+        "attempted": 2,
+        "succeeded": 2,
+        "failed": 0,
+        "documents": [1, 2],
+        "errors": [],
+        "error": None,
+    }
+    with (
+        patch(
+            "doc_intelligence_hub.modules.triage.relationship_projection.PaperlessMetadataResolver",
+            return_value=resolver,
+        ),
+        patch(
+            "doc_intelligence_hub.modules.triage.relationship_projection._projection_values",
+            return_value=([], ""),
+        ),
+        patch(
+            "doc_intelligence_hub.modules.triage.relationship_projection.build_metadata_update",
+            return_value={"field": 1, "value": ""},
+        ),
+        patch(
+            "doc_intelligence_hub.modules.triage.relationship_projection.get_action_queue_session",
+            return_value=db,
+        ),
+        patch(
+            "doc_intelligence_hub.modules.triage.relationship_projection."
+            "obligation_projection_document_ids",
+            return_value=set(),
+        ),
+        patch(
+            "doc_intelligence_hub.modules.triage.relationship_projection."
+            "project_obligations_to_paperless",
+            new=AsyncMock(return_value=obligation_projection),
+        ),
+    ):
+        result = await project_relationships_to_paperless(client, {1, 2})
+
+    assert result["status"] == "partial"
+    assert result["succeeded"] == 1
+    assert result["failed"] == 1
+    assert result["failed_documents"] == [2]
+    assert "private Paperless response" not in str(result)
 
 
 def test_historical_scan_preview_does_not_mutate(client, seed_eob):
@@ -486,18 +616,101 @@ def test_tracked_scan_surfaces_failure(client):
     assert "private connector detail" not in str(status.json())
 
 
-def test_tracked_scan_rejects_concurrent_run(client):
+def test_tracked_scan_attaches_to_same_scope_without_starting_second_worker(client):
     from doc_intelligence_hub.api.routers import duplicates as duplicates_router
 
-    active = create_scan_run()
+    active = create_scan_run(scope_key="same-scope", scope_kind="tag")
     duplicates_router._active_scan_run_ids.add(active["run_id"])
     try:
-        response = client.post("/api/duplicates/scan/runs")
+        with patch(
+            "doc_intelligence_hub.api.routers.duplicates._scan_scope_key",
+            return_value="same-scope",
+        ):
+            response = client.post(
+                "/api/duplicates/scan/runs",
+                json={"kind": "tag", "tags": ["Inbox"]},
+            )
+    finally:
+        duplicates_router._active_scan_run_ids.discard(active["run_id"])
+
+    assert response.status_code == 202
+    assert response.json()["run_id"] == active["run_id"]
+    assert response.json()["attached"] is True
+
+
+def test_tracked_scan_rejects_different_scope_with_safe_active_scope(client):
+    from doc_intelligence_hub.api.routers import duplicates as duplicates_router
+
+    active = create_scan_run(scope_key="active-scope", scope_kind="tag")
+    duplicates_router._active_scan_run_ids.add(active["run_id"])
+    try:
+        response = client.post("/api/duplicates/scan/runs", json={"kind": "all"})
     finally:
         duplicates_router._active_scan_run_ids.discard(active["run_id"])
 
     assert response.status_code == 409
-    assert response.json()["error"]["run_id"] == active["run_id"]
+    assert response.json()["error"] == {
+        "code": "relationship_scan_scope_conflict",
+        "message": "A historical relationship scan is already in progress for another scope.",
+        "run_id": active["run_id"],
+        "active_scope": {"kind": "tag"},
+    }
+
+
+def test_tracked_scan_reports_projection_as_partial_success(client):
+    result = {
+        "documents_examined": 12,
+        "relationships_created": 2,
+        "relationships_reused": 0,
+        "triage_items_created": 0,
+        "conflicts": 0,
+        "failures": 0,
+        "errors": [],
+        "relationship_ids": ["rel-1"],
+    }
+    with (
+        patch(
+            "doc_intelligence_hub.api.routers.duplicates._discover_scan_documents",
+            new=AsyncMock(
+                return_value=(
+                    [],
+                    {
+                        "documents_discovered": 12,
+                        "scope": {
+                            "kind": "action_queue",
+                            "description": "Action Queue tags: Inbox",
+                        },
+                    },
+                )
+            ),
+        ),
+        patch(
+            "doc_intelligence_hub.api.routers.duplicates.scan_all_duplicates",
+            return_value=result,
+        ),
+        patch(
+            "doc_intelligence_hub.api.routers.duplicates._project_automatic_relationships",
+            new=AsyncMock(
+                return_value={
+                    "synced": False,
+                    "status": "failed",
+                    "error_code": "paperless_document_update_failed",
+                    "error": "One or more Paperless documents could not be updated.",
+                }
+            ),
+        ),
+    ):
+        started = client.post("/api/duplicates/scan/runs")
+
+    status = client.get(f"/api/duplicates/scan/runs/{started.json()['run_id']}").json()
+    assert status["status"] == "completed"
+    assert status["counts"]["failures"] == 0
+    assert status["errors"] == []
+    assert status["projection"] == {
+        "status": "failed",
+        "error_code": "paperless_document_update_failed",
+        "message": "One or more Paperless documents could not be updated.",
+    }
 
 
 def test_duplicate_review_related_resolution_applies_notice_priority(client):

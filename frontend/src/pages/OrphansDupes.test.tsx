@@ -36,6 +36,7 @@ vi.mock('../lib/api', () => ({
 
 describe('OrphansDupes relationship maintenance', () => {
   beforeEach(() => {
+    Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.triageQueue.mockResolvedValue({ items: [], count: 0, offset: 0, limit: 200 });
     mocks.actions.mockResolvedValue({ actions: [] });
     mocks.alerts.mockResolvedValue({ alerts: [] });
@@ -121,5 +122,67 @@ describe('OrphansDupes relationship maintenance', () => {
       target: { value: 'all' },
     });
     expect(screen.getByText(/may take a while for a large library/i)).toBeInTheDocument();
+  });
+
+  it('blocks rapid duplicate starts and clears a stale start error when a run attaches', async () => {
+    let resolveStart!: (value: unknown) => void;
+    mocks.start.mockImplementation(() => new Promise((resolve) => {
+      resolveStart = resolve;
+    }));
+    render(<OrphansDupes />);
+    fireEvent.click(await screen.findByRole(
+      'button',
+      { name: 'Scan existing documents for relationships' },
+    ));
+    await waitFor(() => expect(mocks.preview).toHaveBeenCalledTimes(1));
+
+    const start = screen.getByRole('button', { name: 'Start relationship scan' });
+    fireEvent.click(start);
+    fireEvent.click(start);
+
+    expect(mocks.start).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Starting relationship scan…' })).toBeDisabled();
+
+    resolveStart({
+      run_id: 'scan-attached',
+      status: 'running',
+      attached: true,
+      counts: { documents_examined: 2, documents_total: 12 },
+      errors: [],
+      projection: null,
+    });
+    expect(await screen.findByText(/Examining 2 of 12 documents/)).toBeInTheDocument();
+  });
+
+  it('shows projection failure as safe partial success with a repair route', async () => {
+    mocks.start.mockResolvedValue({
+      run_id: 'scan-partial',
+      status: 'completed',
+      counts: {
+        documents_examined: 12,
+        relationships_created: 2,
+        failures: 0,
+      },
+      errors: [],
+      projection: {
+        status: 'failed',
+        error_code: 'paperless_document_update_failed',
+        message: 'One or more Paperless documents could not be updated.',
+      },
+    });
+    render(<OrphansDupes />);
+    fireEvent.click(await screen.findByRole(
+      'button',
+      { name: 'Scan existing documents for relationships' },
+    ));
+    await waitFor(() => expect(mocks.preview).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Start relationship scan' }));
+
+    expect(await screen.findByText(/safely stored in OWL/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Repair Paperless sync' })).toHaveAttribute(
+      'href',
+      '#/action-queue/operations',
+    );
+    expect(screen.getByText('Failures').nextSibling).toHaveTextContent('0');
   });
 });

@@ -96,6 +96,7 @@ class DocumentRelationship(Base):
     paperless_projection_enabled = Column(Integer, nullable=False, default=1)
     paperless_synced = Column(Integer, nullable=False, default=0)
     projection_error = Column(Text, nullable=True)
+    projection_error_code = Column(String, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     removed_at = Column(DateTime, nullable=True)
     removed_by = Column(String, nullable=True)
@@ -110,6 +111,10 @@ class RelationshipScanRun(Base):
     status = Column(String, nullable=False, default="queued", index=True)
     counts_json = Column("counts", Text, nullable=False, default="{}")
     errors_json = Column("errors", Text, nullable=False, default="[]")
+    projection_json = Column("projection", Text, nullable=True)
+    scope_key = Column(String, nullable=True)
+    scope_kind = Column(String, nullable=True)
+    active_slot = Column(String, nullable=True, unique=True)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC), index=True)
@@ -250,6 +255,13 @@ def _migrate_missing_columns(engine):
         ],
         "document_relationships": [
             ("paperless_projection_enabled", "INTEGER NOT NULL DEFAULT 1"),
+            ("projection_error_code", "VARCHAR"),
+        ],
+        "relationship_scan_runs": [
+            ("projection", "TEXT"),
+            ("scope_key", "VARCHAR"),
+            ("scope_kind", "VARCHAR"),
+            ("active_slot", "VARCHAR"),
         ],
     }
 
@@ -261,6 +273,14 @@ def _migrate_missing_columns(engine):
             for col_name, col_ddl in columns:
                 if col_name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_ddl}"))
+        if inspector.has_table("relationship_scan_runs"):
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS "
+                    "idx_relationship_scan_runs_active_slot "
+                    "ON relationship_scan_runs (active_slot)"
+                )
+            )
 
 
 # ------------------------------------------------------------------

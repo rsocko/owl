@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Iterable
 
 from sqlalchemy.orm import Session
@@ -14,6 +15,8 @@ from doc_intelligence_hub.core.paperless import (
 )
 
 from .database import ObligationDocument
+
+logger = logging.getLogger(__name__)
 
 _PROJECTION_FIELDS = (
     MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS,
@@ -115,7 +118,8 @@ async def project_obligations_to_paperless(
 
     try:
         schema = await PaperlessMetadataResolver(client).ensure(_PROJECTION_FIELDS)
-    except Exception as exc:
+    except Exception:
+        logger.exception("Failed to resolve Paperless obligation projection fields")
         return {
             "synced": False,
             "attempted": len(targets),
@@ -123,9 +127,15 @@ async def project_obligations_to_paperless(
             "failed": len(targets),
             "documents": targets,
             "errors": [
-                {"document_id": document_id, "message": str(exc)} for document_id in targets
+                {
+                    "document_id": document_id,
+                    "code": "paperless_schema_unavailable",
+                    "message": "Paperless obligation fields are unavailable or incompatible.",
+                }
+                for document_id in targets
             ],
-            "error": "Paperless obligation fields could not be resolved",
+            "error_code": "paperless_schema_unavailable",
+            "error": "Paperless obligation fields are unavailable or incompatible.",
         }
 
     succeeded = 0
@@ -135,8 +145,18 @@ async def project_obligations_to_paperless(
             updates = _projection_updates(db, document_id, schema)
             await client.update_custom_fields_verified(document_id, updates)
             succeeded += 1
-        except Exception as exc:
-            errors.append({"document_id": document_id, "message": str(exc)})
+        except Exception:
+            logger.exception(
+                "Failed to update Paperless obligation fields for document %s",
+                document_id,
+            )
+            errors.append(
+                {
+                    "document_id": document_id,
+                    "code": "paperless_obligation_projection_failed",
+                    "message": "Paperless obligation fields could not be updated.",
+                }
+            )
 
     failed = len(errors)
     return {
@@ -146,5 +166,6 @@ async def project_obligations_to_paperless(
         "failed": failed,
         "documents": targets,
         "errors": errors,
+        "error_code": None if not errors else "paperless_obligation_projection_failed",
         "error": None if not errors else "One or more Paperless documents could not be updated",
     }

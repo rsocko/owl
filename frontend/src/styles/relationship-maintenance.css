@@ -144,3 +144,18 @@
   color: var(--text-muted);
   font-size: 0.82rem;
 }
+
+.relationship-maintenance__projection-notice {
+  display: grid;
+  gap: 5px;
+  max-width: 70ch;
+  padding: 10px 12px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 0.82rem;
+}
+
+.relationship-maintenance__projection-notice span {
+  color: var(--text-muted);
+}

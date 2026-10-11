@@ -18,7 +18,12 @@ type ProjectionHealth = {
   pending: number;
   failed: number;
   not_intended: number;
-  last_error: { relationship_id: string; message: string; recorded_at: string | null } | null;
+  last_error: {
+    relationship_id: string;
+    code: string;
+    message: string;
+    recorded_at: string | null;
+  } | null;
 };
 
 type ProjectionRepairResult = {
@@ -26,7 +31,16 @@ type ProjectionRepairResult = {
   succeeded: number;
   failed: number;
   remaining: number;
-  errors: Array<{ relationship_id: string; message: string }>;
+  errors: Array<{ relationship_id: string; code: string; message: string }>;
+};
+
+type RelationshipMetadataReadiness = {
+  status: 'ready' | 'missing' | 'incompatible' | 'write_disabled'
+    | 'not_configured' | 'permission_denied' | 'endpoint_unavailable';
+  category: string | null;
+  write_enabled: boolean;
+  can_setup: boolean;
+  fields: Array<{ key: string; name: string; status: string }>;
 };
 
 export default function ActionQueueOperations() {
@@ -37,6 +51,9 @@ export default function ActionQueueOperations() {
   const [projectionHealth, setProjectionHealth] = useState<ProjectionHealth | null>(null);
   const [projectionHealthError, setProjectionHealthError] = useState<string | null>(null);
   const [projectionRepair, setProjectionRepair] = useState<ProjectionRepairResult | null>(null);
+  const [metadataReadiness, setMetadataReadiness] = useState<RelationshipMetadataReadiness | null>(
+    null,
+  );
   const [filters, setFilters] = useState({
     document_id: '',
     tag_override: '',
@@ -72,8 +89,25 @@ export default function ActionQueueOperations() {
     }
   };
 
+  const loadMetadataReadiness = async () => {
+    try {
+      setMetadataReadiness(
+        await endpoints.actionQueue.checkRelationshipMetadata() as RelationshipMetadataReadiness,
+      );
+    } catch {
+      setMetadataReadiness({
+        status: 'endpoint_unavailable',
+        category: 'paperless_custom_fields_unavailable',
+        write_enabled: false,
+        can_setup: false,
+        fields: [],
+      });
+    }
+  };
+
   useEffect(() => {
     void loadProjectionHealth();
+    void loadMetadataReadiness();
   }, []);
 
   const execute = async (key: string, operation: () => Promise<unknown>, success: string) => {
@@ -400,9 +434,48 @@ export default function ActionQueueOperations() {
             )}
             {projectionHealth?.last_error && (
               <p className="relationship-maintenance__status">
-                Last error: {projectionHealth.last_error.message}
+                Last error ({projectionHealth.last_error.code.replaceAll('_', ' ')}):
+                {' '}{projectionHealth.last_error.message}
               </p>
             )}
+            {metadataReadiness && (
+              <div className="relationship-maintenance__status" aria-live="polite">
+                Metadata readiness: {metadataReadiness.status.replaceAll('_', ' ')}
+                {metadataReadiness.category
+                  ? ` (${metadataReadiness.category.replaceAll('_', ' ')})`
+                  : ''}
+              </div>
+            )}
+            <div className="btn-group">
+              <Button
+                onClick={() => void execute(
+                  'relationship-metadata-check',
+                  loadMetadataReadiness,
+                  'Relationship metadata readiness checked.',
+                )}
+                disabled={busy !== null}
+              >
+                Check relationship metadata
+              </Button>
+              {metadataReadiness?.can_setup && (
+                <Button
+                  variant="primary"
+                  onClick={() => void execute(
+                    'relationship-metadata-setup',
+                    async () => {
+                      const readiness = await endpoints.actionQueue.setupRelationshipMetadata();
+                      setMetadataReadiness(readiness as RelationshipMetadataReadiness);
+                    },
+                    'Relationship metadata fields are ready.',
+                  )}
+                  disabled={busy !== null}
+                >
+                  {busy === 'relationship-metadata-setup'
+                    ? 'Setting up relationship metadata…'
+                    : 'Set up relationship metadata'}
+                </Button>
+              )}
+            </div>
             <Button
               onClick={() => void repairRelationshipProjections()}
               disabled={
@@ -441,7 +514,9 @@ export default function ActionQueueOperations() {
                 {projectionRepair.errors.length > 0 && (
                   <ul className="relationship-maintenance__errors">
                     {projectionRepair.errors.map((item) => (
-                      <li key={item.relationship_id}>{item.message}</li>
+                      <li key={item.relationship_id}>
+                        {item.message} ({item.code.replaceAll('_', ' ')})
+                      </li>
                     ))}
                   </ul>
                 )}

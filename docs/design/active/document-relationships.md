@@ -135,10 +135,15 @@ Historical maintenance is a separate, secondary operation:
   metadata-eligible documents, bounded exclusion reason counts, candidate groups and
   pairs, reusable links, and review candidates.
 - `POST /api/duplicates/scan/runs` starts one background application run and immediately
-  returns its durable run ID.
+  returns its durable run ID. Repeating the same active scope attaches to that run
+  without launching another worker. A different scope receives a bounded conflict that
+  identifies only the active scope kind.
 - `GET /api/duplicates/scan/runs/{run_id}` reports `queued`, `running`, `completed`, or
-  `failed` state with aggregate progress, safe failure details, and result counts.
-- A second applied scan is rejected while one is active. Repeated completed scans reuse
+  `failed` state with aggregate progress, safe failure details, result counts, and a
+  separate Paperless projection result. Paperless projection problems are partial
+  success: core scan `failures` remain reserved for pair-processing failures because
+  relationships are already durable in OWL.
+- Concurrency is protected by one durable active slot. Repeated completed scans reuse
   existing relationship identities and review records rather than duplicating them.
 - The synchronous `POST /api/duplicates/scan` endpoint remains available for compatible
   callers.
@@ -156,7 +161,22 @@ not-intended projection counts plus the latest safe error. Projection intent is 
 relationships created with `project_to_paperless=false` are excluded from reconciliation.
 `POST /api/relationships/reconcile-projections` retries intended projections
 idempotently and returns attempted, succeeded, failed, remaining, and per-relationship
-errors. OWL remains authoritative when any Paperless retry fails.
+errors. Projection work uses the API's canonical request-scoped Paperless client rather
+than loading a separate statements configuration. Each document update is isolated, so
+a failure marks only relationships in the affected document or obligation scope while
+successful relationship projections remain synced. Stable categories distinguish
+missing runtime configuration, incompatible custom-field schema, document update, and
+obligation projection failures; detailed exceptions remain in server logs. OWL remains
+authoritative when any Paperless retry fails.
+
+Action Queue Operations validates the full projection schema: **Related Document IDs**
+(`string`), **Relationship Summary** (`string`), **Related Documents**
+(`documentlink`), **Obligation ID** (`string`), and **Obligation Role** (`select`) with
+the required invoice, receipt, reminder, revision, and supporting options. Missing
+fields/options can be provisioned when Paperless writes are enabled. Incompatible
+existing fields, disabled writes, permission failures, and custom-field endpoint
+failures are reported without exposing connector details. Legacy `RelatedDoc` is not a
+projection field and is neither required nor recreated.
 
 ## UX
 
@@ -173,7 +193,9 @@ Needs Review items, conflicts, and failures. Empty, loading, validation, warning
 progress, completion, and failure states remain in the inline panel. The all-documents
 warning is restrained and explains that the tracked scan may take longer.
 Action Queue Operations exposes Paperless relationship retry as a repair action under
-Backfill and repair, disabled when projection health has no pending or failed work.
+Backfill and repair, disabled when projection health has no pending or failed work. A
+completed scan with projection trouble explicitly confirms that relationships are safe
+in OWL and links directly to that repair surface.
 
 ### Visual projection contract
 
