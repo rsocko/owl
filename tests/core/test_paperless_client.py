@@ -83,8 +83,23 @@ def _mock_transport():
                 },
             )
         if request.url.path == "/api/documents/1/":
+            if request.method == "PATCH":
+                return httpx.Response(200, json={"id": 1, "tags": [1, 2, 3]})
             return httpx.Response(
-                200, json={"id": 1, "title": "Doc A", "content": "Hello world", "custom_fields": []}
+                200,
+                json={
+                    "id": 1,
+                    "title": "Doc A",
+                    "content": "Hello world",
+                    "custom_fields": [],
+                    "tags": [1, 2],
+                },
+            )
+        if request.url.path == "/api/documents/1/download/":
+            return httpx.Response(
+                200,
+                content=b"canonical bytes",
+                headers={"content-type": "application/pdf; charset=binary"},
             )
         if request.url.path == "/api/documents/1/suggestions/":
             return httpx.Response(200, json={"correspondents": [20, 10], "tags": [3]})
@@ -174,6 +189,19 @@ async def test_list_documents_filters_by_correspondent_id_without_name_lookup(mo
 async def test_get_document(client):
     doc = await client.get_document(1)
     assert doc["title"] == "Doc A"
+
+
+@pytest.mark.asyncio
+async def test_stream_document_download(client):
+    async with client.stream_document_download(1) as (content, media_type):
+        assert b"".join([chunk async for chunk in content]) == b"canonical bytes"
+    assert media_type == "application/pdf"
+
+
+@pytest.mark.asyncio
+async def test_add_tags_to_document_preserves_existing_tags(client):
+    updated = await client.add_tags_to_document(1, ["annual"])
+    assert updated["tags"] == [1, 2, 3]
 
 
 @pytest.mark.asyncio

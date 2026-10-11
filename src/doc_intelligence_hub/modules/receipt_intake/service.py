@@ -26,6 +26,7 @@ from .models import (
     IntakeResult,
     ProposalKind,
     ProposalState,
+    SourceChannel,
 )
 
 ALLOWED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/tiff"})
@@ -64,6 +65,31 @@ def _paperless_document_ref(document_id: Any) -> str:
     if not value:
         raise PaperlessError("Paperless task returned an empty document reference")
     return value
+
+
+def is_monarch_recovery_document(document_id: int) -> bool:
+    """Return whether Paperless canon traces to a Monarch recovery intake."""
+    database.init_db()
+    paperless_ref = _paperless_document_ref(document_id)
+    with database.transaction() as connection:
+        row = connection.execute(
+            """
+            SELECT 1
+            FROM receipt_canonical_documents canonical
+            JOIN receipt_intake_attempts attempt
+              ON attempt.canonical_ref = canonical.canonical_ref
+            WHERE canonical.deployment_fingerprint = ?
+              AND canonical.paperless_document_ref = ?
+              AND attempt.source_channel = ?
+            LIMIT 1
+            """,
+            (
+                _deployment_fingerprint(),
+                paperless_ref,
+                SourceChannel.MONARCH_RECOVERY.value,
+            ),
+        ).fetchone()
+    return row is not None
 
 
 class ReceiptIntakeService:

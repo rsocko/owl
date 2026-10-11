@@ -19,6 +19,7 @@ import logging
 import mimetypes
 import time
 from collections.abc import AsyncIterator, Callable, Coroutine
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -796,6 +797,17 @@ class PaperlessClient:
         resp.raise_for_status()
         return resp.content, resp.headers.get("content-type", "application/pdf")
 
+    @asynccontextmanager
+    async def stream_document_download(self, document_id: int):
+        """Stream canonical file bytes without buffering or persisting them in OWL."""
+        client = self._get_client()
+        async with client.stream("GET", f"/api/documents/{document_id}/download/") as response:
+            response.raise_for_status()
+            media_type = response.headers.get("content-type", "application/octet-stream").split(
+                ";", 1
+            )[0]
+            yield response.aiter_bytes(), media_type
+
     async def get_document_notes(self, document_id: int) -> list[dict]:
         """Get native Paperless notes attached to a document."""
         resp = await self._request("GET", f"/api/documents/{document_id}/notes/")
@@ -1085,6 +1097,19 @@ class PaperlessClient:
         if len(updated_tags) == len(current_tags):
             return doc  # None of the target tags were present
 
+        return await self.update_document(document_id, {"tags": updated_tags})
+
+    async def add_tags_to_document(self, document_id: int, tag_names: list[str]) -> dict:
+        """Add existing Paperless tags by name while preserving current tags."""
+        tag_ids_to_add = await self.resolve_tag_ids(tag_names)
+        if len(tag_ids_to_add) != len(set(tag_names)):
+            raise PaperlessError("One or more configured Paperless tags do not exist")
+
+        doc = await self.get_document(document_id)
+        current_tags: list[int] = doc.get("tags", [])
+        updated_tags = list(dict.fromkeys([*current_tags, *tag_ids_to_add]))
+        if updated_tags == current_tags:
+            return doc
         return await self.update_document(document_id, {"tags": updated_tags})
 
     # ------------------------------------------------------------------

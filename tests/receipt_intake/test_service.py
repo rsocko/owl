@@ -18,6 +18,7 @@ from doc_intelligence_hub.modules.receipt_intake.models import (
 from doc_intelligence_hub.modules.receipt_intake.service import (
     IntakeValidationError,
     ReceiptIntakeService,
+    is_monarch_recovery_document,
 )
 
 
@@ -412,6 +413,8 @@ async def test_monarch_recovery_prevents_structural_resubmission_loop(ledger):
         media_type="application/pdf",
     )
     assert result.external_replica_eligible is False
+    assert is_monarch_recovery_document(101) is True
+    assert is_monarch_recovery_document(999) is False
 
 
 def result_hash(content: bytes) -> str:
