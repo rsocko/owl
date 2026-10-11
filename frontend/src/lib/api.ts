@@ -218,6 +218,7 @@ export const endpoints = {
     runStreamUrl: '/api/queue/run/stream',
     status: () => api.get('/api/queue/status'),
     actions: (params?: string) => api.get(`/api/queue/actions${params ? `?${params}` : ''}`),
+    action: (id: string) => api.get(`/api/queue/actions/${id}`),
     updateAction: (id: string, body: unknown) => api.patch(`/api/queue/actions/${id}`, body),
     actionNotes: (id: string) => api.get(`/api/queue/actions/${id}/notes`),
     createActionNote: (id: string, note: string) =>

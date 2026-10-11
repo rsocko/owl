@@ -469,7 +469,7 @@ describe('ActionQueue', () => {
     ));
 
     render(<TooltipProvider><ActionQueue /></TooltipProvider>);
-    fireEvent.click(await screen.findByRole('radio', { name: /All \(1\)/i }));
+    fireEvent.click(await screen.findByRole('radio', { name: /Action history \(1\)/i }));
 
     expect(await screen.findByText('Informational document')).toBeTruthy();
     expect(actionsMock).toHaveBeenCalledWith(

@@ -28,6 +28,14 @@ VALID_FEEDBACK_TYPES = {
 VALID_URGENCIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 VALID_REVIEW_STATES = {"ready", "needs_review", "resolved_no_action"}
 STATUS_ALIASES = {"done": "completed", "reopen": "pending"}
+CLASSIFICATION_FIELDS = {
+    "action_type",
+    "title",
+    "summary",
+    "due_date",
+    "amount",
+    "urgency",
+}
 
 
 def normalize_action_status(status: str | None) -> str:
@@ -135,6 +143,34 @@ def mark_action_ready(action: Action) -> None:
     action.action_ready = True
     action.review_state = "ready"
     action.review_item_id = None
+
+
+def mark_human_corrections(
+    action: Action,
+    fields: set[str] | list[str] | tuple[str, ...],
+    *,
+    classification_reviewed: bool = False,
+) -> None:
+    """Record fields whose values are owned by an explicit human decision."""
+    corrected = {
+        str(field)
+        for field in (action.human_corrected_fields or [])
+        if isinstance(field, str)
+    }
+    corrected.update(str(field) for field in fields)
+    action.human_corrected_fields = sorted(corrected)
+    if classification_reviewed:
+        action.human_reviewed = True
+
+
+def action_has_human_classification(action: Action) -> bool:
+    """Return whether automation must not supersede this classification."""
+    corrected = {
+        str(field)
+        for field in (action.human_corrected_fields or [])
+        if isinstance(field, str)
+    }
+    return bool(action.human_reviewed or corrected.intersection(CLASSIFICATION_FIELDS))
 
 
 def document_action_status(db: Session, document_id: int) -> str:
@@ -331,17 +367,20 @@ def record_action_feedback(
         action.review_item_id = None
     elif feedback_type == "misclassified" and normalized_action_type:
         action.action_type = normalized_action_type
+        mark_human_corrections(action, {"action_type"})
         action_changed = True
         recalculate_action_risk(action)
         refresh_recommended_cta(action)
     elif feedback_type == "wrong_urgency" and normalized_urgency:
         action.urgency = normalized_urgency
+        mark_human_corrections(action, {"urgency"})
         action_changed = True
         recalculate_action_risk(action)
     elif feedback_type == "wrong_amount" and corrected_amount_supplied:
         action.amount = corrected_amount
         action.document_amount = corrected_amount
         action.document_amount_overridden = True
+        mark_human_corrections(action, {"amount"})
         action_changed = True
         recalculate_action_risk(action)
 

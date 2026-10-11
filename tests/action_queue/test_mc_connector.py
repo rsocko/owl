@@ -181,6 +181,7 @@ class TestMcListActions:
             action["needs_review_url"]
             == "#/needs-review?type=action_classification&item=review-123"
         )
+        assert action["action_url"] == "#/actions/1"
         assert action["source_actions"] == []
 
     def test_connector_exposes_document_group_and_sibling_context(self, seeded_client):
@@ -368,3 +369,4 @@ class TestMcListActions:
         assert body["action_ready"] is False
         assert body["review_state"] == "needs_review"
         assert body["needs_review_url"]
+        assert body["action_url"] == "#/actions/1"

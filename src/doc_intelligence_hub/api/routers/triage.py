@@ -235,8 +235,10 @@ async def _resolve_action_classification(
         init_db as init_action_db,
     )
     from doc_intelligence_hub.modules.action_queue.lifecycle import (
+        CLASSIFICATION_FIELDS,
         action_has_critical_details,
         mark_action_ready,
+        mark_human_corrections,
         project_action_metadata,
         recalculate_action_risk,
         record_action_feedback,
@@ -269,6 +271,11 @@ async def _resolve_action_classification(
                     "review_state": "needs_review",
                     "reason": "Critical details are still missing.",
                 }
+            mark_human_corrections(
+                action,
+                CLASSIFICATION_FIELDS,
+                classification_reviewed=True,
+            )
             mark_action_ready(action)
         elif body.action == "correct":
             corrected_type = payload.get("action_type")
@@ -289,6 +296,16 @@ async def _resolve_action_classification(
 
                     value = date.fromisoformat(value)
                 setattr(action, field, value)
+                if field == "amount":
+                    siblings = db.query(Action).filter_by(document_id=action.document_id).all()
+                    for sibling in siblings:
+                        sibling.document_amount = value
+                        sibling.document_amount_overridden = True
+            mark_human_corrections(
+                action,
+                CLASSIFICATION_FIELDS.intersection(payload),
+                classification_reviewed=True,
+            )
             recalculate_action_risk(action)
             refresh_recommended_cta(action)
             if not action_has_critical_details(action):

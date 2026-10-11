@@ -380,6 +380,7 @@ async def mc_list_actions(
                     "action_ready": serialized["action_ready"],
                     "review_state": serialized["review_state"],
                     "needs_review_url": serialized["needs_review_url"],
+                    "action_url": serialized["action_url"],
                     "source_actions": source_actions,
                     "extracted_data": serialized["extracted_data"],
                     "status": normalized_status,
@@ -580,6 +581,7 @@ async def mc_submit_feedback(
             "action_ready": serialized["action_ready"],
             "review_state": serialized["review_state"],
             "needs_review_url": serialized["needs_review_url"],
+            "action_url": serialized["action_url"],
         }
     finally:
         db.close()

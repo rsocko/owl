@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { HashRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { TopNav } from './components/TopNav';
 import { TooltipProvider } from './components/ui';
@@ -24,6 +25,8 @@ import DocumentViews from './pages/DocumentViews';
 import OcrQualityDashboard from './pages/OcrQualityDashboard';
 import OcrQualityReviewQueue from './pages/OcrQualityReviewQueue';
 import OcrQualityDocumentDetail from './pages/OcrQualityDocumentDetail';
+import { endpoints } from './lib/api';
+import { canonicalActionTarget, type CanonicalActionLocation } from './lib/canonicalAction';
 
 /** Redirect legacy /eob/matches/:matchId to the unified workspace. */
 function EobMatchRedirect() {
@@ -34,6 +37,29 @@ function EobMatchRedirect() {
 function LegacyRouteRedirect({ to }: { to: string }) {
   const { search } = useLocation();
   return <Navigate to={`${to}${search}`} replace />;
+}
+
+function CanonicalActionRedirect() {
+  const { actionId } = useParams();
+  const [target, setTarget] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!actionId) {
+      setFailed(true);
+      return;
+    }
+    void endpoints.actionQueue.action(actionId)
+      .then((response) => {
+        const action = response as CanonicalActionLocation;
+        setTarget(canonicalActionTarget(action));
+      })
+      .catch(() => setFailed(true));
+  }, [actionId]);
+
+  if (target) return <Navigate to={target} replace />;
+  if (failed) return <Navigate to="/action-queue" replace />;
+  return <div role="status">Opening action…</div>;
 }
 
 function App() {
@@ -59,6 +85,7 @@ function App() {
             <Route path="/eob/benchmarks" element={<BenchmarkHistory />} />
             <Route path="/eob/manual-search" element={<ManualMatchSearch />} />
             <Route path="/action-queue" element={<ActionQueue />} />
+            <Route path="/actions/:actionId" element={<CanonicalActionRedirect />} />
             <Route path="/action-queue/operations" element={<ActionQueueOperations />} />
             <Route path="/needs-review" element={<TriageQueue />} />
             <Route path="/needs-review/manual-search" element={<ManualMatchSearch />} />

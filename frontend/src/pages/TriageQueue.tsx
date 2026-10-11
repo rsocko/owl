@@ -1022,7 +1022,9 @@ export default function TriageQueue() {
                           </span>
                         </div>
                         {['confirm', 'correct'].includes(selectedItem.resolved_action ?? '') && (
-                          <a href="#/action-queue">View in Action Queue</a>
+                          <a href={`#/actions/${selectedItem.metadata?.action_id ?? selectedItem.target_id}`}>
+                            View action
+                          </a>
                         )}
                       </div>
                     )}

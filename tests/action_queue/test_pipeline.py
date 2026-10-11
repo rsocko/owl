@@ -491,6 +491,52 @@ class TestPipelineErrorIsolation:
         finally:
             session.close()
 
+    def test_store_action_does_not_transfer_corrections_by_ordinal(self, db):
+        pipeline = Pipeline()
+        pipeline._correspondent_cache = {}
+        pipeline._doc_type_cache = {}
+        pipeline._tag_cache = {}
+        session = get_session()
+        try:
+            protected = Action(
+                document_id=42,
+                document_title="Multi-action notice",
+                action_type="PAY",
+                title="Pay accepted invoice",
+                amount=395.0,
+                status="pending",
+                action_ready=True,
+                review_state="ready",
+                human_corrected_fields=["title", "amount"],
+                action_index=0,
+            )
+            session.add(protected)
+            session.commit()
+
+            created = pipeline._store_action(
+                session,
+                {"id": 42, "title": "Multi-action notice", "tags": []},
+                {
+                    "action_type": "RESPOND",
+                    "title": "Respond to new notice",
+                    "summary": "Newly inferred sibling",
+                    "due_date": None,
+                    "amount": None,
+                    "urgency": "LOW",
+                    "confidence": 90,
+                },
+                VALID_EXTRACTION["document_assessment"],
+                action_index=0,
+            )
+            session.commit()
+
+            assert created.id != protected.id
+            assert created.action_index == 1
+            assert protected.title == "Pay accepted invoice"
+            assert protected.amount == 395.0
+        finally:
+            session.close()
+
     @pytest.mark.asyncio
     async def test_low_confidence_action_routes_to_needs_review(self, db, monkeypatch):
         pipeline = Pipeline()
@@ -535,6 +581,237 @@ class TestPipelineErrorIsolation:
             session.close()
         assert stats["processed"] == 0
         assert stats["no_action"] == 1
+
+    @pytest.mark.asyncio
+    async def test_reanalysis_preserves_accepted_human_correction(self, db, monkeypatch):
+        pipeline = Pipeline()
+        reanalysis = {
+            **VALID_EXTRACTION,
+            "actions": [
+                {
+                    **VALID_EXTRACTION["actions"][0],
+                    "title": "Model changed title",
+                    "amount": None,
+                    "confidence": 45,
+                }
+            ],
+            "document_assessment": {
+                **VALID_EXTRACTION["document_assessment"],
+                "overall_confidence": 45,
+            },
+        }
+        monkeypatch.setattr(aq_settings, "write_to_paperless", False)
+        monkeypatch.setattr(aq_settings, "confidence_threshold", 70)
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", AsyncMock(return_value=[]))
+        monkeypatch.setattr(
+            pipeline.paperless, "fetch_all_metadata", AsyncMock(return_value=({}, {}, {}))
+        )
+        monkeypatch.setattr(
+            pipeline.paperless, "list_documents", AsyncMock(return_value=_make_docs(1))
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "get_document_content",
+            AsyncMock(return_value="Electrician invoice. Amount due $395."),
+        )
+        monkeypatch.setattr(pipeline.analyzer, "health_check", AsyncMock(return_value=False))
+        monkeypatch.setattr(
+            pipeline.fallback_analyzer,
+            "analyze_document",
+            lambda document: reanalysis,
+        )
+        session = get_session()
+        try:
+            session.add(
+                Action(
+                    document_id=1,
+                    document_title="Electrician invoice",
+                    action_type="PAY",
+                    title="Pay Electrician Invoice",
+                    summary="Accepted by user",
+                    amount=395.0,
+                    urgency="MEDIUM",
+                    confidence=80,
+                    status="pending",
+                    action_ready=True,
+                    review_state="ready",
+                    human_reviewed=False,
+                    human_corrected_fields=[
+                        "action_type",
+                        "title",
+                        "summary",
+                        "due_date",
+                        "amount",
+                        "urgency",
+                    ],
+                    action_index=0,
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        await pipeline.run(force=True, dry_run=False)
+
+        session = get_session()
+        try:
+            action = session.query(Action).filter_by(document_id=1).one()
+            assert action.title == "Pay Electrician Invoice"
+            assert action.amount == 395.0
+            assert action.action_ready is True
+            assert action.review_state == "ready"
+            assert action.review_item_id is None
+            assert action.confidence == 45
+        finally:
+            session.close()
+
+    @pytest.mark.asyncio
+    async def test_successful_reanalysis_promotes_existing_review_action(self, db, monkeypatch):
+        from doc_intelligence_hub.modules.triage.database import (
+            create_action_classification_review,
+            get_queue_item,
+        )
+
+        pipeline = Pipeline()
+        monkeypatch.setattr(aq_settings, "write_to_paperless", False)
+        monkeypatch.setattr(aq_settings, "confidence_threshold", 70)
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", AsyncMock(return_value=[]))
+        monkeypatch.setattr(
+            pipeline.paperless, "fetch_all_metadata", AsyncMock(return_value=({}, {}, {}))
+        )
+        monkeypatch.setattr(
+            pipeline.paperless, "list_documents", AsyncMock(return_value=_make_docs(1))
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "get_document_content",
+            AsyncMock(return_value="Invoice. Amount due $50."),
+        )
+        monkeypatch.setattr(pipeline.analyzer, "health_check", AsyncMock(return_value=False))
+        monkeypatch.setattr(
+            pipeline.fallback_analyzer,
+            "analyze_document",
+            lambda document: VALID_EXTRACTION,
+        )
+        session = get_session()
+        try:
+            action = Action(
+                document_id=1,
+                document_title="Invoice",
+                action_type="PAY",
+                title="Uncertain payment",
+                amount=None,
+                status="pending",
+                action_ready=False,
+                review_state="needs_review",
+                action_index=0,
+            )
+            session.add(action)
+            session.commit()
+            review_item = create_action_classification_review(
+                action_id=action.id,
+                document_id=1,
+                confidence=45,
+                reason="Previous analysis required review",
+                metadata={"action_id": action.id},
+            )
+            action.review_item_id = review_item["id"]
+            session.commit()
+        finally:
+            session.close()
+
+        await pipeline.run(force=True, dry_run=False)
+
+        session = get_session()
+        try:
+            action = session.query(Action).filter_by(document_id=1).one()
+            assert action.amount == 50.0
+            assert action.action_ready is True
+            assert action.review_state == "ready"
+            assert action.review_item_id is None
+        finally:
+            session.close()
+        assert get_queue_item(review_item["id"])["status"] == "resolved"
+
+    @pytest.mark.asyncio
+    async def test_no_action_result_preserves_only_human_corrected_sibling(
+        self, db, monkeypatch
+    ):
+        pipeline = Pipeline()
+        no_action_extraction = {
+            "actions": [],
+            "document_assessment": {
+                "overall_confidence": 95,
+                "requires_action": False,
+                "text_quality": "good",
+            },
+        }
+        monkeypatch.setattr(aq_settings, "write_to_paperless", False)
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", AsyncMock(return_value=[]))
+        monkeypatch.setattr(
+            pipeline.paperless, "fetch_all_metadata", AsyncMock(return_value=({}, {}, {}))
+        )
+        monkeypatch.setattr(
+            pipeline.paperless, "list_documents", AsyncMock(return_value=_make_docs(1))
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "get_document_content",
+            AsyncMock(return_value="Informational notice only."),
+        )
+        monkeypatch.setattr(pipeline.analyzer, "health_check", AsyncMock(return_value=False))
+        monkeypatch.setattr(
+            pipeline.fallback_analyzer,
+            "analyze_document",
+            lambda document: no_action_extraction,
+        )
+        session = get_session()
+        try:
+            session.add_all(
+                [
+                    Action(
+                        document_id=1,
+                        document_title="Notice",
+                        action_type="PAY",
+                        title="Pay corrected amount",
+                        amount=395.0,
+                        status="pending",
+                        action_ready=True,
+                        review_state="ready",
+                        human_corrected_fields=["amount"],
+                        action_index=0,
+                    ),
+                    Action(
+                        document_id=1,
+                        document_title="Notice",
+                        action_type="REVIEW",
+                        title="Review model guess",
+                        status="pending",
+                        action_ready=True,
+                        review_state="ready",
+                        action_index=1,
+                    ),
+                ]
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        await pipeline.run(force=True, dry_run=False)
+
+        session = get_session()
+        try:
+            corrected, unreviewed = (
+                session.query(Action).order_by(Action.action_index.asc()).all()
+            )
+            assert corrected.status == "pending"
+            assert corrected.action_ready is True
+            assert corrected.amount == 395.0
+            assert unreviewed.status == "not_an_action"
+            assert unreviewed.action_ready is False
+            assert unreviewed.review_state == "resolved_no_action"
+        finally:
+            session.close()
 
     @pytest.mark.asyncio
     async def test_no_action_classification_updates_paperless(self, db, monkeypatch):
