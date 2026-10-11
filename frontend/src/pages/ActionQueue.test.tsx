@@ -821,7 +821,7 @@ describe('ActionQueue', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Add a note' }), {
-      target: { value: 'Paid via Mortgage by Chase' },
+      target: { value: 'Paid through escrow account' },
     });
 
     expect(screen.getByText('Unsaved — Add note or Done to save.')).toBeInTheDocument();
@@ -832,7 +832,7 @@ describe('ActionQueue', () => {
       '1',
       expect.objectContaining({ status: 'completed' }),
     ));
-    expect(createActionNoteMock).toHaveBeenCalledWith('1', 'Paid via Mortgage by Chase');
+    expect(createActionNoteMock).toHaveBeenCalledWith('1', 'Paid through escrow account');
     expect(createActionNoteMock.mock.invocationCallOrder[0])
       .toBeLessThan(updateActionMock.mock.invocationCallOrder[0]);
   });
@@ -845,7 +845,7 @@ describe('ActionQueue', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Add a note' }), {
-      target: { value: 'Paid via Mortgage by Chase' },
+      target: { value: 'Paid through escrow account' },
     });
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Action detail' }))
       .getByRole('button', { name: 'Done' }));
@@ -855,7 +855,7 @@ describe('ActionQueue', () => {
     )).toBeInTheDocument();
     expect(updateActionMock).not.toHaveBeenCalled();
     expect(screen.getByRole('textbox', { name: 'Add a note' })).toHaveValue(
-      'Paid via Mortgage by Chase',
+      'Paid through escrow account',
     );
   });
 
