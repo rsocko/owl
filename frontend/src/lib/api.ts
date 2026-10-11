@@ -28,6 +28,29 @@ export interface DocumentSummaryModel {
   patient_name?: string | null;
 }
 
+export type MonarchDeliveryState =
+  | 'not_submitted'
+  | 'submitting'
+  | 'unknown'
+  | 'processing'
+  | 'acknowledged'
+  | 'retryable'
+  | 'failed'
+  | 'blocked_recovery';
+
+export interface MonarchDeliveryResult {
+  schema_version: '1.0';
+  delivery_ref: string;
+  state: MonarchDeliveryState;
+  attempt_count: number;
+  reason_code?: string | null;
+  can_send: boolean;
+  can_reconcile: boolean;
+  can_retry: boolean;
+  display_tag_pending: boolean;
+  acknowledged: boolean;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
@@ -279,6 +302,23 @@ export const endpoints = {
     thumbnailUrl: (id: string | number) => `/api/statements/documents/${id}/thumb`,
     previewUrl: (id: string | number) => `/api/statements/documents/${id}/preview`,
     downloadUrl: (id: string | number) => `/api/documents/${id}/download`,
+    monarchDelivery: {
+      status: (id: string | number) =>
+        api.get<MonarchDeliveryResult>(`/api/documents/${id}/monarch-delivery`),
+      send: (id: string | number) =>
+        api.post<MonarchDeliveryResult>(`/api/documents/${id}/monarch-delivery`, {
+          confirmed: true,
+        }),
+      reconcile: (id: string | number) =>
+        api.post<MonarchDeliveryResult>(
+          `/api/documents/${id}/monarch-delivery/reconcile`,
+        ),
+      retry: (id: string | number) =>
+        api.post<MonarchDeliveryResult>(
+          `/api/documents/${id}/monarch-delivery/retry`,
+          { confirmed: true },
+        ),
+    },
   },
   triage: {
     queue: (params?: string) => api.get(`/api/triage/queue${params ? `?${params}` : ''}`),

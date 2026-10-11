@@ -32,6 +32,7 @@ from doc_intelligence_hub.api.routers import (
     insights,
     mc_connector,
     metadata,
+    monarch_delivery,
     ocr_quality,
     ocr_quality_candidates,
     payment_reconciliation,
@@ -281,6 +282,23 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
         except Exception as exc:
             logger.warning("Could not initialize analysis invalidation DB: %s", exc)
 
+        try:
+            from doc_intelligence_hub.modules.monarch_delivery.database import (
+                init_db as monarch_delivery_init_db,
+            )
+            from doc_intelligence_hub.modules.monarch_delivery.database import (
+                recover_interrupted_submissions,
+            )
+
+            monarch_delivery_init_db()
+            recovered = recover_interrupted_submissions()
+            logger.info(
+                "Monarch delivery ledger initialized; %d interrupted sends require reconciliation.",
+                recovered,
+            )
+        except Exception as exc:
+            logger.warning("Could not initialize Monarch delivery ledger: %s", exc)
+
         # Start the built-in job scheduler
         scheduler: HubScheduler = app.state.scheduler
         try:
@@ -367,6 +385,12 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
                 "name": "receipt-intake",
                 "description": "Canonical Paperless receipt intake and byte-free provenance.",
             },
+            {
+                "name": "monarch-delivery",
+                "description": (
+                    "Confirmed canonical Paperless document delivery through private Tyrion."
+                ),
+            },
         ],
         lifespan=lifespan,
     )
@@ -419,6 +443,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(duplicates.router)
     app.include_router(relationships.router)
     app.include_router(metadata.router)
+    app.include_router(monarch_delivery.router)
     app.include_router(analysis.router)
     app.include_router(insights.router)
     app.include_router(extraction.router)
