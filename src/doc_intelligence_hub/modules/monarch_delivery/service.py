@@ -22,9 +22,7 @@ from .models import (
     SourceDocumentReadError,
 )
 
-ByteStreamFactory = Callable[
-    [], AbstractAsyncContextManager[tuple[AsyncIterator[bytes], str]]
-]
+ByteStreamFactory = Callable[[], AbstractAsyncContextManager[tuple[AsyncIterator[bytes], str]]]
 AcknowledgementHook = Callable[[], Awaitable[None]]
 
 
@@ -206,12 +204,8 @@ class MonarchDeliveryService:
                     )
                     return self._result(updated)
                 except Exception as exc:
-                    self._transition(
-                        claimed, DeliveryState.UNKNOWN, "submit_outcome_unknown"
-                    )
-                    raise DeliveryOutcomeUnknownError(
-                        "monarch_delivery_outcome_unknown"
-                    ) from exc
+                    self._transition(claimed, DeliveryState.UNKNOWN, "submit_outcome_unknown")
+                    raise DeliveryOutcomeUnknownError("monarch_delivery_outcome_unknown") from exc
         except httpx.HTTPError:
             updated = self._transition(
                 claimed,
@@ -241,11 +235,7 @@ class MonarchDeliveryService:
         now = _now()
         digest = self._document_digest(document_id)
         delivery_ref = self._delivery_ref(document_id)
-        state = (
-            DeliveryState.BLOCKED_RECOVERY
-            if recovery_origin
-            else DeliveryState.NOT_SUBMITTED
-        )
+        state = DeliveryState.BLOCKED_RECOVERY if recovery_origin else DeliveryState.NOT_SUBMITTED
         reason_code = "monarch_recovery_loop_prevented" if recovery_origin else None
         with database.transaction(immediate=True) as connection:
             connection.execute(
@@ -341,9 +331,7 @@ class MonarchDeliveryService:
         }
         reason_code = result.reason_code
         if result.state is GatewayState.NOT_FOUND:
-            reason_code = (
-                "reconcile_not_found" if reconciliation else "submit_response_not_found"
-            )
+            reason_code = "reconcile_not_found" if reconciliation else "submit_response_not_found"
         acknowledgement_digest = (
             hashlib.sha256(result.acknowledgement_ref.encode()).hexdigest()
             if result.acknowledgement_ref
@@ -481,7 +469,8 @@ class MonarchDeliveryService:
             attempt_count=row["attempt_count"],
             reason_code=row["reason_code"],
             can_send=self._write_enabled and state is DeliveryState.NOT_SUBMITTED,
-            can_reconcile=state in {
+            can_reconcile=state
+            in {
                 DeliveryState.UNKNOWN,
                 DeliveryState.PROCESSING,
                 DeliveryState.RETRYABLE,

@@ -81,7 +81,9 @@ def delivery_api(monkeypatch, tmp_path):
 
     paperless = FakePaperless()
     tyrion = FakeTyrion()
-    monkeypatch.setattr(monarch_delivery, "make_paperless_client", lambda *args, **kwargs: paperless)
+    monkeypatch.setattr(
+        monarch_delivery, "make_paperless_client", lambda *args, **kwargs: paperless
+    )
     monkeypatch.setattr(monarch_delivery, "_gateway", lambda **kwargs: tyrion)
     yield paperless, tyrion
 

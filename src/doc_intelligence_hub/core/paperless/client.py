@@ -802,9 +802,9 @@ class PaperlessClient:
         client = self._get_client()
         async with client.stream("GET", f"/api/documents/{document_id}/download/") as response:
             response.raise_for_status()
-            media_type = response.headers.get(
-                "content-type", "application/octet-stream"
-            ).split(";", 1)[0]
+            media_type = response.headers.get("content-type", "application/octet-stream").split(
+                ";", 1
+            )[0]
             yield response.aiter_bytes(), media_type
 
     async def get_document_notes(self, document_id: int) -> list[dict]:
