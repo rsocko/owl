@@ -120,6 +120,42 @@ class TestPromptBuildingWithIntegerTags:
         mock_chat.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_payment_confirmation_without_receipt_metadata_skips_llm(self, analyzer):
+        document = {
+            "title": "Payment confirmation",
+            "content": "Your payment was processed successfully. Total $142.50.",
+            "document_type_name": "Correspondence",
+            "tag_names": ["Inbox"],
+        }
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.analyzer.chat_json", new_callable=AsyncMock
+        ) as mock_chat:
+            result = await analyzer.analyze_document(document)
+
+        assert result["actions"] == []
+        assert result["document_assessment"]["requires_action"] is False
+        mock_chat.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_confirmation_with_outstanding_balance_still_uses_llm(self, analyzer):
+        document = {
+            "title": "Payment update",
+            "content": "We received your payment. Remaining balance due: $42.00.",
+            "document_type_name": "Correspondence",
+            "tag_names": ["Inbox"],
+        }
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.analyzer.chat_json", new_callable=AsyncMock
+        ) as mock_chat:
+            mock_chat.return_value = {
+                "actions": [{"action_type": "PAY"}],
+                "document_assessment": {"requires_action": True},
+            }
+            await analyzer.analyze_document(document)
+
+        mock_chat.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_document_type_is_included_in_prompt(self, analyzer):
         document = {
             "title": "Policy notice",
@@ -137,6 +173,27 @@ class TestPromptBuildingWithIntegerTags:
             await analyzer.analyze_document(document)
 
         assert "- Document type: Correspondence" in mock_chat.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_prompt_requires_an_unresolved_obligation_for_pay(self, analyzer):
+        document = {
+            "title": "Account notice",
+            "content": "Please review this notice.",
+            "document_type_name": "Correspondence",
+            "tag_names": ["Inbox"],
+        }
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.analyzer.chat_json", new_callable=AsyncMock
+        ) as mock_chat:
+            mock_chat.return_value = {
+                "actions": [],
+                "document_assessment": {"requires_action": False},
+            }
+            await analyzer.analyze_document(document)
+
+        prompt_sent = mock_chat.call_args[0][0]
+        assert "PAY requires clear evidence of an unresolved obligation" in prompt_sent
+        assert "treat the receipt as reconciliation evidence" in prompt_sent
 
 
 def test_normalize_extracted_data_keeps_safe_links_and_rejects_unsafe_urls():

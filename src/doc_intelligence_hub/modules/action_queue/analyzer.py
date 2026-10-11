@@ -73,7 +73,9 @@ Return a JSON object with these fields:
 IMPORTANT:
 - Most documents will have exactly ONE action. Only include multiple if the document genuinely requires separate actions.
 - If the document requires NO action (informational receipt, old statement, etc.), set "requires_action": false and return an empty actions array.
-- A document whose type or tag is "Receipt" records a completed transaction. Do not create a PAY action for it, even if it contains bill, utility, amount, payment, or provider language.
+- PAY requires clear evidence of an unresolved obligation: an amount currently due, a payment request, or an unpaid balance.
+- Receipts, payment confirmations, and successful-transaction notices record completed payments. Return no action for them, even if they contain an amount, payment URL, provider name, or references to a bill or invoice.
+- When a receipt refers to a bill or invoice, treat the receipt as reconciliation evidence for that source document; never turn the receipt itself into a new PAY action.
 - If the text is unreadable or too garbled, set text_quality to "unreadable" and requires_action to false.
 
 Rules for urgency:
@@ -123,7 +125,14 @@ _RECEIPT_NAME = re.compile(r"\breceipts?\b", re.IGNORECASE)
 _PAYMENT_CONFIRMATION = re.compile(
     r"\b(thank you for (?:your )?payment|payment (?:has been )?(?:received|processed|"
     r"successful|completed|confirmed)|paid(?:\s+in\s+full)?|transaction (?:approved|"
-    r"successful|completed)|payment receipt|receipt number)\b",
+    r"successful|completed)|payment receipt|receipt number|payment confirmation|"
+    r"transaction confirmation|we received your payment)\b",
+    re.IGNORECASE,
+)
+_OUTSTANDING_PAYMENT_REQUEST = re.compile(
+    r"\b(amount|balance|payment|minimum payment|total)\s+(?:is\s+)?due\b|"
+    r"\b(?:pay|payment|remit)\s+by\b|\b(?:past|over)\s*due\b|"
+    r"\bpayment\s+required\b",
     re.IGNORECASE,
 )
 
@@ -141,9 +150,9 @@ def is_non_actionable_receipt(document: dict) -> bool:
         bool(_RECEIPT_NAME.fullmatch(str(tag).strip())) for tag in tags
     )
     text = f"{document.get('title', '')}\n{document.get('content', '')[:2000]}"
+    payment_confirmation = bool(_PAYMENT_CONFIRMATION.search(text))
     return receipt_metadata or (
-        bool(_RECEIPT_NAME.search(str(document.get("title", ""))))
-        and bool(_PAYMENT_CONFIRMATION.search(text))
+        payment_confirmation and not bool(_OUTSTANDING_PAYMENT_REQUEST.search(text))
     )
 
 
@@ -158,7 +167,7 @@ def receipt_no_action_result(document: dict) -> dict | None:
             "correspondent": document.get("correspondent_name", document.get("correspondent")),
             "overall_confidence": 98,
             "requires_action": False,
-            "reasoning": "Receipt metadata indicates this records a completed payment.",
+            "reasoning": "Receipt or payment-confirmation evidence records a completed payment.",
             "text_quality": "good",
             "extracted_data": {},
         },

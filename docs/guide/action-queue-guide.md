@@ -38,7 +38,7 @@ Documents are classified into one of these action categories:
 
 | Action | Description | Example |
 |--------|-------------|---------|
-| `PAY` | Payment required | Invoice, utility bill |
+| `PAY` | An unresolved payment is explicitly required | Invoice, utility bill with an amount due |
 | `RESPOND` | Reply or action needed | Letter requiring response |
 | `FILE` | Just file, no action | Informational notice |
 | `REVIEW` | Read and decide | Policy change, terms update |
@@ -48,6 +48,13 @@ Documents are classified into one of these action categories:
 | `SCHEDULE` | Calendar event needed | Appointment reminder |
 | `ARCHIVE` | Safe to archive immediately | Duplicate, outdated |
 | `TASK` | General to-do (catch-all) | Create account, register, cancel service |
+
+Receipts and payment confirmations are evidence that a transaction already happened,
+not requests to pay again. OWL excludes them from `PAY` even when their OCR includes
+an amount, payment URL, or references to a bill. It then attempts to reconcile the
+receipt with an existing open payment obligation using invoice/reference number,
+account identifier, correspondent, and amount evidence. A receipt that cannot be
+matched remains a no-action document rather than becoming a speculative payment task.
 
 ## Action Lifecycle
 
