@@ -1100,6 +1100,23 @@ export default function ActionQueue() {
   const updateAction = async (actionId: number, nextStatus: ActionStatus, snoozedUntil?: string) => {
     setBusyKey(`action-${actionId}-${nextStatus}`);
     const currentAction = filteredActions.find((a) => a.id === actionId) ?? cachedAction;
+    const pendingNote = selectedActionId === actionId ? noteDraft.trim() : '';
+    if (nextStatus === 'completed' && pendingNote) {
+      try {
+        await endpoints.actionQueue.createActionNote(String(actionId), pendingNote);
+        setNoteDraft('');
+        await loadPaperlessNotes(actionId);
+      } catch (err) {
+        setToast({
+          message: err instanceof Error
+            ? `Action not completed because the note could not be saved: ${err.message}`
+            : 'Action not completed because the note could not be saved in Paperless.',
+          tone: 'error',
+        });
+        setBusyKey(null);
+        return;
+      }
+    }
     const payload: Record<string, unknown> = { status: nextStatus, dry_run: false };
     if (currentAction?.version != null) {
       payload.version = currentAction.version;
@@ -2521,6 +2538,9 @@ export default function ActionQueue() {
                   <div className="aq-note-compose-footer">
                     {status?.read_only && (
                       <span className="text-muted">Paperless writes are disabled.</span>
+                    )}
+                    {!status?.read_only && noteDraft.trim() && (
+                      <span className="text-muted">Unsaved — Add note or Done to save.</span>
                     )}
                     <Button
                       size="sm"

@@ -812,6 +812,53 @@ describe('ActionQueue', () => {
     fireEvent.click(within(unlinkDialog).getByRole('button', { name: 'Remove link' }));
     await waitFor(() => expect(unlinkDocumentMock).toHaveBeenCalledWith('1', 2));
   });
+
+  it('saves a pending Paperless note before completing an action', async () => {
+    actionsMock.mockReset().mockResolvedValue({ actions: [initialAction], total: 1 });
+    updateActionMock.mockResolvedValue({ ...initialAction, status: 'completed' });
+
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Add a note' }), {
+      target: { value: 'Paid via Mortgage by Chase' },
+    });
+
+    expect(screen.getByText('Unsaved — Add note or Done to save.')).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Action detail' }))
+      .getByRole('button', { name: 'Done' }));
+
+    await waitFor(() => expect(updateActionMock).toHaveBeenCalledWith(
+      '1',
+      expect.objectContaining({ status: 'completed' }),
+    ));
+    expect(createActionNoteMock).toHaveBeenCalledWith('1', 'Paid via Mortgage by Chase');
+    expect(createActionNoteMock.mock.invocationCallOrder[0])
+      .toBeLessThan(updateActionMock.mock.invocationCallOrder[0]);
+  });
+
+  it('does not complete an action when its pending Paperless note fails to save', async () => {
+    actionsMock.mockReset().mockResolvedValue({ actions: [initialAction], total: 1 });
+    createActionNoteMock.mockRejectedValue(new Error('Paperless unavailable'));
+
+    render(<TooltipProvider><ActionQueue /></TooltipProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /open pay electric bill/i }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Add a note' }), {
+      target: { value: 'Paid via Mortgage by Chase' },
+    });
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Action detail' }))
+      .getByRole('button', { name: 'Done' }));
+
+    expect(await screen.findByText(
+      'Action not completed because the note could not be saved: Paperless unavailable',
+    )).toBeInTheDocument();
+    expect(updateActionMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox', { name: 'Add a note' })).toHaveValue(
+      'Paid via Mortgage by Chase',
+    );
+  });
+
   it('suggests and manually links a related PAY action', async () => {
     const relatedAction = {
       ...initialAction,
