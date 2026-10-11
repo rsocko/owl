@@ -7,11 +7,13 @@ const {
   reconcileProjectionsMock,
   refreshMetadataMock,
   runMock,
+  setupCustomFieldsMock,
 } = vi.hoisted(() => ({
   projectionHealthMock: vi.fn(),
   reconcileProjectionsMock: vi.fn(),
   refreshMetadataMock: vi.fn(),
   runMock: vi.fn(),
+  setupCustomFieldsMock: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
@@ -20,6 +22,7 @@ vi.mock('../lib/api', () => ({
       run: runMock,
       check: vi.fn(),
       checkCustomFields: vi.fn(),
+      setupCustomFields: setupCustomFieldsMock,
       backfill: vi.fn(),
       refreshMetadata: refreshMetadataMock,
     },
@@ -34,6 +37,8 @@ describe('ActionQueueOperations', () => {
   beforeEach(() => {
     runMock.mockReset();
     runMock.mockResolvedValue({});
+    setupCustomFieldsMock.mockReset();
+    setupCustomFieldsMock.mockResolvedValue({ ready: 9, fields: [] });
     refreshMetadataMock.mockReset();
     refreshMetadataMock.mockResolvedValue({});
     projectionHealthMock.mockReset();
@@ -83,6 +88,17 @@ describe('ActionQueueOperations', () => {
     await waitFor(() => {
       expect(refreshMetadataMock).toHaveBeenCalledWith({ force: true });
     });
+  });
+
+  it('sets up OWL-owned metadata fields in Paperless', async () => {
+    render(<ActionQueueOperations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set up metadata fields' }));
+
+    await waitFor(() => {
+      expect(setupCustomFieldsMock).toHaveBeenCalledTimes(1);
+    });
+    expect(await screen.findByText('Paperless metadata fields are ready.')).toBeInTheDocument();
   });
 
   it('disables relationship repair when projection health is empty', async () => {

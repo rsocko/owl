@@ -211,6 +211,7 @@ export const endpoints = {
   actionQueue: {
     check: () => api.get('/api/queue/check'),
     checkCustomFields: () => api.get('/api/queue/check/custom-fields'),
+    setupCustomFields: () => api.post('/api/queue/setup/custom-fields'),
     run: (body?: unknown) => api.post('/api/queue/run', body),
     runStreamUrl: '/api/queue/run/stream',
     status: () => api.get('/api/queue/status'),

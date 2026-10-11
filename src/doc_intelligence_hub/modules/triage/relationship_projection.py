@@ -10,6 +10,19 @@ from doc_intelligence_hub.core.paperless import (
     PaperlessMetadataResolver,
     build_metadata_update,
 )
+from doc_intelligence_hub.modules.action_queue.database import (
+    ObligationDocument,
+)
+from doc_intelligence_hub.modules.action_queue.database import (
+    get_session as get_action_queue_session,
+)
+from doc_intelligence_hub.modules.action_queue.database import (
+    init_db as init_action_queue_db,
+)
+from doc_intelligence_hub.modules.action_queue.obligation_projection import (
+    obligation_projection_document_ids,
+    project_obligations_to_paperless,
+)
 from doc_intelligence_hub.modules.statements.config import load_config, resolve_api_token
 from doc_intelligence_hub.modules.triage.relationships import list_document_relationships
 
@@ -59,7 +72,37 @@ async def project_relationships_to_paperless(document_ids: set[int]) -> dict[str
                 build_metadata_update(MetadataFieldKey.RELATIONSHIP_SUMMARY, summary, schema),
             ]
             await client.update_custom_fields(document_id, updates)
+
+        init_action_queue_db()
+        db = get_action_queue_session()
+        try:
+            obligation_ids = {
+                row[0]
+                for row in db.query(ObligationDocument.obligation_id)
+                .filter(
+                    ObligationDocument.document_id.in_(document_ids),
+                    ObligationDocument.excluded.is_(False),
+                )
+                .distinct()
+                .all()
+            }
+            obligation_document_ids = document_ids | obligation_projection_document_ids(
+                db,
+                obligation_ids,
+            )
+            obligation_projection = await project_obligations_to_paperless(
+                db,
+                client,
+                document_ids=obligation_document_ids,
+            )
+        finally:
+            db.close()
     finally:
         await client.aclose()
 
-    return {"synced": True, "documents": sorted(document_ids), "error": None}
+    return {
+        "synced": obligation_projection["synced"],
+        "documents": sorted(obligation_document_ids),
+        "error": obligation_projection["error"],
+        "obligation_projection": obligation_projection,
+    }

@@ -47,6 +47,10 @@ from doc_intelligence_hub.modules.action_queue.lifecycle import (
     sync_action_status,
     transition_action_status,
 )
+from doc_intelligence_hub.modules.action_queue.obligation_projection import (
+    obligation_projection_document_ids,
+    project_obligations_to_paperless,
+)
 from doc_intelligence_hub.modules.action_queue.obligations import (
     backfill_obligations,
     completion_suggestion,
@@ -72,6 +76,43 @@ _INITIAL_QUEUE_SETTINGS = {
     "rate_limit_delay": action_queue_settings.rate_limit_delay,
     "remove_source_tag_on_resolve": action_queue_settings.remove_source_tag_on_resolve,
 }
+
+
+async def _project_obligation_documents(
+    request: Request,
+    db: Session,
+    document_ids: set[int],
+) -> dict[str, Any]:
+    if not action_queue_settings.write_to_paperless:
+        return await project_obligations_to_paperless(
+            db,
+            None,
+            document_ids=document_ids,
+            write_enabled=False,
+        )
+    client = None
+    try:
+        client = make_paperless_client(request, timeout=15.0)
+        return await project_obligations_to_paperless(
+            db,
+            client,
+            document_ids=document_ids,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to project OWL obligation to Paperless")
+        targets = sorted(document_ids)
+        return {
+            "synced": False,
+            "attempted": len(targets),
+            "succeeded": 0,
+            "failed": len(targets),
+            "documents": targets,
+            "errors": [],
+            "error": "Failed to sync obligation projection to Paperless",
+        }
+    finally:
+        if client is not None:
+            await client.aclose()
 
 
 def _paperless_query_diagnostics(response: httpx.Response) -> list[str]:
@@ -589,6 +630,39 @@ async def queue_check_custom_fields(request: Request) -> dict[str, Any]:
     _sync_action_queue_settings(request)
     client = make_paperless_client(request, timeout=15.0)
     return await client.check_custom_fields()
+
+
+@router.post("/setup/custom-fields")
+async def queue_setup_custom_fields(request: Request) -> dict[str, Any]:
+    """Provision every Paperless custom field owned by the Action Queue."""
+    from fastapi import HTTPException
+
+    from doc_intelligence_hub.core.paperless import get_metadata_field_spec
+    from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
+
+    _sync_action_queue_settings(request)
+    if not action_queue_settings.write_to_paperless:
+        raise HTTPException(
+            status_code=409,
+            detail="Paperless writes are disabled; custom fields were not changed.",
+        )
+
+    enricher = PaperlessEnricher()
+    try:
+        field_map = await enricher.ensure_custom_fields_exist()
+    finally:
+        await enricher.client.aclose()
+    return {
+        "ready": len(field_map),
+        "fields": [
+            {
+                "key": key.value,
+                "name": get_metadata_field_spec(key).canonical_name,
+                "id": field_id,
+            }
+            for key, field_id in field_map.items()
+        ],
+    }
 
 
 @router.post("/run")
@@ -1503,7 +1577,15 @@ async def link_action_document(
         primary.version = (primary.version or 1) + 1
         db.commit()
         db.refresh(primary)
-        return _serialize_action_with_siblings(db, primary)
+        projection_ids = obligation_projection_document_ids(
+            db,
+            {primary.obligation_id} if primary.obligation_id else set(),
+        )
+        projection = await _project_obligation_documents(request, db, projection_ids)
+        return {
+            **_serialize_action_with_siblings(db, primary),
+            "obligation_projection": projection,
+        }
     finally:
         db.close()
 
@@ -1524,6 +1606,7 @@ async def unlink_action_document(
         primary = db.query(Action).filter_by(id=action_id).first()
         if not primary:
             raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+        obligation_id = primary.obligation_id
         try:
             restored_actions = unlink_document(db, primary, document_id)
         except ValueError as exc:
@@ -1539,7 +1622,29 @@ async def unlink_action_document(
                 logger=logging.getLogger(__name__),
             )
         db.refresh(primary)
-        return _serialize_action_with_siblings(db, primary)
+        projection_ids = obligation_projection_document_ids(
+            db,
+            {obligation_id} if obligation_id else set(),
+        )
+        projection_ids.add(document_id)
+        projection = await _project_obligation_documents(request, db, projection_ids)
+        return {
+            **_serialize_action_with_siblings(db, primary),
+            "obligation_projection": projection,
+        }
+    finally:
+        db.close()
+
+
+@router.post("/obligations/reconcile-projections")
+async def reconcile_obligation_projections(request: Request) -> dict[str, Any]:
+    """Idempotently rebuild every OWL-owned obligation field in Paperless."""
+    _sync_action_queue_settings(request)
+    init_db()
+    db = get_session()
+    try:
+        document_ids = obligation_projection_document_ids(db)
+        return await _project_obligation_documents(request, db, document_ids)
     finally:
         db.close()
 

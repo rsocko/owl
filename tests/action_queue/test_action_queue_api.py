@@ -108,6 +108,38 @@ def seeded_client(client):
 
 
 class TestListActions:
+    def test_sets_up_action_and_obligation_metadata_fields(self, client):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from doc_intelligence_hub.core.paperless import MetadataFieldKey
+
+        enricher = MagicMock()
+        enricher.ensure_custom_fields_exist = AsyncMock(
+            return_value={
+                MetadataFieldKey.ACTION_STATUS: 10,
+                MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS: 11,
+                MetadataFieldKey.OBLIGATION_ID: 12,
+                MetadataFieldKey.OBLIGATION_ROLE: 13,
+            }
+        )
+        enricher.client.aclose = AsyncMock()
+
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
+            return_value=enricher,
+        ):
+            response = client.post("/api/queue/setup/custom-fields")
+
+        assert response.status_code == 200
+        assert {field["name"] for field in response.json()["fields"]} == {
+            "Action Status",
+            "Related Documents",
+            "Obligation ID",
+            "Obligation Role",
+        }
+        enricher.ensure_custom_fields_exist.assert_awaited_once()
+        enricher.client.aclose.assert_awaited_once()
+
     def test_list_actions_returns_preview_url(self, seeded_client):
         resp = seeded_client.get("/api/queue/actions")
         assert resp.status_code == 200
@@ -202,9 +234,26 @@ class TestListActions:
             synchronized.append((action.id, status))
 
         sync_status = AsyncMock(side_effect=capture_sync)
-        with patch(
-            "doc_intelligence_hub.api.routers.action_queue.sync_action_status",
-            sync_status,
+        projection = AsyncMock(
+            return_value={
+                "synced": True,
+                "attempted": 2,
+                "succeeded": 2,
+                "failed": 0,
+                "documents": [42, 43],
+                "errors": [],
+                "error": None,
+            }
+        )
+        with (
+            patch(
+                "doc_intelligence_hub.api.routers.action_queue.sync_action_status",
+                sync_status,
+            ),
+            patch(
+                "doc_intelligence_hub.api.routers.action_queue._project_obligation_documents",
+                projection,
+            ),
         ):
             linked = seeded_client.post(
                 "/api/queue/actions/1/link",
@@ -212,6 +261,7 @@ class TestListActions:
             )
         assert linked.status_code == 200
         assert linked.json()["linked_document_count"] == 2
+        assert linked.json()["obligation_projection"]["synced"] is True
         assert synchronized == [(3, "pending")]
         ready = seeded_client.get("/api/queue/actions?status=pending").json()
         assert [action["id"] for action in ready["actions"]] == [1]
@@ -257,9 +307,25 @@ class TestListActions:
             }
         )
 
-        with patch(
-            "doc_intelligence_hub.api.routers.action_queue.make_paperless_client",
-            return_value=paperless,
+        with (
+            patch(
+                "doc_intelligence_hub.api.routers.action_queue.make_paperless_client",
+                return_value=paperless,
+            ),
+            patch(
+                "doc_intelligence_hub.api.routers.action_queue._project_obligation_documents",
+                new=AsyncMock(
+                    return_value={
+                        "synced": True,
+                        "attempted": 2,
+                        "succeeded": 2,
+                        "failed": 0,
+                        "documents": [42, 77],
+                        "errors": [],
+                        "error": None,
+                    }
+                ),
+            ),
         ):
             candidates = seeded_client.get(
                 "/api/queue/actions/1/link-candidates?q=payment%20receipt"
@@ -447,6 +513,8 @@ class TestListActions:
         )
 
     def test_unlinks_related_document_without_deleting_it(self, seeded_client):
+        from unittest.mock import AsyncMock, patch
+
         from doc_intelligence_hub.modules.action_queue.obligations import (
             manually_link_document,
         )
@@ -463,11 +531,60 @@ class TestListActions:
         finally:
             db.close()
 
-        response = seeded_client.delete("/api/queue/actions/1/links/77")
+        projection = AsyncMock(
+            return_value={
+                "synced": False,
+                "attempted": 2,
+                "succeeded": 1,
+                "failed": 1,
+                "documents": [42, 77],
+                "errors": [{"document_id": 77, "message": "Document was deleted"}],
+                "error": "One or more Paperless documents could not be updated",
+            }
+        )
+        with patch(
+            "doc_intelligence_hub.api.routers.action_queue._project_obligation_documents",
+            projection,
+        ):
+            response = seeded_client.delete("/api/queue/actions/1/links/77")
 
         assert response.status_code == 200
         assert response.json()["linked_document_count"] == 1
         assert response.json()["linked_documents"][0]["document_id"] == 42
+        assert response.json()["obligation_projection"]["failed"] == 1
+
+    def test_reconciles_all_obligation_projections(self, seeded_client):
+        from unittest.mock import AsyncMock, patch
+
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=1).one()
+            from doc_intelligence_hub.modules.action_queue.obligations import ensure_obligation
+
+            ensure_obligation(db, action)
+            db.commit()
+        finally:
+            db.close()
+
+        projection = AsyncMock(
+            return_value={
+                "synced": True,
+                "attempted": 0,
+                "succeeded": 0,
+                "failed": 0,
+                "documents": [],
+                "errors": [],
+                "error": None,
+            }
+        )
+        with patch(
+            "doc_intelligence_hub.api.routers.action_queue._project_obligation_documents",
+            projection,
+        ):
+            response = seeded_client.post("/api/queue/obligations/reconcile-projections")
+
+        assert response.status_code == 200
+        projection.assert_awaited_once()
 
     def test_daily_list_excludes_not_ready_actions(self, seeded_client):
         db = get_session()

@@ -26,6 +26,35 @@ Paperless's native Document Type remains the canonical taxonomy and is outside t
 custom-field migration. The tool does not create or migrate a separate OWL document-type
 field.
 
+## OWL obligation projection
+
+OWL provisions three additional Paperless custom fields for obligation navigation:
+
+| Field | Paperless type | Purpose |
+|---|---|---|
+| `Related Documents` | Document Link | Multi-value links to every other active document in the obligation |
+| `Obligation ID` | Text | Stable OWL-owned obligation identifier shared by all projected documents |
+| `Obligation Role` | Select | `invoice`, `receipt`, `reminder`, `revision`, or `supporting` |
+
+These are new fields; the existing `Related Document IDs` and `Relationship Summary`
+fields describe generic document relationships and cannot provide native Paperless
+navigation or obligation identity. OWL remains authoritative for confidence, provenance,
+rejected-link tombstones, action suppression, and completion state.
+
+Link and unlink operations rebuild the projection on every affected document. The
+projection merges only these three owned values into each document's custom fields, so
+unrelated Paperless metadata is preserved. A removed or rejected link clears stale OWL
+values without deleting the document. Operators can idempotently backfill or repair all
+known obligations with:
+
+```text
+POST /api/queue/obligations/reconcile-projections
+```
+
+The response reports per-document successes and failures. When Paperless writes are
+disabled, OWL still records the authoritative relationship and returns an explicit
+`Paperless writes are disabled` projection result for later reconciliation.
+
 ## Output classes
 
 Default stdout is a versioned, redacted JSON summary. It contains the registry digest, run

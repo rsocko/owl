@@ -41,6 +41,11 @@ _ACTION_FIELDS = (
     MetadataFieldKey.ACTION_STATUS,
     MetadataFieldKey.ACTION_ANALYZED,
 )
+_OBLIGATION_FIELDS = (
+    MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS,
+    MetadataFieldKey.OBLIGATION_ID,
+    MetadataFieldKey.OBLIGATION_ROLE,
+)
 _LEGACY_CLEANUP_FIELDS = (
     MetadataFieldKey.LEGACY_ACTION_TYPE,
     MetadataFieldKey.LEGACY_ACTION_DUE_DATE,
@@ -48,11 +53,12 @@ _LEGACY_CLEANUP_FIELDS = (
     MetadataFieldKey.LEGACY_ACTION_SUMMARY,
     MetadataFieldKey.LEGACY_ACTION_COUNT,
 )
-_ALL_ACTION_FIELDS = (*_ACTION_FIELDS, *_LEGACY_CLEANUP_FIELDS)
+_SETUP_FIELDS = (*_ACTION_FIELDS, *_OBLIGATION_FIELDS)
+_ALL_ACTION_FIELDS = (*_SETUP_FIELDS, *_LEGACY_CLEANUP_FIELDS)
 
 # Backward-compatible public constant; definitions are owned by the shared registry.
 CUSTOM_FIELD_DEFINITIONS = [
-    get_metadata_field_spec(key).create_definition() for key in _ACTION_FIELDS
+    get_metadata_field_spec(key).create_definition() for key in _SETUP_FIELDS
 ]
 
 
