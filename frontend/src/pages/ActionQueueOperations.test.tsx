@@ -80,26 +80,54 @@ describe('ActionQueueOperations', () => {
     });
   });
 
-  it('owns custom and dry-run controls outside the daily queue', async () => {
+  it('previews a forced single-document rescan', async () => {
     render(<ActionQueueOperations />);
 
+    fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'document' } });
     fireEvent.change(screen.getByLabelText('Document ID'), { target: { value: '42' } });
-    fireEvent.change(screen.getByLabelText('Saved view ID'), { target: { value: '7' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview scope' }));
+
+    await waitFor(() => {
+      expect(runMock).toHaveBeenCalledWith({
+        dry_run: true,
+        force: true,
+        document_id: 42,
+      });
+    });
+  });
+
+  it('forces a filtered all-document rescan after confirmation', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<ActionQueueOperations />);
+
+    fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'all' } });
     fireEvent.change(screen.getByLabelText('Correspondent'), { target: { value: 'Utility Co' } });
     fireEvent.change(screen.getByLabelText('Document type'), { target: { value: 'Statement' } });
     fireEvent.change(screen.getByLabelText('Added after'), { target: { value: '2026-08-01' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Dry run' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Force rescan' }));
 
     await waitFor(() => {
-      expect(runMock).toHaveBeenCalledWith(expect.objectContaining({
-        dry_run: true,
-        document_id: 42,
-        saved_view_id: 7,
+      expect(runMock).toHaveBeenCalledWith({
+        dry_run: false,
+        force: true,
+        all_documents: true,
         correspondent: 'Utility Co',
         document_type: 'Statement',
         added_after: '2026-08-01',
-      }));
+      });
     });
+    expect(confirm).toHaveBeenCalledTimes(1);
+    confirm.mockRestore();
+  });
+
+  it('requires the selected scope value before running', async () => {
+    render(<ActionQueueOperations />);
+
+    fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'saved_view' } });
+
+    expect(screen.getByRole('button', { name: 'Preview scope' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Run new or stale' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Force rescan' })).toBeDisabled();
   });
 
   it('treats Paperless as the source of truth when refreshing metadata', async () => {

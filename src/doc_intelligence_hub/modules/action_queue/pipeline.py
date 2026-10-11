@@ -55,7 +55,7 @@ console = Console(file=io.StringIO(), force_terminal=False, highlight=False)
 # analyzer/fallback-analyzer logic should make previously-computed actions
 # be treated as stale even if the document content hasn't changed.
 ACTION_QUEUE_ANALYSIS_MODULE_NAME = "action_queue"
-ACTION_QUEUE_ANALYSIS_MODULE_VERSION = "action-queue-analyzer-v1"
+ACTION_QUEUE_ANALYSIS_MODULE_VERSION = "action-queue-analyzer-v2"
 
 
 def _document_content_identity(doc: dict[str, Any]) -> str:
@@ -232,6 +232,7 @@ class Pipeline:
         document_id: int | None = None,
         tag_override: str | None = None,
         saved_view_id: int | None = None,
+        all_documents: bool = False,
         created_after: str | None = None,
         created_before: str | None = None,
         added_after: str | None = None,
@@ -333,6 +334,7 @@ class Pipeline:
                     document_id=document_id,
                     saved_view_id=saved_view_id,
                     tag_override=tag_override,
+                    all_documents=all_documents,
                     created_after=created_after,
                     created_before=created_before,
                     added_after=added_after,
@@ -1032,6 +1034,7 @@ class Pipeline:
         document_id: int | None,
         saved_view_id: int | None,
         tag_override: str | None,
+        all_documents: bool,
         created_after: str | None,
         created_before: str | None,
         added_after: str | None,
@@ -1053,11 +1056,27 @@ class Pipeline:
             console.print(f"[dim]Fetching documents from saved view #{saved_view_id}...[/dim]")
             return await self.paperless.list_documents(saved_view=saved_view_id, limit=fetch_limit)
 
+        if all_documents:
+            console.print("[dim]Fetching all Paperless documents in the selected scope...[/dim]")
+            return await self.paperless.list_documents(
+                created_after=created_after,
+                created_before=created_before,
+                added_after=added_after,
+                added_before=added_before,
+                correspondent=correspondent,
+                document_type=document_type,
+                limit=fetch_limit,
+            )
+
         if any(
             [created_after, created_before, added_after, added_before, correspondent, document_type]
         ):
             # Use flexible query with date/correspondent/type filters
-            tags = [tag_override] if tag_override else None
+            tags = (
+                [tag.strip() for tag in tag_override.split(",") if tag.strip()]
+                if tag_override
+                else None
+            )
             console.print("[dim]Fetching documents with custom filters...[/dim]")
             return await self.paperless.list_documents(
                 tags=tags,
@@ -1071,7 +1090,11 @@ class Pipeline:
             )
 
         # Default: use configured intake tags.
-        tags = [tag_override] if tag_override else settings.monitor_tags
+        tags = (
+            [tag.strip() for tag in tag_override.split(",") if tag.strip()]
+            if tag_override
+            else settings.monitor_tags
+        )
         console.print(f"[dim]Fetching documents tagged: {tags}[/dim]")
         return await self.paperless.list_documents(tags=tags, limit=fetch_limit)
 
@@ -1424,6 +1447,7 @@ async def run_pipeline(
     document_id: int | None = None,
     tag_override: str | None = None,
     saved_view_id: int | None = None,
+    all_documents: bool = False,
     created_after: str | None = None,
     created_before: str | None = None,
     added_after: str | None = None,
@@ -1451,6 +1475,7 @@ async def run_pipeline(
             document_id=document_id,
             tag_override=tag_override,
             saved_view_id=saved_view_id,
+            all_documents=all_documents,
             created_after=created_after,
             created_before=created_before,
             added_after=added_after,
