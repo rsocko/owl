@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from typing import Any
@@ -40,6 +41,7 @@ from doc_intelligence_hub.modules.triage.relationships import (
     RelationshipConflictError,
     classify_related_notice,
     create_document_relationship,
+    inspect_relationship_candidate,
 )
 
 logger = logging.getLogger(__name__)
@@ -384,13 +386,16 @@ def _cleanup_self_referencing_pairs() -> int:
         session.close()
 
 
-def scan_all_duplicates() -> dict[str, Any]:
-    """Full scan for duplicates across all documents. Creates DB records and triage items.
+def scan_all_duplicates(
+    *,
+    dry_run: bool = False,
+    on_progress: Callable[[dict[str, int]], None] | None = None,
+) -> dict[str, Any]:
+    """Scan historical documents for relationships and review candidates.
 
-    Returns summary stats.
+    ``dry_run`` evaluates the complete scope without changing OWL or Paperless state.
     """
-    # Clean up any self-referencing pairs from a prior bug
-    cleaned = _cleanup_self_referencing_pairs()
+    cleaned = 0 if dry_run else _cleanup_self_referencing_pairs()
 
     try:
         from doc_intelligence_hub.modules.eob_matching.database import (
@@ -403,9 +408,18 @@ def scan_all_duplicates() -> dict[str, Any]:
     except ImportError:
         logger.warning("EOB matching module not available, skipping duplicate scan")
         return {
+            "dry_run": dry_run,
+            "documents_examined": 0,
+            "candidate_pairs": 0,
             "pairs_found": 0,
             "pairs_created": 0,
             "triage_items_created": 0,
+            "review_candidates": 0,
+            "relationships_created": 0,
+            "relationships_reused": 0,
+            "conflicts": 0,
+            "failures": 0,
+            "errors": [],
             "cleaned_invalid": cleaned,
         }
 
@@ -434,7 +448,12 @@ def scan_all_duplicates() -> dict[str, Any]:
     pairs_found = 0
     pairs_created = 0
     triage_created = 0
+    review_candidates = 0
     relationships_created = 0
+    relationships_reused = 0
+    conflicts = 0
+    failures = 0
+    errors: list[dict[str, Any]] = []
     relationship_ids: list[str] = []
     seen_pairs: set[tuple[int, int]] = set()
 
@@ -455,88 +474,128 @@ def scan_all_duplicates() -> dict[str, Any]:
                 continue
             seen_pairs.add(pair_key)
 
-            overall, breakdown = score_documents(meta_a, meta_b)
-            if overall < DUPLICATE_THRESHOLD:
-                continue
-
-            pairs_found += 1
-
-            # Check if pair already exists
-            existing = find_existing_duplicate_pair(doc_a_id, doc_b_id)
-            if existing:
-                continue
-
-            proposal = classify_related_notice(doc_a_id, meta_a, doc_b_id, meta_b)
-            relationship_conflict = False
-            if proposal and proposal.auto_create and proposal.relationship_type != "same_sequence":
-                try:
-                    relationship, created = create_document_relationship(
-                        source_document_id=proposal.source_document_id,
-                        target_document_id=proposal.target_document_id,
-                        relationship_type=proposal.relationship_type,
-                        provenance="automatic",
-                        confidence=proposal.confidence,
-                        reason_codes=proposal.reason_codes,
-                        priority_adjustment=proposal.priority_adjustment,
-                        priority_explanation=proposal.priority_explanation,
-                    )
-                    if created:
-                        relationships_created += 1
-                        relationship_ids.append(relationship["id"])
+            try:
+                overall, breakdown = score_documents(meta_a, meta_b)
+                if overall < DUPLICATE_THRESHOLD:
                     continue
-                except RelationshipConflictError:
+
+                pairs_found += 1
+                proposal = classify_related_notice(doc_a_id, meta_a, doc_b_id, meta_b)
+                relationship_conflict = False
+                if (
+                    proposal
+                    and proposal.auto_create
+                    and proposal.relationship_type != "same_sequence"
+                ):
+                    candidate_state = inspect_relationship_candidate(
+                        proposal.source_document_id,
+                        proposal.target_document_id,
+                        proposal.relationship_type,
+                    )
+                    if candidate_state == "reuse":
+                        relationships_reused += 1
+                        continue
+                    if candidate_state == "create":
+                        if dry_run:
+                            relationships_created += 1
+                        else:
+                            relationship, created = create_document_relationship(
+                                source_document_id=proposal.source_document_id,
+                                target_document_id=proposal.target_document_id,
+                                relationship_type=proposal.relationship_type,
+                                provenance="automatic",
+                                confidence=proposal.confidence,
+                                reason_codes=proposal.reason_codes,
+                                priority_adjustment=proposal.priority_adjustment,
+                                priority_explanation=proposal.priority_explanation,
+                            )
+                            relationships_created += int(created)
+                            if created:
+                                relationship_ids.append(relationship["id"])
+                            else:
+                                relationships_reused += 1
+                        continue
                     relationship_conflict = True
+                    conflicts += 1
                     logger.warning(
                         "Relationship proposal conflicts with an active link for docs %d and %d",
                         doc_a_id,
                         doc_b_id,
                     )
 
-            # Create duplicate pair record
-            pair = create_duplicate_pair(
-                doc_a_id=doc_a_id,
-                doc_b_id=doc_b_id,
-                similarity_score=overall,
-                breakdown=breakdown,
-            )
-            pairs_created += 1
+                review_candidates += 1
+                existing = find_existing_duplicate_pair(doc_a_id, doc_b_id)
+                if existing or dry_run:
+                    continue
 
-            # Create triage queue item
-            provider_a = meta_a.get("provider") or meta_a.get("provider_name") or "Unknown"
-            provider_b = meta_b.get("provider") or meta_b.get("provider_name") or "Unknown"
-            score_pct = round(overall * 100, 1)
-            proposal_data = proposal.to_dict() if proposal else None
-            priority = _priority_from_similarity(overall)
-            if proposal:
-                priority = min(100, priority + proposal.priority_adjustment)
-            if relationship_conflict:
-                priority = min(100, priority + 15)
-                proposal_data = {
-                    **(proposal_data or {}),
-                    "conflict": True,
-                    "conflict_priority_adjustment": 15,
+                pair = create_duplicate_pair(
+                    doc_a_id=doc_a_id,
+                    doc_b_id=doc_b_id,
+                    similarity_score=overall,
+                    breakdown=breakdown,
+                )
+                pairs_created += 1
+
+                provider_a = meta_a.get("provider") or meta_a.get("provider_name") or "Unknown"
+                provider_b = meta_b.get("provider") or meta_b.get("provider_name") or "Unknown"
+                score_pct = round(overall * 100, 1)
+                proposal_data = proposal.to_dict() if proposal else None
+                priority = _priority_from_similarity(overall)
+                if proposal:
+                    priority = min(100, priority + proposal.priority_adjustment)
+                if relationship_conflict:
+                    priority = min(100, priority + 15)
+                    proposal_data = {
+                        **(proposal_data or {}),
+                        "conflict": True,
+                        "conflict_priority_adjustment": 15,
+                    }
+
+                create_queue_item(
+                    item_type="duplicate_document",
+                    source="auto_flag",
+                    target_type="document_duplicate",
+                    target_id=pair["id"],
+                    reason=(
+                        f"Potential duplicate: {score_pct}% similar "
+                        f"(docs #{doc_a_id} & #{doc_b_id})"
+                    ),
+                    priority=priority,
+                    metadata={
+                        "duplicate_pair_id": pair["id"],
+                        "doc_a_id": doc_a_id,
+                        "doc_b_id": doc_b_id,
+                        "similarity_score": overall,
+                        "score_pct": score_pct,
+                        "provider_a": provider_a,
+                        "provider_b": provider_b,
+                        "breakdown": breakdown,
+                        "relationship_proposal": proposal_data,
+                    },
+                )
+                triage_created += 1
+            except Exception as exc:
+                failures += 1
+                errors.append(
+                    {
+                        "document_ids": [doc_a_id, doc_b_id],
+                        "code": type(exc).__name__,
+                        "message": "The candidate pair could not be processed.",
+                    }
+                )
+                logger.exception(
+                    "Historical relationship scan failed for docs %d and %d",
+                    doc_a_id,
+                    doc_b_id,
+                )
+        if on_progress:
+            on_progress(
+                {
+                    "documents_examined": i + 1,
+                    "documents_total": len(meta_cache),
+                    "candidate_pairs": pairs_found,
                 }
-
-            create_queue_item(
-                item_type="duplicate_document",
-                source="auto_flag",
-                target_type="document_duplicate",
-                target_id=pair["id"],
-                reason=f"Potential duplicate: {score_pct}% similar (docs #{doc_a_id} & #{doc_b_id})",
-                priority=priority,
-                metadata={
-                    "duplicate_pair_id": pair["id"],
-                    "doc_a_id": doc_a_id,
-                    "doc_b_id": doc_b_id,
-                    "similarity_score": overall,
-                    "score_pct": score_pct,
-                    "provider_a": provider_a,
-                    "provider_b": provider_b,
-                    "breakdown": breakdown,
-                    "relationship_proposal": proposal_data,
-                },
             )
-            triage_created += 1
 
     logger.info(
         "Duplicate scan complete: %d pairs found, %d relationships, %d pairs, %d triage items",
@@ -546,10 +605,18 @@ def scan_all_duplicates() -> dict[str, Any]:
         triage_created,
     )
     return {
+        "dry_run": dry_run,
+        "documents_examined": len(meta_cache),
+        "candidate_pairs": pairs_found,
         "pairs_found": pairs_found,
         "pairs_created": pairs_created,
         "triage_items_created": triage_created,
+        "review_candidates": review_candidates,
         "relationships_created": relationships_created,
+        "relationships_reused": relationships_reused,
+        "conflicts": conflicts,
+        "failures": failures,
+        "errors": errors,
         "relationship_ids": relationship_ids,
         "cleaned_invalid": cleaned,
     }

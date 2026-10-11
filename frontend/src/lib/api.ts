@@ -350,6 +350,9 @@ export const endpoints = {
     resolve: (id: string, body: { resolution: string; primary_doc_id?: number; relationship_type?: string }) =>
       api.post(`/api/duplicates/${id}/resolve`, body),
     scan: () => api.post('/api/duplicates/scan'),
+    previewRelationshipScan: () => api.post('/api/duplicates/scan/preview'),
+    startRelationshipScan: () => api.post('/api/duplicates/scan/runs'),
+    relationshipScanStatus: (runId: string) => api.get(`/api/duplicates/scan/runs/${runId}`),
     settings: () => api.get<{ auto_detect_enabled: boolean }>('/api/duplicates/settings'),
     updateSettings: (body: { auto_detect_enabled: boolean }) =>
       api.put<{ auto_detect_enabled: boolean }>('/api/duplicates/settings', body),
@@ -363,6 +366,8 @@ export const endpoints = {
     propose: (body: unknown) => api.post('/api/relationships/propose', body),
     create: (body: unknown) => api.post('/api/relationships', body),
     remove: (id: string) => api.delete(`/api/relationships/${id}`),
+    projectionHealth: () => api.get('/api/relationships/projection-health'),
+    reconcileProjections: () => api.post('/api/relationships/reconcile-projections'),
   },
   metadata: {
     get: (docId: string | number) => api.get(`/api/metadata/${docId}`),

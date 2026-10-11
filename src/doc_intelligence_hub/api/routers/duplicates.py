@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.api.document_summary import build_document_summary
@@ -35,6 +35,12 @@ from doc_intelligence_hub.modules.triage.duplicates import (
 from doc_intelligence_hub.modules.triage.relationship_projection import (
     project_relationships_to_paperless,
 )
+from doc_intelligence_hub.modules.triage.relationship_scans import (
+    create_scan_run,
+    get_scan_run,
+    recover_abandoned_runs,
+    update_scan_run,
+)
 from doc_intelligence_hub.modules.triage.relationships import (
     RelationshipConflictError,
     calculate_priority_adjustment,
@@ -47,6 +53,7 @@ from doc_intelligence_hub.modules.triage.relationships import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/duplicates", tags=["duplicates"])
+_active_scan_run_ids: set[str] = set()
 
 
 # ------------------------------------------------------------------
@@ -121,6 +128,89 @@ async def trigger_scan() -> dict[str, Any]:
     return result
 
 
+@router.post("/scan/preview")
+async def preview_historical_relationship_scan() -> dict[str, Any]:
+    """Estimate the historical scan without changing OWL or Paperless state."""
+    return scan_all_duplicates(dry_run=True)
+
+
+async def _run_tracked_scan(run_id: str) -> None:
+    counts: dict[str, Any] = {}
+
+    def record_progress(progress: dict[str, int]) -> None:
+        counts.update(progress)
+        update_scan_run(run_id, counts=counts)
+
+    try:
+        update_scan_run(run_id, status="running", counts=counts)
+        result = scan_all_duplicates(on_progress=record_progress)
+        projection = await _project_automatic_relationships(result)
+        if projection and not projection["synced"]:
+            result["failures"] = int(result.get("failures", 0)) + 1
+            result.setdefault("errors", []).append(
+                {
+                    "code": "paperless_projection_failed",
+                    "message": projection["error"]
+                    or "Relationship links could not be synced to Paperless.",
+                }
+            )
+        counts.update({key: value for key, value in result.items() if key != "relationship_ids"})
+        update_scan_run(
+            run_id,
+            status="completed",
+            counts=counts,
+            errors=result.get("errors", []),
+        )
+    except Exception as exc:
+        logger.exception("Tracked historical relationship scan failed")
+        update_scan_run(
+            run_id,
+            status="failed",
+            counts=counts,
+            errors=[
+                {
+                    "code": type(exc).__name__,
+                    "message": "The relationship scan could not be completed.",
+                }
+            ],
+        )
+    finally:
+        _active_scan_run_ids.discard(run_id)
+
+
+@router.post("/scan/runs", status_code=202)
+async def start_historical_relationship_scan(
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    """Start one durable, tracked historical relationship scan."""
+    recover_abandoned_runs(_active_scan_run_ids)
+    try:
+        run = create_scan_run()
+    except RuntimeError as exc:
+        active_run_id = str(exc)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "relationship_scan_in_progress",
+                "message": "A historical relationship scan is already in progress.",
+                "run_id": active_run_id,
+            },
+        ) from exc
+    run_id = run["run_id"]
+    _active_scan_run_ids.add(run_id)
+    background_tasks.add_task(_run_tracked_scan, run_id)
+    return run
+
+
+@router.get("/scan/runs/{run_id}")
+async def historical_relationship_scan_status(run_id: str) -> dict[str, Any]:
+    recover_abandoned_runs(_active_scan_run_ids)
+    run = get_scan_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Relationship scan run not found")
+    return run
+
+
 @router.post("/check-single")
 async def check_single_document(body: CheckSingleRequest) -> dict[str, Any]:
     """Run duplicate detection for a single document (as if it were just ingested)."""
@@ -137,10 +227,10 @@ async def document_ingested(body: CheckSingleRequest) -> dict[str, Any]:
     return result
 
 
-async def _project_automatic_relationships(result: dict[str, Any]) -> None:
+async def _project_automatic_relationships(result: dict[str, Any]) -> dict[str, Any] | None:
     relationship_ids = result.get("relationship_ids", [])
     if not relationship_ids:
-        return
+        return None
     document_ids: set[int] = set()
     relationships = []
     for relationship_id in relationship_ids:
@@ -154,7 +244,7 @@ async def _project_automatic_relationships(result: dict[str, Any]) -> None:
                 }
             )
     if not relationships:
-        return
+        return None
     try:
         projection = await project_relationships_to_paperless(document_ids)
     except Exception:
@@ -176,6 +266,7 @@ async def _project_automatic_relationships(result: dict[str, Any]) -> None:
         len(document_ids),
         bool(projection["synced"]),
     )
+    return projection
 
 
 @router.get("/{pair_id}")

@@ -22,6 +22,7 @@ from doc_intelligence_hub.modules.triage.relationships import (
     RelationshipConflictError,
     classify_related_notice,
     create_document_relationship,
+    get_projection_health,
     list_document_relationships,
     list_pending_projection_relationships,
     remove_document_relationship,
@@ -121,6 +122,7 @@ async def create_relationship(body: RelationshipCreateRequest) -> dict[str, Any]
             priority_adjustment=body.priority_adjustment,
             priority_explanation=body.priority_explanation,
             source_duplicate_pair_id=body.source_duplicate_pair_id,
+            project_to_paperless=body.project_to_paperless,
         )
     except RelationshipConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -156,42 +158,67 @@ async def reconcile_relationship_projections(
     if not relationships:
         return {
             "attempted": 0,
-            "synced": True,
-            "documents": [],
-            "error": None,
+            "succeeded": 0,
+            "failed": 0,
+            "remaining": 0,
+            "errors": [],
         }
 
-    document_ids = {
-        document_id
-        for relationship in relationships
-        for document_id in (
-            relationship["source_document_id"],
-            relationship["target_document_id"],
-        )
-    }
-    try:
-        projection = await project_relationships_to_paperless(document_ids)
-    except Exception:
-        logger.exception("Failed to reconcile document relationship projections")
-        projection = {
-            "synced": False,
-            "documents": sorted(document_ids),
-            "error": "Failed to sync relationship projection to Paperless",
-        }
-
+    succeeded = 0
+    errors: list[dict[str, str]] = []
     for relationship in relationships:
+        try:
+            projection = await project_relationships_to_paperless(
+                {
+                    relationship["source_document_id"],
+                    relationship["target_document_id"],
+                }
+            )
+        except Exception:
+            logger.exception(
+                "Failed to reconcile relationship projection %s",
+                relationship["id"],
+            )
+            projection = {
+                "synced": False,
+                "error": "Failed to sync relationship projection to Paperless",
+            }
         set_projection_result(
             relationship["id"],
             synced=bool(projection["synced"]),
             error=projection["error"],
         )
+        if projection["synced"]:
+            succeeded += 1
+        else:
+            errors.append(
+                {
+                    "relationship_id": relationship["id"],
+                    "message": projection["error"]
+                    or "Failed to sync relationship projection to Paperless",
+                }
+            )
+    health = get_projection_health()
+    failed = len(relationships) - succeeded
     logger.info(
-        "Relationship projection reconciliation completed: relationships=%d documents=%d synced=%s",
+        "Relationship projection reconciliation completed: attempted=%d succeeded=%d failed=%d",
         len(relationships),
-        len(document_ids),
-        bool(projection["synced"]),
+        succeeded,
+        failed,
     )
-    return {"attempted": len(relationships), **projection}
+    return {
+        "attempted": len(relationships),
+        "succeeded": succeeded,
+        "failed": failed,
+        "remaining": health["pending"] + health["failed"],
+        "errors": errors,
+    }
+
+
+@router.get("/projection-health")
+async def relationship_projection_health() -> dict[str, Any]:
+    """Return aggregate projection health without document content or connector details."""
+    return get_projection_health()
 
 
 @router.delete("/{relationship_id}")
@@ -203,6 +230,6 @@ async def delete_relationship(
     relationship = remove_document_relationship(relationship_id, removed_by=removed_by)
     if not relationship:
         raise HTTPException(status_code=404, detail="Document relationship not found")
-    if not project_to_paperless:
+    if not project_to_paperless or not relationship["paperless_projection_enabled"]:
         return {"relationship": relationship, "projection": None}
     return await _project_and_record(relationship)
