@@ -73,6 +73,37 @@ def test_relationship_projection_fields_are_creatable() -> None:
     assert summary.create_policy is MetadataCreatePolicy.IF_MISSING
 
 
+def test_obligation_projection_fields_are_creatable() -> None:
+    related = get_metadata_field_spec(MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS)
+    obligation_id = get_metadata_field_spec(MetadataFieldKey.OBLIGATION_ID)
+    role = get_metadata_field_spec(MetadataFieldKey.OBLIGATION_ROLE)
+
+    assert related.canonical_name == "Related Documents"
+    assert related.create_definition()["data_type"] == "documentlink"
+    assert obligation_id.canonical_name == "Obligation ID"
+    assert obligation_id.create_definition()["data_type"] == "string"
+    assert role.canonical_name == "Obligation Role"
+    assert role.select_options == ("invoice", "receipt", "reminder", "revision", "supporting")
+
+
+def test_document_link_metadata_supports_multiple_values() -> None:
+    schema = resolve_metadata_schema(
+        [_definition(80, MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS)],
+        (MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS,),
+    )
+
+    assert build_metadata_update(
+        MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS,
+        [42, "43"],
+        schema,
+    ) == {"field": 80, "value": [42, 43]}
+    assert build_metadata_update(
+        MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS,
+        [],
+        schema,
+    ) == {"field": 80, "value": []}
+
+
 def test_canonical_nonblank_value_wins() -> None:
     definitions = [
         _definition(10, MetadataFieldKey.PROVIDER_NAME),

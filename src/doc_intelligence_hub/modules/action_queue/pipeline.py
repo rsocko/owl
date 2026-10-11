@@ -34,6 +34,10 @@ from .lifecycle import (
     route_action_to_review,
     transition_action_status,
 )
+from .obligation_projection import (
+    obligation_projection_document_ids,
+    project_obligations_to_paperless,
+)
 from .obligations import (
     associate_pay_action,
     associate_receipt,
@@ -709,6 +713,7 @@ class Pipeline:
                         )
                         if lifecycle_changed or current_state != previous_state:
                             existing_action.version = (existing_action.version or 1) + 1
+                    receipt_match = None
                     if is_non_actionable_receipt(doc):
                         receipt_match = associate_receipt(db, doc, content)
                         if receipt_match:
@@ -726,6 +731,23 @@ class Pipeline:
                                 # Never retain a SQLite write lock during network I/O.
                                 db.commit()
                                 await self.enricher.sync_status(doc_id, "not_an_action")
+                                if receipt_match:
+                                    matched_action, _ = receipt_match
+                                    projection_ids = obligation_projection_document_ids(
+                                        db,
+                                        (
+                                            {matched_action.obligation_id}
+                                            if matched_action.obligation_id
+                                            else set()
+                                        ),
+                                    )
+                                    projection = await project_obligations_to_paperless(
+                                        db,
+                                        self.paperless,
+                                        document_ids=projection_ids,
+                                    )
+                                    if not projection["synced"]:
+                                        raise RuntimeError(projection["error"])
                                 for existing_action in existing_actions:
                                     existing_action.last_synced_status = "not_an_action"
                             except Exception as exc:
@@ -899,6 +921,19 @@ class Pipeline:
                         # Make local analysis visible and release the writer before Paperless I/O.
                         db.commit()
                         await self.enricher.enrich_document(doc_id, enrichment_data)
+                        obligation_ids = {
+                            action.obligation_id
+                            for action in stored_actions
+                            if action.obligation_id is not None
+                        }
+                        projection_ids = obligation_projection_document_ids(db, obligation_ids)
+                        projection = await project_obligations_to_paperless(
+                            db,
+                            self.paperless,
+                            document_ids=projection_ids,
+                        )
+                        if not projection["synced"]:
+                            raise RuntimeError(projection["error"])
                         logger.info("doc_id=%s: enrichment succeeded", doc_id)
                         # Track what we wrote so bidirectional sync knows our last state
                         for a in stored_actions:

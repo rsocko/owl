@@ -40,6 +40,9 @@ class MetadataFieldKey(str, Enum):
     EOB_ANALYZED = "eob_analyzed"
     RELATED_DOCUMENTS = "related_documents"
     RELATIONSHIP_SUMMARY = "relationship_summary"
+    OBLIGATION_RELATED_DOCUMENTS = "obligation_related_documents"
+    OBLIGATION_ID = "obligation_id"
+    OBLIGATION_ROLE = "obligation_role"
 
 
 class PaperlessFieldType(str, Enum):
@@ -50,7 +53,7 @@ class PaperlessFieldType(str, Enum):
     FLOAT = "float"
     DECIMAL = "decimal"
     MONETARY = "monetary"
-    DOCUMENT_LINK = "document_link"
+    DOCUMENT_LINK = "documentlink"
 
 
 class MetadataSensitivity(str, Enum):
@@ -288,6 +291,34 @@ _REGISTRY_ENTRIES = (
         projection_policy=_OPERATIONAL,
         create_policy=_CREATE,
         create_type=PaperlessFieldType.TEXT,
+    ),
+    _spec(
+        MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS,
+        "Related Documents",
+        PaperlessFieldType.DOCUMENT_LINK,
+        MetadataNormalization.DOCUMENT_LINK,
+        projection_policy=_OPERATIONAL,
+        create_policy=_CREATE,
+        create_type=PaperlessFieldType.DOCUMENT_LINK,
+    ),
+    _spec(
+        MetadataFieldKey.OBLIGATION_ID,
+        "Obligation ID",
+        PaperlessFieldType.TEXT,
+        MetadataNormalization.TEXT,
+        projection_policy=_OPERATIONAL,
+        create_policy=_CREATE,
+        create_type=PaperlessFieldType.TEXT,
+    ),
+    _spec(
+        MetadataFieldKey.OBLIGATION_ROLE,
+        "Obligation Role",
+        PaperlessFieldType.SELECT,
+        MetadataNormalization.SELECT,
+        select_options=("invoice", "receipt", "reminder", "revision", "supporting"),
+        projection_policy=_OPERATIONAL,
+        create_policy=_CREATE,
+        create_type=PaperlessFieldType.SELECT,
     ),
     _spec(
         MetadataFieldKey.DOCUMENT_AMOUNT,
@@ -830,6 +861,13 @@ def _normalize_value(spec: MetadataFieldSpec, value: Any) -> Any:
         except (InvalidOperation, ValueError) as exc:
             raise MetadataValueError(f"Invalid numeric value for {spec.key.value}") from exc
     if spec.normalization is MetadataNormalization.DOCUMENT_LINK:
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+            try:
+                return [int(item) for item in value]
+            except (TypeError, ValueError) as exc:
+                raise MetadataValueError(
+                    f"Invalid document links for {spec.key.value}"
+                ) from exc
         try:
             return int(value)
         except (TypeError, ValueError) as exc:

@@ -187,7 +187,23 @@ export default function ActionQueueOperations() {
             >
               Check custom fields
             </Button>
+            <Button
+              variant="primary"
+              onClick={() => void execute(
+                'setup-fields',
+                () => endpoints.actionQueue.setupCustomFields(),
+                'Paperless metadata fields are ready.',
+              )}
+              disabled={busy !== null || health?.read_only === true}
+            >
+              {busy === 'setup-fields' ? 'Setting up metadata…' : 'Set up metadata fields'}
+            </Button>
           </div>
+          {health?.read_only === true && (
+            <p className="text-muted">
+              Enable Paperless writeback before setting up metadata fields.
+            </p>
+          )}
         </Card>
 
         <Card title="Custom run">

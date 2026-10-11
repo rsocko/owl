@@ -176,6 +176,20 @@ class TestPipelineErrorIsolation:
             lambda doc: VALID_EXTRACTION,
         )
         pipeline.enricher.ensure_custom_fields_exist = AsyncMock(return_value={})
+        monkeypatch.setattr(
+            "doc_intelligence_hub.modules.action_queue.pipeline.project_obligations_to_paperless",
+            AsyncMock(
+                return_value={
+                    "synced": True,
+                    "attempted": 1,
+                    "succeeded": 1,
+                    "failed": 0,
+                    "documents": [1],
+                    "errors": [],
+                    "error": None,
+                }
+            ),
+        )
 
         async def paused_enrichment(*args, **kwargs):
             enrichment_started.set()
