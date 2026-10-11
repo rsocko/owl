@@ -865,9 +865,7 @@ def _normalize_value(spec: MetadataFieldSpec, value: Any) -> Any:
             try:
                 return [int(item) for item in value]
             except (TypeError, ValueError) as exc:
-                raise MetadataValueError(
-                    f"Invalid document links for {spec.key.value}"
-                ) from exc
+                raise MetadataValueError(f"Invalid document links for {spec.key.value}") from exc
         try:
             return int(value)
         except (TypeError, ValueError) as exc:
