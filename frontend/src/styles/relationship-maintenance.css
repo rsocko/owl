@@ -1,0 +1,68 @@
+.relationship-maintenance {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.relationship-maintenance__intro {
+  display: grid;
+  gap: 6px;
+}
+
+.relationship-maintenance__intro strong {
+  font-size: 0.9rem;
+}
+
+.relationship-maintenance__panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.relationship-maintenance__panel p {
+  max-width: 70ch;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.relationship-maintenance__metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.relationship-maintenance__metric {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.relationship-maintenance__metric dt {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.relationship-maintenance__metric dd {
+  margin: 0;
+  font-weight: 750;
+}
+
+.relationship-maintenance__errors {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-inline-start: 20px;
+  color: var(--danger);
+  font-size: 0.82rem;
+}
+
+.relationship-maintenance__status {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
