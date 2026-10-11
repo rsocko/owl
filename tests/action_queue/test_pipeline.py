@@ -734,9 +734,7 @@ class TestPipelineErrorIsolation:
         assert get_queue_item(review_item["id"])["status"] == "resolved"
 
     @pytest.mark.asyncio
-    async def test_no_action_result_preserves_only_human_corrected_sibling(
-        self, db, monkeypatch
-    ):
+    async def test_no_action_result_preserves_only_human_corrected_sibling(self, db, monkeypatch):
         pipeline = Pipeline()
         no_action_extraction = {
             "actions": [],
@@ -801,9 +799,7 @@ class TestPipelineErrorIsolation:
 
         session = get_session()
         try:
-            corrected, unreviewed = (
-                session.query(Action).order_by(Action.action_index.asc()).all()
-            )
+            corrected, unreviewed = session.query(Action).order_by(Action.action_index.asc()).all()
             assert corrected.status == "pending"
             assert corrected.action_ready is True
             assert corrected.amount == 395.0

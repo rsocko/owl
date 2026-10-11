@@ -153,9 +153,7 @@ def mark_human_corrections(
 ) -> None:
     """Record fields whose values are owned by an explicit human decision."""
     corrected = {
-        str(field)
-        for field in (action.human_corrected_fields or [])
-        if isinstance(field, str)
+        str(field) for field in (action.human_corrected_fields or []) if isinstance(field, str)
     }
     corrected.update(str(field) for field in fields)
     action.human_corrected_fields = sorted(corrected)
@@ -166,9 +164,7 @@ def mark_human_corrections(
 def action_has_human_classification(action: Action) -> bool:
     """Return whether automation must not supersede this classification."""
     corrected = {
-        str(field)
-        for field in (action.human_corrected_fields or [])
-        if isinstance(field, str)
+        str(field) for field in (action.human_corrected_fields or []) if isinstance(field, str)
     }
     return bool(action.human_reviewed or corrected.intersection(CLASSIFICATION_FIELDS))
 
