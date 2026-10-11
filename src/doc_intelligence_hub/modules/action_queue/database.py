@@ -22,7 +22,15 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from .config import settings
 
 # Valid action statuses (lifecycle states)
-VALID_STATUSES = {"pending", "acknowledged", "completed", "snoozed", "dismissed", "not_an_action"}
+VALID_STATUSES = {
+    "pending",
+    "acknowledged",
+    "completed",
+    "snoozed",
+    "dismissed",
+    "not_an_action",
+    "source_deleted",
+}
 
 # 3-tier severity model (derived from urgency for display)
 VALID_SEVERITIES = {"critical", "focus", "safe"}
