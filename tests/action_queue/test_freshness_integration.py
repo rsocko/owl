@@ -17,7 +17,11 @@ from doc_intelligence_hub.modules.action_queue.config import settings as aq_sett
 from doc_intelligence_hub.modules.action_queue.database import ProcessingHistory, init_db
 from doc_intelligence_hub.modules.action_queue.pipeline import (
     ACTION_QUEUE_ANALYSIS_MODULE_NAME,
+    ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
     Pipeline,
+    _analysis_config_hash,
+    _document_content_identity,
+    _document_metadata_fields,
 )
 from doc_intelligence_hub.modules.analysis_invalidation import config as ai_config
 from doc_intelligence_hub.modules.analysis_invalidation.database import (
@@ -109,6 +113,33 @@ def _wire_pipeline(
 
 class TestActionQueueFreshnessIntegration:
     @pytest.mark.asyncio
+    async def test_analyzer_version_bump_reprocesses_previous_results(self, db, monkeypatch):
+        docs = {
+            1: {"id": 1, "title": "Doc 1", "checksum": "chk-1", "tag_names": ["Inbox"]}
+        }
+        pipeline = Pipeline()
+        _wire_pipeline(monkeypatch, pipeline, docs)
+        first = await pipeline.run(force=False, dry_run=False)
+        assert first["processed"] == 1
+
+        AnalysisFreshnessService().record_fingerprint(
+            document_id=1,
+            module_name=ACTION_QUEUE_ANALYSIS_MODULE_NAME,
+            module_version="action-queue-analyzer-v1",
+            config_hash=_analysis_config_hash(pipeline.analyzer.model),
+            current_checksum=_document_content_identity(docs[1]),
+            metadata_fields=_document_metadata_fields(docs[1]),
+        )
+
+        upgraded = Pipeline()
+        _wire_pipeline(monkeypatch, upgraded, docs)
+        result = await upgraded.run(force=False, dry_run=False)
+
+        assert ACTION_QUEUE_ANALYSIS_MODULE_VERSION == "action-queue-analyzer-v2"
+        assert result["processed"] == 1
+        assert result["skipped"] == 0
+
+    @pytest.mark.asyncio
     async def test_partial_failure_retries_only_failed_document_next_run(self, db, monkeypatch):
         """One doc succeeds and is recorded fresh; one fails and stays retryable.
 
@@ -131,7 +162,7 @@ class TestActionQueueFreshnessIntegration:
         result_1 = freshness.check_freshness(
             document_id=1,
             module_name=ACTION_QUEUE_ANALYSIS_MODULE_NAME,
-            module_version="action-queue-analyzer-v1",
+            module_version=ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
             config_hash="ignored",
             current_checksum="chk-1",
         )
@@ -142,7 +173,7 @@ class TestActionQueueFreshnessIntegration:
         result_2 = freshness.check_freshness(
             document_id=2,
             module_name=ACTION_QUEUE_ANALYSIS_MODULE_NAME,
-            module_version="action-queue-analyzer-v1",
+            module_version=ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
             config_hash="ignored",
             current_checksum="chk-2",
         )

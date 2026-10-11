@@ -159,6 +159,13 @@ curl -X POST http://service-005.example.invalid/api/queue/run \
 `dry_run` defaults to `true`. You must explicitly set `"dry_run": false` to persist classifications and enrich Paperless.
 :::
 
+The **Action Queue Operations** page provides the same behavior without constructing an
+API request. Choose the configured source, all Paperless documents, one document, tags,
+or a saved view. **Preview scope** lists the documents a forced run would analyze,
+**Run new or stale** preserves normal freshness checks, and **Force rescan** reanalyzes
+the entire selected scope after confirmation. All-document scans can be narrowed by
+date, correspondent, document type, and a maximum document count.
+
 ### List Actions
 
 ```bash

@@ -51,6 +51,61 @@ def _make_docs(n: int) -> list[dict]:
     ]
 
 
+@pytest.mark.asyncio
+async def test_all_documents_scope_does_not_apply_monitor_tags():
+    pipeline = Pipeline()
+    pipeline.paperless.list_documents = AsyncMock(return_value=[])
+
+    await pipeline._fetch_documents(
+        document_id=None,
+        saved_view_id=None,
+        tag_override=None,
+        all_documents=True,
+        created_after="2026-01-01",
+        created_before=None,
+        added_after=None,
+        added_before=None,
+        correspondent="Utility Co",
+        document_type=None,
+        fetch_limit=None,
+    )
+
+    pipeline.paperless.list_documents.assert_awaited_once_with(
+        created_after="2026-01-01",
+        created_before=None,
+        added_after=None,
+        added_before=None,
+        correspondent="Utility Co",
+        document_type=None,
+        limit=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_tag_scope_splits_comma_separated_tag_names():
+    pipeline = Pipeline()
+    pipeline.paperless.list_documents = AsyncMock(return_value=[])
+
+    await pipeline._fetch_documents(
+        document_id=None,
+        saved_view_id=None,
+        tag_override="Inbox, Receipt",
+        all_documents=False,
+        created_after=None,
+        created_before=None,
+        added_after=None,
+        added_before=None,
+        correspondent=None,
+        document_type=None,
+        fetch_limit=25,
+    )
+
+    pipeline.paperless.list_documents.assert_awaited_once_with(
+        tags=["Inbox", "Receipt"],
+        limit=25,
+    )
+
+
 @pytest.fixture()
 def db(tmp_path):
     """Isolated SQLite database for pipeline runs."""
