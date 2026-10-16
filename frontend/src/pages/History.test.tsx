@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { computeMatchRates, computeConfidence, formatShortDate, rateClass } from './History';
+import {
+  computeMatchRates,
+  computeConfidence,
+  formatShortDate,
+  parseApiDate,
+  rateClass,
+  summarizeActionQueueRun,
+} from './History';
 
 /* ================================================================
  * Unit tests for History page pure helper functions
@@ -30,6 +37,18 @@ describe('formatShortDate', () => {
     const result = formatShortDate('2026-03-15T10:00:00Z');
     expect(result).toMatch(/Mar/);
     expect(result).toMatch(/15/);
+  });
+
+  describe('parseApiDate', () => {
+    it('treats legacy timestamps without an offset as UTC', () => {
+      expect(parseApiDate('2026-10-16T02:49:03').toISOString())
+        .toBe('2026-10-16T02:49:03.000Z');
+    });
+
+    it('preserves timestamps that already include an offset', () => {
+      expect(parseApiDate('2026-10-15T22:49:03-04:00').toISOString())
+        .toBe('2026-10-16T02:49:03.000Z');
+    });
   });
   it('returns the raw string for an invalid date', () => {
     expect(formatShortDate('not-a-date')).toBe('not-a-date');
@@ -101,5 +120,39 @@ describe('computeConfidence', () => {
     expect(result[0].medium).toBe(0);
     expect(result[0].low).toBe(0);
     expect(result[0].total).toBe(5);
+  });
+});
+
+describe('summarizeActionQueueRun', () => {
+  it('reports run-specific document outcomes', () => {
+    expect(summarizeActionQueueRun({
+      documents_scanned: 19,
+      skipped: 3,
+      outcomes: {
+        action_required: 11,
+        no_action: 4,
+        needs_review: 2,
+        unreadable: 1,
+        failed: 1,
+      },
+    })).toEqual({
+      summary: '19 docs scanned · 11 require action · 4 no action',
+      metrics: '2 needs review · 1 unreadable · 1 failed · 3 skipped',
+    });
+  });
+
+  it('describes previews without implying documents were scanned', () => {
+    expect(summarizeActionQueueRun({ would_process: 25 })).toEqual({
+      summary: '25 docs would be scanned',
+      metrics: 'Preview only · no outcomes determined',
+    });
+  });
+
+  it('supports results from older servers', () => {
+    expect(summarizeActionQueueRun({ processed: 7, no_action: 2, failed: 1, skipped: 4 }))
+      .toEqual({
+        summary: '10 docs scanned · 7 require action · 2 no action',
+        metrics: '0 needs review · 0 unreadable · 1 failed · 4 skipped',
+      });
   });
 });
