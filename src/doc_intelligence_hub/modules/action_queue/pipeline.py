@@ -148,6 +148,24 @@ def _set_progress(**kwargs: Any) -> None:
     _progress.update(kwargs)
 
 
+def _with_run_outcomes(stats: dict[str, Any]) -> dict[str, Any]:
+    """Add stable, per-run document outcome counts to a pipeline result."""
+    result = dict(stats)
+    no_action = int(result.pop("_no_action_determined", 0))
+    needs_review = int(result.pop("_needs_review", 0))
+    unreadable = int(result.pop("_unreadable", 0))
+    outcomes = {
+        "action_required": int(result.get("processed", 0)),
+        "no_action": no_action,
+        "needs_review": needs_review,
+        "unreadable": unreadable,
+        "failed": int(result.get("failed", 0)),
+    }
+    result["documents_scanned"] = sum(outcomes.values())
+    result["outcomes"] = outcomes
+    return result
+
+
 def _make_paperless_client() -> PaperlessClient:
     """Create a PaperlessClient from action queue settings."""
     return PaperlessClient(base_url=settings.paperless_url, token=settings.paperless_api_token)
@@ -409,12 +427,15 @@ class Pipeline:
         if not documents:
             console.print("[yellow]No documents to process.[/yellow]")
             _set_progress(current_step="complete", progress="0/0 documents processed")
-            return {
-                "processed": 0,
-                "skipped": 0,
-                "failed": 0,
-                "deleted_sources": deleted_sources,
-            }
+            return _with_run_outcomes(
+                {
+                    "processed": 0,
+                    "skipped": 0,
+                    "failed": 0,
+                    "no_action": 0,
+                    "deleted_sources": deleted_sources,
+                }
+            )
 
         # Filter out already-processed documents (unless force re-scan).
         # "Already processed" now also requires the cached analysis to still
@@ -480,13 +501,15 @@ class Pipeline:
         if not documents:
             console.print("[yellow]No new documents to process.[/yellow]")
             _set_progress(current_step="complete", progress="0/0 documents processed")
-            return {
-                "processed": 0,
-                "skipped": skipped_count if not force else 0,
-                "failed": 0,
-                "no_action": 0,
-                "deleted_sources": deleted_sources,
-            }
+            return _with_run_outcomes(
+                {
+                    "processed": 0,
+                    "skipped": skipped_count if not force else 0,
+                    "failed": 0,
+                    "no_action": 0,
+                    "deleted_sources": deleted_sources,
+                }
+            )
 
         # Dry-run: just list what would be processed
         if dry_run:
@@ -514,7 +537,15 @@ class Pipeline:
                 current_step="complete",
                 progress=f"0/{len(documents)} documents processed (dry run)",
             )
-            return {"processed": 0, "skipped": 0, "failed": 0, "would_process": len(documents)}
+            return _with_run_outcomes(
+                {
+                    "processed": 0,
+                    "skipped": 0,
+                    "failed": 0,
+                    "no_action": 0,
+                    "would_process": len(documents),
+                }
+            )
 
         # Step 3: Process each document
         init_db()
@@ -525,6 +556,9 @@ class Pipeline:
             "skipped": 0,
             "failed": 0,
             "no_action": 0,
+            "_no_action_determined": 0,
+            "_needs_review": 0,
+            "_unreadable": 0,
             "enrichment_failed": 0,
             "deleted_sources": deleted_sources,
             "errors": [],
@@ -600,6 +634,7 @@ class Pipeline:
                         doc=doc,
                     )
                     stats["no_action"] += 1
+                    stats["_unreadable"] += 1
                     continue
 
                 # Analyze with Ollama (or fallback to rules if unavailable)
@@ -686,6 +721,7 @@ class Pipeline:
                         doc=doc,
                     )
                     stats["no_action"] += 1
+                    stats["_unreadable"] += 1
                     continue
 
                 # Handle "no action needed" documents
@@ -834,6 +870,7 @@ class Pipeline:
                         doc=doc,
                     )
                     stats["no_action"] += 1
+                    stats["_no_action_determined"] += 1
                     continue
 
                 # Store ALL actions in internal DB
@@ -989,6 +1026,7 @@ class Pipeline:
                         doc=doc,
                     )
                     stats["no_action"] += 1
+                    stats["_needs_review"] += 1
                     continue
                 for stored_action in stored_actions:
                     mark_action_ready(stored_action)
@@ -1125,7 +1163,7 @@ class Pipeline:
             total_duration,
         )
         stats["duration_seconds"] = round(total_duration, 2)
-        return stats
+        return _with_run_outcomes(stats)
 
     async def _fetch_documents(
         self,

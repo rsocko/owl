@@ -37,8 +37,19 @@ type QueueStatus = {
     total?: number;
   };
   result?: {
+    processed?: number;
+    no_action?: number;
+    skipped?: number;
+    failed?: number;
     documents_scanned?: number;
-    actions_created?: number;
+    would_process?: number;
+    outcomes?: {
+      action_required?: number;
+      no_action?: number;
+      needs_review?: number;
+      unreadable?: number;
+      failed?: number;
+    };
   };
 };
 
@@ -59,22 +70,55 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Something went wrong.';
 }
 
+export function parseApiDate(value: string) {
+  const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
+  return new Date(hasTimezone ? value : `${value}Z`);
+}
+
 function formatDateTime(value?: string | null) {
   if (!value) return '—';
-  const date = new Date(value);
+  const date = parseApiDate(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 function formatDuration(start?: string | null, end?: string | null) {
   if (!start || !end) return '—';
-  const started = new Date(start).getTime();
-  const finished = new Date(end).getTime();
+  const started = parseApiDate(start).getTime();
+  const finished = parseApiDate(end).getTime();
   if (Number.isNaN(started) || Number.isNaN(finished) || finished < started) return '—';
   const totalSeconds = Math.round((finished - started) / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   if (minutes === 0) return `${seconds}s`;
   return `${minutes}m ${seconds}s`;
+}
+
+export function summarizeActionQueueRun(result?: QueueStatus['result']) {
+  if (!result) {
+    return {
+      summary: '0 docs scanned · 0 action needed · 0 no action',
+      metrics: '0 needs review · 0 unreadable · 0 failed · 0 skipped',
+    };
+  }
+  if (result.would_process !== undefined) {
+    return {
+      summary: `${result.would_process} docs would be scanned`,
+      metrics: 'Preview only · no outcomes determined',
+    };
+  }
+
+  const actionRequired = result.outcomes?.action_required ?? result.processed ?? 0;
+  const noAction = result.outcomes?.no_action ?? result.no_action ?? 0;
+  const needsReview = result.outcomes?.needs_review ?? 0;
+  const unreadable = result.outcomes?.unreadable ?? 0;
+  const failed = result.outcomes?.failed ?? result.failed ?? 0;
+  const scanned = result.documents_scanned
+    ?? actionRequired + noAction + needsReview + unreadable + failed;
+
+  return {
+    summary: `${scanned} docs scanned · ${actionRequired} require action · ${noAction} no action`,
+    metrics: `${needsReview} needs review · ${unreadable} unreadable · ${failed} failed · ${result.skipped ?? 0} skipped`,
+  };
 }
 
 /* ── Run range filter options ── */
@@ -117,7 +161,7 @@ export function computeConfidence(eobRuns: EobRun[]): ConfidencePoint[] {
 }
 
 export function formatShortDate(value: string) {
-  const d = new Date(value);
+  const d = parseApiDate(value);
   if (Number.isNaN(d.getTime())) return value;
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
@@ -226,6 +270,7 @@ export default function History() {
 
     const queueRows: HistoryRow[] = [];
     if (queueStatus?.started_at || queueStatus?.finished_at || queueStatus?.status === 'running') {
+      const runSummary = summarizeActionQueueRun(queueStatus.result);
       queueRows.push({
         id: 'action-queue-latest',
         type: 'action_queue',
@@ -234,15 +279,15 @@ export default function History() {
         title: queueStatus.dry_run ? 'Action queue dry run' : 'Action queue run',
         status: queueStatus.status === 'running' ? 'Running' : queueStatus.status === 'ok' ? 'Completed' : queueStatus.status ?? 'Unknown',
         tone: queueStatus.status === 'running' ? 'warning' : queueStatus.status === 'ok' ? 'success' : 'muted',
-        summary: `${queueStatus.database?.pending ?? 0} pending · ${queueStatus.database?.completed ?? 0} completed · ${queueStatus.database?.dismissed ?? 0} dismissed`,
-        metrics: `${queueStatus.result?.documents_scanned ?? 0} docs scanned · limit ${queueStatus.limit ?? '—'}${queueStatus.read_only ? ' · read-only' : ''}`,
+        summary: runSummary.summary,
+        metrics: `${runSummary.metrics} · limit ${queueStatus.limit ?? '—'}${queueStatus.read_only ? ' · read-only' : ''}`,
         href: '/action-queue',
       });
     }
 
     return [...eobRows, ...queueRows].sort((a, b) => {
-      const aTime = a.startedAt ? new Date(a.startedAt).getTime() : 0;
-      const bTime = b.startedAt ? new Date(b.startedAt).getTime() : 0;
+      const aTime = a.startedAt ? parseApiDate(a.startedAt).getTime() : 0;
+      const bTime = b.startedAt ? parseApiDate(b.startedAt).getTime() : 0;
       return bTime - aTime;
     });
   }, [queueStatus, runs]);
@@ -256,7 +301,7 @@ export default function History() {
   const sortedEobRuns = useMemo(() => {
     return [...runs]
       .filter((r) => r.started_at)
-      .sort((a, b) => new Date(a.started_at!).getTime() - new Date(b.started_at!).getTime());
+      .sort((a, b) => parseApiDate(a.started_at!).getTime() - parseApiDate(b.started_at!).getTime());
   }, [runs]);
 
   const rangedRuns = useMemo(() => {
@@ -436,4 +481,3 @@ export default function History() {
     </>
   );
 }
-
