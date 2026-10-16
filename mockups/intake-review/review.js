@@ -7,7 +7,9 @@ const documents = [
     id: 1042, short: "Northline Energy · payment confirmation", provider: "Northline Energy",
     title: "Northline Energy — payment confirmation — 2026-10-14", type: "Receipt",
     suggestedType: "Payment confirmation", date: "2026-10-14", storage: "Household / Utilities",
-    tags: "Inbox, Utilities", amount: "$84.20", confidence: 96, assessment: "none",
+    suggestedDate: "2026-10-14", suggestedStorage: "Household / Utilities",
+    tags: "Inbox, Utilities", suggestedTags: "Inbox, Utilities, Payment", amount: "$84.20", confidence: 96, assessment: "none",
+    actionCandidates: [],
     reason: "A completed payment is evidence, not a new obligation. Keep it available for statement matching.",
     paperTitle: "Thank you for your payment.", paperKind: "PAYMENT CONFIRMATION",
     paperDescription: "Your payment has been received. This is a confirmation, not a request for payment.",
@@ -17,7 +19,12 @@ const documents = [
     id: 1043, short: "Cedar Dental · October invoice", provider: "Cedar Dental",
     title: "Cedar Dental — invoice — 2026-10-15", type: "Invoice",
     suggestedType: "Invoice", date: "2026-10-15", storage: "Household / Health",
-    tags: "Inbox, Health", amount: "$128.00", confidence: 94, assessment: "pay",
+    suggestedDate: "2026-10-15", suggestedStorage: "Household / Health",
+    tags: "Inbox, Health", suggestedTags: "Inbox, Health, Invoice", amount: "$128.00", confidence: 94, assessment: "pay",
+    actionCandidates: [
+      { key: "pay-balance", type: "PAY", title: "Pay Cedar Dental invoice", detail: "$128.00 due October 30", confidence: 94, selected: true },
+      { key: "review-adjustment", type: "REVIEW", title: "Verify insurance adjustment", detail: "Check benefits before paying the full balance", confidence: 72, selected: false }
+    ],
     reason: "An unpaid balance is due October 30. Confirm the obligation before it becomes a trusted task.",
     paperTitle: "Your account statement.", paperKind: "INVOICE",
     paperDescription: "Services have been billed. Please arrange payment of the balance shown below by October 30, 2026.",
@@ -27,7 +34,12 @@ const documents = [
     id: 1044, short: "Harbor Bank · account notice", provider: "Harbor Bank",
     title: "Harbor Bank — account notice — 2026-10-15", type: "Statement",
     suggestedType: "Statement", date: "2026-10-15", storage: "Household / Banking",
-    tags: "Inbox, Banking", amount: "Not stated", confidence: 67, assessment: "review",
+    suggestedDate: "2026-10-15", suggestedStorage: "Household / Banking",
+    tags: "Inbox, Banking", suggestedTags: "Inbox, Banking, Account notice", amount: "Not stated", confidence: 67, assessment: "review",
+    actionCandidates: [
+      { key: "review-terms", type: "REVIEW", title: "Review changed account terms", detail: "The notice is readable, but the required response is unclear", confidence: 83, selected: false },
+      { key: "respond-bank", type: "RESPOND", title: "Respond to Harbor Bank", detail: "Possible response requested; deadline was not extracted", confidence: 67, selected: false }
+    ],
     reason: "The notice mentions a response, but the OCR does not reliably identify a deadline. Human review is needed.",
     paperTitle: "An update about your account.", paperKind: "ACCOUNT NOTICE",
     paperDescription: "Please review the enclosed account terms. The scanned response instructions are unclear.",
@@ -40,7 +52,7 @@ const history = [
   { id: 1040, title: "Northline · service information", source: "Human", confidence: 88, sampled: false, reason: "Reviewer confirmed informational notice.", fingerprint: "1040:r9:v3", time: "Oct 16, 05:46 UTC" },
   { id: 1036, title: "Cedar Dental · benefits summary", source: "Automated", confidence: 93, sampled: true, reason: "Benefits explanation, not a bill. Selected for quality audit.", fingerprint: "1036:r6:v3", time: "Oct 16, 05:50 UTC" }
 ];
-const actions = [{ id: 1031, title: "Pay October water bill", provider: "Riverwater Utilities", amount: "$62.10", due: "Oct 24", completed: false }];
+const trustedActions = [{ id: "1031-pay", sourceDocumentId: 1031, type: "PAY", title: "Pay October water bill", provider: "Riverwater Utilities", detail: "$62.10 · due Oct 24", completed: false }];
 let current = documents[0];
 let dirty = false;
 let conflictPending = false;
@@ -128,6 +140,35 @@ function updateBulkControls() {
   byId("bulk-review").disabled = selectedVisible === 0;
   byId("bulk-review").textContent = selectedVisible ? `Mark ${selectedVisible} needs review` : "Mark needs review";
 }
+function selectedActionCandidates(doc = current) {
+  return (doc.actionCandidates || []).filter((candidate) => candidate.selected);
+}
+function renderActionCandidates() {
+  const container = byId("action-candidates");
+  const candidates = current.actionCandidates || [];
+  container.replaceChildren();
+  container.hidden = candidates.length === 0;
+  if (!candidates.length) return;
+  const heading = node("div", candidates.length === 1 ? "Candidate action" : "Candidate actions", "candidate-heading");
+  container.append(heading);
+  candidates.forEach((candidate) => {
+    const label = node("label", undefined, "candidate-action");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = candidate.selected;
+    checkbox.setAttribute("aria-label", `Select ${candidate.type} action: ${candidate.title}`);
+    checkbox.addEventListener("change", () => {
+      candidate.selected = checkbox.checked;
+      updateControls();
+    });
+    const copy = node("span");
+    const top = node("span", undefined, "candidate-action-top");
+    top.append(node("strong", candidate.type), node("span", `${candidate.confidence}%`, "candidate-confidence"));
+    copy.append(top, node("span", candidate.title, "candidate-title"), node("small", candidate.detail));
+    label.append(checkbox, copy);
+    container.append(label);
+  });
+}
 function loadDocument() {
   fields.forEach((field) => { byId(`field-${field}`).value = current[field]; });
   byId("source-heading").textContent = current.short;
@@ -145,14 +186,17 @@ function loadDocument() {
   document.querySelector('[data-suggestion="correspondent"] small').textContent = `Traditional · existing #${current.correspondentId}`;
   byId("suggested-type").textContent = current.suggestedType;
   byId("type-provenance").textContent = existingTypes.has(current.suggestedType) ? "Traditional · existing type" : "Paperless AI · new name";
-  byId("owned-status").value = current.assessment === "pay" ? "Unconfirmed PAY candidate" : current.assessment === "review" ? "Needs Review" : "No action identified";
+  byId("suggested-date").textContent = current.suggestedDate;
+  byId("suggested-storage").textContent = current.suggestedStorage;
+  byId("suggested-tags").textContent = current.suggestedTags;
+  byId("owned-status").value = current.actionCandidates.length ? `${current.actionCandidates.length} candidate action${current.actionCandidates.length === 1 ? "" : "s"}` : current.assessment === "review" ? "Needs Review" : "No action identified";
   byId("metadata-heading").textContent = current.assessment === "review" ? "Check the source" : "Ready to file";
-  byId("assessment-title").textContent = current.assessment === "pay" ? "PAY · provisional action" : current.assessment === "review" ? "Needs human review" : "No action needed";
+  byId("assessment-title").textContent = current.actionCandidates.length ? `${current.actionCandidates.length} possible action${current.actionCandidates.length === 1 ? "" : "s"}` : current.assessment === "review" ? "Needs human review" : "No action needed";
   byId("assessment-reason").textContent = current.reason;
   byId("assessment-confidence").textContent = `${current.confidence}% confidence`;
   byId("assessment-icon").textContent = current.assessment === "none" ? "✓" : "?";
-  byId("confirm-action").textContent = current.assessment === "pay" ? "Confirm PAY action" : "Confirm action";
-  byId("routing-help").textContent = current.assessment === "pay" ? "Confirming sends this obligation to the Action Queue and makes it eligible for Mission Control. It does not mark it paid." : current.assessment === "review" ? "Uncertain documents stay in review. No trusted Mission Control task is created." : "No Mission Control task will be created. Future statements can still match this receipt.";
+  renderActionCandidates();
+  byId("routing-help").textContent = current.actionCandidates.length ? "Confirm only the selected actions. Each keeps an independent lifecycle and becomes eligible for Mission Control; nothing is marked completed." : current.assessment === "review" ? "Uncertain documents stay in review. No trusted Mission Control task is created." : "No Mission Control task will be created. Future statements can still match this receipt.";
   dirty = false;
   byId("revision-label").textContent = `Loaded Paperless revision r${current.revision}`;
   byId("paper-title").closest(".paper").classList.remove("zoomed");
@@ -170,11 +214,15 @@ function updateFreshness() {
 }
 function updateControls() {
   const blocked = scenario === "unauthorized" || !pendingDocuments().includes(current);
+  const selectedActions = selectedActionCandidates();
   byId("save-metadata").disabled = !dirty || blocked || analysisRunning;
   byId("save-state").textContent = dirty ? "Unsaved changes" : "No unsaved changes";
   byId("save-state").className = `pill ${dirty ? "warning" : "neutral"}`;
   byId("file-document").disabled = dirty || current.stale || blocked || analysisRunning;
-  byId("confirm-action").disabled = dirty || current.stale || blocked || current.assessment !== "pay" || analysisRunning;
+  byId("file-document").textContent = current.actionCandidates.length ? "Override candidates — file with no action" : "File — no action needed";
+  byId("file-document").className = current.actionCandidates.length ? "wide override-action" : "primary wide";
+  byId("confirm-action").disabled = dirty || current.stale || blocked || selectedActions.length === 0 || analysisRunning;
+  byId("confirm-action").textContent = selectedActions.length ? `Confirm ${selectedActions.length} selected action${selectedActions.length === 1 ? "" : "s"}` : "Select an action to confirm";
   byId("needs-review").disabled = dirty || blocked || analysisRunning;
   byId("analyze").disabled = dirty || blocked || analysisRunning;
   byId("analyze").textContent = analysisRunning ? "Analyzing…" : "Re-evaluate now";
@@ -182,7 +230,12 @@ function updateControls() {
   document.querySelectorAll("[data-apply]").forEach((button) => {
     button.disabled = blocked || !["ready", "conflict"].includes(scenario) || analysisRunning;
   });
+  byId("action-candidates").querySelectorAll("input").forEach((checkbox) => {
+    checkbox.disabled = blocked || dirty || current.stale || analysisRunning;
+  });
   byId("metadata-form").querySelectorAll("input:not([readonly]), select").forEach((field) => { field.disabled = blocked || analysisRunning; });
+  byId("metadata-readiness-status").textContent = dirty ? "Unsaved metadata changes" : current.tags.toLowerCase().includes("inbox") ? "Ready to leave Inbox" : "Filed in Paperless";
+  byId("action-assessment-status").textContent = current.stale ? "Reanalysis pending" : selectedActions.length ? `${selectedActions.length} action${selectedActions.length === 1 ? "" : "s"} selected` : current.actionCandidates.length ? "Candidates need a decision" : current.assessment === "review" ? "Needs human review" : "No action likely";
 }
 function markDirty() {
   dirty = fields.some((field) => byId(`field-${field}`).value !== current[field]);
@@ -232,12 +285,25 @@ function routeDocument(outcome) {
     doc.activeHistoryEntry = null;
   }
   if (outcome === "filed") {
-    const entry = { id: doc.id, title: doc.title, source: "Human", confidence: doc.confidence, sampled: false, reason: doc.assessment === "pay" ? "Reviewer overrode the PAY candidate: no action needed." : "Reviewer confirmed no action needed.", fingerprint: `${doc.id}:r${doc.revision}:v3`, time: "Just now · demo" };
+    const candidateTypes = doc.actionCandidates.map((candidate) => candidate.type).join(", ");
+    const entry = { id: doc.id, title: doc.title, source: "Human", confidence: doc.confidence, sampled: false, reason: candidateTypes ? `Reviewer overrode ${candidateTypes} candidate${doc.actionCandidates.length === 1 ? "" : "s"}: no action needed.` : "Reviewer confirmed no action needed.", fingerprint: `${doc.id}:r${doc.revision}:v3`, time: "Just now · demo" };
     history.unshift(entry);
     doc.activeHistoryEntry = entry;
   }
-  if (outcome === "action" && !actions.some((action) => action.id === doc.id)) {
-    actions.push({ id: doc.id, title: `Pay ${doc.provider} invoice`, provider: doc.provider, amount: doc.amount, due: "Oct 30", completed: false });
+  if (outcome === "action") {
+    selectedActionCandidates(doc).forEach((candidate) => {
+      const id = `${doc.id}-${candidate.key}`;
+      if (trustedActions.some((action) => action.id === id)) return;
+      trustedActions.push({
+        id,
+        sourceDocumentId: doc.id,
+        type: candidate.type,
+        title: candidate.title,
+        provider: doc.provider,
+        detail: candidate.detail,
+        completed: false
+      });
+    });
   }
   doc.status = outcome;
   if (outcome !== "review") doc.tags = doc.tags.split(",").filter((tag) => tag.trim().toLowerCase() !== "inbox").join(",").trim();
@@ -250,14 +316,15 @@ function routeDocument(outcome) {
   byId("inbox-empty").hidden = !empty;
   renderActions();
   renderHistory();
-  toast(outcome === "filed" ? "Filed to no-action history. Inbox tag removed; matching remains enabled. No Mission Control task created." : outcome === "review" ? "Kept in Needs Review. Not sent to Mission Control." : "PAY action confirmed. Eligible for Mission Control; not marked paid.");
+  const confirmedCount = selectedActionCandidates(doc).length;
+  toast(outcome === "filed" ? "Filed to no-action history. Inbox tag removed; matching remains enabled. No Mission Control task created." : outcome === "review" ? "Kept in Needs Review. Not sent to Mission Control." : `${confirmedCount} action${confirmedCount === 1 ? "" : "s"} confirmed with independent lifecycles. Eligible for Mission Control; nothing marked completed.`);
   if (!empty && outcome !== "review") byId("source-heading").scrollIntoView({ block: "nearest" });
 }
 function renderActions() {
   byId("trusted-actions").replaceChildren();
-  for (const action of actions) {
+  for (const action of trustedActions) {
     const item = node("article", undefined, "action-item");
-    item.append(node("span", action.completed ? "Completed" : "PAY · confirmed", `pill ${action.completed ? "success" : "warning"}`), node("h3", action.title), node("p", `${action.amount} · due ${action.due} · Paperless #${action.id}`));
+    item.append(node("span", action.completed ? "Completed" : `${action.type} · confirmed`, `pill ${action.completed ? "success" : "warning"}`), node("h3", action.title), node("p", `${action.detail} · Paperless #${action.sourceDocumentId}`));
     item.append(node("div", action.completed ? "Explicit user completion · settlement recorded" : "Human-confirmed · eligible for Mission Control sync", "inline-meta"));
     const complete = node("button", action.completed ? "Completed" : "Mark completed", action.completed ? "" : "primary");
     complete.type = "button";
@@ -270,7 +337,7 @@ function renderActions() {
     item.append(complete);
     byId("trusted-actions").append(item);
   }
-  const count = actions.filter((action) => !action.completed).length;
+  const count = trustedActions.filter((action) => !action.completed).length;
   byId("action-count").textContent = count;
   byId("confirmed-count").textContent = count;
   byId("review-count").textContent = documents.filter((doc) => doc.status === "review").length + history.filter((entry) => !isSuperseded(entry) && (entry.reopened || (entry.sampled && !entry.auditConfirmed)) && !documents.some((doc) => doc.id === entry.id)).length;
@@ -348,8 +415,9 @@ function ensureReviewDocument(entry) {
   documents.push({
     id: entry.id, short: entry.title, title: entry.title, provider,
     correspondent: provider, correspondentId: 18, type: "Statement", suggestedType: "Statement",
-    date: "2026-10-15", storage: "Household / Utilities", tags: "Audit sample",
+    date: "2026-10-15", suggestedDate: "2026-10-15", storage: "Household / Utilities", suggestedStorage: "Household / Utilities", tags: "Audit sample", suggestedTags: "Audit sample, Reference",
     amount: "Not applicable", confidence: entry.confidence, assessment: "none",
+    actionCandidates: [],
     reason: entry.reason, paperTitle: "For your records.", paperKind: "REFERENCE DOCUMENT",
     paperDescription: "This document is not a request for payment. Retain it for your records.",
     callout: "REFERENCE · Human audit requested", revision: 12, status: "review", stale: false,
@@ -414,9 +482,17 @@ document.querySelectorAll("[data-apply]").forEach((button) => {
   button.addEventListener("click", () => {
     const field = button.dataset.apply;
     if (field === "type" && !existingTypes.has(current.suggestedType)) { byId("taxonomy-dialog").showModal(); return; }
-    byId(`field-${field}`).value = field === "title" ? current.title : field === "type" ? current.suggestedType : current.provider;
+    const suggestions = {
+      title: current.title,
+      correspondent: current.provider,
+      type: current.suggestedType,
+      date: current.suggestedDate,
+      storage: current.suggestedStorage,
+      tags: current.suggestedTags
+    };
+    byId(`field-${field}`).value = suggestions[field];
     markDirty();
-    toast(`Paperless ${field === "correspondent" || field === "type" ? "taxonomy" : "AI"} suggestion staged. Save metadata to apply it.`);
+    toast(`Paperless ${["correspondent", "type", "storage"].includes(field) ? "existing-value" : "AI"} suggestion staged. Save metadata to apply it.`);
   });
 });
 byId("create-taxonomy").addEventListener("click", () => {
@@ -432,7 +508,7 @@ byId("keep-paperless").addEventListener("click", () => resolveConflict("paperles
 byId("re-edit").addEventListener("click", () => resolveConflict("edit"));
 byId("apply-owl").addEventListener("click", () => resolveConflict("owl"));
 byId("file-document").addEventListener("click", () => {
-  if (current.assessment !== "none" && !window.confirm("Override this provisional assessment and confirm that no action is needed?")) return;
+  if (current.actionCandidates.length && !window.confirm(`Override ${current.actionCandidates.length} action candidate${current.actionCandidates.length === 1 ? "" : "s"} and confirm that no action is needed? The override will be retained in audit history.`)) return;
   routeDocument("filed");
 });
 byId("needs-review").addEventListener("click", () => routeDocument("review"));
