@@ -61,7 +61,10 @@ class TestQueueRunSettings:
             resp = client.post("/api/queue/run", json={"dry_run": True})
 
         assert resp.status_code == 200
-        assert resp.json()["limit"] == 12
+        body = resp.json()
+        assert body["limit"] == 12
+        assert body["started_at"].endswith("Z")
+        assert body["finished_at"].endswith("Z")
         assert mock_run.await_args.kwargs["limit"] == 12
 
     def test_all_documents_bypasses_persisted_saved_view(self, client, mock_paperless):
