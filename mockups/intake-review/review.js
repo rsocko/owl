@@ -169,7 +169,7 @@ function updateFreshness() {
   byId("freshness-metric").textContent = `${documents.filter((doc) => doc.stale).length + 1} stale`;
 }
 function updateControls() {
-  const blocked = scenario === "unauthorized";
+  const blocked = scenario === "unauthorized" || !pendingDocuments().includes(current);
   byId("save-metadata").disabled = !dirty || blocked || analysisRunning;
   byId("save-state").textContent = dirty ? "Unsaved changes" : "No unsaved changes";
   byId("save-state").className = `pill ${dirty ? "warning" : "neutral"}`;
@@ -180,9 +180,9 @@ function updateControls() {
   byId("analyze").textContent = analysisRunning ? "Analyzing…" : "Re-evaluate now";
   byId("analysis-hint").textContent = dirty ? "Save metadata before routing or re-evaluating." : current.stale ? "Targeted reanalysis pending · run now to bypass debounce." : "Evaluated against saved metadata.";
   document.querySelectorAll("[data-apply]").forEach((button) => {
-    button.disabled = !["ready", "conflict"].includes(scenario) || analysisRunning;
+    button.disabled = blocked || !["ready", "conflict"].includes(scenario) || analysisRunning;
   });
-  byId("metadata-form").querySelectorAll("input:not([readonly]), select").forEach((field) => { field.disabled = analysisRunning; });
+  byId("metadata-form").querySelectorAll("input:not([readonly]), select").forEach((field) => { field.disabled = blocked || analysisRunning; });
 }
 function markDirty() {
   dirty = fields.some((field) => byId(`field-${field}`).value !== current[field]);
@@ -227,9 +227,14 @@ function resolveConflict(mode) {
 }
 function routeDocument(outcome) {
   const doc = current;
+  if (outcome !== "review") {
+    if (doc.activeHistoryEntry) doc.activeHistoryEntry.reopened = false;
+    doc.activeHistoryEntry = null;
+  }
   if (outcome === "filed") {
     const entry = { id: doc.id, title: doc.title, source: "Human", confidence: doc.confidence, sampled: false, reason: doc.assessment === "pay" ? "Reviewer overrode the PAY candidate: no action needed." : "Reviewer confirmed no action needed.", fingerprint: `${doc.id}:r${doc.revision}:v3`, time: "Just now · demo" };
     history.unshift(entry);
+    doc.activeHistoryEntry = entry;
   }
   if (outcome === "action" && !actions.some((action) => action.id === doc.id)) {
     actions.push({ id: doc.id, title: `Pay ${doc.provider} invoice`, provider: doc.provider, amount: doc.amount, due: "Oct 30", completed: false });
@@ -268,8 +273,18 @@ function renderActions() {
   const count = actions.filter((action) => !action.completed).length;
   byId("action-count").textContent = count;
   byId("confirmed-count").textContent = count;
-  byId("review-count").textContent = documents.filter((doc) => doc.status === "review").length + history.filter((entry) => (entry.reopened || (entry.sampled && !entry.auditConfirmed)) && !documents.some((doc) => doc.id === entry.id)).length;
-  byId("filed-count").textContent = history.filter((entry) => !entry.sampled && !entry.reopened).length;
+  byId("review-count").textContent = documents.filter((doc) => doc.status === "review").length + history.filter((entry) => !isSuperseded(entry) && (entry.reopened || (entry.sampled && !entry.auditConfirmed)) && !documents.some((doc) => doc.id === entry.id)).length;
+  byId("filed-count").textContent = history.filter((entry) => !isSuperseded(entry) && !entry.sampled && !entry.reopened).length;
+}
+function isSuperseded(entry) {
+  const doc = documents.find((candidate) => candidate.id === entry.id);
+  return Boolean(doc && doc.activeHistoryEntry !== entry);
+}
+function allowReviewRemoval(entry) {
+  if (current.id !== entry.id || !dirty) return true;
+  if (!window.confirm("This review has unsaved metadata. Discard the draft before closing the review?")) return false;
+  loadDocument();
+  return true;
 }
 function renderHistory() {
   const source = byId("history-source").value;
@@ -294,13 +309,17 @@ function renderHistory() {
       byId("audit-heading").textContent = entry.title;
       byId("audit-reason").textContent = entry.reason;
       byId("audit-provenance").textContent = `${entry.source} · ${entry.confidence}% confidence · ${entry.time} · fingerprint ${entry.fingerprint} · analyzer v3 / prompt v5`;
-      byId("audit-reopen").disabled = Boolean(entry.reopened);
+      byId("audit-superseded").hidden = !isSuperseded(entry);
+      byId("audit-reopen").disabled = Boolean(entry.reopened) || isSuperseded(entry);
+      byId("audit-confirm").disabled = isSuperseded(entry);
       byId("audit-dialog").showModal();
     });
     review.append(inspect);
     const button = node("button", entry.reopened ? "Reopened · undo" : "Reopen");
     button.type = "button";
+    button.disabled = isSuperseded(entry);
     button.addEventListener("click", () => {
+      if (isSuperseded(entry) || (entry.reopened && !allowReviewRemoval(entry))) return;
       entry.reopened = !entry.reopened;
       if (entry.reopened) ensureReviewDocument(entry);
       else {
@@ -315,6 +334,7 @@ function renderHistory() {
     });
     review.append(button);
     if (entry.reopened) review.append(node("small", "Needs Review · original decision preserved"));
+    if (isSuperseded(entry)) review.append(node("small", "Superseded · historical record only"));
     row.append(title, sourceCell, node("td", `${entry.confidence}%`), review);
     byId("history-rows").append(row);
   });
@@ -323,7 +343,7 @@ function renderHistory() {
 }
 function ensureReviewDocument(entry) {
   const existing = documents.find((doc) => doc.id === entry.id);
-  if (existing) { existing.status = "review"; return; }
+  if (existing) { existing.status = "review"; existing.activeHistoryEntry = entry; return; }
   const provider = entry.title.split(" · ")[0];
   documents.push({
     id: entry.id, short: entry.title, title: entry.title, provider,
@@ -332,7 +352,8 @@ function ensureReviewDocument(entry) {
     amount: "Not applicable", confidence: entry.confidence, assessment: "none",
     reason: entry.reason, paperTitle: "For your records.", paperKind: "REFERENCE DOCUMENT",
     paperDescription: "This document is not a request for payment. Retain it for your records.",
-    callout: "REFERENCE · Human audit requested", revision: 12, status: "review", stale: false
+    callout: "REFERENCE · Human audit requested", revision: 12, status: "review", stale: false,
+    activeHistoryEntry: entry
   });
 }
 function syncIntake() {
@@ -461,6 +482,11 @@ byId("simulate-match").addEventListener("click", () => {
 ["history-source", "history-confidence", "history-sampled"].forEach((id) => byId(id).addEventListener("change", renderHistory));
 function finishAudit(reopen) {
   if (!auditEntry) return;
+  if (isSuperseded(auditEntry)) {
+    toast("This historical decision is read-only because a newer disposition superseded it.");
+    return;
+  }
+  if (!reopen && !allowReviewRemoval(auditEntry)) return;
   auditEntry.reopened = reopen;
   auditEntry.auditConfirmed = !reopen;
   if (reopen) ensureReviewDocument(auditEntry);
