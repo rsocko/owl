@@ -364,6 +364,7 @@ function syncIntake() {
   }
   byId("intake-layout").hidden = !pending.length || scenario === "unauthorized" || scenario === "empty";
   byId("inbox-empty").hidden = (pending.length > 0 && scenario !== "empty") || scenario === "unauthorized";
+  updateControls();
 }
 function setScenario(value) {
   scenario = value;
