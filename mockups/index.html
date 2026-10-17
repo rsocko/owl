@@ -419,7 +419,7 @@
       <dl class="summary" aria-label="Mockup inventory summary">
         <div>
           <dt>Mockups</dt>
-          <dd>11</dd>
+          <dd>12</dd>
         </div>
         <div>
           <dt>Feature areas</dt>
@@ -429,7 +429,7 @@
     </section>
 
     <div class="toolbar">
-      <p id="result-count" aria-live="polite">Showing all 11 mockups</p>
+      <p id="result-count" aria-live="polite">Showing all 12 mockups</p>
       <label class="search">
         <span class="sr-only" hidden>Filter mockups</span>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -443,9 +443,17 @@
     <section class="mockup-group" data-group>
       <div class="group-header">
         <h2>Triage &amp; correction</h2>
-        <p>8 concepts for review queues, metadata quality, insights, and rules.</p>
+        <p>9 concepts for intake, review queues, metadata quality, insights, and rules.</p>
       </div>
       <div class="mockup-list">
+        <a class="mockup-link" href="intake-review/index.html" data-search="intake inbox metadata action review paperless suggestions keyboard thumbnails save file">
+          <span>
+            <span class="mockup-title">Intake &amp; Action Review</span>
+            <span class="mockup-path">intake-review/index.html</span>
+          </span>
+          <p class="mockup-description">Keyboard-friendly inbox triage with source thumbnails, clickable Paperless suggestions, tag pills, Save &amp; file, and a separate action-review step.</p>
+          <span class="open-label">Open <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></span>
+        </a>
         <a class="mockup-link" href="triage-correction/triage-unified.html" data-search="triage unified action queue review keyboard bulk eob grouping orphan">
           <span>
             <span class="mockup-title">Unified Triage Queue</span>
@@ -579,7 +587,7 @@
 
       count.textContent = query
         ? `${visibleCount} mockup${visibleCount === 1 ? "" : "s"} found`
-        : "Showing all 11 mockups";
+        : "Showing all 12 mockups";
       emptyState.style.display = visibleCount === 0 ? "block" : "none";
     });
   </script>

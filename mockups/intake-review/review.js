@@ -8,16 +8,18 @@ const documents = [
     title: "Northline Energy — payment confirmation — 2026-10-14", type: "Receipt",
     suggestedType: "Payment confirmation", date: "2026-10-14", storage: "Household / Utilities",
     tags: "Inbox, Utilities", amount: "$84.20", confidence: 96, assessment: "none",
+    due: null, reference: "Account •••• 4821", recurring: "Monthly utility payment evidence",
     reason: "A completed payment is evidence, not a new obligation. Keep it available for statement matching.",
     paperTitle: "Thank you for your payment.", paperKind: "PAYMENT CONFIRMATION",
-    paperDescription: "Your payment has been received. This is a confirmation, not a request for payment.",
-    callout: "PAID · No outstanding balance", correspondentId: 18, revision: 12, status: "pending", stale: false
+    paperDescription: "Your payment has been received and the account balance is $0.00.",
+    callout: "PAYMENT RECEIVED · BALANCE $0.00", correspondentId: 18, revision: 12, status: "pending", stale: false
   },
   {
     id: 1043, short: "Cedar Dental · October invoice", provider: "Cedar Dental",
     title: "Cedar Dental — invoice — 2026-10-15", type: "Invoice",
     suggestedType: "Invoice", date: "2026-10-15", storage: "Household / Health",
     tags: "Inbox, Health", amount: "$128.00", confidence: 94, assessment: "pay",
+    due: "October 30, 2026", reference: "Account •••• 4821", recurring: "Likely monthly invoice",
     reason: "An unpaid balance is due October 30. Confirm the obligation before it becomes a trusted task.",
     paperTitle: "Your account statement.", paperKind: "INVOICE",
     paperDescription: "Services have been billed. Please arrange payment of the balance shown below by October 30, 2026.",
@@ -28,6 +30,7 @@ const documents = [
     title: "Harbor Bank — account notice — 2026-10-15", type: "Statement",
     suggestedType: "Statement", date: "2026-10-15", storage: "Household / Banking",
     tags: "Inbox, Banking", amount: "Not stated", confidence: 67, assessment: "review",
+    due: "Not reliably extracted", reference: "Account •••• 4821", recurring: "Possible recurring account notice",
     reason: "The notice mentions a response, but the OCR does not reliably identify a deadline. Human review is needed.",
     paperTitle: "An update about your account.", paperKind: "ACCOUNT NOTICE",
     paperDescription: "Please review the enclosed account terms. The scanned response instructions are unclear.",
@@ -68,7 +71,7 @@ function toast(message) {
   toastTimer = setTimeout(() => { byId("toast").hidden = true; }, 6500);
 }
 function navigate() {
-  const route = ["intake", "actions", "history", "processing"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "intake";
+  const route = ["intake", "review", "actions", "history", "processing"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "intake";
   document.querySelectorAll(".screen").forEach((screen) => { screen.hidden = screen.id !== route; });
   document.querySelectorAll("[data-route]").forEach((link) => {
     if (link.dataset.route === route) link.setAttribute("aria-current", "page");
@@ -76,7 +79,9 @@ function navigate() {
   });
   if (route === "history") renderHistory();
   if (route === "actions") renderActions();
-  document.title = `OWL · ${ { intake: "Intake review", actions: "Trusted actions", history: "No-action history", processing: "Processing freshness" }[route]} — UX proposal`;
+  if (route === "review") loadActionReview();
+  window.scrollTo(0, 0);
+  document.title = `OWL · ${ { intake: "Intake review", review: "Action review", actions: "Trusted actions", history: "No-action history", processing: "Processing freshness" }[route]} — UX proposal`;
 }
 function pendingDocuments() {
   return documents.filter((doc) => ["pending", "review"].includes(doc.status));
@@ -84,6 +89,14 @@ function pendingDocuments() {
 function visibleDocuments() {
   const query = byId("queue-search").value.trim().toLowerCase();
   return pendingDocuments().filter((doc) => `${doc.short} ${doc.title} ${doc.correspondent}`.toLowerCase().includes(query));
+}
+function selectDocument(doc) {
+  if (dirty && !window.confirm("Discard unsaved metadata changes and review another document?")) return false;
+  current = doc;
+  conflictPending = false;
+  loadDocument();
+  renderQueue();
+  return true;
 }
 function renderQueue() {
   const list = byId("document-list");
@@ -100,19 +113,16 @@ function renderQueue() {
       else selection.delete(doc.id);
       updateBulkControls();
     });
+    const thumbnail = node("span", undefined, "document-thumb");
+    thumbnail.setAttribute("aria-hidden", "true");
+    thumbnail.textContent = doc.type.slice(0, 3).toUpperCase();
     const button = node("button", undefined, "document-select");
     button.type = "button";
     button.setAttribute("aria-pressed", String(doc === current));
     const kind = doc.status === "review" ? "Needs Review" : doc.assessment === "none" ? "Likely no action" : "Action candidate";
     button.append(node("span", kind, `pill ${doc.status === "review" ? "warning" : doc.assessment === "none" ? "success" : "purple"}`), node("strong", doc.short), node("small", `#${doc.id} · ${doc.confidence}% confidence`));
-    button.addEventListener("click", () => {
-      if (dirty && !window.confirm("Discard unsaved metadata changes and review another document?")) return;
-      current = doc;
-      conflictPending = false;
-      loadDocument();
-      renderQueue();
-    });
-    row.append(checkbox, button);
+    button.addEventListener("click", () => selectDocument(doc));
+    row.append(checkbox, thumbnail, button);
     list.append(row);
   }
   byId("queue-empty").hidden = visible.length > 0;
@@ -128,8 +138,30 @@ function updateBulkControls() {
   byId("bulk-review").disabled = selectedVisible === 0;
   byId("bulk-review").textContent = selectedVisible ? `Mark ${selectedVisible} needs review` : "Mark needs review";
 }
+function tagValues() {
+  return byId("field-tags").value.split(",").map((tag) => tag.trim()).filter(Boolean);
+}
+function setTags(tags) {
+  byId("field-tags").value = [...new Set(tags)].join(", ");
+  renderTags();
+  markDirty();
+}
+function renderTags() {
+  const container = byId("tag-pills");
+  container.replaceChildren();
+  for (const tag of tagValues()) {
+    const pill = node("span", tag, "tag-pill");
+    const remove = node("button", "×");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Remove ${tag} tag`);
+    remove.addEventListener("click", () => setTags(tagValues().filter((value) => value !== tag)));
+    pill.append(remove);
+    container.append(pill);
+  }
+}
 function loadDocument() {
   fields.forEach((field) => { byId(`field-${field}`).value = current[field]; });
+  renderTags();
   byId("source-heading").textContent = current.short;
   byId("paper-provider").textContent = current.provider.toUpperCase();
   byId("paper-kind").textContent = current.paperKind;
@@ -146,13 +178,28 @@ function loadDocument() {
   byId("suggested-type").textContent = current.suggestedType;
   byId("type-provenance").textContent = existingTypes.has(current.suggestedType) ? "Traditional · existing type" : "Paperless AI · new name";
   byId("owned-status").value = current.assessment === "pay" ? "Unconfirmed PAY candidate" : current.assessment === "review" ? "Needs Review" : "No action identified";
-  byId("metadata-heading").textContent = current.assessment === "review" ? "Check the source" : "Ready to file";
+  byId("metadata-heading").textContent = "Document metadata";
   byId("assessment-title").textContent = current.assessment === "pay" ? "PAY · provisional action" : current.assessment === "review" ? "Needs human review" : "No action needed";
   byId("assessment-reason").textContent = current.reason;
   byId("assessment-confidence").textContent = `${current.confidence}% confidence`;
   byId("assessment-icon").textContent = current.assessment === "none" ? "✓" : "?";
-  byId("confirm-action").textContent = current.assessment === "pay" ? "Confirm PAY action" : "Confirm action";
-  byId("routing-help").textContent = current.assessment === "pay" ? "Confirming sends this obligation to the Action Queue and makes it eligible for Mission Control. It does not mark it paid." : current.assessment === "review" ? "Uncertain documents stay in review. No trusted Mission Control task is created." : "No Mission Control task will be created. Future statements can still match this receipt.";
+  byId("pattern-title").textContent = current.recurring;
+  byId("pattern-detail").textContent = current.assessment === "pay"
+    ? "Naming consistency can be applied here. Amount, due date, and payee are reviewed in the separate Action review."
+    : current.assessment === "review"
+      ? "OWL found a possible series, but the source is too unclear to automate missing-document checks."
+      : "Consistent naming can be applied now; missing-period checks stay in the Statements workflow.";
+  const actionCandidate = current.assessment === "pay";
+  const uncertain = current.assessment === "review";
+  byId("disposition-heading").textContent = actionCandidate ? "Proposed action found" : uncertain ? "Needs a closer look" : "Ready to file";
+  byId("routing-help").textContent = actionCandidate
+    ? "Save metadata here, then review payee, amount, and due date in a focused action step."
+    : uncertain
+      ? "Keep this document in review without creating trusted work."
+      : "Saves metadata, removes Inbox, and records no action. Matching remains enabled.";
+  byId("file-document").hidden = actionCandidate || uncertain;
+  byId("confirm-action").hidden = !actionCandidate;
+  byId("needs-review").textContent = uncertain ? "Keep in Needs Review" : "Needs review";
   dirty = false;
   byId("revision-label").textContent = `Loaded Paperless revision r${current.revision}`;
   byId("paper-title").closest(".paper").classList.remove("zoomed");
@@ -173,9 +220,9 @@ function updateControls() {
   byId("save-metadata").disabled = !dirty || blocked || analysisRunning;
   byId("save-state").textContent = dirty ? "Unsaved changes" : "No unsaved changes";
   byId("save-state").className = `pill ${dirty ? "warning" : "neutral"}`;
-  byId("file-document").disabled = dirty || current.stale || blocked || analysisRunning;
-  byId("confirm-action").disabled = dirty || current.stale || blocked || current.assessment !== "pay" || analysisRunning;
-  byId("needs-review").disabled = dirty || blocked || analysisRunning;
+  byId("file-document").disabled = blocked || analysisRunning;
+  byId("confirm-action").disabled = blocked || current.assessment !== "pay" || analysisRunning;
+  byId("needs-review").disabled = blocked || analysisRunning;
   byId("analyze").disabled = dirty || blocked || analysisRunning;
   byId("analyze").textContent = analysisRunning ? "Analyzing…" : "Re-evaluate now";
   byId("analysis-hint").textContent = dirty ? "Save metadata before routing or re-evaluating." : current.stale ? "Targeted reanalysis pending · run now to bypass debounce." : "Evaluated against saved metadata.";
@@ -183,20 +230,38 @@ function updateControls() {
     button.disabled = blocked || !["ready", "conflict"].includes(scenario) || analysisRunning;
   });
   byId("metadata-form").querySelectorAll("input:not([readonly]), select").forEach((field) => { field.disabled = blocked || analysisRunning; });
+  byId("tag-pills").querySelectorAll("button").forEach((button) => { button.disabled = blocked || analysisRunning; });
 }
 function markDirty() {
   dirty = fields.some((field) => byId(`field-${field}`).value !== current[field]);
   updateControls();
 }
-function saveMetadata() {
+function validateMetadata() {
+  if (!byId("field-title").value.trim()) {
+    toast("Add a document title before continuing.");
+    byId("field-title").focus();
+    return false;
+  }
+  if (!existingTypes.has(byId("field-type").value.trim())) {
+    toast("Choose an existing document type, or approve the new Paperless AI suggestion first.");
+    byId("field-type").focus();
+    return false;
+  }
+  return true;
+}
+function commitMetadata(markAssessmentStale = true) {
+  if (!dirty) return;
   fields.forEach((field) => { current[field] = byId(`field-${field}`).value.trim(); });
   current.revision += 1;
-  current.stale = true;
+  current.stale = markAssessmentStale;
   dirty = false;
   byId("revision-label").textContent = `Loaded Paperless revision r${current.revision}`;
   updateFreshness();
   updateControls();
   renderQueue();
+}
+function saveMetadata() {
+  commitMetadata(true);
   toast("Metadata saved. Assessment is stale; a targeted rerun is pending. Use Re-evaluate now to simulate it. No task created.");
 }
 function showConflict() {
@@ -253,6 +318,31 @@ function routeDocument(outcome) {
   toast(outcome === "filed" ? "Filed to no-action history. Inbox tag removed; matching remains enabled. No Mission Control task created." : outcome === "review" ? "Kept in Needs Review. Not sent to Mission Control." : "PAY action confirmed. Eligible for Mission Control; not marked paid.");
   if (!empty && outcome !== "review") byId("source-heading").scrollIntoView({ block: "nearest" });
 }
+function loadActionReview() {
+  if (current.assessment !== "pay" || !pendingDocuments().includes(current)) {
+    const candidate = pendingDocuments().find((doc) => doc.assessment === "pay");
+    if (!candidate) {
+      location.hash = "intake";
+      toast("There are no proposed actions waiting for review.");
+      return;
+    }
+    current = candidate;
+    loadDocument();
+    renderQueue();
+  }
+  byId("review-action-title").textContent = `Pay ${current.provider} invoice`;
+  byId("review-action-subtitle").textContent = `Paperless #${current.id} · proposed PAY action`;
+  byId("review-confidence").textContent = `${current.confidence}% confidence`;
+  byId("review-payee").textContent = current.provider;
+  byId("review-amount").textContent = current.amount;
+  byId("review-due").textContent = current.due || "Not extracted";
+  byId("review-reference").textContent = current.reference;
+  byId("review-reason").textContent = current.reason;
+  byId("review-source-kind").textContent = current.paperKind;
+  byId("review-source-title").textContent = current.paperTitle;
+  byId("review-source-description").textContent = current.paperDescription;
+  byId("review-source-callout").textContent = current.callout;
+}
 function renderActions() {
   byId("trusted-actions").replaceChildren();
   for (const action of actions) {
@@ -272,6 +362,7 @@ function renderActions() {
   }
   const count = actions.filter((action) => !action.completed).length;
   byId("action-count").textContent = count;
+  byId("review-nav-count").textContent = documents.filter((doc) => doc.status === "pending" && doc.assessment === "pay").length;
   byId("confirmed-count").textContent = count;
   byId("review-count").textContent = documents.filter((doc) => doc.status === "review").length + history.filter((entry) => !isSuperseded(entry) && (entry.reopened || (entry.sampled && !entry.auditConfirmed)) && !documents.some((doc) => doc.id === entry.id)).length;
   byId("filed-count").textContent = history.filter((entry) => !isSuperseded(entry) && !entry.sampled && !entry.reopened).length;
@@ -401,12 +492,7 @@ byId("metadata-form").addEventListener("input", markDirty);
 byId("metadata-form").addEventListener("submit", (event) => {
   event.preventDefault();
   if (!dirty || analysisRunning) return;
-  if (!byId("field-title").value.trim()) { toast("Add a document title before saving metadata."); byId("field-title").focus(); return; }
-  if (!existingTypes.has(byId("field-type").value.trim())) {
-    toast("Choose an existing document type, or approve the new Paperless AI suggestion first.");
-    byId("field-type").focus();
-    return;
-  }
+  if (!validateMetadata()) return;
   if (conflictPending) showConflict();
   else saveMetadata();
 });
@@ -432,11 +518,33 @@ byId("keep-paperless").addEventListener("click", () => resolveConflict("paperles
 byId("re-edit").addEventListener("click", () => resolveConflict("edit"));
 byId("apply-owl").addEventListener("click", () => resolveConflict("owl"));
 byId("file-document").addEventListener("click", () => {
-  if (current.assessment !== "none" && !window.confirm("Override this provisional assessment and confirm that no action is needed?")) return;
+  if (!validateMetadata()) return;
+  commitMetadata(false);
   routeDocument("filed");
 });
-byId("needs-review").addEventListener("click", () => routeDocument("review"));
-byId("confirm-action").addEventListener("click", () => routeDocument("action"));
+byId("needs-review").addEventListener("click", () => {
+  if (!validateMetadata()) return;
+  commitMetadata(false);
+  routeDocument("review");
+});
+byId("confirm-action").addEventListener("click", () => {
+  if (!validateMetadata()) return;
+  commitMetadata(false);
+  location.hash = "review";
+});
+byId("review-no-action").addEventListener("click", () => {
+  if (!window.confirm("File this document and record that no action is needed?")) return;
+  routeDocument("filed");
+  location.hash = "intake";
+});
+byId("review-needs-review").addEventListener("click", () => {
+  routeDocument("review");
+  location.hash = "intake";
+});
+byId("review-confirm").addEventListener("click", () => {
+  routeDocument("action");
+  location.hash = "actions";
+});
 byId("analyze").addEventListener("click", () => {
   const doc = current;
   analysisRunning = true;
@@ -459,6 +567,20 @@ byId("refresh-suggestions").addEventListener("click", () => {
 });
 byId("scenario").addEventListener("change", (event) => setScenario(event.target.value));
 byId("queue-search").addEventListener("input", renderQueue);
+byId("tag-input").addEventListener("keydown", (event) => {
+  if (!["Enter", ","].includes(event.key)) return;
+  event.preventDefault();
+  const tag = event.currentTarget.value.trim().replace(/,$/, "");
+  if (!tag) return;
+  setTags([...tagValues(), tag]);
+  event.currentTarget.value = "";
+});
+byId("tag-input").addEventListener("blur", (event) => {
+  const tag = event.currentTarget.value.trim();
+  if (!tag) return;
+  setTags([...tagValues(), tag]);
+  event.currentTarget.value = "";
+});
 byId("select-all").addEventListener("change", (event) => {
   visibleDocuments().forEach((doc) => { if (event.target.checked) selection.add(doc.id); else selection.delete(doc.id); });
   renderQueue();
@@ -475,6 +597,9 @@ byId("zoom-preview").addEventListener("click", () => {
   byId("zoom-preview").textContent = zoomed ? "Fit page" : "Zoom +";
 });
 byId("paperless-link").addEventListener("click", () => toast(`Production handoff: open Paperless document #${current.id} in its web UI. This mockup has no real Paperless connection.`));
+byId("review-paperless-link").addEventListener("click", () => toast(`Production handoff: open Paperless document #${current.id} in its web UI. This mockup has no real Paperless connection.`));
+byId("prototype-guide").addEventListener("click", () => byId("prototype-guide-dialog").showModal());
+byId("source-status-info").addEventListener("click", () => byId("source-status-dialog").showModal());
 byId("simulate-match").addEventListener("click", () => {
   byId("match-result").hidden = false;
   byId("simulate-match").disabled = true;
@@ -556,6 +681,20 @@ byId("reset-demo").addEventListener("click", () => {
   location.reload();
 });
 window.addEventListener("hashchange", navigate);
+window.addEventListener("keydown", (event) => {
+  if (!["ArrowUp", "ArrowDown"].includes(event.key) || location.hash !== "#intake") return;
+  if (event.target.closest("input, select, textarea, button, a, dialog")) return;
+  const visible = visibleDocuments();
+  if (!visible.length) return;
+  event.preventDefault();
+  const currentIndex = Math.max(0, visible.indexOf(current));
+  const nextIndex = event.key === "ArrowDown"
+    ? Math.min(visible.length - 1, currentIndex + 1)
+    : Math.max(0, currentIndex - 1);
+  if (visible[nextIndex] !== current && selectDocument(visible[nextIndex])) {
+    document.querySelector(".document-row.selected .document-select")?.focus();
+  }
+});
 loadDocument();
 renderQueue();
 renderActions();
