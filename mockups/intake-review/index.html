@@ -63,6 +63,7 @@
               <div class="workspace-tabs" role="tablist" aria-label="Review details">
                 <button id="metadata-tab" type="button" role="tab" aria-selected="true" aria-controls="metadata-panel">Metadata</button>
                 <button id="actions-tab" type="button" role="tab" aria-selected="false" aria-controls="actions-panel">Actions <span id="intake-action-count" class="tab-count">0</span></button>
+                <button id="ocr-tab" type="button" role="tab" aria-selected="false" aria-controls="ocr-panel">OCR <span id="ocr-quality-count" class="tab-count">96</span></button>
               </div>
               <div class="workspace-tools"><button id="refresh-review" type="button">Refresh analysis</button><span id="save-state" class="pill neutral">No unsaved changes</span></div>
             </div>
@@ -77,21 +78,26 @@
                   <div><label>Document type<input id="field-type" name="type" value="Receipt" list="document-types"></label><datalist id="document-types"><option value="Receipt"></option><option value="Invoice"></option><option value="Statement"></option><option value="Payment confirmation"></option></datalist><button class="suggestion-link" type="button" data-suggestion="type" data-apply="type"><small id="type-provenance">Paperless AI · new name</small><span id="suggested-type">Payment confirmation</span></button></div>
                 </div>
                 <div class="field-pair"><label>Document date<input id="field-date" name="date" type="date" value="2026-10-14"></label><label>Storage path<select id="field-storage" name="storage"><option>Household / Utilities</option><option>Household / Health</option><option>Household / Banking</option></select></label></div>
+                <div id="custom-metadata-fields" class="custom-metadata-fields" hidden></div>
                 <div class="tag-field"><label for="tag-input">Tags <small>Remove with ×, or type a new tag and press Enter.</small></label><div id="tag-editor" class="tag-editor"><div id="tag-pills" class="tag-pills"></div><input id="tag-input" aria-label="Add a tag" placeholder="Add tag"></div><input id="field-tags" name="tags" type="hidden" value="Inbox, Utilities"></div>
               </form>
             </div>
             <div id="actions-panel" role="tabpanel" aria-labelledby="actions-tab" hidden>
               <div class="decision-panel">
-                <div class="decision-summary">
-                  <span id="assessment-icon" class="assessment-icon" aria-hidden="true">✓</span>
-                  <div><span id="disposition-heading" class="decision-label">Ready to file</span><h2 id="assessment-title">No action needed</h2><p id="assessment-reason">A completed payment is evidence, not a new obligation. Keep it available for statement matching.</p><div class="inline-meta"><span id="assessment-confidence">96% confidence</span><span id="assessment-time">Evaluated 2 minutes ago</span></div></div>
-                  <span id="freshness" class="pill success">Current · source r12</span>
-                </div>
+                <span id="disposition-heading" class="sr-only">OWL analysis</span><strong id="assessment-title" class="sr-only">No suggested actions</strong><span id="assessment-icon" class="sr-only" aria-hidden="true">✓</span><p id="assessment-reason" class="sr-only">A completed payment is evidence, not a new obligation.</p>
                 <div id="stale-notice" class="notice warning" hidden>Metadata changed. Re-evaluate OWL’s assessment, or make your own decision.</div>
                 <button id="analyze" class="analysis-button" type="button" hidden>Re-evaluate assessment</button>
-                <div class="actions-toolbar"><div><strong>Actions related to this document</strong><p>Correct an inference or add work OWL missed.</p></div><button id="new-action" type="button">+ New action</button></div>
+                <div class="actions-toolbar"><div><strong>Actions related to this document</strong><p><span id="assessment-confidence">96% confidence</span> · <span id="assessment-time">Evaluated 2 minutes ago</span> · <span id="freshness" class="pill success">Current · source r12</span></p></div><button id="new-action" type="button">+ New action</button></div>
                 <div id="action-candidates" class="action-candidates"></div>
                 <div id="no-action-state" class="no-action-state"><strong id="no-action-title">No action details to confirm</strong><p id="no-action-message">File the document when its metadata is ready, or keep it in Inbox for another reviewer.</p></div>
+              </div>
+            </div>
+            <div id="ocr-panel" role="tabpanel" aria-labelledby="ocr-tab" hidden>
+              <div class="ocr-review">
+                <div class="ocr-score"><div><span>OCR quality</span><strong id="ocr-score">96</strong><small>/ 100</small></div><span id="ocr-status" class="pill success">Text ready</span></div>
+                <div class="ocr-facts"><div><span>Language</span><strong id="ocr-language">English</strong></div><div><span>Pages</span><strong id="ocr-pages">1 page</strong></div><div><span>Orientation</span><strong id="ocr-orientation">Correct</strong></div><div><span>Low-confidence regions</span><strong id="ocr-regions">0 detected</strong></div></div>
+                <label class="ocr-text-label">Searchable OCR text<textarea id="ocr-text" rows="10" readonly></textarea></label>
+                <div class="ocr-actions"><p>Use OCR review when poor recognition could affect metadata or action extraction.</p><button id="rerun-ocr" type="button">Re-run OCR</button></div>
               </div>
             </div>
             <div class="workspace-footer">
@@ -105,6 +111,7 @@
         <div class="review-column">
           <section class="card preview-card" aria-labelledby="source-heading">
             <div class="panel-heading"><h2 id="source-heading">Payment confirmation</h2><button id="paperless-link" type="button" class="text-button">Open in Paperless ↗</button></div>
+            <div class="source-metadata-strip"><div><span>Date</span><strong id="preview-metadata-date">Oct 14, 2026</strong></div><div><span>Correspondent</span><strong id="preview-metadata-correspondent">Northline Energy</strong></div><div><span>Type</span><strong id="preview-metadata-type">Receipt</strong></div></div>
             <div class="preview-toolbar"><span>Illustrative document preview</span><span>1 / 1 <button id="zoom-preview" type="button" aria-pressed="false">Zoom +</button></span></div>
             <div class="document-canvas">
               <article class="paper" aria-label="Synthetic document text">
@@ -132,22 +139,28 @@
             <div class="workspace-tabs" role="tablist" aria-label="Action Queue review details">
               <button id="queue-metadata-tab" type="button" role="tab" aria-selected="false" aria-controls="queue-metadata-panel">Metadata</button>
               <button id="queue-actions-tab" type="button" role="tab" aria-selected="true" aria-controls="queue-actions-panel">Actions <span id="queue-action-count" class="tab-count">1</span></button>
+              <button id="queue-ocr-tab" type="button" role="tab" aria-selected="false" aria-controls="queue-ocr-panel">OCR</button>
             </div>
             <div class="workspace-tools"><button id="queue-refresh" type="button">Refresh analysis</button><span id="review-confidence" class="pill warning">94% confidence</span></div>
           </div>
           <div id="queue-metadata-panel" class="queue-metadata-panel" role="tabpanel" aria-labelledby="queue-metadata-tab" hidden>
             <div class="metadata-summary"><div><span>Title</span><strong id="queue-metadata-title">Cedar Dental — invoice — 2026-10-15</strong></div><div><span>Correspondent</span><strong id="queue-metadata-correspondent">Cedar Dental</strong></div><div><span>Document type</span><strong id="queue-metadata-type">Invoice</strong></div><div><span>Document date</span><strong id="queue-metadata-date">October 15, 2026</strong></div></div>
+            <div id="queue-custom-metadata" class="queue-custom-metadata"></div>
           </div>
           <div id="queue-actions-panel" role="tabpanel" aria-labelledby="queue-actions-tab">
             <div class="queue-action-summary"><div><h2 id="review-action-title">Cedar Dental invoice actions</h2><p id="review-action-subtitle" class="muted">Paperless #1043 · proposed actions</p></div><button id="queue-new-action" type="button">+ New action</button></div>
             <div id="queue-action-candidates" class="action-candidates"></div>
-            <div class="review-evidence"><strong>Why OWL proposed this work</strong><p id="review-reason">An unpaid balance is due October 30. Confirm the obligation before it becomes trusted work.</p></div>
+            <details class="review-evidence"><summary>Why OWL suggested this work</summary><p id="review-reason">An unpaid balance is due October 30. Confirm the obligation before it becomes trusted work.</p></details>
+          </div>
+          <div id="queue-ocr-panel" role="tabpanel" aria-labelledby="queue-ocr-tab" hidden>
+            <div class="ocr-review compact"><div class="ocr-score"><div><span>OCR quality</span><strong id="queue-ocr-score">94</strong><small>/ 100</small></div><span class="pill success">Text ready</span></div><label class="ocr-text-label">Searchable OCR text<textarea id="queue-ocr-text" rows="12" readonly></textarea></label></div>
           </div>
           <div class="review-actions"><button id="review-no-action" type="button">No actions needed</button><button id="review-needs-review" type="button">Defer &amp; next</button><button id="review-save" type="button" disabled>Save corrections</button><button id="review-confirm" type="button" class="primary">Confirm actions</button></div>
           <p class="field-help">The Action Queue defaults to Actions. Metadata remains available when the source classification needs correction.</p>
         </section>
         <section class="card review-source">
           <div class="panel-heading"><h2>Source evidence</h2><button id="review-paperless-link" type="button" class="text-button">Open in Paperless ↗</button></div>
+          <div class="source-metadata-strip"><div><span>Date</span><strong id="queue-preview-date">Oct 15, 2026</strong></div><div><span>Correspondent</span><strong id="queue-preview-correspondent">Cedar Dental</strong></div><div><span>Type</span><strong id="queue-preview-type">Invoice</strong></div></div>
           <div class="review-source-sheet"><span id="review-source-kind">INVOICE</span><h3 id="review-source-title">Your account statement.</h3><p id="review-source-description">Services have been billed. Please arrange payment of the balance shown below by October 30, 2026.</p><div id="review-source-callout" class="paper-callout">BALANCE DUE · October 30, 2026</div></div>
         </section>
       </div>

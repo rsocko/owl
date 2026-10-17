@@ -42,6 +42,17 @@ for (const doc of documents) doc.correspondent = doc.provider;
 for (const doc of documents) {
   doc.actionStatus = doc.assessment === "pay" ? "proposed" : "none";
   doc.actionDrafts = doc.assessment === "pay" ? [createActionDraft(doc, "suggested")] : [];
+  doc.customMetadata = doc.id === 1043
+    ? [{ label: "Patient", value: "Morgan Lee" }, { label: "Service date", value: "2026-10-08" }, { label: "Billing category", value: "Dental care" }]
+    : [];
+  doc.ocr = {
+    score: doc.id === 1044 ? 67 : doc.id === 1043 ? 94 : 98,
+    language: "English",
+    pages: 1,
+    orientation: "Correct",
+    regions: doc.id === 1044 ? 3 : 0,
+    text: `${doc.paperKind}\n\n${doc.paperTitle}\n${doc.paperDescription}\n\n${doc.callout}`
+  };
 }
 const history = [
   { id: 1038, title: "Harbor Bank · September statement", source: "Automated", confidence: 98, sampled: false, reason: "Reference statement; no outstanding obligation.", fingerprint: "1038:r8:v3", time: "Oct 16, 05:42 UTC" },
@@ -53,6 +64,7 @@ let current = documents[0];
 let dirty = false;
 let actionDirty = false;
 let actionDraftSnapshot = "";
+let customMetadataSnapshot = "";
 let conflictPending = false;
 let externalTitle = "";
 let scenario = "ready";
@@ -164,6 +176,52 @@ function renderActionCards(containerId, doc, context) {
     card.append(heading, fieldsContainer, controls);
     container.append(card);
   });
+}
+function renderCustomMetadata() {
+  const container = byId("custom-metadata-fields");
+  container.replaceChildren();
+  container.hidden = current.customMetadata.length === 0;
+  current.customMetadata.forEach((field, index) => {
+    const label = node("label");
+    label.append(document.createTextNode(field.label));
+    const input = document.createElement("input");
+    input.value = field.value;
+    input.addEventListener("input", () => {
+      current.customMetadata[index].value = input.value;
+      markDirty();
+    });
+    label.append(input);
+    container.append(label);
+  });
+}
+function renderQueueCustomMetadata(doc) {
+  const container = byId("queue-custom-metadata");
+  container.replaceChildren();
+  doc.customMetadata.forEach((field) => {
+    const item = node("div");
+    item.append(node("span", field.label), node("strong", field.value));
+    container.append(item);
+  });
+}
+function updatePreviewMetadata() {
+  const rawDate = byId("field-date").value;
+  const formattedDate = rawDate
+    ? new Date(`${rawDate}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })
+    : "No date";
+  byId("preview-metadata-date").textContent = formattedDate;
+  byId("preview-metadata-correspondent").textContent = byId("field-correspondent").value.trim() || "No correspondent";
+  byId("preview-metadata-type").textContent = byId("field-type").value.trim() || "No type";
+}
+function loadOcrReview(doc = current) {
+  byId("ocr-quality-count").textContent = doc.ocr.score;
+  byId("ocr-score").textContent = doc.ocr.score;
+  byId("ocr-status").textContent = doc.ocr.score >= 90 ? "Text ready" : "Review quality";
+  byId("ocr-status").className = `pill ${doc.ocr.score >= 90 ? "success" : "warning"}`;
+  byId("ocr-language").textContent = doc.ocr.language;
+  byId("ocr-pages").textContent = `${doc.ocr.pages} ${doc.ocr.pages === 1 ? "page" : "pages"}`;
+  byId("ocr-orientation").textContent = doc.ocr.orientation;
+  byId("ocr-regions").textContent = `${doc.ocr.regions} detected`;
+  byId("ocr-text").value = doc.ocr.text;
 }
 function toast(message) {
   clearTimeout(toastTimer);
@@ -278,6 +336,10 @@ function updateSuggestionVisibility() {
 function loadDocument() {
   fields.forEach((field) => { byId(`field-${field}`).value = current[field]; });
   renderTags();
+  customMetadataSnapshot = JSON.stringify(current.customMetadata);
+  renderCustomMetadata();
+  updatePreviewMetadata();
+  loadOcrReview();
   byId("source-heading").textContent = current.short;
   byId("paper-provider").textContent = current.provider.toUpperCase();
   byId("paper-kind").textContent = current.paperKind;
@@ -293,13 +355,11 @@ function loadDocument() {
   document.querySelector('[data-suggestion="correspondent"] small').textContent = `Traditional · existing #${current.correspondentId}`;
   byId("suggested-type").textContent = current.suggestedType;
   byId("type-provenance").textContent = existingTypes.has(current.suggestedType) ? "Traditional · existing type" : "Paperless AI · new name";
-  byId("assessment-title").textContent = current.assessment === "pay" ? "PAY · provisional action" : current.assessment === "review" ? "Needs human review" : "No action needed";
   byId("assessment-reason").textContent = current.reason;
   byId("assessment-confidence").textContent = `${current.confidence}% confidence`;
   byId("assessment-icon").textContent = current.assessment === "none" ? "✓" : "?";
-  const actionCandidate = current.assessment === "pay";
   const uncertain = current.assessment === "review";
-  byId("disposition-heading").textContent = actionCandidate ? "Proposed action found" : uncertain ? "Needs a closer look" : "Ready to file";
+  byId("disposition-heading").textContent = "OWL analysis";
   byId("no-action-title").textContent = uncertain ? "Action details need human interpretation" : "No action details to confirm";
   byId("no-action-message").textContent = uncertain
     ? "The source may require a response, but the deadline and obligation were not reliably extracted."
@@ -347,6 +407,7 @@ function updateControls() {
 }
 function updateWorkspaceActions() {
   const showActions = activeWorkspaceTab === "actions";
+  const showOcr = activeWorkspaceTab === "ocr";
   const actionCount = activeActionDrafts().length;
   const actionCandidate = actionCount > 0;
   const uncertain = current.assessment === "review";
@@ -361,11 +422,14 @@ function updateWorkspaceActions() {
       : uncertain
         ? "Keep this document in Inbox until the obligation can be interpreted."
         : "No action was suggested. Filing records a no-action decision and removes Inbox."
-    : "Save metadata without leaving Inbox, or finish filing this document.";
+    : showOcr
+      ? "Review OCR quality before filing. Re-running OCR can change later metadata and action analysis."
+      : "Save metadata without leaving Inbox, or finish filing this document.";
 }
 function renderIntakeActionState() {
   const count = activeActionDrafts().length;
   byId("intake-action-count").textContent = count;
+  byId("assessment-title").textContent = count ? `${count} suggested ${count === 1 ? "action" : "actions"}` : current.assessment === "review" ? "Action interpretation needed" : "No suggested actions";
   byId("no-action-state").hidden = count > 0;
   renderActionCards("action-candidates", current, "intake");
   updateWorkspaceActions();
@@ -373,15 +437,19 @@ function renderIntakeActionState() {
 function selectWorkspaceTab(tab) {
   activeWorkspaceTab = tab;
   const showActions = tab === "actions";
-  byId("metadata-tab").setAttribute("aria-selected", String(!showActions));
+  const showOcr = tab === "ocr";
+  byId("metadata-tab").setAttribute("aria-selected", String(!showActions && !showOcr));
   byId("actions-tab").setAttribute("aria-selected", String(showActions));
-  byId("metadata-panel").hidden = showActions;
+  byId("ocr-tab").setAttribute("aria-selected", String(showOcr));
+  byId("metadata-panel").hidden = showActions || showOcr;
   byId("actions-panel").hidden = !showActions;
+  byId("ocr-panel").hidden = !showOcr;
   updateWorkspaceActions();
 }
 function markDirty() {
-  dirty = fields.some((field) => byId(`field-${field}`).value !== current[field]);
+  dirty = fields.some((field) => byId(`field-${field}`).value !== current[field]) || JSON.stringify(current.customMetadata) !== customMetadataSnapshot;
   updateSuggestionVisibility();
+  updatePreviewMetadata();
   updateControls();
 }
 function validateMetadata() {
@@ -403,6 +471,7 @@ function commitMetadata(markAssessmentStale = true) {
   current.revision += 1;
   current.stale = markAssessmentStale;
   dirty = false;
+  customMetadataSnapshot = JSON.stringify(current.customMetadata);
   byId("revision-label").textContent = `Loaded Paperless revision r${current.revision}`;
   updateFreshness();
   updateControls();
@@ -516,6 +585,12 @@ function loadActionReview() {
   byId("queue-metadata-correspondent").textContent = reviewDoc.correspondent;
   byId("queue-metadata-type").textContent = reviewDoc.type;
   byId("queue-metadata-date").textContent = new Date(`${reviewDoc.date}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  byId("queue-preview-date").textContent = new Date(`${reviewDoc.date}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  byId("queue-preview-correspondent").textContent = reviewDoc.correspondent;
+  byId("queue-preview-type").textContent = reviewDoc.type;
+  renderQueueCustomMetadata(reviewDoc);
+  byId("queue-ocr-score").textContent = reviewDoc.ocr.score;
+  byId("queue-ocr-text").value = reviewDoc.ocr.text;
   byId("review-source-kind").textContent = reviewDoc.paperKind;
   byId("review-source-title").textContent = reviewDoc.paperTitle;
   byId("review-source-description").textContent = reviewDoc.paperDescription;
@@ -536,10 +611,16 @@ function updateQueueActionState() {
 function selectQueueTab(tab) {
   activeQueueTab = tab;
   const showActions = tab === "actions";
-  byId("queue-metadata-tab").setAttribute("aria-selected", String(!showActions));
+  const showOcr = tab === "ocr";
+  byId("queue-metadata-tab").setAttribute("aria-selected", String(!showActions && !showOcr));
   byId("queue-actions-tab").setAttribute("aria-selected", String(showActions));
-  byId("queue-metadata-panel").hidden = showActions;
+  byId("queue-ocr-tab").setAttribute("aria-selected", String(showOcr));
+  byId("queue-metadata-panel").hidden = showActions || showOcr;
   byId("queue-actions-panel").hidden = !showActions;
+  byId("queue-ocr-panel").hidden = !showOcr;
+  byId("review-no-action").hidden = !showActions;
+  byId("review-save").hidden = !showActions;
+  byId("review-confirm").hidden = !showActions;
 }
 function renderActions() {
   byId("trusted-actions").replaceChildren();
@@ -739,13 +820,14 @@ byId("new-action").addEventListener("click", () => {
 });
 byId("metadata-tab").addEventListener("click", () => selectWorkspaceTab("metadata"));
 byId("actions-tab").addEventListener("click", () => selectWorkspaceTab("actions"));
-[byId("metadata-tab"), byId("actions-tab")].forEach((tab, index, tabs) => {
+byId("ocr-tab").addEventListener("click", () => selectWorkspaceTab("ocr"));
+[byId("metadata-tab"), byId("actions-tab"), byId("ocr-tab")].forEach((tab, index, tabs) => {
   tab.addEventListener("keydown", (event) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
     const nextTab = tabs[nextIndex];
-    selectWorkspaceTab(nextTab === byId("actions-tab") ? "actions" : "metadata");
+    selectWorkspaceTab(nextTab === byId("actions-tab") ? "actions" : nextTab === byId("ocr-tab") ? "ocr" : "metadata");
     nextTab.focus();
   });
 });
@@ -789,13 +871,14 @@ byId("queue-new-action").addEventListener("click", () => {
 });
 byId("queue-metadata-tab").addEventListener("click", () => selectQueueTab("metadata"));
 byId("queue-actions-tab").addEventListener("click", () => selectQueueTab("actions"));
-[byId("queue-metadata-tab"), byId("queue-actions-tab")].forEach((tab, index, tabs) => {
+byId("queue-ocr-tab").addEventListener("click", () => selectQueueTab("ocr"));
+[byId("queue-metadata-tab"), byId("queue-actions-tab"), byId("queue-ocr-tab")].forEach((tab, index, tabs) => {
   tab.addEventListener("keydown", (event) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
     const nextTab = tabs[nextIndex];
-    selectQueueTab(nextTab === byId("queue-actions-tab") ? "actions" : "metadata");
+    selectQueueTab(nextTab === byId("queue-actions-tab") ? "actions" : nextTab === byId("queue-ocr-tab") ? "ocr" : "metadata");
     nextTab.focus();
   });
 });
@@ -828,6 +911,17 @@ byId("queue-refresh").addEventListener("click", () => {
   actionReviewDocument.evaluated = true;
   byId("review-confidence").textContent = `${actionReviewDocument.confidence}% confidence · refreshed`;
   toast("Paperless source data and action analysis refreshed.");
+});
+byId("rerun-ocr").addEventListener("click", () => {
+  byId("rerun-ocr").disabled = true;
+  byId("ocr-status").textContent = "OCR running…";
+  setTimeout(() => {
+    current.ocr.score = Math.min(100, current.ocr.score + 2);
+    current.ocr.regions = Math.max(0, current.ocr.regions - 1);
+    loadOcrReview();
+    byId("rerun-ocr").disabled = false;
+    toast("OCR rerun completed. Metadata and action analysis should be refreshed if the text changed.");
+  }, 900);
 });
 byId("scenario").addEventListener("change", (event) => setScenario(event.target.value));
 byId("queue-search").addEventListener("input", renderQueue);
