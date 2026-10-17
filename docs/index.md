@@ -33,7 +33,6 @@ OWL transforms a passive document archive into an actionable intelligence layer 
 
 | Mockup | Feature Area | Description |
 |--------|-------------|-------------|
-| [Intake Review Walkthrough](../mockups/intake-review/index.html) | Intake / Action Queue / Processing | Interactive proposed workspace with native Paperless suggestions, metadata conflicts, trusted action routing, no-action audit, and scoped reanalysis |
 | [Triage Unified](../mockups/triage-correction/triage-unified.html) | Action Queue / Triage | Combined triage workflow with keyboard shortcuts |
 | [EOB Match Review](../mockups/triage-correction/eob-match-review.html) | EOB Matching | Side-by-side EOB/bill comparison with scoring |
 | [Manual Match Search](../mockups/triage-correction/manual-match-search.html) | EOB Matching | Search interface for manually pairing documents |
