@@ -93,6 +93,7 @@ def _owl_retirement_coverage() -> dict[MetadataFieldKey, set[int]]:
     }
     coverage: dict[MetadataFieldKey, set[int]] = {}
     for key in (
+        MetadataFieldKey.ACTION_ANALYZED,
         MetadataFieldKey.LEGACY_ACTION_TYPE,
         MetadataFieldKey.LEGACY_ACTION_DUE_DATE,
         MetadataFieldKey.LEGACY_ACTION_URGENCY,

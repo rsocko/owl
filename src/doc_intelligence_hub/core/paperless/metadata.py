@@ -364,8 +364,8 @@ _REGISTRY_ENTRIES = (
         "Action Analyzed",
         PaperlessFieldType.DATE,
         MetadataNormalization.DATE,
-        create_policy=_CREATE,
-        create_type=PaperlessFieldType.DATE,
+        write_policy=MetadataWritePolicy.DISABLED,
+        retirement_policy=MetadataRetirementPolicy.RETIRE_WHEN_EMPTY,
     ),
     _spec(
         MetadataFieldKey.LEGACY_ACTION_TYPE,
