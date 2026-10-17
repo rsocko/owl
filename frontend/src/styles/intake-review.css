@@ -178,6 +178,22 @@
   color: var(--text-muted);
 }
 
+.intake-queue-more {
+  padding: 0.65rem 0.4rem 0.4rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.intake-queue-more .btn {
+  width: 100%;
+}
+
+.intake-queue-more > span {
+  color: var(--danger);
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
+
 .intake-queue-copy {
   min-width: 0;
   display: grid;

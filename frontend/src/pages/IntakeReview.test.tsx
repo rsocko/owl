@@ -95,6 +95,7 @@ describe('IntakeReview', () => {
         { id: 2, title: 'Document 2', created: '2026-10-15', thumbnail_url: '/thumb/2', pending_action_count: 1 },
       ],
       total: 2,
+      next_cursor: null,
       monitor_tags: ['Inbox'],
     });
     documentCoreMock.mockImplementation((id: number) => Promise.resolve(core(id)));
@@ -170,6 +171,22 @@ describe('IntakeReview', () => {
     expect(screen.getByRole('button', { name: /Document 2/ })).toBeInTheDocument();
   });
 
+  it('searches the full inbox through the paged API', async () => {
+    renderPage();
+    await screen.findByRole('button', { name: /Document 1/ });
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search intake documents' }), {
+      target: { value: 'utility' },
+    });
+
+    await waitFor(() => expect(documentsMock).toHaveBeenLastCalledWith({
+      pageSize: 100,
+      cursor: null,
+      search: 'utility',
+      filter: 'all',
+    }));
+  });
+
   it('uses Paperless tag colors inside one combined tag control', async () => {
     documentCoreMock.mockResolvedValue({
       ...core(1),
@@ -229,6 +246,7 @@ describe('IntakeReview', () => {
           { id: 2, title: 'Document 2', created: '2026-10-15', thumbnail_url: '/thumb/2', pending_action_count: 0 },
         ],
         total: 2,
+        next_cursor: null,
         monitor_tags: ['Inbox'],
       } : {
         documents: [
@@ -236,6 +254,7 @@ describe('IntakeReview', () => {
           { id: 2, title: 'Document 2', created: '2026-10-15', thumbnail_url: '/thumb/2', pending_action_count: 0 },
         ],
         total: 2,
+        next_cursor: null,
         monitor_tags: ['Inbox'],
       },
     ));
@@ -258,5 +277,38 @@ describe('IntakeReview', () => {
     expect(await screen.findByRole('button', { name: /Document 1/ })).toHaveAttribute('aria-current', 'true');
     expect(screen.getByText('Document 1', { selector: 'h2' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Document 2/ })).toBeInTheDocument();
+  });
+
+  it('shows the full Paperless total and progressively loads another queue page', async () => {
+    documentsMock
+      .mockResolvedValueOnce({
+        documents: [
+          { id: 1, title: 'Document 1', created: '2026-10-14', thumbnail_url: '/thumb/1', pending_action_count: 0 },
+        ],
+        total: 213,
+        next_cursor: '2',
+        monitor_tags: ['Inbox'],
+      })
+      .mockResolvedValueOnce({
+        documents: [
+          { id: 2, title: 'Document 2', created: '2026-10-15', thumbnail_url: '/thumb/2', pending_action_count: 0 },
+        ],
+        total: 213,
+        next_cursor: '3',
+        monitor_tags: ['Inbox'],
+      });
+
+    renderPage();
+
+    expect(await screen.findByText('213 awaiting review')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Load more (1 of 213 loaded)' }));
+
+    expect(await screen.findByRole('button', { name: /Document 2/ })).toBeInTheDocument();
+    expect(documentsMock).toHaveBeenNthCalledWith(2, {
+      pageSize: 100,
+      cursor: '2',
+      search: '',
+      filter: 'all',
+    });
   });
 });

@@ -51,8 +51,11 @@ interface IntakeListItem {
 interface IntakeQueueResponse {
   documents: IntakeListItem[];
   total: number;
+  next_cursor: string | null;
   monitor_tags: string[];
 }
+
+const QUEUE_PAGE_SIZE = 100;
 
 interface IntakeAction {
   id: number;
@@ -586,6 +589,8 @@ export default function IntakeReview() {
   const requestedTab = searchParams.get('tab');
   const [tab, setTab] = useState<ReviewTab>(requestedTab === 'actions' || requestedTab === 'ocr' ? requestedTab : 'metadata');
   const [queue, setQueue] = useState<IntakeListItem[]>([]);
+  const [queueTotal, setQueueTotal] = useState(0);
+  const [nextQueueCursor, setNextQueueCursor] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(requestedDocument ? Number(requestedDocument) : null);
   const [focusedId, setFocusedId] = useState<number | null>(selectedId);
   const [queueQuery, setQueueQuery] = useState('');
@@ -600,11 +605,13 @@ export default function IntakeReview() {
   const [actions, setActions] = useState<IntakeAction[]>([]);
   const [ocr, setOcr] = useState<OcrState | null>(null);
   const [loadingQueue, setLoadingQueue] = useState(true);
+  const [loadingMoreQueue, setLoadingMoreQueue] = useState(false);
   const [loadingCore, setLoadingCore] = useState(false);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [loadingActions, setLoadingActions] = useState(false);
   const [loadingOcr, setLoadingOcr] = useState(false);
   const [queueError, setQueueError] = useState('');
+  const [queueMoreError, setQueueMoreError] = useState('');
   const [coreError, setCoreError] = useState('');
   const [suggestionError, setSuggestionError] = useState('');
   const [actionError, setActionError] = useState('');
@@ -615,6 +622,7 @@ export default function IntakeReview() {
   const [newAction, setNewAction] = useState<ActionDraft>(EMPTY_ACTION);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const queueButtonRefs = useRef(new Map<number, HTMLButtonElement>());
+  const queueRequestId = useRef(0);
   const requestId = useRef(0);
 
   const dirty = useMemo(() => Boolean(metadata && baseline && JSON.stringify(metadata) !== JSON.stringify(baseline)), [baseline, metadata]);
@@ -622,9 +630,9 @@ export default function IntakeReview() {
   const selectedQueueItem = queue.find((item) => item.id === selectedId);
   const filteredQueue = useMemo(() => {
     return queue.filter(
-      (item) => item.id === pinnedFilteredId || matchesQueueFilter(item, queueQuery, queueFilter),
+      (item) => item.id === pinnedFilteredId || matchesQueueFilter(item, '', queueFilter),
     );
-  }, [pinnedFilteredId, queue, queueFilter, queueQuery]);
+  }, [pinnedFilteredId, queue, queueFilter]);
 
   const showToast = useCallback((message: string, tone: 'success' | 'error' = 'success') => {
     setToast({ message, tone });
@@ -632,22 +640,69 @@ export default function IntakeReview() {
     if (duration) window.setTimeout(() => setToast(null), duration);
   }, []);
 
-  const loadQueue = useCallback(async (): Promise<IntakeListItem[]> => {
+  const loadQueue = useCallback(async (
+    pageCount = 1,
+    search = '',
+    filter: QueueFilter = 'all',
+  ): Promise<IntakeListItem[]> => {
+    const currentRequest = ++queueRequestId.current;
     setLoadingQueue(true);
     setQueueError('');
     try {
-      const response = await endpoints.intake.documents() as IntakeQueueResponse;
-      setQueue(response.documents);
-      setSelectedId((current) => current ?? response.documents[0]?.id ?? null);
-      setFocusedId((current) => current ?? response.documents[0]?.id ?? null);
-      return response.documents;
+      const documents: IntakeListItem[] = [];
+      let cursor: string | null = null;
+      let total = 0;
+      let pagesLoaded = 0;
+      do {
+        const response = await endpoints.intake.documents({
+          pageSize: QUEUE_PAGE_SIZE,
+          cursor,
+          search,
+          filter,
+        }) as IntakeQueueResponse;
+        documents.push(...response.documents);
+        total = response.total;
+        cursor = response.next_cursor;
+        pagesLoaded += 1;
+      } while (cursor && pagesLoaded < pageCount);
+      if (queueRequestId.current !== currentRequest) return documents;
+      setQueue(documents);
+      setQueueTotal(total);
+      setNextQueueCursor(cursor);
+      setSelectedId((current) => current ?? documents[0]?.id ?? null);
+      setFocusedId((current) => current ?? documents[0]?.id ?? null);
+      return documents;
     } catch (error) {
-      setQueueError(errorMessage(error));
+      if (queueRequestId.current === currentRequest) setQueueError(errorMessage(error));
       return [];
     } finally {
-      setLoadingQueue(false);
+      if (queueRequestId.current === currentRequest) setLoadingQueue(false);
     }
   }, []);
+
+  const loadMoreQueue = useCallback(async () => {
+    if (!nextQueueCursor || loadingMoreQueue) return;
+    setLoadingMoreQueue(true);
+    setQueueMoreError('');
+    try {
+      const response = await endpoints.intake.documents({
+        pageSize: QUEUE_PAGE_SIZE,
+        cursor: nextQueueCursor,
+        search: queueQuery,
+        filter: queueFilter,
+      }) as IntakeQueueResponse;
+      setQueue((current) => {
+        const existingIds = new Set(current.map((item) => item.id));
+        return [...current, ...response.documents.filter((item) => !existingIds.has(item.id))];
+      });
+      setQueueTotal(response.total);
+      setNextQueueCursor(response.next_cursor);
+    } catch (error) {
+      setQueueMoreError(errorMessage(error));
+    } finally {
+      setLoadingMoreQueue(false);
+    }
+  }, [loadingMoreQueue, nextQueueCursor, queueFilter, queueQuery]);
 
   const loadDocument = useCallback(async (id: number) => {
     const currentRequest = ++requestId.current;
@@ -724,7 +779,13 @@ export default function IntakeReview() {
       });
   }, []);
 
-  useEffect(() => { void loadQueue(); }, [loadQueue]);
+  useEffect(() => {
+    const timeout = window.setTimeout(
+      () => void loadQueue(1, queueQuery, queueFilter),
+      queueQuery.trim() ? 250 : 0,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [loadQueue, queueFilter, queueQuery]);
   useEffect(() => {
     if (selectedId != null) void loadDocument(selectedId);
   }, [loadDocument, selectedId]);
@@ -853,8 +914,12 @@ export default function IntakeReview() {
           : {},
       }) as { filed: boolean };
       showToast(disposition === 'defer' ? 'Changes saved; document kept in the Inbox.' : response.filed ? 'Document filed.' : 'Changes saved.');
-      const refreshedQueue = await loadQueue();
-      const matchingQueue = refreshedQueue.filter((item) => matchesQueueFilter(item, queueQuery, queueFilter));
+      const refreshedQueue = await loadQueue(
+        Math.max(1, Math.ceil(queue.length / QUEUE_PAGE_SIZE)),
+        queueQuery,
+        queueFilter,
+      );
+      const matchingQueue = refreshedQueue;
       if (response.filed || disposition === 'defer') {
         setPinnedFilteredId(null);
         const nextMatching = matchingQueue.find((item) => item.id !== core.document.id)
@@ -869,11 +934,12 @@ export default function IntakeReview() {
         }
       } else {
         const refreshedCurrent = refreshedQueue.find((item) => item.id === core.document.id);
-        setPinnedFilteredId(
-          refreshedCurrent && !matchesQueueFilter(refreshedCurrent, queueQuery, queueFilter)
-            ? core.document.id
-            : null,
-        );
+        const shouldPinCurrent = !refreshedCurrent
+          || !matchesQueueFilter(refreshedCurrent, '', queueFilter);
+        if (shouldPinCurrent && !refreshedCurrent && selectedQueueItem) {
+          setQueue([selectedQueueItem, ...refreshedQueue]);
+        }
+        setPinnedFilteredId(shouldPinCurrent ? core.document.id : null);
         await loadDocument(core.document.id);
       }
     } catch (error) {
@@ -988,8 +1054,21 @@ export default function IntakeReview() {
     <div className="intake-review-page">
       <aside className="intake-queue" aria-label="Inbox documents">
         <div className="intake-queue-header">
-          <div><span className="intake-eyebrow">Paperless inbox</span><h1>Inbox Review</h1><p>{queue.length} awaiting review</p></div>
-          <Button size="sm" aria-label="Reload queue" disabled={loadingQueue} onClick={() => void loadQueue()}><RefreshCw size={15} /></Button>
+          <div>
+            <span className="intake-eyebrow">Paperless inbox</span>
+            <h1>Inbox Review</h1>
+            <p>{queueTotal} {queueQuery.trim() || queueFilter !== 'all' ? 'matching documents' : 'awaiting review'}</p>
+          </div>
+          <Button
+            size="sm"
+            aria-label="Reload queue"
+            disabled={loadingQueue}
+            onClick={() => void loadQueue(
+              Math.max(1, Math.ceil(queue.length / QUEUE_PAGE_SIZE)),
+              queueQuery,
+              queueFilter,
+            )}
+          ><RefreshCw size={15} /></Button>
         </div>
         <div className="intake-queue-tools">
           <label><Search size={16} /><input aria-label="Search intake documents" placeholder="Search documents…" value={queueQuery} onChange={(event) => {
@@ -1010,7 +1089,7 @@ export default function IntakeReview() {
           </div>
         </div>
         {loadingQueue ? <SkeletonLoader variant="default" /> : queueError ? (
-          <ErrorState message={`Inbox unavailable: ${queueError}`} onRetry={() => void loadQueue()} />
+          <ErrorState message={`Inbox unavailable: ${queueError}`} onRetry={() => void loadQueue(1, queueQuery, queueFilter)} />
         ) : queue.length === 0 ? (
           <EmptyState title="Inbox is clear" desc="No documents match the configured intake tags." />
         ) : filteredQueue.length === 0 ? (
@@ -1021,7 +1100,11 @@ export default function IntakeReview() {
             onKeyDown={(event) => {
               if (event.key === 'ArrowDown') { event.preventDefault(); moveQueueFocus(1); }
               else if (event.key === 'ArrowUp') { event.preventDefault(); moveQueueFocus(-1); }
-              else if (event.key === 'Enter' && focusedId != null) { event.preventDefault(); selectDocument(focusedId); }
+              else if (
+                event.key === 'Enter'
+                && focusedId != null
+                && (event.target as HTMLElement).classList.contains('intake-queue-item')
+              ) { event.preventDefault(); selectDocument(focusedId); }
             }}
           >
             {filteredQueue.map((item) => (
@@ -1047,6 +1130,21 @@ export default function IntakeReview() {
                 <ChevronRight size={17} aria-hidden="true" />
               </button>
             ))}
+            {nextQueueCursor ? (
+              <div className="intake-queue-more">
+                {queueMoreError ? (
+                  <span role="alert">Could not load more documents: {queueMoreError}</span>
+                ) : null}
+                <Button
+                  size="sm"
+                  disabled={loadingMoreQueue}
+                  onClick={() => void loadMoreQueue()}
+                >
+                  {loadingMoreQueue ? <RefreshCw className="intake-spin" size={14} /> : null}
+                  {loadingMoreQueue ? 'Loading…' : `Load more (${queue.length} of ${queueTotal} loaded)`}
+                </Button>
+              </div>
+            ) : null}
           </div>
         )}
       </aside>
