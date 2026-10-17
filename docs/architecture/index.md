@@ -11,11 +11,15 @@ OWL is a **full-stack document intelligence application** with its own built-in 
 - **Direct users** interact with the OWL dashboard (a React/Vite SPA served from the same container) for triage, action queues, statement tracking, and EOB matching.
 - **Mission Control** consumes OWL's dedicated connector endpoints to surface alerts and actions within the broader homelab dashboard.
 
-Paperless-ngx remains the document source-of-truth; OWL reads from it but never modifies documents directly.
+Paperless-ngx remains the document source of truth. OWL reads current
+documents and suggestions, writes only governed metadata and user-approved
+changes through the Paperless REST API, and never prevents direct edits from
+Paperless web, mobile, workflow, or API clients.
 
 ```mermaid
 graph LR
-    P[Paperless-ngx] -->|documents & metadata| OWL[OWL]
+    P[Paperless-ngx] -->|documents, metadata & suggestions| OWL[OWL]
+    OWL -->|approved metadata & governed fields| P
     LLM[LLM Gateway] -->|analysis| OWL
     OWL -->|built-in UI| User
     OWL -->|connector API| MC[Mission Control]
@@ -116,14 +120,14 @@ The workflows are currently implemented as independent modules. The target routi
 flowchart TD
     D[Document received] --> Analyze[OWL analyzes document]
 
-    Analyze -->|Confident and no work required| File[File automatically]
+    Analyze -->|Confident and no work required| NoAction[Record no action]
     Analyze -->|Confident and work required| Action[Action Queue]
     Analyze -->|Uncertain interpretation| Review[Needs Review]
 
     Review -->|User corrects or confirms| Reprocess[Re-evaluate document]
-    Review -->|No task required| File
+    Review -->|No task required| NoAction
     Reprocess -->|Work required| Action
-    Reprocess -->|No work required| File
+    Reprocess -->|No work required| NoAction
 
     Action -->|Done| Finished[Finished]
     Action -->|Remind later| Action
@@ -136,6 +140,16 @@ This establishes the product rule:
 - **Action Queue tracks what the user should do.**
 - Most confidently understood documents never enter Needs Review.
 - Resolving an item in Needs Review does not always create an action.
+- Metadata filing is a separate intake decision and may happen before, during,
+  or after action analysis in the same OWL workspace.
+- Filing may leave a proposed action awaiting confirmation in Action Queue;
+  only trusted actions are eligible for Mission Control.
+- A no-action result does not remove a document from later relationship,
+  reconciliation, or version-triggered analysis.
+
+See [Intake Triage and Action Routing](../design/active/intake-triage-and-action-routing.md)
+for the authoritative Paperless suggestion, Inbox, re-analysis, FILE/ARCHIVE,
+and no-action contract.
 
 `/needs-review` is the canonical user-facing route. The legacy `/triage` route redirects to it for compatibility, while the API namespace, database tables, and internal code identifiers retain the `triage` name.
 
@@ -200,7 +214,7 @@ A dedicated `mc_connector` router exposes the endpoints that Mission Control's D
 - `/api/action-queue/actions/{id}/snooze` — source-side snooze
 - `/api/action-queue/actions/{id}/feedback` — classifier feedback and corrections
 - `/api/action-queue/actions/{id}/review` — route a trusted action to Needs Review
-- `/api/action-queue/actions/{id}/file` — atomically file FILE/ARCHIVE work at the source
+- `/api/action-queue/actions/{id}/file` — atomically complete legacy FILE work at the source
 - `/api/statements/missing` — missing statement alerts
 - `/api/eob/unmatched` — unmatched EOB records
 

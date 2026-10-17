@@ -15,9 +15,10 @@ sidebar_position: 3
 ## Core Concepts
 
 ### What It Does
-1. Scans Paperless-NGX for documents tagged "Inbox" or "Todo"
+1. Discovers new and changed Paperless-NGX documents through an incremental cursor
 2. Uses AI to extract information and recommend actions
-3. Presents actions in a prioritized dashboard
+3. Routes uncertain document interpretation to Needs Review, reviewable action
+   proposals to Action Queue, and only trusted actions to Mission Control
 4. Learns from user feedback to improve accuracy
 
 ### Action Categories
@@ -25,12 +26,15 @@ sidebar_position: 3
 |----------|------------------|-----------------|
 | PAY | Bills, invoices | Make payment by due date |
 | RESPOND | Forms, letters | Submit response, provide info |
-| FILE | Statements, receipts | Categorize and archive |
 | REVIEW | Contracts, notices | Read and understand |
 | SHARE | Tax docs, reports | Send to accountant/family |
 | SCHEDULE | Appointments, renewals | Add to calendar |
 | SIGN | Contracts, forms | Sign and return |
-| ARCHIVE | Processed items | Move to long-term storage |
+| TASK | Documents with another explicit obligation | Complete the named task |
+
+`FILE` is retained only for legacy cleanup. Filing now belongs to intake
+metadata readiness. Ordinary `ARCHIVE` classifications resolve into no-action
+history rather than the daily Action Queue or Mission Control.
 
 ## Recommended Stack (MVP)
 

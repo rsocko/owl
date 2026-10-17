@@ -213,7 +213,7 @@ release. See the [OCR Quality Implementation Plan](design/proposed/ocr-quality-i
 | Feature | Priority | Effort | Issue |
 |---------|----------|--------|-------|
 | Migrate DocIntel to its own repository | HIGH | M | #836 |
-| Coordinate pipeline with Tagvico (delegate general filing) | HIGH | L | #815 |
+| Build Paperless suggestion adapter and unified intake workspace | HIGH | L | — |
 | Use Bifrost virtual key for LLM auth (unified LLM routing) | MEDIUM | M | #795 |
 | Evaluate Copilot SDK as AI provider (free GPT-5.4-mini via Copilot subscription) | MEDIUM | M | #816 |
 | DocType/Tag review for DocIntel | MEDIUM | S | #865 |

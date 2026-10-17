@@ -2,7 +2,7 @@
 title: "Tagvico Integration — Architecture & Deployment Plan"
 sidebar_label: Tagvico Integration
 sidebar_position: 2
-status: proposed
+status: superseded
 created: 2026-07-24
 category: design
 label: tagvico-integration
@@ -11,6 +11,7 @@ sources:
   - "https://tagvico.arturf.ch/docs/"
   - "Prior review: Paperless triage tool evaluation"
 related:
+  - "[Intake Triage and Action Routing](../active/intake-triage-and-action-routing.md)"
   - "[DI ↔ MC Unified Integration Plan](./copilot-sdk-provider.md)"
   - "[Connector Expansion Review](../active/current-state-assessment.md)"
   - "Tagvico Comparative Assessment (internal review notes)"
@@ -22,6 +23,21 @@ tracking:
 ---
 
 # Tagvico Integration — Architecture & Deployment Plan
+
+:::warning Superseded
+This July 2026 plan evaluated Tagvico v3.1.2 and is retained as historical
+research. Tagvico v3.4 and v3.5 explicitly repositioned the product around
+Action Cases, household roles, deadlines, approvals, chat, and family bots.
+Metadata filing remains an optional utility, while OCR rescue and several bulk
+processing features entered maintenance mode or became v4 removal candidates.
+
+OWL will not require Tagvico as an ingestion, filing, action, or OCR pipeline
+dependency. Paperless native suggestions and OWL's
+[Intake Triage and Action Routing](../active/intake-triage-and-action-routing.md)
+design replace the deployment and sequencing decisions below. Tagvico remains
+useful reference material for durable approvals, restore snapshots, retries,
+processing history, and one-writer safeguards.
+:::
 
 ## Context
 
@@ -35,9 +51,8 @@ Our Document Intelligence Hub focuses on **domain-specific deep analysis** that
 Tagvico doesn't attempt: recurring statement detection, EOB-to-bill matching,
 and urgency-scored action triage.
 
-**Decision:** Use Tagvico for general filing + taxonomy management. Keep DI Hub
-for domain analysis. Surface both through Mission Control as the unified user
-surface.
+**Historical decision:** Use Tagvico for general filing + taxonomy management.
+This decision is superseded and must not be used for implementation planning.
 
 ---
 

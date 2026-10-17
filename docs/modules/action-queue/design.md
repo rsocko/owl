@@ -38,11 +38,20 @@ stateDiagram-v2
 The configured Action Queue confidence threshold remains the confidence policy;
 readiness does not introduce a second magic threshold. A title is critical for
 all action types. PAY also requires an amount. Confident actionable items bypass
-review, confident no-action assessments file automatically, and uncertain
-interpretations remain absent from the default Action Queue and Mission Control
-feeds until resolved. Needs Review URLs use
+review, while plausible action candidates may enter a proposed state for detail
+confirmation. Proposed actions are not Mission Control eligible until trusted.
+Confident no-action assessments resolve into no-action history, and uncertain
+document interpretations remain absent from the default Action Queue and
+Mission Control feeds until resolved. Needs Review URLs use
 `#/needs-review?type=action_classification&item={review_item_id}` and must select the
 specific review item.
+
+Metadata readiness is independent. Removing the Paperless Inbox tag does not
+confirm, dismiss, create, or complete an Action Queue item. A proposed action
+may therefore remain in Action Queue after the source document is filed. A
+no-action assessment does not exclude the document from future relationship or
+reconciliation scans. See
+[Intake Triage and Action Routing](../../design/active/intake-triage-and-action-routing.md).
 
 ## Daily Action Queue
 
@@ -53,11 +62,11 @@ health checks, backfill, dry-run, custom-run, or custom-field controls.
 
 Pending actions are grouped in this fixed order: **Overdue**, **Today**,
 **Next 7 days**, **Later**, **No due date**. Each group initially displays 15
-items and supports collapse and Show more. Within a group the deterministic
-order is:
+items and supports collapse and Show more. Ordinary filing and archival
+dispositions are excluded. Within a group the deterministic order is:
 
 1. Exact due date, earliest first.
-2. Action type: PAY, RESPOND, SIGN, SCHEDULE, TASK, REVIEW, SHARE, FILE, ARCHIVE.
+2. Action type: PAY, RESPOND, SIGN, SCHEDULE, TASK, REVIEW, SHARE.
 3. Newest discovery first, then descending action ID.
 
 The deadline bucket and exact date always outrank action type. Quick filters are
@@ -120,16 +129,20 @@ done or Remind later. **Something's wrong** is the exceptional path:
 Original and rejected guesses remain in OWL feedback/audit history. They are
 never rendered as current authoritative metadata.
 
-FILE and ARCHIVE mean filing the document, not deleting it and not invoking a
-separate Paperless archival feature. **File in Paperless** is a source action:
-it removes only configured intake/monitor tags, writes the resolved Action
-Status, completes the OWL action, and refreshes the UI. Paperless mutation
-happens before local completion; a Paperless failure is shown and leaves the
-local action open rather than reporting false success.
+`FILE` is deprecated for newly inferred actions. Filing is a metadata-readiness
+operation in the intake workspace: it removes only configured intake tags and
+does not create a Mission Control task. Existing FILE actions retain the atomic
+**File in Paperless** path for compatibility and legacy cleanup.
+
+Ordinary `ARCHIVE` results are retained as informational no-action
+dispositions. They remain visible in no-action history and quality review but
+do not appear in the default Action Queue or Mission Control. A genuine
+physical or procedural archival task must be represented as a specifically
+titled TASK or SHARE action.
 
 Lifecycle actions are status-aware in cards, rows, bulk controls, and the
-drawer. Active work may be completed, reminded, or declined; FILE and ARCHIVE
-must use the atomic Paperless filing action. Resolved history offers Re-open
+drawer. Active work may be completed, reminded, or declined. Legacy FILE
+records use the atomic Paperless filing action. Resolved history offers Re-open
 instead of Done. Bulk controls appear only when the operation is valid for the
 entire selected set.
 
