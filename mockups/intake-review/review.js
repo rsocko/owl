@@ -353,7 +353,9 @@ function routeDocument(outcome, options = {}) {
       ? "Document filed and Inbox tag removed. The PAY suggestion remains in Action Queue for later review."
       : "Filed to no-action history. Inbox tag removed; matching remains enabled. No Mission Control task created."
     : outcome === "review"
-      ? "Kept in Needs Review. Not sent to Mission Control."
+      ? doc.assessment === "pay"
+        ? "Kept in Inbox as Needs Review. The PAY suggestion remains unconfirmed and no trusted work was created."
+        : "Kept in Needs Review. Not sent to Mission Control."
       : "PAY action confirmed and document filed. Eligible for Mission Control; not marked paid.");
   if (!empty && outcome !== "review") byId("source-heading").scrollIntoView({ block: "nearest" });
 }
