@@ -612,9 +612,7 @@ class TestPipelineErrorIsolation:
         monkeypatch.setattr(
             pipeline.paperless,
             "get_document_content",
-            AsyncMock(
-                return_value="We received your payment. Remaining balance due: $42.00."
-            ),
+            AsyncMock(return_value="We received your payment. Remaining balance due: $42.00."),
         )
         monkeypatch.setattr(pipeline.analyzer, "health_check", AsyncMock(return_value=False))
 

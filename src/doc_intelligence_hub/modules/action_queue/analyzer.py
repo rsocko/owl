@@ -190,9 +190,7 @@ def receipt_classification_result(document: dict) -> dict | None:
             ],
             "document_assessment": {
                 "primary_action_index": 0,
-                "correspondent": document.get(
-                    "correspondent_name", document.get("correspondent")
-                ),
+                "correspondent": document.get("correspondent_name", document.get("correspondent")),
                 "overall_confidence": 50,
                 "requires_action": True,
                 "reasoning": (
