@@ -252,6 +252,24 @@ export const endpoints = {
     ),
     metadataDocumentTypes: () => api.get('/api/queue/metadata/document-types'),
   },
+  intake: {
+    documents: () => api.get('/api/intake/documents'),
+    document: (id: string | number) => api.get(`/api/intake/documents/${id}`),
+    saveDocument: (id: string | number, body: unknown) =>
+      api.put(`/api/intake/documents/${id}`, body),
+    refresh: (id: string | number, expectedModified: string) =>
+      api.post(
+        `/api/intake/documents/${id}/refresh?expected_modified=${encodeURIComponent(expectedModified)}`,
+      ),
+    createTaxonomy: (
+      kind: 'tag' | 'correspondent' | 'document_type' | 'storage_path',
+      name: string,
+    ) => api.post(`/api/intake/taxonomies/${kind}`, { name }),
+    createAction: (documentId: string | number, body: unknown) =>
+      api.post(`/api/intake/documents/${documentId}/actions`, body),
+    deleteAction: (actionId: string | number) =>
+      api.delete(`/api/intake/actions/${actionId}`),
+  },
   alerts: {
     list: (params?: string) => api.get(`/api/insights/alerts${params ? `?${params}` : ''}`),
     summary: () => api.get('/api/insights/alerts/summary'),

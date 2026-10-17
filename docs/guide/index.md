@@ -12,6 +12,7 @@ OWL is a document intelligence application that turns your [Paperless-ngx](https
 
 | Module | What It Does |
 |--------|-------------|
+| [Intake Review](./intake-review-guide.md) | Review Paperless metadata, actions, and OCR together before filing |
 | [Action Queue](./action-queue-guide.md) | Inbox-zero workflow — classifies documents and recommends next actions |
 | [Statement Tracking](./statement-tracking-guide.md) | Detects missing recurring statements (bank, utilities, insurance) |
 | [EOB Matching](./eob-matching-guide.md) | Matches insurance Explanations of Benefit to medical bills |
@@ -103,6 +104,7 @@ All endpoints are served under `http://service-005.example.invalid` (or `localho
 
 | Prefix | Module |
 |--------|--------|
+| `/api/intake/*` | Intake Review |
 | `/api/queue/*` | Action Queue |
 | `/api/statements/*` | Statement Tracking |
 | `/api/eob/*` | EOB Matching |

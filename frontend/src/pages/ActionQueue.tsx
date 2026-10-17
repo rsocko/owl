@@ -1893,6 +1893,17 @@ export default function ActionQueue() {
                     variant="ghost"
                     size="sm"
                     onClick={() => {
+                      window.location.hash = `#/intake-review/${selectedAction.document_id}?tab=actions`;
+                    }}
+                  >
+                    Review document
+                  </Button>
+                )}
+                {selectedAction.document_id && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
                       const url = endpoints.documents.previewUrl(selectedAction.document_id!);
                       window.open(url, '_blank', 'noopener,noreferrer');
                     }}

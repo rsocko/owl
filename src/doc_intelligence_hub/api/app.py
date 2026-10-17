@@ -30,6 +30,7 @@ from doc_intelligence_hub.api.routers import (
     eob,
     extraction,
     insights,
+    intake_review,
     mc_connector,
     metadata,
     monarch_delivery,
@@ -446,6 +447,7 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     app.include_router(monarch_delivery.router)
     app.include_router(analysis.router)
     app.include_router(insights.router)
+    app.include_router(intake_review.router)
     app.include_router(extraction.router)
     app.include_router(webhooks.router)
     app.include_router(ocr_quality.router)

@@ -10,6 +10,11 @@ mockups:
 
 The Action Queue is OWL's primary workflow module. It scans your Paperless-ngx inbox, classifies each document using an LLM, assigns urgency scores, and surfaces recommended actions — turning a pile of unprocessed documents into a prioritized task list.
 
+For document-by-document filing, use [Intake Review](./intake-review-guide.md).
+Action Queue's **Review document** control opens that shared workspace on the
+Actions tab, keeping action lifecycle management and Paperless filing
+independent.
+
 :::info Interactive Mockup
 Preview the Needs Review UI: [Unified Review Dashboard](../../mockups/triage-correction/triage-unified.html) — The human-review workflow with keyboard shortcuts and bulk operations.
 :::
@@ -71,6 +76,7 @@ stateDiagram-v2
     acknowledged --> snoozed: Set reminder (legacy state)
     snoozed --> pending: Snooze expired
     completed --> [*]
+    completed --> pending: Undo completion
     dismissed --> [*]
     not_an_action --> [*]
 ```
@@ -83,6 +89,10 @@ stateDiagram-v2
 | `snoozed` | **Remind me later** — returns tomorrow, next week, or on a selected date | ❌ No (resurfaces when the reminder expires) |
 | `dismissed` | **Won't do** — this was a real task, intentionally declined | ❌ No |
 | `not_an_action` | **No action needed** — OWL detected a task incorrectly | ❌ No (records classifier feedback) |
+
+Completed actions remain visible in the shared document workspace as auditable
+history. Undoing completion restores the active state and appends a corrective
+event rather than deleting the original completion record.
 
 ### Severity Tiers
 

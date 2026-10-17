@@ -779,6 +779,17 @@ class PaperlessClient:
             )
         return suggestions
 
+    async def get_document_ai_suggestions(self, document_id: int) -> dict:
+        """Get Paperless AI suggestions for a document when the capability is enabled."""
+        resp = await self._request("GET", f"/api/documents/{document_id}/ai_suggestions/")
+        resp.raise_for_status()
+        suggestions = resp.json()
+        if not isinstance(suggestions, dict):
+            raise PaperlessError(
+                f"Paperless AI suggestions for document {document_id} returned an invalid response"
+            )
+        return suggestions
+
     async def get_document_content(self, document_id: int) -> str:
         """Get the OCR/text content of a document."""
         resp = await self._request("GET", f"/api/documents/{document_id}/")
@@ -1068,6 +1079,12 @@ class PaperlessClient:
         client = self._get_client()
         return await self._paginate(client, "/api/tags/", {"page_size": 500})
 
+    async def create_tag(self, name: str) -> dict:
+        """Create a Paperless tag."""
+        resp = await self._request("POST", "/api/tags/", json={"name": name})
+        resp.raise_for_status()
+        return resp.json()
+
     async def resolve_tag_names(self, tag_ids: list[int]) -> dict[int, str]:
         """Resolve tag IDs to names. Returns {id: name} mapping."""
         tags = await self.list_tags()
@@ -1121,6 +1138,12 @@ class PaperlessClient:
         client = self._get_client()
         return await self._paginate(client, "/api/correspondents/", {"page_size": 100})
 
+    async def create_correspondent(self, name: str) -> dict:
+        """Create a Paperless correspondent."""
+        resp = await self._request("POST", "/api/correspondents/", json={"name": name})
+        resp.raise_for_status()
+        return resp.json()
+
     async def resolve_correspondent_id(self, name: str) -> int | None:
         """Resolve an exact correspondent name to its Paperless ID."""
         normalized = name.strip().casefold()
@@ -1139,6 +1162,28 @@ class PaperlessClient:
             if isinstance(correspondent_id, int) and not isinstance(correspondent_id, bool)
             else None
         )
+
+    async def list_document_types(self) -> list[dict]:
+        """List all Paperless document types."""
+        client = self._get_client()
+        return await self._paginate(client, "/api/document_types/", {"page_size": 100})
+
+    async def create_document_type(self, name: str) -> dict:
+        """Create a Paperless document type."""
+        resp = await self._request("POST", "/api/document_types/", json={"name": name})
+        resp.raise_for_status()
+        return resp.json()
+
+    async def list_storage_paths(self) -> list[dict]:
+        """List all Paperless storage paths."""
+        client = self._get_client()
+        return await self._paginate(client, "/api/storage_paths/", {"page_size": 100})
+
+    async def create_storage_path(self, name: str) -> dict:
+        """Create a Paperless storage path."""
+        resp = await self._request("POST", "/api/storage_paths/", json={"name": name})
+        resp.raise_for_status()
+        return resp.json()
 
     # ------------------------------------------------------------------
     # Custom fields

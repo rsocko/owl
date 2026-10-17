@@ -98,6 +98,21 @@ def _make_mock_paperless() -> AsyncMock:
         "added": "2026-01-01",
     }
     mock.get_document_suggestions.return_value = {"correspondents": [2]}
+    mock.get_document_ai_suggestions.return_value = {}
+    mock.list_document_types.return_value = [
+        {"id": 1, "name": "Statement"},
+        {"id": 2, "name": "Bill"},
+        {"id": 3, "name": "Letter"},
+    ]
+    mock.list_storage_paths.return_value = [
+        {"id": 1, "name": "Household"},
+    ]
+    mock.resolve_tag_ids.return_value = [1]
+    mock.update_document.side_effect = lambda _document_id, data: {
+        **mock.get_document.return_value,
+        **data,
+        "modified": "2026-01-02T00:00:00Z",
+    }
     mock.get_document_content.return_value = "Sample document content for testing."
     mock.get_document_thumbnail.return_value = (b"\x89PNG", "image/png")
     mock.get_document_preview.return_value = (b"%PDF-1.4", "application/pdf")
@@ -125,6 +140,7 @@ def mock_paperless():
         "doc_intelligence_hub.api.routers.ocr_quality.make_paperless_client",
         "doc_intelligence_hub.api.routers.ocr_quality_candidates.make_paperless_client",
         "doc_intelligence_hub.api.routers.receipt_intake.make_paperless_client",
+        "doc_intelligence_hub.api.routers.intake_review.make_paperless_client",
         # "doc_intelligence_hub.api.routers.stats.make_paperless_client",  # stats doesn't import this
     ]
     patches = [patch(t, return_value=mock) for t in targets]

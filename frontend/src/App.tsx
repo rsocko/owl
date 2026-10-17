@@ -25,6 +25,7 @@ import DocumentViews from './pages/DocumentViews';
 import OcrQualityDashboard from './pages/OcrQualityDashboard';
 import OcrQualityReviewQueue from './pages/OcrQualityReviewQueue';
 import OcrQualityDocumentDetail from './pages/OcrQualityDocumentDetail';
+import IntakeReview from './pages/IntakeReview';
 import { endpoints } from './lib/api';
 import { canonicalActionTarget, type CanonicalActionLocation } from './lib/canonicalAction';
 
@@ -85,6 +86,8 @@ function App() {
             <Route path="/eob/benchmarks" element={<BenchmarkHistory />} />
             <Route path="/eob/manual-search" element={<ManualMatchSearch />} />
             <Route path="/action-queue" element={<ActionQueue />} />
+            <Route path="/intake-review" element={<IntakeReview />} />
+            <Route path="/intake-review/:documentId" element={<IntakeReview />} />
             <Route path="/actions/:actionId" element={<CanonicalActionRedirect />} />
             <Route path="/action-queue/operations" element={<ActionQueueOperations />} />
             <Route path="/needs-review" element={<TriageQueue />} />
