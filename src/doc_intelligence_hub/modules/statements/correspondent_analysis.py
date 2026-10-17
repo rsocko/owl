@@ -87,39 +87,51 @@ def analyze_correspondent_policy(
         for document in profile_documents
         for identifier in _account_identifiers(document.title)
     )
-    groups: dict[tuple[DocumentKind, str], list[DocumentRecord]] = defaultdict(list)
-    group_series: dict[tuple[DocumentKind, str], dict] = {}
+    style_counts = Counter(
+        style
+        for document in profile_documents
+        if (style := _classification_neutral_title(document))
+    )
+    groups: dict[str, list[DocumentRecord]] = defaultdict(list)
+    group_series: dict[str, dict] = {}
     for document in profile_documents:
         series = series_by_document.get(str(document.id))
-        kind: DocumentKind = "statement" if series else classify_document_kind(document)
+        kind = classify_document_kind(document)
         normalized = _normalized_document_title(document) or kind
         override = candidate_overrides.get(document.id)
         account_key = normalize_masked_account_identifier(
             document.account_identifier
         ) or _account_group_key(document.title, identifier_counts)
-        metadata_key = _metadata_group_key(document)
+        family_key = _family_tag_group_key(document)
+        style_key = _classification_neutral_title(document)
         if series:
             group_key = f"series:{series['id']}"
         elif override and override.group_key:
             group_key = f"manual:{override.group_key}"
         elif account_key:
             group_key = f"account:{account_key}"
+        elif document.document_type_id is not None and style_key and style_counts[style_key] >= 2:
+            group_key = f"title:{style_key}"
+        elif family_key:
+            group_key = f"family:{family_key}"
+        elif style_key and style_counts[style_key] >= 2:
+            group_key = f"title:{style_key}"
         else:
-            group_key = metadata_key or f"title:{normalized}"
-        key = (kind, group_key)
-        groups[key].append(document)
+            group_key = _metadata_group_key(document) or f"title:{normalized}"
+        groups[group_key].append(document)
         if series:
-            group_series[key] = series
+            group_series[group_key] = series
 
     prepared_groups = [
         (
-            kind,
+            "statement" if group_key in group_series else _dominant_document_kind(grouped_documents),
             group_key,
-            _dominant_title_pattern(grouped_documents) or kind,
+            _dominant_title_pattern(grouped_documents)
+            or _dominant_document_kind(grouped_documents),
             grouped_documents,
         )
-        for (kind, group_key), grouped_documents in sorted(
-            groups.items(), key=lambda item: (item[0][0], item[0][1])
+        for group_key, grouped_documents in sorted(
+            groups.items(), key=lambda item: item[0]
         )
     ]
     duplicate_counts = Counter(
@@ -142,7 +154,7 @@ def analyze_correspondent_policy(
                 normalized_title,
                 grouped_documents,
                 matching_series,
-                bound_series=group_series.get((kind, group_key)),
+                bound_series=group_series.get(group_key),
                 candidate_number=candidate_number,
             )
         )
@@ -218,6 +230,13 @@ def _build_suggestion(
     )
     reason_codes = ["paperless_history", cadence_reason]
     signal_reason_code = _group_signal_reason_code(group_key)
+    type_ids = {
+        document.document_type_id
+        for document in ordered
+        if document.document_type_id is not None
+    }
+    if signal_reason_code == "title_pattern_match" and len(type_ids) == 1:
+        signal_reason_code = None
     if signal_reason_code:
         reason_codes.append(signal_reason_code)
     if bound_series_id:
@@ -226,7 +245,11 @@ def _build_suggestion(
         reason_codes.append("single_document_low_evidence")
 
     return ExpectationPolicySuggestion(
-        suggestion_key=_suggestion_key(correspondent_id, kind, group_key),
+        suggestion_key=_suggestion_key(
+            correspondent_id,
+            kind,
+            _suggestion_identity_group_key(group_key, ordered),
+        ),
         kind=kind,
         series_discriminator=discriminator,
         statement_series_id=bound_series_id if kind == "statement" else None,
@@ -258,6 +281,28 @@ def _suggestion_key(correspondent_id: int, kind: DocumentKind, group_key: str) -
     return f"{correspondent_id}-{kind}-{hashlib.sha256(identity).hexdigest()[:16]}"
 
 
+def _suggestion_identity_group_key(
+    group_key: str, documents: list[DocumentRecord]
+) -> str:
+    if not group_key.startswith("title:"):
+        return group_key
+    type_ids = {
+        document.document_type_id
+        for document in documents
+        if document.document_type_id is not None
+    }
+    if len(type_ids) == 1:
+        return f"document-type-id:{next(iter(type_ids))}"
+    type_names = {
+        normalize_title(document.document_type or "")
+        for document in documents
+        if document.document_type
+    }
+    if len(type_names) == 1:
+        return f"document-type:{next(iter(type_names))}"
+    return group_key
+
+
 def _group_signal_reason_code(group_key: str) -> str | None:
     """Explain which signal established candidate identity, for review transparency."""
     if group_key.startswith("manual:"):
@@ -274,16 +319,16 @@ def _group_signal_reason_code(group_key: str) -> str | None:
 
 
 def _metadata_group_key(document: DocumentRecord) -> str | None:
-    if document.document_type_id is not None:
-        return f"document-type-id:{document.document_type_id}"
-    document_type = normalize_title(document.document_type or "")
-    if document_type:
-        return f"document-type:{document_type}"
     family_key = _family_tag_group_key(document)
     if family_key:
         return f"family:{family_key}"
     if document.tag_ids:
         return "tags:" + ",".join(str(tag_id) for tag_id in sorted(set(document.tag_ids)))
+    if document.document_type_id is not None:
+        return f"document-type-id:{document.document_type_id}"
+    document_type = normalize_title(document.document_type or "")
+    if document_type:
+        return f"document-type:{document_type}"
     return None
 
 
@@ -302,6 +347,30 @@ def _dominant_title_pattern(documents: list[DocumentRecord]) -> str:
     patterns = Counter(_normalized_document_title(document) for document in documents)
     patterns.pop("", None)
     return patterns.most_common(1)[0][0] if patterns else ""
+
+
+def _classification_neutral_title(document: DocumentRecord) -> str:
+    normalized = _normalized_document_title(document)
+    classification_words = {
+        keyword
+        for _, keywords in _KIND_KEYWORDS
+        for keyword in keywords
+        if " " not in keyword
+    }
+    return " ".join(word for word in normalized.split() if word not in classification_words)
+
+
+def _dominant_document_kind(documents: list[DocumentRecord]) -> DocumentKind:
+    counts = Counter(classify_document_kind(document) for document in documents)
+    order: tuple[DocumentKind, ...] = (
+        "statement",
+        "invoice",
+        "bill",
+        "receipt",
+        "record",
+        "other",
+    )
+    return min(order, key=lambda kind: (-counts[kind], order.index(kind)))
 
 
 def _account_group_key(title: str, identifier_counts: Counter[str]) -> str | None:
@@ -549,13 +618,17 @@ def _suggest_metadata_policy(documents: list[DocumentRecord]) -> MetadataPolicyS
     )
     required_type_id: int | None = None
     required_type_name: str | None = None
+    dominant_type_id: int | None = None
+    dominant_type_name: str | None = None
+    type_exception_ids: list[int] = []
     type_coverage = 0.0
     if type_counts:
         candidate, count = type_counts.most_common(1)[0]
         type_coverage = count / len(documents)
-        if type_coverage >= 0.8:
-            required_type_id = candidate
-            required_type_name = next(
+        next_count = type_counts.most_common(2)[1][1] if len(type_counts) > 1 else 0
+        if count >= 2 and count > next_count:
+            dominant_type_id = candidate
+            dominant_type_name = next(
                 (
                     document.document_type
                     for document in documents
@@ -563,6 +636,14 @@ def _suggest_metadata_policy(documents: list[DocumentRecord]) -> MetadataPolicyS
                 ),
                 None,
             )
+            type_exception_ids = [
+                document.id
+                for document in documents
+                if document.document_type_id != dominant_type_id
+            ]
+        if type_coverage >= 0.8:
+            required_type_id = candidate
+            required_type_name = dominant_type_name
 
     reason_codes = []
     if all_of:
@@ -571,8 +652,18 @@ def _suggest_metadata_policy(documents: list[DocumentRecord]) -> MetadataPolicyS
         reason_codes.append("tag_family_present_on_all_documents")
     if required_type_id:
         reason_codes.append("consistent_document_type")
+    elif type_exception_ids:
+        reason_codes.append("document_type_outliers")
+    elif len(type_counts) > 1:
+        reason_codes.append("mixed_document_types")
     if not reason_codes:
         reason_codes.append("metadata_inconsistent_or_unavailable")
+    document_type_counts = dict(
+        sorted(
+            Counter(document.document_type or "Unknown" for document in documents).items(),
+            key=lambda item: item[0].casefold(),
+        )
+    )
     return MetadataPolicySuggestion(
         policy=MetadataPolicy(
             all_of=sorted(all_of),
@@ -581,6 +672,9 @@ def _suggest_metadata_policy(documents: list[DocumentRecord]) -> MetadataPolicyS
         ),
         tag_names={tag_id: tag_names[tag_id] for tag_id in sorted(all_of | any_of)},
         required_document_type_name=required_type_name,
+        dominant_document_type_name=dominant_type_name,
+        document_type_counts=document_type_counts,
+        document_type_exception_ids=type_exception_ids,
         confidence=round(
             max(
                 len(all_of | any_of) > 0 and 1.0 or 0.0,

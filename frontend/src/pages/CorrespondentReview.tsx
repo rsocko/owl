@@ -82,6 +82,9 @@ interface Suggestion {
     policy: MetadataPolicy;
     tag_names: Record<string, string>;
     required_document_type_name?: string | null;
+    dominant_document_type_name?: string | null;
+    document_type_counts?: Record<string, number>;
+    document_type_exception_ids?: number[];
     confidence?: number | null;
     reason_codes: string[];
   };
@@ -555,7 +558,11 @@ function SuggestionCard({
         </div>
         <div>
           <span className="correspondent-label">Metadata pattern</span>
-          <strong>{suggestion.metadata.required_document_type_name ?? 'Mixed document types'}</strong>
+          <strong>
+            {suggestion.metadata.required_document_type_name
+              ?? suggestion.metadata.dominant_document_type_name
+              ?? 'Mixed document types'}
+          </strong>
           <span>{suggestion.metadata.policy.all_of.length} required tags · {suggestion.metadata.policy.any_of.length} family choices</span>
         </div>
         <div>
@@ -885,6 +892,14 @@ function SuggestionCard({
       {needsSeries ? (
         <div className="correspondent-callout warning">
           This statement candidate is ambiguous. Group it into a statement series before confirming or dismissing policy.
+        </div>
+      ) : null}
+      {(suggestion.metadata.document_type_exception_ids?.length ?? 0) > 0 ? (
+        <div className="correspondent-callout warning">
+          Classification exception: {suggestion.metadata.document_type_exception_ids!.length}{' '}
+          {suggestion.metadata.document_type_exception_ids!.length === 1 ? 'document differs' : 'documents differ'} from the
+          dominant {suggestion.metadata.dominant_document_type_name ?? 'document type'} classification.
+          {' '}Review document {suggestion.metadata.document_type_exception_ids!.join(', ')} before enforcing a required type.
         </div>
       ) : null}
       {calendarMissing ? (

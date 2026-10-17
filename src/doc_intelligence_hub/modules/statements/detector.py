@@ -76,15 +76,13 @@ def analyze_correspondent(
     documents: list[DocumentRecord],
     config: AnalysisConfig,
 ) -> list[ProviderCandidate]:
-    statement_like_documents = [
-        document for document in documents if _is_statement_like(document, config)
-    ]
+    statement_like_documents = _statement_like_documents(documents, config)
     if len(statement_like_documents) < config.min_documents_for_pattern:
         return []
 
     grouped_by_title: dict[str, list[DocumentRecord]] = defaultdict(list)
     for document in statement_like_documents:
-        normalized_title = normalize_title(document.title)
+        normalized_title = _classification_neutral_title(document)
         if not normalized_title:
             continue
         grouped_by_title[normalized_title].append(document)
@@ -118,15 +116,13 @@ def _diagnose_correspondent(
     documents: list[DocumentRecord],
     config: AnalysisConfig,
 ) -> list[DiscoveryDiagnosticEntry]:
-    statement_like_documents = [
-        document for document in documents if _is_statement_like(document, config)
-    ]
+    statement_like_documents = _statement_like_documents(documents, config)
     if not statement_like_documents:
         return []
 
     grouped_by_title: dict[str, list[DocumentRecord]] = defaultdict(list)
     for document in statement_like_documents:
-        normalized_title = normalize_title(document.title)
+        normalized_title = _classification_neutral_title(document)
         if normalized_title:
             grouped_by_title[normalized_title].append(document)
 
@@ -159,19 +155,23 @@ def analyze_group(
     if frequency is None:
         return None
 
-    normalized = [normalize_title(document.title) for document in ordered]
-    normalized_counts = Counter(pattern for pattern in normalized if pattern)
-    if not normalized_counts:
+    styles = [_classification_neutral_title(document) for document in ordered]
+    style_counts = Counter(pattern for pattern in styles if pattern)
+    if not style_counts:
         return None
 
-    dominant_pattern, dominant_count = normalized_counts.most_common(1)[0]
-    if normalized_title_hint and normalized_title_hint in normalized_counts:
-        dominant_pattern = normalized_title_hint
-        dominant_count = normalized_counts[normalized_title_hint]
-    title_consistency = dominant_count / len(normalized)
+    dominant_style, dominant_count = style_counts.most_common(1)[0]
+    if normalized_title_hint and normalized_title_hint in style_counts:
+        dominant_style = normalized_title_hint
+        dominant_count = style_counts[normalized_title_hint]
+    title_consistency = dominant_count / len(styles)
     if title_consistency < config.minimum_title_consistency:
         return None
 
+    display_patterns = Counter(
+        pattern for document in ordered if (pattern := normalize_title(document.title))
+    )
+    dominant_pattern = display_patterns.most_common(1)[0][0]
     pattern = _build_pattern(
         frequency, [document.created for document in ordered], config.default_grace_period_days
     )
@@ -181,7 +181,7 @@ def analyze_group(
     statement_name = dominant_pattern.title()
 
     return ProviderCandidate(
-        provider_key=slugify(f"{correspondent_name}-{dominant_pattern}"),
+        provider_key=slugify(f"{correspondent_name}-{dominant_style}"),
         provider_name=provider_name,
         statement_name=statement_name,
         correspondent_id=correspondent_id,
@@ -217,6 +217,33 @@ def _is_statement_like(document: DocumentRecord, config: AnalysisConfig) -> bool
     return any(
         keyword in normalized
         for keyword in ("statement", "bill", "invoice", "eob", "explanation of benefits")
+    )
+
+
+def _statement_like_documents(
+    documents: list[DocumentRecord], config: AnalysisConfig
+) -> list[DocumentRecord]:
+    directly_eligible = [document for document in documents if _is_statement_like(document, config)]
+    directly_eligible_ids = {document.id for document in directly_eligible}
+    eligible_styles = {
+        style
+        for document in directly_eligible
+        if (style := _classification_neutral_title(document))
+    }
+    return [
+        document
+        for document in documents
+        if document.id in directly_eligible_ids
+        or _classification_neutral_title(document) in eligible_styles
+    ]
+
+
+def _classification_neutral_title(document: DocumentRecord) -> str:
+    normalized = normalize_title(document.title)
+    return " ".join(
+        word
+        for word in normalized.split()
+        if word not in {"statement", "bill", "invoice", "eob"}
     )
 
 

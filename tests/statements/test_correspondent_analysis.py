@@ -285,6 +285,66 @@ def test_document_type_takes_priority_over_conflicting_title_keyword() -> None:
     assert result.suggestions[0].kind == "statement"
 
 
+def test_same_style_documents_are_grouped_across_document_type_mismatch() -> None:
+    documents = [
+        _document(1, "Utility Statement January 2026", date(2026, 1, 3)),
+        _document(2, "Utility Statement February 2026", date(2026, 2, 3)),
+        _document(
+            3,
+            "Utility Invoice March 2026",
+            date(2026, 3, 3),
+            document_type_id=4,
+            document_type="Invoice",
+        ),
+    ]
+
+    result = analyze_correspondent_policy(42, "Utility Co", documents, [])
+
+    assert len(result.suggestions) == 1
+    suggestion = result.suggestions[0]
+    assert suggestion.kind == "statement"
+    assert suggestion.document_ids == [1, 2, 3]
+    assert suggestion.metadata.dominant_document_type_name == "Statement"
+    assert suggestion.metadata.document_type_counts == {"Invoice": 1, "Statement": 2}
+    assert suggestion.metadata.document_type_exception_ids == [3]
+    assert "document_type_outliers" in suggestion.metadata.reason_codes
+
+
+def test_curated_series_surfaces_document_type_exception_without_splitting() -> None:
+    documents = [
+        _document(1, "Old label", date(2026, 1, 3)),
+        _document(2, "New label", date(2026, 2, 3)),
+        _document(
+            3,
+            "Portal invoice label",
+            date(2026, 3, 3),
+            document_type_id=4,
+            document_type="Invoice",
+        ),
+    ]
+
+    result = analyze_correspondent_policy(
+        42,
+        "Example Bank",
+        documents,
+        [
+            {
+                "id": "checking",
+                "name": "Household Checking",
+                "correspondent_id": 42,
+                "correspondent_name": "Example Bank",
+                "document_ids": ["1", "2", "3"],
+            }
+        ],
+    )
+
+    assert len(result.suggestions) == 1
+    suggestion = result.suggestions[0]
+    assert suggestion.statement_series_id == "checking"
+    assert suggestion.document_ids == [1, 2, 3]
+    assert suggestion.metadata.document_type_exception_ids == [3]
+
+
 def test_curated_series_membership_overrides_ambiguous_document_kind() -> None:
     documents = [
         _document(
