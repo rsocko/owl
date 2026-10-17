@@ -100,6 +100,9 @@ class Action(Base):
     )  # pending, acknowledged, completed, snoozed, dismissed, not_an_action
     last_synced_status = Column(String, nullable=True)  # What we last wrote to Paperless
     correspondent = Column(String, nullable=True)
+    payee_or_owner = Column(String, nullable=True)
+    reference = Column(String, nullable=True)
+    origin = Column(String, nullable=False, default="inferred")
     document_date = Column(Date, nullable=True)  # Paperless "created" date (document date)
     document_type = Column(String, nullable=True)  # Paperless document type name
     tags = Column(JSON, nullable=True)  # Paperless tags as JSON array of strings
@@ -126,6 +129,22 @@ class Action(Base):
     completed_at = Column(DateTime, nullable=True)
     acknowledged_at = Column(DateTime, nullable=True)
     snoozed_until = Column(DateTime, nullable=True)  # When snooze expires; null = not snoozed
+
+
+class ActionLifecycleEvent(Base):
+    """Append-only action history, including corrective undo transitions."""
+
+    __tablename__ = "action_lifecycle_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    action_id = Column(Integer, nullable=False, index=True)
+    event_type = Column(String, nullable=False, index=True)
+    previous_status = Column(String, nullable=True)
+    new_status = Column(String, nullable=True)
+    action_version = Column(Integer, nullable=False)
+    actor = Column(String, nullable=False, default="user")
+    details = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class ObligationDocument(Base):
@@ -503,6 +522,9 @@ def _migrate_missing_columns(engine):
             ("superseded_by_action_id", "INTEGER"),
             ("obligation_id", "TEXT"),
             ("relationship_base_snapshot", "TEXT"),
+            ("payee_or_owner", "TEXT"),
+            ("reference", "TEXT"),
+            ("origin", "TEXT DEFAULT 'inferred' NOT NULL"),
         ],
         "action_feedback": [
             ("original_urgency", "TEXT"),

@@ -189,6 +189,9 @@ class TestUpdateAction:
         data = resp.json()
         assert data["status"] == "pending"
         assert data["completed_at"] is None
+        assert data["history"][-1]["event_type"] == "completion_undone"
+        assert data["history"][-1]["previous_status"] == "completed"
+        assert data["history"][-1]["new_status"] == "pending"
 
     def test_update_action_not_found(self, client):
         resp = client.patch(
@@ -230,6 +233,8 @@ class TestUpdateAction:
                     "amount": 123.45,
                     "urgency": "HIGH",
                     "correspondent": "Utility Co",
+                    "payee_or_owner": "Accounts Payable",
+                    "reference": "INV-4821",
                 },
             )
         assert resp.status_code == 200
@@ -245,6 +250,8 @@ class TestUpdateAction:
         assert data["amount"] == 123.45
         assert data["urgency"] == "HIGH"
         assert data["correspondent"] == "Utility Co"
+        assert data["payee_or_owner"] == "Accounts Payable"
+        assert data["reference"] == "INV-4821"
         assert data["version"] == action["version"] + 1
 
     def test_update_action_allows_clearing_optional_fields(self, client, seed_actions):
