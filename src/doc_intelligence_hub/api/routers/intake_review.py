@@ -23,14 +23,12 @@ from doc_intelligence_hub.core.paperless import (
     MetadataProjectionPolicy,
     get_metadata_field_spec,
 )
-from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
 from doc_intelligence_hub.modules.action_queue.database import (
     VALID_ACTION_TYPES,
     Action,
     ActionLifecycleEvent,
     IntakeSuggestionSnapshot,
     ProcessingHistory,
-    QueueConfiguration,
     get_session,
     init_db,
 )
@@ -54,6 +52,7 @@ _TAXONOMY_METHODS = {
 }
 _TAXONOMY_CACHE_TTL = timedelta(minutes=5)
 _SUGGESTION_CACHE_TTL = timedelta(hours=6)
+_INBOX_TAG_NAME = "Inbox"
 _taxonomy_cache: tuple[datetime, dict[str, list[dict[str, Any]]]] | None = None
 _taxonomy_cache_lock = asyncio.Lock()
 _EDITABLE_CUSTOM_FIELD_KEYS = {
@@ -318,18 +317,20 @@ def _normalize_suggestions(
     return normalized
 
 
-def _queue_settings() -> QueueConfiguration | None:
-    init_db()
-    db = get_session()
-    try:
-        return db.query(QueueConfiguration).filter_by(id=1).first()
-    finally:
-        db.close()
-
-
-def _monitor_tags() -> list[str]:
-    settings = _queue_settings()
-    return list(settings.monitor_tags if settings else action_queue_settings.monitor_tags)
+async def _resolve_inbox_tag_id(client: Any) -> int:
+    tag_ids = await client.resolve_tag_ids([_INBOX_TAG_NAME])
+    if not tag_ids:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "paperless_inbox_tag_missing",
+                "message": (
+                    "Inbox Review requires a Paperless tag named 'Inbox'. "
+                    "Create the tag in Paperless before using Inbox Review."
+                ),
+            },
+        )
+    return tag_ids[0]
 
 
 async def _load_taxonomies(client: Any) -> dict[str, list[dict[str, Any]]]:
@@ -693,7 +694,6 @@ async def _document_detail(request: Request, document_id: int) -> dict[str, Any]
             "download_url": f"/api/documents/{document_id}/download",
             "paperless_url": _paperless_document_url(request, document_id),
             "write_enabled": bool(request.app.state.hub_settings.write_to_paperless),
-            "monitor_tags": _monitor_tags(),
         }
     finally:
         await client.aclose()
@@ -710,9 +710,9 @@ async def list_intake_documents(
     client = make_paperless_client(request, timeout=30.0)
     try:
         try:
-            tag_ids = await client.resolve_tag_ids(_monitor_tags())
+            inbox_tag_id = await _resolve_inbox_tag_id(client)
             scope_params = {
-                "tags__id__in": ",".join(str(tag_id) for tag_id in tag_ids) if tag_ids else "0",
+                "tags__id__in": str(inbox_tag_id),
                 "ordering": "-id",
             }
             if search.strip():
@@ -751,6 +751,8 @@ async def list_intake_documents(
                 _load_taxonomies(client),
             )
             documents = list(page.results)
+        except HTTPException:
+            raise
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
@@ -833,7 +835,6 @@ async def list_intake_documents(
             ],
             "total": page.total_count,
             "next_cursor": page.next_cursor,
-            "monitor_tags": _monitor_tags(),
         }
     finally:
         await client.aclose()
@@ -862,7 +863,6 @@ async def get_intake_document_core(request: Request, document_id: int) -> dict[s
             "download_url": f"/api/documents/{document_id}/download",
             "paperless_url": _paperless_document_url(request, document_id),
             "write_enabled": bool(request.app.state.hub_settings.write_to_paperless),
-            "monitor_tags": _monitor_tags(),
         }
     finally:
         await client.aclose()
@@ -1234,9 +1234,9 @@ async def save_intake_document(
             patch["custom_fields"] = merged_custom_fields
 
         if body.disposition in {"file_only", "confirm_and_file"}:
-            intake_tag_ids = set(await client.resolve_tag_ids(_monitor_tags()))
+            inbox_tag_id = await _resolve_inbox_tag_id(client)
             source_tags = patch.get("tags", current.get("tags") or [])
-            patch["tags"] = [tag_id for tag_id in source_tags if tag_id not in intake_tag_ids]
+            patch["tags"] = [tag_id for tag_id in source_tags if tag_id != inbox_tag_id]
 
         try:
             updated = await client.update_document(document_id, patch) if patch else current

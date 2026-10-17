@@ -53,7 +53,6 @@ interface IntakeQueueResponse {
   documents: IntakeListItem[];
   total: number;
   next_cursor: string | null;
-  monitor_tags: string[];
 }
 
 const QUEUE_PAGE_SIZE = 100;
@@ -121,7 +120,6 @@ interface IntakeCore {
   preview_url: string;
   paperless_url?: string | null;
   write_enabled: boolean;
-  monitor_tags: string[];
 }
 
 interface OcrState {
