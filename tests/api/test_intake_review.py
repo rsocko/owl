@@ -44,9 +44,7 @@ def test_list_intake_documents_uses_configured_source(client, mock_paperless):
     )
 
 
-def test_list_intake_documents_applies_search_and_missing_type_to_paperless(
-    client, mock_paperless
-):
+def test_list_intake_documents_applies_search_and_missing_type_to_paperless(client, mock_paperless):
     mock_paperless.resolve_tag_ids.return_value = [1]
     mock_paperless.list_document_page.return_value = PaperlessPage(
         results=(),
@@ -54,9 +52,7 @@ def test_list_intake_documents_applies_search_and_missing_type_to_paperless(
         total_count=0,
     )
 
-    response = client.get(
-        "/api/intake/documents?search=utility&queue_filter=missing_type"
-    )
+    response = client.get("/api/intake/documents?search=utility&queue_filter=missing_type")
 
     assert response.status_code == 200
     mock_paperless.list_document_page.assert_awaited_once_with(

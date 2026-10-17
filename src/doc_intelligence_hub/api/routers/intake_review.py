@@ -656,9 +656,7 @@ async def list_intake_documents(
         try:
             tag_ids = await client.resolve_tag_ids(_monitor_tags())
             scope_params = {
-                "tags__id__in": ",".join(str(tag_id) for tag_id in tag_ids)
-                if tag_ids
-                else "0",
+                "tags__id__in": ",".join(str(tag_id) for tag_id in tag_ids) if tag_ids else "0",
                 "ordering": "-id",
             }
             if search.strip():
@@ -675,9 +673,7 @@ async def list_intake_documents(
                             db.query(Action.document_id)
                             .filter(
                                 Action.superseded_by_action_id.is_(None),
-                                Action.status.notin_(
-                                    {"completed", "dismissed", "not_an_action"}
-                                ),
+                                Action.status.notin_({"completed", "dismissed", "not_an_action"}),
                             )
                             .distinct()
                             .all()
