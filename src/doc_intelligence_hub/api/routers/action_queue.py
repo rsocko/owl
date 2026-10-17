@@ -33,6 +33,7 @@ from doc_intelligence_hub.modules.action_queue.database import (
     VALID_ACTION_TYPES,
     Action,
     ActionFeedback,
+    ActionLifecycleEvent,
     Obligation,
     QueueConfiguration,
     get_session,
@@ -233,6 +234,8 @@ class ActionUpdateRequest(BaseModel):
         description="Editable urgency",
     )
     correspondent: str | None = Field(default=None, description="Editable correspondent")
+    payee_or_owner: str | None = Field(default=None, description="Editable payee or owner")
+    reference: str | None = Field(default=None, description="Editable action reference")
 
     @field_validator("action_type")
     @classmethod
@@ -258,7 +261,7 @@ class ActionUpdateRequest(BaseModel):
             raise PydanticCustomError("blank_title", "title cannot be blank")
         return normalized
 
-    @field_validator("summary", "correspondent")
+    @field_validator("summary", "correspondent", "payee_or_owner", "reference")
     @classmethod
     def _normalize_optional_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -279,6 +282,8 @@ class ActionUpdateRequest(BaseModel):
             "document_due_date",
             "urgency",
             "correspondent",
+            "payee_or_owner",
+            "reference",
         }
         if not (self.model_fields_set & mutable_fields):
             raise PydanticCustomError(
@@ -513,6 +518,9 @@ def _serialize_action(a: Action) -> dict[str, Any]:
         ),
         "action_url": f"#/actions/{a.id}",
         "correspondent": a.correspondent,
+        "payee_or_owner": a.payee_or_owner or a.correspondent,
+        "reference": a.reference or (extracted_data or {}).get("reference_number"),
+        "origin": a.origin or "inferred",
         "document_date": a.document_date.isoformat() if a.document_date else None,
         "document_created_at": a.document_date.isoformat() if a.document_date else None,
         "document_type": a.document_type,
@@ -558,6 +566,24 @@ def _serialize_action_with_siblings(db: Session, action: Action) -> dict[str, An
         (index for index, sibling in enumerate(siblings, start=1) if sibling.id == action.id),
         None,
     )
+    serialized["history"] = [
+        {
+            "id": event.id,
+            "event_type": event.event_type,
+            "previous_status": event.previous_status,
+            "new_status": event.new_status,
+            "action_version": event.action_version,
+            "actor": event.actor,
+            "details": event.details or {},
+            "created_at": event.created_at.isoformat() if event.created_at else None,
+        }
+        for event in (
+            db.query(ActionLifecycleEvent)
+            .filter_by(action_id=action.id)
+            .order_by(ActionLifecycleEvent.id.asc())
+            .all()
+        )
+    ]
     documents = linked_documents(db, action)
     serialized["obligation_id"] = action.obligation_id
     obligation = (
@@ -1431,13 +1457,28 @@ async def update_action(
             for sibling in siblings:
                 sibling.correspondent = body.correspondent
                 mark_human_corrections(sibling, {"correspondent"})
+        if "payee_or_owner" in supplied_fields:
+            action.payee_or_owner = body.payee_or_owner
+        if "reference" in supplied_fields:
+            action.reference = body.reference
 
         corrected_fields = supplied_fields.intersection(
-            {"action_type", "title", "summary", "due_date", "amount", "urgency", "correspondent"}
+            {
+                "action_type",
+                "title",
+                "summary",
+                "due_date",
+                "amount",
+                "urgency",
+                "correspondent",
+                "payee_or_owner",
+                "reference",
+            }
         )
         if corrected_fields:
             mark_human_corrections(action, corrected_fields)
 
+        previous_status_for_event = action.status
         if "status" in supplied_fields or "snoozed_until" in supplied_fields:
             effective_status = body.status or action.status
             previous_status = action.status
@@ -1538,6 +1579,25 @@ async def update_action(
 
         if not feedback_changed:
             action.version = (action.version or 1) + 1
+        if status_changed:
+            event_type = (
+                "completion_undone"
+                if previous_status_for_event == "completed" and action.status != "completed"
+                else "status_changed"
+            )
+            db.add(
+                ActionLifecycleEvent(
+                    action_id=action.id,
+                    event_type=event_type,
+                    previous_status=previous_status_for_event,
+                    new_status=action.status,
+                    action_version=action.version or 1,
+                    details={
+                        "completed_at_retained_in_history": previous_status_for_event
+                        == "completed",
+                    },
+                )
+            )
         if status_changed:
             sync_obligation_status(db, action)
         db.commit()

@@ -552,6 +552,9 @@ class TestListActions:
             "needs_review_url",
             "action_url",
             "correspondent",
+            "payee_or_owner",
+            "reference",
+            "origin",
             "document_date",
             "document_created_at",
             "document_type",
@@ -581,6 +584,7 @@ class TestListActions:
             "completed_at",
             "acknowledged_at",
             "snoozed_until",
+            "history",
         }
         assert set(action.keys()) == expected_fields
         assert action["action_url"] == "#/actions/1"
