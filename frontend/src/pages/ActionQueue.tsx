@@ -1893,7 +1893,7 @@ export default function ActionQueue() {
                     variant="ghost"
                     size="sm"
                     onClick={() => {
-                      window.location.hash = `#/intake-review/${selectedAction.document_id}?tab=actions`;
+                      window.location.hash = `#/intake-review?document=${selectedAction.document_id}&tab=actions`;
                     }}
                   >
                     Review document

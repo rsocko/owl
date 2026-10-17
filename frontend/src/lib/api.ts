@@ -255,6 +255,11 @@ export const endpoints = {
   intake: {
     documents: () => api.get('/api/intake/documents'),
     document: (id: string | number) => api.get(`/api/intake/documents/${id}`),
+    documentCore: (id: string | number) => api.get(`/api/intake/documents/${id}/core`),
+    documentSuggestions: (id: string | number, refresh = false) =>
+      api.get(`/api/intake/documents/${id}/suggestions${refresh ? '?refresh=true' : ''}`),
+    documentActions: (id: string | number) => api.get(`/api/intake/documents/${id}/actions`),
+    documentOcr: (id: string | number) => api.get(`/api/intake/documents/${id}/ocr`),
     saveDocument: (id: string | number, body: unknown) =>
       api.put(`/api/intake/documents/${id}`, body),
     refresh: (id: string | number, expectedModified: string) =>

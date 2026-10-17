@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 
 import httpx
@@ -17,11 +17,17 @@ from doc_intelligence_hub.api.routers.action_queue import (
     _serialize_action_with_siblings,
     _sync_action_queue_settings,
 )
+from doc_intelligence_hub.core.paperless import (
+    MetadataFieldKey,
+    MetadataProjectionPolicy,
+    get_metadata_field_spec,
+)
 from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
 from doc_intelligence_hub.modules.action_queue.database import (
     VALID_ACTION_TYPES,
     Action,
     ActionLifecycleEvent,
+    IntakeSuggestionSnapshot,
     ProcessingHistory,
     QueueConfiguration,
     get_session,
@@ -38,6 +44,32 @@ _TAXONOMY_METHODS = {
     "document_type": ("list_document_types", "create_document_type"),
     "storage_path": ("list_storage_paths", "create_storage_path"),
 }
+_TAXONOMY_CACHE_TTL = timedelta(minutes=5)
+_SUGGESTION_CACHE_TTL = timedelta(hours=6)
+_taxonomy_cache: tuple[datetime, dict[str, list[dict[str, Any]]]] | None = None
+_taxonomy_cache_lock = asyncio.Lock()
+_EDITABLE_CUSTOM_FIELD_KEYS = {
+    MetadataFieldKey.DOCUMENT_AMOUNT,
+    MetadataFieldKey.DOCUMENT_DUE_DATE,
+}
+_HIDDEN_CUSTOM_FIELD_NAMES = {
+    "Action Status",
+    "Action Analyzed",
+    "Action Type",
+    "Action Due Date",
+    "Action Urgency",
+    "Action Summary",
+    "Action Count",
+    "Related Document IDs",
+    "Relationship Summary",
+    "Related Documents",
+    "Obligation ID",
+    "Obligation Role",
+}
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class IntakeMetadataPatch(BaseModel):
@@ -68,6 +100,25 @@ class IntakeMetadataPatch(BaseModel):
             raise ValueError("tags must contain positive integer IDs")
         if len(value) != len(set(value)):
             raise ValueError("tags cannot contain duplicates")
+        return value
+
+    @field_validator("custom_fields")
+    @classmethod
+    def valid_custom_fields(
+        cls, value: list[dict[str, Any]] | None
+    ) -> list[dict[str, Any]] | None:
+        if value is None:
+            return None
+        field_ids: list[int] = []
+        for item in value:
+            field_id = item.get("field")
+            if isinstance(field_id, bool) or not isinstance(field_id, int) or field_id <= 0:
+                raise ValueError("custom fields require a positive integer field ID")
+            if "value" not in item:
+                raise ValueError("custom fields require a value")
+            field_ids.append(field_id)
+        if len(field_ids) != len(set(field_ids)):
+            raise ValueError("custom fields cannot contain duplicate field IDs")
         return value
 
 
@@ -226,7 +277,14 @@ def _normalize_suggestions(
 
     for field, keys in {
         "title": ("title", "suggested_title"),
-        "created": ("created", "date", "suggested_date"),
+        "created": (
+            "created",
+            "date",
+            "dates",
+            "created_dates",
+            "suggested_date",
+            "suggested_dates",
+        ),
     }.items():
         for raw in _suggestion_values(payload, *keys):
             if not isinstance(raw, str) or not raw.strip() or raw == current.get(field):
@@ -255,6 +313,20 @@ def _monitor_tags() -> list[str]:
 
 
 async def _load_taxonomies(client: Any) -> dict[str, list[dict[str, Any]]]:
+    global _taxonomy_cache
+    now = datetime.now(UTC)
+    if _taxonomy_cache and now - _taxonomy_cache[0] < _TAXONOMY_CACHE_TTL:
+        return _taxonomy_cache[1]
+    async with _taxonomy_cache_lock:
+        now = datetime.now(UTC)
+        if _taxonomy_cache and now - _taxonomy_cache[0] < _TAXONOMY_CACHE_TTL:
+            return _taxonomy_cache[1]
+        taxonomies = await _fetch_taxonomies(client)
+        _taxonomy_cache = (now, taxonomies)
+        return taxonomies
+
+
+async def _fetch_taxonomies(client: Any) -> dict[str, list[dict[str, Any]]]:
     tags, correspondents, document_types, storage_paths, custom_fields = await asyncio.gather(
         client.list_tags(),
         client.list_correspondents(),
@@ -271,17 +343,119 @@ async def _load_taxonomies(client: Any) -> dict[str, list[dict[str, Any]]]:
     }
 
 
-async def _document_detail(request: Request, document_id: int) -> dict[str, Any]:
-    client = make_paperless_client(request, timeout=30.0)
+def _metadata_spec_by_name(name: str) -> tuple[MetadataFieldKey, Any] | None:
+    normalized = name.strip().casefold()
+    for key in MetadataFieldKey:
+        spec = get_metadata_field_spec(key)
+        if normalized in {
+            spec.canonical_name.casefold(),
+            *(alias.casefold() for alias in spec.aliases),
+        }:
+            return key, spec
+    return None
+
+
+def _review_custom_fields(
+    document: dict[str, Any], definitions: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    definitions_by_id = {
+        definition.get("id"): definition
+        for definition in definitions
+        if isinstance(definition, dict)
+    }
+    fields: list[dict[str, Any]] = []
+    for item in document.get("custom_fields") or []:
+        if not isinstance(item, dict):
+            continue
+        definition = definitions_by_id.get(item.get("field"))
+        if not definition:
+            continue
+        name = str(definition.get("name") or f"Field {item.get('field')}")
+        if name in _HIDDEN_CUSTOM_FIELD_NAMES:
+            continue
+        matched = _metadata_spec_by_name(name)
+        if (
+            matched
+            and matched[1].projection_policy is MetadataProjectionPolicy.OPERATIONAL
+            and matched[0] not in _EDITABLE_CUSTOM_FIELD_KEYS
+        ):
+            continue
+        key = matched[0] if matched else None
+        fields.append(
+            {
+                "field": item.get("field"),
+                "name": name,
+                "value": item.get("value"),
+                "data_type": definition.get("data_type"),
+                "editable": key in _EDITABLE_CUSTOM_FIELD_KEYS,
+                "audit": key is MetadataFieldKey.ACCOUNT_IDENTIFIER,
+            }
+        )
+    return fields
+
+
+def _native_document_payload(
+    document: dict[str, Any],
+    taxonomies: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    catalogs = {
+        key: _catalog_map(taxonomies[key])
+        for key in ("tags", "correspondents", "document_types", "storage_paths")
+    }
+    return {
+        **document,
+        "document_summary": build_document_summary(
+            {
+                **document,
+                "correspondent_name": (
+                    _catalog_value(catalogs["correspondents"], document.get("correspondent")) or {}
+                ).get("name"),
+                "document_type_name": (
+                    _catalog_value(catalogs["document_types"], document.get("document_type")) or {}
+                ).get("name"),
+            }
+        ),
+        "correspondent_value": _catalog_value(
+            catalogs["correspondents"], document.get("correspondent")
+        ),
+        "document_type_value": _catalog_value(
+            catalogs["document_types"], document.get("document_type")
+        ),
+        "storage_path_value": _catalog_value(
+            catalogs["storage_paths"], document.get("storage_path")
+        ),
+        "tag_values": [
+            item
+            for tag_id in document.get("tags") or []
+            if (item := _catalog_value(catalogs["tags"], tag_id)) is not None
+        ],
+        "review_fields": _review_custom_fields(document, taxonomies["custom_fields"]),
+    }
+
+
+async def _suggestions_for_document(
+    client: Any,
+    document: dict[str, Any],
+    taxonomies: dict[str, list[dict[str, Any]]],
+    *,
+    force: bool = False,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], bool]:
+    init_db()
+    db = get_session()
+    source_modified = str(document.get("modified") or "")
     try:
-        try:
-            document, taxonomies, content = await asyncio.gather(
-                client.get_document(document_id),
-                _load_taxonomies(client),
-                client.get_document_content(document_id),
+        snapshot = db.get(IntakeSuggestionSnapshot, int(document["id"]))
+        if (
+            not force
+            and snapshot
+            and snapshot.source_modified == source_modified
+            and _utcnow_naive() - snapshot.fetched_at < _SUGGESTION_CACHE_TTL
+            and all(
+                state.get("available")
+                for state in (snapshot.source_states or {}).values()
             )
-        except Exception as exc:
-            _raise_paperless_error(exc, "loading the intake document")
+        ):
+            return list(snapshot.suggestions or []), dict(snapshot.source_states or {}), True
 
         catalogs = {
             key: _catalog_map(taxonomies[key])
@@ -295,14 +469,13 @@ async def _document_detail(request: Request, document_id: int) -> dict[str, Any]
             "title": document.get("title"),
             "created": document.get("created"),
         }
-
         suggestion_results = await asyncio.gather(
-            client.get_document_suggestions(document_id),
-            client.get_document_ai_suggestions(document_id),
+            client.get_document_suggestions(int(document["id"])),
+            client.get_document_ai_suggestions(int(document["id"])),
             return_exceptions=True,
         )
         suggestions: list[dict[str, Any]] = []
-        suggestion_sources: dict[str, dict[str, Any]] = {}
+        source_states: dict[str, dict[str, Any]] = {}
         for source, result in zip(
             ("paperless_ml", "paperless_ai"), suggestion_results, strict=True
         ):
@@ -312,82 +485,103 @@ async def _document_detail(request: Request, document_id: int) -> dict[str, Any]
                     if isinstance(result, httpx.HTTPStatusError)
                     else None
                 )
-                suggestion_sources[source] = {
+                source_states[source] = {
                     "available": False,
                     "status": status,
                     "error": str(result),
                 }
                 continue
-            suggestion_sources[source] = {"available": True, "status": 200, "error": None}
+            source_states[source] = {"available": True, "status": 200, "error": None}
             suggestions.extend(_normalize_suggestions(result, source, catalogs, current))
 
-        init_db()
-        db = get_session()
-        try:
-            actions = (
-                db.query(Action)
-                .filter(
-                    Action.document_id == document_id,
-                    Action.superseded_by_action_id.is_(None),
-                )
-                .order_by(Action.action_index.asc(), Action.id.asc())
-                .all()
-            )
-            action_payloads = [_serialize_action_with_siblings(db, action) for action in actions]
-            history = (
-                db.query(ProcessingHistory)
-                .filter_by(document_id=document_id)
-                .order_by(ProcessingHistory.processed_at.desc())
-                .first()
-            )
-        finally:
-            db.close()
+        if snapshot is None:
+            snapshot = IntakeSuggestionSnapshot(document_id=int(document["id"]))
+            db.add(snapshot)
+        snapshot.source_modified = source_modified
+        snapshot.suggestions = suggestions
+        snapshot.source_states = source_states
+        snapshot.fetched_at = _utcnow_naive()
+        db.commit()
+        return suggestions, source_states, False
+    finally:
+        db.close()
 
-        quality_score = history.text_quality_score if history else None
-        quality_band = (
-            "green"
-            if quality_score is not None and quality_score >= 90
-            else "amber"
-            if quality_score is not None and quality_score >= 75
-            else "red"
-            if quality_score is not None
-            else "unknown"
+
+def _action_and_quality_payload(document_id: int) -> dict[str, Any]:
+    init_db()
+    db = get_session()
+    try:
+        actions = (
+            db.query(Action)
+            .filter(
+                Action.document_id == document_id,
+                Action.superseded_by_action_id.is_(None),
+            )
+            .order_by(Action.action_index.asc(), Action.id.asc())
+            .all()
         )
+        history = (
+            db.query(ProcessingHistory)
+            .filter_by(document_id=document_id)
+            .order_by(ProcessingHistory.processed_at.desc())
+            .first()
+        )
+        score = history.text_quality_score if history else None
         return {
-            "document": {
-                **document,
-                "document_summary": build_document_summary(document),
-                "correspondent_value": _catalog_value(
-                    catalogs["correspondents"], document.get("correspondent")
-                ),
-                "document_type_value": _catalog_value(
-                    catalogs["document_types"], document.get("document_type")
-                ),
-                "storage_path_value": _catalog_value(
-                    catalogs["storage_paths"], document.get("storage_path")
-                ),
-                "tag_values": [
-                    item
-                    for tag_id in document.get("tags") or []
-                    if (item := _catalog_value(catalogs["tags"], tag_id)) is not None
-                ],
-            },
-            "taxonomies": taxonomies,
-            "suggestions": suggestions,
-            "suggestion_sources": suggestion_sources,
-            "actions": action_payloads,
-            "ocr": {
-                "quality_score": quality_score,
-                "quality_band": quality_band,
-                "poor_quality": quality_score is not None and quality_score < 75,
-                "text": content,
-            },
+            "actions": [_serialize_action_with_siblings(db, action) for action in actions],
             "analysis": {
                 "available": history is not None,
                 "processed_at": (
                     history.processed_at.isoformat() if history and history.processed_at else None
                 ),
                 "disposition": history.disposition if history else None,
+            },
+            "ocr_quality": {
+                "quality_score": score,
+                "quality_band": (
+                    "green"
+                    if score is not None and score >= 90
+                    else "amber"
+                    if score is not None and score >= 75
+                    else "red"
+                    if score is not None
+                    else "unknown"
+                ),
+                "poor_quality": score is not None and score < 75,
+            },
+        }
+    finally:
+        db.close()
+
+
+async def _document_detail(request: Request, document_id: int) -> dict[str, Any]:
+    client = make_paperless_client(request, timeout=30.0)
+    try:
+        try:
+            document, taxonomies, content = await asyncio.gather(
+                client.get_document(document_id),
+                _load_taxonomies(client),
+                client.get_document_content(document_id),
+            )
+        except Exception as exc:
+            _raise_paperless_error(exc, "loading the intake document")
+        suggestions, suggestion_sources, suggestion_cached = await _suggestions_for_document(
+            client, document, taxonomies
+        )
+        action_payload = _action_and_quality_payload(document_id)
+        return {
+            "document": _native_document_payload(document, taxonomies),
+            "taxonomies": taxonomies,
+            "suggestions": suggestions,
+            "suggestion_sources": suggestion_sources,
+            "suggestions_cached": suggestion_cached,
+            "actions": action_payload["actions"],
+            "ocr": {
+                **action_payload["ocr_quality"],
+                "text": content,
+            },
+            "analysis": {
+                **action_payload["analysis"],
                 "source_modified": document.get("modified"),
             },
             "preview_url": f"/api/statements/documents/{document_id}/preview",
@@ -404,9 +598,36 @@ async def list_intake_documents(request: Request, limit: int = 100) -> dict[str,
     client = make_paperless_client(request, timeout=30.0)
     try:
         try:
-            documents = await client.list_documents(tags=_monitor_tags(), limit=min(limit, 200))
+            documents, taxonomies = await asyncio.gather(
+                client.list_documents(tags=_monitor_tags(), limit=min(limit, 200)),
+                _load_taxonomies(client),
+            )
         except Exception as exc:
             _raise_paperless_error(exc, "loading the intake queue")
+        document_ids = [document.get("id") for document in documents if document.get("id")]
+        catalogs = {
+            key: _catalog_map(taxonomies[key])
+            for key in ("tags", "correspondents", "document_types")
+        }
+        init_db()
+        db = get_session()
+        try:
+            action_rows = (
+                db.query(Action.document_id, Action.status, func.count(Action.id))
+                .filter(
+                    Action.document_id.in_(document_ids),
+                    Action.superseded_by_action_id.is_(None),
+                )
+                .group_by(Action.document_id, Action.status)
+                .all()
+                if document_ids
+                else []
+            )
+        finally:
+            db.close()
+        counts: dict[int, dict[str, int]] = {}
+        for document_id, status, count in action_rows:
+            counts.setdefault(document_id, {})[status] = count
         return {
             "documents": [
                 {
@@ -415,9 +636,51 @@ async def list_intake_documents(request: Request, limit: int = 100) -> dict[str,
                     "created": document.get("created"),
                     "modified": document.get("modified"),
                     "correspondent": document.get("correspondent"),
+                    "correspondent_name": (
+                        _catalog_value(
+                            catalogs["correspondents"], document.get("correspondent")
+                        )
+                        or {}
+                    ).get("name"),
                     "document_type": document.get("document_type"),
+                    "document_type_name": (
+                        _catalog_value(
+                            catalogs["document_types"], document.get("document_type")
+                        )
+                        or {}
+                    ).get("name"),
                     "tags": document.get("tags") or [],
-                    "document_summary": build_document_summary(document),
+                    "tag_values": [
+                        item
+                        for tag_id in document.get("tags") or []
+                        if (item := _catalog_value(catalogs["tags"], tag_id)) is not None
+                    ],
+                    "document_summary": build_document_summary(
+                        {
+                            **document,
+                            "correspondent_name": (
+                                _catalog_value(
+                                    catalogs["correspondents"],
+                                    document.get("correspondent"),
+                                )
+                                or {}
+                            ).get("name"),
+                            "document_type_name": (
+                                _catalog_value(
+                                    catalogs["document_types"],
+                                    document.get("document_type"),
+                                )
+                                or {}
+                            ).get("name"),
+                        }
+                    ),
+                    "thumbnail_url": f"/api/statements/documents/{document.get('id')}/thumb",
+                    "action_counts": counts.get(document.get("id"), {}),
+                    "pending_action_count": sum(
+                        count
+                        for status, count in counts.get(document.get("id"), {}).items()
+                        if status not in {"completed", "not_action", "confirmed_no_action"}
+                    ),
                 }
                 for document in documents
             ],
@@ -433,12 +696,82 @@ async def get_intake_document(request: Request, document_id: int) -> dict[str, A
     return await _document_detail(request, document_id)
 
 
+@router.get("/documents/{document_id}/core")
+async def get_intake_document_core(request: Request, document_id: int) -> dict[str, Any]:
+    client = make_paperless_client(request, timeout=15.0)
+    try:
+        try:
+            document, taxonomies = await asyncio.gather(
+                client.get_document(document_id),
+                _load_taxonomies(client),
+            )
+        except Exception as exc:
+            _raise_paperless_error(exc, "loading the intake document")
+        return {
+            "document": _native_document_payload(document, taxonomies),
+            "taxonomies": taxonomies,
+            "preview_url": f"/api/statements/documents/{document_id}/preview",
+            "download_url": f"/api/documents/{document_id}/download",
+            "write_enabled": bool(request.app.state.hub_settings.write_to_paperless),
+            "monitor_tags": _monitor_tags(),
+        }
+    finally:
+        await client.aclose()
+
+
+@router.get("/documents/{document_id}/suggestions")
+async def get_intake_document_suggestions(
+    request: Request, document_id: int, refresh: bool = False
+) -> dict[str, Any]:
+    client = make_paperless_client(request, timeout=30.0)
+    try:
+        try:
+            document, taxonomies = await asyncio.gather(
+                client.get_document(document_id),
+                _load_taxonomies(client),
+            )
+            suggestions, sources, cached = await _suggestions_for_document(
+                client, document, taxonomies, force=refresh
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            _raise_paperless_error(exc, "loading document suggestions")
+        return {
+            "suggestions": suggestions,
+            "suggestion_sources": sources,
+            "cached": cached,
+            "source_modified": document.get("modified"),
+        }
+    finally:
+        await client.aclose()
+
+
+@router.get("/documents/{document_id}/actions")
+async def get_intake_document_actions(document_id: int) -> dict[str, Any]:
+    return _action_and_quality_payload(document_id)
+
+
+@router.get("/documents/{document_id}/ocr")
+async def get_intake_document_ocr(request: Request, document_id: int) -> dict[str, Any]:
+    client = make_paperless_client(request, timeout=30.0)
+    try:
+        try:
+            content = await client.get_document_content(document_id)
+        except Exception as exc:
+            _raise_paperless_error(exc, "loading OCR text")
+        return {"text": content, **_action_and_quality_payload(document_id)["ocr_quality"]}
+    finally:
+        await client.aclose()
+
+
 @router.post("/taxonomies/{kind}")
 async def create_taxonomy(
     request: Request,
     kind: Literal["tag", "correspondent", "document_type", "storage_path"],
     body: TaxonomyCreateRequest,
 ) -> dict[str, Any]:
+    global _taxonomy_cache
     if not request.app.state.hub_settings.write_to_paperless:
         raise HTTPException(
             status_code=409,
@@ -475,6 +808,7 @@ async def create_taxonomy(
             created = await getattr(client, create_method_name)(body.name)
         except Exception as exc:
             _raise_paperless_error(exc, f"creating the {kind}")
+        _taxonomy_cache = None
         return {"value": created}
     finally:
         await client.aclose()
@@ -548,7 +882,53 @@ async def save_intake_document(
         patch: dict[str, Any] = {}
         for field in body.metadata.model_fields_set:
             value = getattr(body.metadata, field)
-            patch[field] = value.isoformat() if isinstance(value, date) else value
+            if field != "custom_fields":
+                patch[field] = value.isoformat() if isinstance(value, date) else value
+
+        if body.metadata.custom_fields is not None:
+            try:
+                definitions = await client.list_custom_fields()
+            except Exception as exc:
+                _raise_paperless_error(exc, "validating custom field updates")
+            editable_ids = {
+                definition["id"]
+                for definition in definitions
+                if isinstance(definition, dict)
+                and definition.get("id")
+                and (matched := _metadata_spec_by_name(str(definition.get("name") or "")))
+                and matched[0] in _EDITABLE_CUSTOM_FIELD_KEYS
+            }
+            requested_ids = {
+                item["field"] for item in body.metadata.custom_fields
+            }
+            disallowed = sorted(requested_ids - editable_ids)
+            if disallowed:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "custom_field_not_editable",
+                        "message": "One or more custom fields are read-only in Intake Review.",
+                        "field_ids": disallowed,
+                    },
+                )
+            requested_by_id = {
+                item["field"]: item["value"] for item in body.metadata.custom_fields
+            }
+            merged_custom_fields = [
+                {
+                    "field": item["field"],
+                    "value": requested_by_id.get(item["field"], item.get("value")),
+                }
+                for item in current.get("custom_fields") or []
+                if isinstance(item, dict) and item.get("field")
+            ]
+            existing_ids = {item["field"] for item in merged_custom_fields}
+            merged_custom_fields.extend(
+                {"field": field_id, "value": value}
+                for field_id, value in requested_by_id.items()
+                if field_id not in existing_ids
+            )
+            patch["custom_fields"] = merged_custom_fields
 
         if body.disposition in {"file_only", "confirm_and_file"}:
             intake_tag_ids = set(await client.resolve_tag_ids(_monitor_tags()))
@@ -615,7 +995,23 @@ async def refresh_intake_analysis(
 
     _sync_action_queue_settings(request)
     result = await run_pipeline(document_id=document_id, force=True, dry_run=False)
-    return {"result": result, "review": await _document_detail(request, document_id)}
+    client = make_paperless_client(request, timeout=30.0)
+    try:
+        document, taxonomies = await asyncio.gather(
+            client.get_document(document_id),
+            _load_taxonomies(client),
+        )
+        suggestions, sources, _ = await _suggestions_for_document(
+            client, document, taxonomies, force=True
+        )
+    finally:
+        await client.aclose()
+    return {
+        "result": result,
+        "actions": _action_and_quality_payload(document_id),
+        "suggestions": suggestions,
+        "suggestion_sources": sources,
+    }
 
 
 @router.post("/documents/{document_id}/actions")
