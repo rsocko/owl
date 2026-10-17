@@ -39,7 +39,7 @@ def test_summary_does_not_accept_module_generated_document_type():
     assert "document_type" not in summary
 
 
-def test_account_review_masks_identifier_and_uses_display_only_key():
+def test_account_review_shows_exact_identifier_in_review_context():
     summary = build_document_summary(
         {
             "document_id": "9",
@@ -49,7 +49,7 @@ def test_account_review_masks_identifier_and_uses_display_only_key():
         context=DocumentSummaryContext.ACCOUNT_REVIEW,
     )
 
-    assert summary["account_identifier_display"] == "ending 3456"
+    assert summary["account_identifier_display"] == "ACCT-123456"
     assert summary["document_date"] == "2026-09-30"
     assert "account_identifier" not in summary
 

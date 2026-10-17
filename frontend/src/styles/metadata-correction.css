@@ -112,6 +112,62 @@
   gap: 8px;
 }
 
+.meta-edit-controls {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.meta-edit-value-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.meta-account-classification {
+  display: grid;
+  grid-template-columns: max-content minmax(150px, 220px) 1fr;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted, #6b7280);
+  font-size: 12px;
+}
+
+.meta-account-classification label {
+  color: var(--text, #1f2937);
+  font-weight: 600;
+}
+
+.meta-account-classification select {
+  min-height: 34px;
+  padding: 6px 30px 6px 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  background: var(--surface, #fff);
+  color: var(--text, #1f2937);
+  font: inherit;
+}
+
+.meta-account-classification select:focus-visible {
+  outline: 2px solid var(--accent, #3498db);
+  outline-offset: 2px;
+}
+
+@media (max-width: 680px) {
+  .meta-edit-value-row {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .meta-input {
+    flex-basis: 100%;
+  }
+
+  .meta-account-classification {
+    grid-template-columns: 1fr;
+  }
+}
+
 .meta-field-value {
   font-size: 14px;
   font-weight: 600;

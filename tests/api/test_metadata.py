@@ -223,7 +223,7 @@ async def test_correct_field_tolerates_document_fetch_failure(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_account_identifier_is_only_masked_in_named_review_context(monkeypatch) -> None:
+async def test_account_identifier_is_exact_only_in_named_review_context(monkeypatch) -> None:
     client = AsyncMock()
     client.get_document.return_value = {
         "id": 100,
@@ -243,9 +243,9 @@ async def test_account_identifier_is_only_masked_in_named_review_context(monkeyp
     account = next(
         field for field in review["extracted_fields"] if field["field_name"] == "account_identifier"
     )
-    assert account["account_identifier_display"] == "ending 3456"
-    assert "value" not in account
-    assert "SENSITIVE123456" not in str(review)
+    assert account["account_identifier_display"] == "SENSITIVE123456"
+    assert account["value"] == "SENSITIVE123456"
+    assert review["document_summary"]["account_identifier_display"] == "SENSITIVE123456"
 
 
 @pytest.mark.asyncio

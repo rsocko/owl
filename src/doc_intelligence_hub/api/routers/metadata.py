@@ -16,7 +16,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from doc_intelligence_hub.api.document_summary import build_document_summary
+from doc_intelligence_hub.api.document_summary import (
+    DocumentSummaryContext,
+    build_document_summary,
+)
 from doc_intelligence_hub.api.routers import make_paperless_client
 from doc_intelligence_hub.core.extractors.correction_hints import derive_label_anchor
 from doc_intelligence_hub.core.paperless import (
@@ -144,6 +147,7 @@ async def get_document_metadata(
     extracted_fields: list[dict[str, Any]] = []
     conflicts: list[dict[str, Any]] = []
     value_diagnostics: list[dict[str, str]] = []
+    account_identifier: Any = None
     for api_name, key in _API_FIELD_KEYS.items():
         if key is MetadataFieldKey.ACCOUNT_IDENTIFIER and context != "account_review":
             continue
@@ -158,7 +162,12 @@ async def get_document_metadata(
                         {
                             "source": source,
                             "value": (
-                                mask_account_identifier(value)
+                                value
+                                if (
+                                    key is MetadataFieldKey.ACCOUNT_IDENTIFIER
+                                    and context == "account_review"
+                                )
+                                else mask_account_identifier(value)
                                 if key is MetadataFieldKey.ACCOUNT_IDENTIFIER
                                 else value
                             ),
@@ -184,9 +193,9 @@ async def get_document_metadata(
             "validation_error": resolved_value.validation_error,
         }
         if key is MetadataFieldKey.ACCOUNT_IDENTIFIER:
-            field_payload["account_identifier_display"] = mask_account_identifier(
-                resolved_value.value
-            )
+            account_identifier = resolved_value.value
+            field_payload["value"] = resolved_value.value
+            field_payload["account_identifier_display"] = resolved_value.value
         else:
             field_payload["value"] = resolved_value.value
         extracted_fields.append(field_payload)
@@ -206,7 +215,17 @@ async def get_document_metadata(
     return {
         "document_id": doc_id,
         "title": doc.get("title", ""),
-        "document_summary": build_document_summary(doc),
+        "document_summary": build_document_summary(
+            {
+                **doc,
+                "account_identifier": account_identifier,
+            },
+            context=(
+                DocumentSummaryContext.ACCOUNT_REVIEW
+                if context == "account_review"
+                else DocumentSummaryContext.GENERAL
+            ),
+        ),
         "paperless_url": f"/documents/{doc_id}/details",
         "extracted_fields": extracted_fields,
         "corrections": corrections,

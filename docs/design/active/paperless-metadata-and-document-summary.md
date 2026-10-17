@@ -18,8 +18,9 @@ OWL will:
 2. define Paperless custom fields in one metadata schema registry;
 3. use human-readable canonical Paperless field names without a `di_` prefix;
 4. read canonical and legacy names, but write only canonical names;
-5. preserve useful archive identifiers in Paperless, mask financial credentials,
-   and expose only display-safe account context outside the Paperless trust boundary;
+5. preserve confidently classified archive identifiers exactly in Paperless and
+   show them exactly in purpose-built OWL review workflows inside the same
+   deployment trust boundary;
 6. retain match confidence and triage analytics in OWL while projecting durable, user-facing metadata to Paperless only when it improves the archive; and
 7. migrate metadata through reviewable queues and reversible, type-safe operations.
 
@@ -48,7 +49,8 @@ merge, duplicate, and matching operations.
 - Replace implementation-oriented `di_*` names with user-facing canonical names.
 - Preserve access to metadata produced by OWL `0.2.0`.
 - Prevent exact account identifiers and unnecessary medical identity data from
-  spreading beyond Paperless through APIs, logs, analytics, or general-purpose UI.
+  spreading beyond the OWL/Paperless deployment trust boundary through logs,
+  analytics, external integrations, or general-purpose aggregate UI.
 - Separate durable archive metadata from OWL's operational and analytical state.
 - Make metadata cleanup observable, reviewable, idempotent, and reversible.
 
@@ -57,8 +59,8 @@ merge, duplicate, and matching operations.
 - Turning Paperless into OWL's analytics database.
 - Writing every extracted value or model signal back to Paperless.
 - Renaming fields in place or deleting legacy fields during initial rollout.
-- Displaying raw OCR snippets, full account numbers, or unrestricted patient
-  details in a generic summary component.
+- Displaying raw OCR snippets or unrestricted patient details in a generic
+  summary component.
 
 ## 1. Shared `DocumentSummary` UI
 
@@ -76,7 +78,7 @@ The model should support:
 | Source | correspondent or provider | Show when known |
 | Date | created date, document date, statement date, or date of service | Use a labeled, context-appropriate date |
 | Financial | patient responsibility, invoice amount, or balance | Show one labeled amount when relevant |
-| Account | display-safe Account Identifier | Mask exact values before returning them from the API |
+| Account | Account Identifier | Show the Paperless value in named account-review contexts |
 | Clinical | Patient Name | Only in medical workflows that already require patient identity |
 | Navigation | Paperless detail or OWL preview URL | Preserve the current workflow's navigation behavior |
 
@@ -121,8 +123,9 @@ The frontend must not reconstruct summaries independently from action, EOB,
 statement, and triage response shapes. APIs should return a shared summary model
 or a shared adapter should normalize those responses at the API boundary.
 Formatting, masking, field precedence, and privacy flags belong in shared code.
-The normalized model exposes `account_identifier_display`, never the canonical
-Paperless value. It is omitted outside named account-review contexts.
+The normalized model retains the compatibility key
+`account_identifier_display`, but named account-review contexts may populate it
+with the exact Paperless value. It is omitted outside those contexts.
 
 ### Implemented Summary Contexts
 
@@ -130,11 +133,10 @@ The server owns field precedence and privacy enforcement through four named
 contexts:
 
 - `general` omits Account Identifier and Patient Name;
-- `account_review` may include only server-masked
-  `account_identifier_display`;
+- `account_review` may include the exact Paperless Account Identifier;
 - `medical_review` may include Patient Name but omits Account Identifier; and
-- `medical_account_review` may include Patient Name plus the masked account
-  display needed for EOB review.
+- `medical_account_review` may include Patient Name plus the exact stored
+  account identifier needed for EOB review.
 
 Only `document_type_name` or an explicitly supplied native
 `paperless_document_type` can populate the summary's Document Type. Module
@@ -212,18 +214,20 @@ read the source document. Within that boundary, preserving an exact, clearly
 labeled provider account, member, or policy identifier improves filtering and
 avoids collisions caused by suffix-only values.
 
-Payment-card and bank-account identifiers remain masked even in Paperless.
-Their full values are financial credentials rather than useful archive
-metadata. Claim Number and Invoice Number have dedicated canonical fields and
-must not be selected as account fallbacks.
+Bank-account and payment-card identifiers follow the same archive rule as other
+confidently classified document identifiers. If the value is already present in
+the source document, Paperless may preserve it exactly as searchable metadata
+and a named OWL review workflow may display and correct it. Claim Number and
+Invoice Number have dedicated canonical fields and must not be selected as
+account fallbacks.
 
 The registry assigns each identifier class a storage policy:
 
 | Identifier class | Paperless value | Outside Paperless |
 |---|---|---|
-| Provider or service account | Exact when confidently labeled | Masked display value |
-| Member or policy identifier | Exact when confidently labeled | Masked display value |
-| Bank account or payment card | Masked only | Masked display value |
+| Provider or service account | Exact when confidently labeled | Exact in named OWL review; excluded from external projections |
+| Member or policy identifier | Exact when confidently labeled | Exact in named OWL review; excluded from external projections |
+| Bank account or payment card | Exact when confidently labeled | Exact in named OWL review; excluded from external projections |
 | Claim or invoice | Dedicated canonical field | Governed by that field's policy |
 | Ambiguous generic sequence | Do not write | Do not expose |
 
@@ -248,8 +252,9 @@ the metadata-quality queue instead of being written automatically.
   application logs, telemetry, analytics events, queue titles, URLs, browser
   storage, Mission Control, Tyrion, GitHub, or other external projections.
 - General API responses never expose the canonical Paperless
-  `Account Identifier` value. Named account-review responses may expose only
-  `account_identifier_display`, masked by shared server-side policy.
+  `Account Identifier` value. Named OWL account-review responses may expose the
+  exact Paperless value for display and correction within the deployment trust
+  boundary.
 - A narrowly scoped correction endpoint may accept an exact archive identifier
   for immediate write-through to Paperless. It must not echo the value or place
   request bodies in logs, audit records, retries, or durable OWL state.
@@ -394,7 +399,7 @@ supported deployment still depends on them.
 |---|---|
 | 1. Registry and compatibility | Typed registry, schema diagnostics, dual-read/single-write behavior |
 | 2. Safe canonical migration | Canonical fields, dry-run/backfill tooling, conflict queue |
-| 3. Privacy-safe enrichment | Classified Account Identifier extraction, Paperless storage policy, and egress masking |
+| 3. Privacy-safe enrichment | Classified Account Identifier extraction, Paperless storage policy, trusted review display, and external egress controls |
 | 4. Shared UI | Normalized summary API model and `DocumentSummary` adoption |
 | 5. Quality operations | Metadata-quality and correspondent merge review queues |
 | 6. EOB projection hardening | Registry-driven durable EOB projection; analytics remain OWL-local |
@@ -409,8 +414,8 @@ metadata before completion.
 - Native Paperless Document Type remains the sole authoritative taxonomy.
 - Legacy aliases and deterministic conflict behavior are explicit.
 - No initial migration step deletes or renames a deployed field in place.
-- Exact account identifiers are retained only in Paperless; financial
-  credentials remain masked there, and all OWL/external projections are
+- Exact account identifiers are retained only in Paperless and may be read
+  transiently by named OWL review workflows; external projections remain
   display-safe.
 - OWL-local and Paperless-projected EOB data are clearly separated.
 - Every title- or ID-only document surface has an adoption disposition.
