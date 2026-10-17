@@ -153,6 +153,10 @@ main { padding: 26px 28px; max-width: 1920px; margin: auto; }
 .actions-toolbar button { flex: 0 0 auto; }
 .action-candidates { display: grid; gap: 10px; margin-top: 16px; }
 .action-candidate-card { overflow: hidden; border: 1px solid var(--border); border-radius: 8px; }
+.action-candidate-card.completed { border-color: #b8ddc9; background: #f7fcf9; }
+.action-candidate-card.completed .action-candidate-heading { background: #edf8f2; }
+.action-candidate-card.completed input:disabled,
+.action-candidate-card.completed select:disabled { color: var(--ink); opacity: 1; background: #f8fbf9; }
 .action-candidate-heading { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: #f8f9fc; }
 .action-candidate-heading strong { font-size: 12px; }
 .action-candidate-heading .muted { margin-left: auto; font-size: 9px; }

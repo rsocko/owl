@@ -97,11 +97,18 @@ function createActionDraft(doc, origin = "new") {
     amount: origin === "suggested" ? doc.amount : "",
     due: origin === "suggested" ? (doc.due || "") : "",
     reference: doc.reference || "",
+    completed: false,
     removed: false
   };
 }
-function activeActionDrafts(doc = current) {
+function visibleActionDrafts(doc = current) {
   return (doc.actionDrafts || []).filter((draft) => !draft.removed);
+}
+function activeActionDrafts(doc = current) {
+  return visibleActionDrafts(doc).filter((draft) => !draft.completed);
+}
+function completedActionDrafts(doc = current) {
+  return visibleActionDrafts(doc).filter((draft) => draft.completed);
 }
 function actionTypeLabel(type) {
   return { PAY: "Pay", FOLLOW_UP: "Follow up", CALL: "Call", REVIEW: "Review" }[type] || type;
@@ -130,6 +137,7 @@ function labeledActionField(labelText, value, onInput, options = {}) {
     if (options.placeholder) input.placeholder = options.placeholder;
   }
   input.value = value;
+  input.disabled = Boolean(options.disabled);
   input.addEventListener(options.select ? "change" : "input", () => onInput(input.value));
   label.append(input);
   return label;
@@ -137,20 +145,33 @@ function labeledActionField(labelText, value, onInput, options = {}) {
 function renderActionCards(containerId, doc, context) {
   const container = byId(containerId);
   container.replaceChildren();
-  activeActionDrafts(doc).forEach((draft, index) => {
-    const card = node("article", undefined, "action-candidate-card");
+  visibleActionDrafts(doc).forEach((draft, index) => {
+    const card = node("article", undefined, `action-candidate-card${draft.completed ? " completed" : ""}`);
     const heading = node("div", undefined, "action-candidate-heading");
-    heading.append(node("span", draft.type, "pill purple"), node("strong", draft.title), node("span", `${draft.origin === "suggested" ? "Suggested" : "Added"} action ${index + 1}`, "muted"));
+    heading.append(
+      node("span", draft.completed ? "DONE" : draft.type, `pill ${draft.completed ? "success" : "purple"}`),
+      node("strong", draft.title),
+      node("span", draft.completed ? "Completed action" : `${draft.origin === "suggested" ? "Suggested" : "Added"} action ${index + 1}`, "muted")
+    );
     const fieldsContainer = node("div", undefined, "inline-action-fields");
     fieldsContainer.append(
-      labeledActionField("Action type", draft.type, (value) => { draft.type = value; heading.querySelector(".pill").textContent = value; markActionDirty(); }, { select: [["PAY", "Pay"], ["FOLLOW_UP", "Follow up"], ["CALL", "Call"], ["REVIEW", "Review"]] }),
-      labeledActionField("Action title", draft.title, (value) => { draft.title = value; heading.querySelector("strong").textContent = value || "Untitled action"; markActionDirty(); }, { wide: true }),
-      labeledActionField("Payee / owner", draft.payee, (value) => { draft.payee = value; markActionDirty(); }),
-      labeledActionField("Amount", draft.amount, (value) => { draft.amount = value; markActionDirty(); }, { placeholder: "Optional" }),
-      labeledActionField("Due date", draft.due, (value) => { draft.due = value; markActionDirty(); }, { placeholder: "Optional" }),
-      labeledActionField("Reference", draft.reference, (value) => { draft.reference = value; markActionDirty(); }, { placeholder: "Optional" })
+      labeledActionField("Action type", draft.type, (value) => { draft.type = value; heading.querySelector(".pill").textContent = value; markActionDirty(); }, { disabled: draft.completed, select: [["PAY", "Pay"], ["FOLLOW_UP", "Follow up"], ["CALL", "Call"], ["REVIEW", "Review"]] }),
+      labeledActionField("Action title", draft.title, (value) => { draft.title = value; heading.querySelector("strong").textContent = value || "Untitled action"; markActionDirty(); }, { disabled: draft.completed, wide: true }),
+      labeledActionField("Payee / owner", draft.payee, (value) => { draft.payee = value; markActionDirty(); }, { disabled: draft.completed }),
+      labeledActionField("Amount", draft.amount, (value) => { draft.amount = value; markActionDirty(); }, { disabled: draft.completed, placeholder: "Optional" }),
+      labeledActionField("Due date", draft.due, (value) => { draft.due = value; markActionDirty(); }, { disabled: draft.completed, placeholder: "Optional" }),
+      labeledActionField("Reference", draft.reference, (value) => { draft.reference = value; markActionDirty(); }, { disabled: draft.completed, placeholder: "Optional" })
     );
     const controls = node("div", undefined, "action-card-controls");
+    if (draft.completed) {
+      const completed = node("button", "Completed");
+      completed.type = "button";
+      completed.disabled = true;
+      controls.append(completed);
+      card.append(heading, fieldsContainer, controls);
+      container.append(card);
+      return;
+    }
     const remove = node("button", draft.origin === "suggested" ? "Not an action" : "Delete action", "danger-text");
     remove.type = "button";
     remove.addEventListener("click", () => {
@@ -163,9 +184,10 @@ function renderActionCards(containerId, doc, context) {
     const complete = node("button", "Mark done");
     complete.type = "button";
     complete.addEventListener("click", () => {
-      actions.push({ id: `${doc.id}-${draft.id}`, sourceId: doc.id, draftId: draft.id, type: draft.type, title: draft.title, provider: draft.payee || doc.provider, amount: draft.amount || "No amount", due: draft.due || "No due date", completed: true });
-      draft.removed = true;
-      actionDirty = true;
+      if (!actions.some((action) => action.sourceId === doc.id && action.draftId === draft.id)) {
+        actions.push({ id: `${doc.id}-${draft.id}`, sourceId: doc.id, draftId: draft.id, type: draft.type, title: draft.title, provider: draft.payee || doc.provider, amount: draft.amount || "No amount", due: draft.due || "No due date", completed: true });
+      }
+      draft.completed = true;
       commitActionDrafts(doc);
       renderActionCards(containerId, doc, context);
       renderActions();
@@ -409,6 +431,7 @@ function updateWorkspaceActions() {
   const showActions = activeWorkspaceTab === "actions";
   const showOcr = activeWorkspaceTab === "ocr";
   const actionCount = activeActionDrafts().length;
+  const completedCount = completedActionDrafts().length;
   const actionCandidate = actionCount > 0;
   const uncertain = current.assessment === "review";
   byId("confirm-action").hidden = !showActions || !actionCandidate;
@@ -419,6 +442,8 @@ function updateWorkspaceActions() {
   byId("routing-help").textContent = showActions
     ? actionCandidate
       ? "Confirm the suggested action and file, or file only and leave it pending in Action Queue."
+      : completedCount
+        ? "The action is recorded as completed. File the document when its metadata is ready."
       : uncertain
         ? "Keep this document in Inbox until the obligation can be interpreted."
         : "No action was suggested. Filing records a no-action decision and removes Inbox."
@@ -428,9 +453,14 @@ function updateWorkspaceActions() {
 }
 function renderIntakeActionState() {
   const count = activeActionDrafts().length;
-  byId("intake-action-count").textContent = count;
-  byId("assessment-title").textContent = count ? `${count} suggested ${count === 1 ? "action" : "actions"}` : current.assessment === "review" ? "Action interpretation needed" : "No suggested actions";
-  byId("no-action-state").hidden = count > 0;
+  const completedCount = completedActionDrafts().length;
+  byId("intake-action-count").textContent = visibleActionDrafts().length;
+  byId("assessment-title").textContent = count
+    ? `${count} suggested ${count === 1 ? "action" : "actions"}`
+    : completedCount
+      ? `${completedCount} completed ${completedCount === 1 ? "action" : "actions"}`
+      : current.assessment === "review" ? "Action interpretation needed" : "No suggested actions";
+  byId("no-action-state").hidden = visibleActionDrafts().length > 0;
   renderActionCards("action-candidates", current, "intake");
   updateWorkspaceActions();
 }
@@ -479,7 +509,7 @@ function commitMetadata(markAssessmentStale = true) {
 }
 function commitActionDrafts(doc = current) {
   const count = activeActionDrafts(doc).length;
-  doc.actionStatus = count ? "proposed" : doc.assessment === "pay" ? "dismissed" : "none";
+  doc.actionStatus = count ? "proposed" : completedActionDrafts(doc).length ? "confirmed" : doc.assessment === "pay" ? "dismissed" : "none";
   actionDirty = false;
   if (doc === current) actionDraftSnapshot = JSON.stringify(doc.actionDrafts);
 }
@@ -528,7 +558,7 @@ function routeDocument(outcome, options = {}) {
   }
   if (outcome === "filed") {
     if (options.dismissAction) doc.actionStatus = "dismissed";
-    const recordsNoAction = doc.actionStatus !== "proposed" || options.dismissAction;
+    const recordsNoAction = ["none", "dismissed"].includes(doc.actionStatus) || options.dismissAction;
     if (recordsNoAction) {
       const entry = { id: doc.id, title: doc.title, source: "Human", confidence: doc.confidence, sampled: false, reason: doc.assessment === "pay" ? "Reviewer dismissed the PAY suggestion: no action needed." : "Reviewer confirmed no action needed.", fingerprint: `${doc.id}:r${doc.revision}:v3`, time: "Just now · demo" };
       history.unshift(entry);
@@ -557,7 +587,9 @@ function routeDocument(outcome, options = {}) {
   toast(outcome === "filed"
     ? doc.actionStatus === "proposed"
       ? "Document filed and Inbox tag removed. The PAY suggestion remains in Action Queue for later review."
-      : "Filed to no-action history. Inbox tag removed; matching remains enabled. No Mission Control task created."
+      : doc.actionStatus === "confirmed"
+        ? "Document filed and Inbox tag removed. The completed action remains visible in action history."
+        : "Filed to no-action history. Inbox tag removed; matching remains enabled. No Mission Control task created."
     : outcome === "review"
       ? doc.assessment === "pay"
         ? options.advance
@@ -568,9 +600,12 @@ function routeDocument(outcome, options = {}) {
   if (!empty && outcome !== "review") byId("source-heading").scrollIntoView({ block: "nearest" });
 }
 function loadActionReview() {
+  const retainedReview = actionReviewDocument && visibleActionDrafts(actionReviewDocument).length
+    ? actionReviewDocument
+    : null;
   const reviewDoc = current.actionStatus === "proposed"
     ? current
-    : documents.find((doc) => doc.actionStatus === "proposed");
+    : retainedReview || documents.find((doc) => doc.actionStatus === "proposed");
   actionReviewDocument = reviewDoc || null;
   if (!reviewDoc) {
     byId("pending-action-review").hidden = true;
@@ -578,7 +613,8 @@ function loadActionReview() {
   }
   byId("pending-action-review").hidden = false;
   byId("review-action-title").textContent = `${reviewDoc.provider} document actions`;
-  byId("review-action-subtitle").textContent = `Paperless #${reviewDoc.id} · ${reviewDoc.status === "filed" ? "filed from Inbox · " : ""}proposed actions`;
+  const activeCount = activeActionDrafts(reviewDoc).length;
+  byId("review-action-subtitle").textContent = `Paperless #${reviewDoc.id} · ${reviewDoc.status === "filed" ? "filed from Inbox · " : ""}${activeCount ? "proposed actions" : "completed actions"}`;
   byId("review-confidence").textContent = `${reviewDoc.confidence}% confidence`;
   byId("review-reason").textContent = reviewDoc.reason;
   byId("queue-metadata-title").textContent = reviewDoc.title;
@@ -601,11 +637,13 @@ function loadActionReview() {
 function updateQueueActionState() {
   if (!actionReviewDocument) return;
   const count = activeActionDrafts(actionReviewDocument).length;
-  byId("queue-action-count").textContent = count;
+  const completedCount = completedActionDrafts(actionReviewDocument).length;
+  byId("queue-action-count").textContent = visibleActionDrafts(actionReviewDocument).length;
   byId("review-save").disabled = !actionDirty;
   byId("queue-refresh").disabled = actionDirty;
   byId("review-confirm").disabled = count === 0;
   byId("review-confirm").textContent = `Confirm ${count > 1 ? `${count} actions` : "action"}`;
+  byId("review-no-action").hidden = activeQueueTab !== "actions" || (count === 0 && completedCount > 0);
   renderActionCards("queue-action-candidates", actionReviewDocument, "queue");
 }
 function selectQueueTab(tab) {
@@ -618,7 +656,7 @@ function selectQueueTab(tab) {
   byId("queue-metadata-panel").hidden = showActions || showOcr;
   byId("queue-actions-panel").hidden = !showActions;
   byId("queue-ocr-panel").hidden = !showOcr;
-  byId("review-no-action").hidden = !showActions;
+  byId("review-no-action").hidden = !showActions || Boolean(actionReviewDocument && activeActionDrafts(actionReviewDocument).length === 0 && completedActionDrafts(actionReviewDocument).length);
   byId("review-save").hidden = !showActions;
   byId("review-confirm").hidden = !showActions;
 }
