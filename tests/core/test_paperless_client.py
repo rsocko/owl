@@ -292,6 +292,57 @@ async def test_update_custom_field(client):
 
 
 @pytest.mark.asyncio
+async def test_delete_custom_field(monkeypatch):
+    requests_seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests_seen.append(request)
+        if request.url.path == "/api/custom_fields/7/" and request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    paperless = PaperlessClient(base_url="https://paperless.test", token="test-token")
+
+    await paperless.delete_custom_field(7)
+
+    assert len(requests_seen) == 1
+    assert requests_seen[0].method == "DELETE"
+
+
+@pytest.mark.asyncio
+async def test_list_workflows(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/workflows/":
+            return httpx.Response(
+                200,
+                json={"count": 1, "next": None, "results": [{"id": 3, "name": "Route bills"}]},
+            )
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    paperless = PaperlessClient(base_url="https://paperless.test", token="test-token")
+
+    workflows = await paperless.list_workflows()
+
+    assert workflows == [{"id": 3, "name": "Route bills"}]
+
+
+@pytest.mark.asyncio
 async def test_list_saved_views(client):
     views = await client.list_saved_views()
     assert len(views) == 1

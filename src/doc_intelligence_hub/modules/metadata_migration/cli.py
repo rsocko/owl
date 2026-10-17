@@ -8,8 +8,9 @@ import os
 
 import click
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
 
-from doc_intelligence_hub.core.paperless import PaperlessClient
+from doc_intelligence_hub.core.paperless import MetadataFieldKey, PaperlessClient
 from doc_intelligence_hub.core.resilience import PaperlessError
 
 from .service import MetadataMigrationService
@@ -25,8 +26,8 @@ def _run_command(coroutine) -> tuple[str, int]:
         return asyncio.run(coroutine)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
-    except (PaperlessError, httpx.HTTPError) as exc:
-        raise click.ClickException("Paperless operation failed without a success result.") from exc
+    except (PaperlessError, SQLAlchemyError, httpx.HTTPError) as exc:
+        raise click.ClickException("Metadata operation failed without a success result.") from exc
 
 
 def _require_apply_preflight(apply: bool, external_writers_disabled: bool) -> None:
@@ -40,6 +41,79 @@ def _require_apply_preflight(apply: bool, external_writers_disabled: bool) -> No
         raise click.UsageError(
             "--apply refused while WRITE_TO_PAPERLESS enables another OWL write path"
         )
+
+
+def _owl_retirement_coverage() -> dict[MetadataFieldKey, set[int]]:
+    from doc_intelligence_hub.modules.action_queue.database import Action
+    from doc_intelligence_hub.modules.action_queue.database import (
+        get_session as get_action_session,
+    )
+    from doc_intelligence_hub.modules.eob_matching.database import (
+        BillRecord,
+        EOBRecord,
+        MatchRecord,
+    )
+    from doc_intelligence_hub.modules.eob_matching.database import (
+        get_session as get_eob_session,
+    )
+
+    action_session = get_action_session()
+    try:
+        action_document_ids = {
+            int(row[0]) for row in action_session.query(Action.document_id).distinct().all()
+        }
+    finally:
+        action_session.close()
+
+    eob_session = get_eob_session()
+    try:
+        eob_document_ids = {
+            int(row[0]) for row in eob_session.query(EOBRecord.document_id).distinct().all()
+        }
+        bill_document_ids = {
+            int(row[0]) for row in eob_session.query(BillRecord.document_id).distinct().all()
+        }
+        responsibility_document_ids = {
+            int(row[0])
+            for row in eob_session.query(EOBRecord.document_id)
+            .filter(EOBRecord.total_patient_responsibility.is_not(None))
+            .distinct()
+            .all()
+        }
+        match_rows = eob_session.query(
+            MatchRecord.eob_document_id,
+            MatchRecord.bill_document_id,
+        ).all()
+    finally:
+        eob_session.close()
+
+    classified_document_ids = eob_document_ids | bill_document_ids
+    matched_document_ids = {
+        int(document_id) for row in match_rows for document_id in row if document_id is not None
+    }
+    coverage: dict[MetadataFieldKey, set[int]] = {}
+    for key in (
+        MetadataFieldKey.LEGACY_ACTION_TYPE,
+        MetadataFieldKey.LEGACY_ACTION_DUE_DATE,
+        MetadataFieldKey.LEGACY_ACTION_URGENCY,
+        MetadataFieldKey.LEGACY_ACTION_SUMMARY,
+        MetadataFieldKey.LEGACY_ACTION_COUNT,
+    ):
+        coverage[key] = action_document_ids
+    for key in (
+        MetadataFieldKey.EOB_MATCH_STATUS,
+        MetadataFieldKey.EOB_DOCUMENT_TYPE,
+        MetadataFieldKey.EOB_ANALYZED,
+    ):
+        coverage[key] = classified_document_ids
+    for key in (
+        MetadataFieldKey.EOB_MATCH_SCORE,
+        MetadataFieldKey.EOB_MATCH_CONFIDENCE,
+        MetadataFieldKey.EOB_MATCHED_DOCUMENT,
+    ):
+        coverage[key] = matched_document_ids
+    coverage[MetadataFieldKey.EOB_PATIENT_RESPONSIBILITY] = responsibility_document_ids
+    return coverage
 
 
 @click.group()
@@ -111,6 +185,91 @@ def prepare(
     async def run() -> tuple[str, int]:
         async with _client(paperless_url, paperless_token) as client:
             summary = await MetadataMigrationService(client).prepare(apply=apply)
+            return summary.to_json(), summary.exit_status
+
+    output, status = _run_command(run())
+    click.echo(output)
+    raise SystemExit(status)
+
+
+@cli.command("field-audit")
+@_connection_options
+@click.option("--batch-size", type=click.IntRange(min=1, max=1000), default=100)
+@click.option(
+    "--protected-output",
+    type=click.Path(dir_okay=False),
+    help="Protected path for deployed field names, IDs, and dependency details.",
+)
+def field_audit(
+    paperless_url: str,
+    paperless_token: str,
+    batch_size: int,
+    protected_output: str | None,
+) -> None:
+    """Review all managed fields and count unmanaged fields without changing Paperless."""
+
+    async def run() -> tuple[str, int]:
+        async with _client(paperless_url, paperless_token) as client:
+            summary = await MetadataMigrationService(
+                client,
+                owl_document_coverage=_owl_retirement_coverage(),
+            ).review_fields(
+                batch_size=batch_size,
+                protected_output=protected_output,
+            )
+            return summary.to_json(), summary.exit_status
+
+    output, status = _run_command(run())
+    click.echo(output)
+    raise SystemExit(status)
+
+
+@cli.command("retire-fields")
+@_connection_options
+@click.option("--apply", is_flag=True, help="Clear covered values and delete eligible fields.")
+@click.option(
+    "--discard-retired-values",
+    is_flag=True,
+    help="Clear populated registry-approved retired fields before deleting them.",
+)
+@click.option(
+    "--external-writers-disabled",
+    is_flag=True,
+    help="Confirm Paperless-AI and other metadata writers are disabled.",
+)
+@click.option("--batch-size", type=click.IntRange(min=1, max=1000), default=100)
+@click.option(
+    "--protected-output",
+    type=click.Path(dir_okay=False),
+    help="Protected path for deployed field names, IDs, and dependency details.",
+)
+def retire_fields(
+    paperless_url: str,
+    paperless_token: str,
+    apply: bool,
+    discard_retired_values: bool,
+    external_writers_disabled: bool,
+    batch_size: int,
+    protected_output: str | None,
+) -> None:
+    """Dry-run by default; retire only registry-approved dependency-free fields."""
+    _require_apply_preflight(apply, external_writers_disabled)
+    if apply and not protected_output:
+        raise click.UsageError("--apply requires --protected-output")
+    if discard_retired_values and not apply:
+        raise click.UsageError("--discard-retired-values requires --apply")
+
+    async def run() -> tuple[str, int]:
+        async with _client(paperless_url, paperless_token) as client:
+            summary = await MetadataMigrationService(
+                client,
+                owl_document_coverage=_owl_retirement_coverage(),
+            ).review_fields(
+                apply=apply,
+                discard_retired_values=discard_retired_values,
+                batch_size=batch_size,
+                protected_output=protected_output,
+            )
             return summary.to_json(), summary.exit_status
 
     output, status = _run_command(run())
