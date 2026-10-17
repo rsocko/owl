@@ -90,6 +90,11 @@ class MetadataCreatePolicy(str, Enum):
     RENAME_FIRST_ALIAS = "rename_first_alias"
 
 
+class MetadataRetirementPolicy(str, Enum):
+    KEEP = "keep"
+    RETIRE_WHEN_EMPTY = "retire_when_empty"
+
+
 class AccountIdentifierClass(str, Enum):
     PROVIDER_ACCOUNT = "provider_account"
     SERVICE_ACCOUNT = "service_account"
@@ -130,6 +135,7 @@ class MetadataFieldSpec:
     auto_projection_min_confidence: float | None = None
     confirmation_required: bool = False
     confirmation_bypasses_confidence: bool = True
+    retirement_policy: MetadataRetirementPolicy = MetadataRetirementPolicy.KEEP
     schema_version: str = "1.0"
 
     def create_definition(self) -> dict[str, Any]:
@@ -370,6 +376,7 @@ _REGISTRY_ENTRIES = (
         MetadataNormalization.SELECT,
         write_policy=MetadataWritePolicy.CLEAR_ONLY,
         projection_policy=MetadataProjectionPolicy.LEGACY_CLEANUP,
+        retirement_policy=MetadataRetirementPolicy.RETIRE_WHEN_EMPTY,
     ),
     _spec(
         MetadataFieldKey.LEGACY_ACTION_DUE_DATE,
@@ -378,6 +385,7 @@ _REGISTRY_ENTRIES = (
         MetadataNormalization.DATE,
         write_policy=MetadataWritePolicy.CLEAR_ONLY,
         projection_policy=MetadataProjectionPolicy.LEGACY_CLEANUP,
+        retirement_policy=MetadataRetirementPolicy.RETIRE_WHEN_EMPTY,
     ),
     _spec(
         MetadataFieldKey.LEGACY_ACTION_URGENCY,
@@ -386,6 +394,7 @@ _REGISTRY_ENTRIES = (
         MetadataNormalization.SELECT,
         write_policy=MetadataWritePolicy.CLEAR_ONLY,
         projection_policy=MetadataProjectionPolicy.LEGACY_CLEANUP,
+        retirement_policy=MetadataRetirementPolicy.RETIRE_WHEN_EMPTY,
     ),
     _spec(
         MetadataFieldKey.LEGACY_ACTION_SUMMARY,
@@ -394,6 +403,7 @@ _REGISTRY_ENTRIES = (
         MetadataNormalization.TEXT,
         write_policy=MetadataWritePolicy.CLEAR_ONLY,
         projection_policy=MetadataProjectionPolicy.LEGACY_CLEANUP,
+        retirement_policy=MetadataRetirementPolicy.RETIRE_WHEN_EMPTY,
     ),
     _spec(
         MetadataFieldKey.LEGACY_ACTION_COUNT,
@@ -402,6 +412,7 @@ _REGISTRY_ENTRIES = (
         MetadataNormalization.NUMBER,
         write_policy=MetadataWritePolicy.CLEAR_ONLY,
         projection_policy=MetadataProjectionPolicy.LEGACY_CLEANUP,
+        retirement_policy=MetadataRetirementPolicy.RETIRE_WHEN_EMPTY,
     ),
     _spec(
         MetadataFieldKey.EOB_MATCH_STATUS,
@@ -410,6 +421,7 @@ _REGISTRY_ENTRIES = (
         MetadataNormalization.SELECT,
         select_options=("matched", "unmatched", "review_needed"),
         write_policy=MetadataWritePolicy.DISABLED,
+        retirement_policy=MetadataRetirementPolicy.RETIRE_WHEN_EMPTY,
     ),
     _spec(
         MetadataFieldKey.EOB_MATCH_SCORE,
@@ -417,6 +429,7 @@ _REGISTRY_ENTRIES = (
         PaperlessFieldType.DECIMAL,
         MetadataNormalization.NUMBER,
         write_policy=MetadataWritePolicy.DISABLED,
+        retirement_policy=MetadataRetirementPolicy.RETIRE_WHEN_EMPTY,
     ),
     _spec(
         MetadataFieldKey.EOB_MATCH_CONFIDENCE,
@@ -425,6 +438,7 @@ _REGISTRY_ENTRIES = (
         MetadataNormalization.SELECT,
         select_options=("HIGH", "MEDIUM", "LOW"),
         write_policy=MetadataWritePolicy.DISABLED,
+        retirement_policy=MetadataRetirementPolicy.RETIRE_WHEN_EMPTY,
     ),
     _spec(
         MetadataFieldKey.EOB_MATCHED_DOCUMENT,
@@ -432,6 +446,7 @@ _REGISTRY_ENTRIES = (
         PaperlessFieldType.DOCUMENT_LINK,
         MetadataNormalization.DOCUMENT_LINK,
         write_policy=MetadataWritePolicy.DISABLED,
+        retirement_policy=MetadataRetirementPolicy.RETIRE_WHEN_EMPTY,
     ),
     _spec(
         MetadataFieldKey.EOB_DOCUMENT_TYPE,
@@ -440,6 +455,7 @@ _REGISTRY_ENTRIES = (
         MetadataNormalization.SELECT,
         select_options=("EOB", "BILL"),
         write_policy=MetadataWritePolicy.DISABLED,
+        retirement_policy=MetadataRetirementPolicy.RETIRE_WHEN_EMPTY,
     ),
     _spec(
         MetadataFieldKey.EOB_PATIENT_RESPONSIBILITY,
@@ -448,6 +464,7 @@ _REGISTRY_ENTRIES = (
         MetadataNormalization.NUMBER,
         sensitivity=MetadataSensitivity.MEDICAL,
         write_policy=MetadataWritePolicy.DISABLED,
+        retirement_policy=MetadataRetirementPolicy.RETIRE_WHEN_EMPTY,
     ),
     _spec(
         MetadataFieldKey.EOB_ANALYZED,
@@ -455,6 +472,7 @@ _REGISTRY_ENTRIES = (
         PaperlessFieldType.DATE,
         MetadataNormalization.DATE,
         write_policy=MetadataWritePolicy.DISABLED,
+        retirement_policy=MetadataRetirementPolicy.RETIRE_WHEN_EMPTY,
     ),
 )
 

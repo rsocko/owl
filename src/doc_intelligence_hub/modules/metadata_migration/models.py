@@ -12,6 +12,7 @@ from typing import Any
 
 SUMMARY_SCHEMA_VERSION = "1.0"
 PROTECTED_SCHEMA_VERSION = "1.0"
+FIELD_REVIEW_SCHEMA_VERSION = "1.0"
 
 
 class RunMode(str, Enum):
@@ -54,6 +55,87 @@ class ReasonCode(str, Enum):
     ALREADY_APPLIED = "already_applied"
     WRITE_FAILED = "write_failed"
     VERIFY_FAILED = "verify_failed"
+
+
+class FieldDisposition(str, Enum):
+    KEEP = "keep"
+    MIGRATE_THEN_RETIRE = "migrate_then_retire"
+    RETIRE_WHEN_EMPTY = "retire_when_empty"
+    PRESERVE_UNMANAGED = "preserve_unmanaged"
+    REVIEW_REQUIRED = "review_required"
+
+
+class FieldReviewState(str, Enum):
+    ABSENT = "absent"
+    RETAINED = "retained"
+    ELIGIBLE = "eligible"
+    BLOCKED_POPULATED = "blocked_populated"
+    BLOCKED_DEPENDENCY = "blocked_dependency"
+    INCOMPATIBLE = "incompatible"
+    DUPLICATE = "duplicate"
+    DELETED = "deleted"
+
+
+@dataclasses.dataclass(frozen=True)
+class FieldReview:
+    stable_key: str
+    field_name: str
+    role: str
+    disposition: FieldDisposition
+    state: FieldReviewState
+    deployed_count: int
+    expected_types: tuple[str, ...]
+    observed_types: tuple[str, ...]
+    non_empty_documents: int
+    saved_view_references: int
+    document_type_references: int
+    workflow_references: int
+    diagnostic_codes: tuple[str, ...] = ()
+
+
+@dataclasses.dataclass
+class FieldReviewSummary:
+    run_id: str
+    mode: str
+    started_at: str
+    fields: list[FieldReview]
+    unmanaged_fields: int
+    apply: bool
+    finished_at: str | None = None
+    deleted_fields: int = 0
+    eligible_fields: int = 0
+    blocked_populated: int = 0
+    blocked_dependencies: int = 0
+    review_required: int = 0
+    redacted: bool = True
+    exit_status: int = 0
+    schema_version: str = FIELD_REVIEW_SCHEMA_VERSION
+
+    def finish(self) -> None:
+        self.finished_at = datetime.now(UTC).isoformat()
+        self.eligible_fields = sum(
+            field.state in {FieldReviewState.ELIGIBLE, FieldReviewState.DELETED}
+            for field in self.fields
+        )
+        self.deleted_fields = sum(field.state is FieldReviewState.DELETED for field in self.fields)
+        self.blocked_populated = sum(
+            field.state is FieldReviewState.BLOCKED_POPULATED for field in self.fields
+        )
+        self.blocked_dependencies = sum(
+            field.state is FieldReviewState.BLOCKED_DEPENDENCY for field in self.fields
+        )
+        self.review_required = sum(
+            field.state
+            in {
+                FieldReviewState.DUPLICATE,
+                FieldReviewState.INCOMPATIBLE,
+            }
+            for field in self.fields
+        )
+        self.exit_status = 2 if self.review_required else 0
+
+    def to_json(self) -> str:
+        return json.dumps(to_json_safe(self), indent=2, sort_keys=True)
 
 
 @dataclasses.dataclass(frozen=True)

@@ -20,11 +20,31 @@ names, aliases, types, or IDs independently.
 - Every write is read back and verified.
 - Conflicts, invalid conversions, incompatible definitions, and exhausted retries remain
   actionable outcomes. They are never converted to plausible defaults.
-- Legacy fields are never renamed, hidden, cleared, or deleted by this tooling.
+- Backfill tooling never renames, hides, clears, or deletes legacy fields.
+- Field retirement is a separate dry-run-first command. It deletes only registry-approved
+  retirement candidates that have no non-empty document values and no saved-view,
+  document-type, or workflow references. It never clears values.
 
 Paperless's native Document Type remains the canonical taxonomy and is outside this
 custom-field migration. The tool does not create or migrate a separate OWL document-type
 field.
+
+## Field ownership and retirement
+
+The typed registry explicitly identifies what remains in Paperless and what can eventually
+be retired. Unknown fields are user-owned and are always preserved.
+
+| Outcome | Fields |
+|---|---|
+| Keep — durable archive metadata | `Account Identifier`, `Patient Name`, `Provider Name`, `Date of Service`, `Patient Responsibility`, `Claim Number`, `Invoice Number`, `Series Name`, `Document Amount`, `Document Due Date` |
+| Keep — OWL projection | `Related Document IDs`, `Relationship Summary`, `Related Documents`, `Obligation ID`, `Obligation Role`, `Action Status`, `Action Analyzed` |
+| Migrate, then retire when empty | `di_account_id`, `di_patient_name`, `di_provider_name`, `di_date_of_service`, `di_patient_resp`, `di_claim_number`, `di_invoice_number`, `Action Amount` |
+| Retire when empty | `Action Type`, `Action Due Date`, `Action Urgency`, `Action Summary`, `Action Count`, `EOB Match Status`, `EOB Match Score`, `EOB Match Confidence`, `EOB Matched Document`, `EOB Document Type`, `EOB Patient Responsibility`, `EOB Analyzed` |
+| Preserve | Every unregistered/custom deployment field |
+
+The action fields are retired because OWL stores actions as first-class records and one
+Paperless document may have multiple actions. The retired EOB fields contain match analytics
+or duplicate metadata that now remains OWL-local or uses canonical durable fields.
 
 ## OWL obligation projection
 
@@ -84,6 +104,9 @@ paperless-metadata inventory \
   --protected-output /protected/run.metadata-migration.json
 paperless-metadata prepare
 paperless-metadata backfill --batch-size 100
+paperless-metadata field-audit \
+  --protected-output /protected/paperless-field-audit.json
+paperless-metadata retire-fields
 ```
 
 The first three examples above do not mutate Paperless. A write-enabled run requires all
@@ -96,6 +119,20 @@ paperless-metadata backfill \
   --external-writers-disabled \
   --state-db /protected/metadata-migration.sqlite
 ```
+
+`retire-fields` is also dry-run by default. Apply mode uses the same single-writer preflight:
+
+```text
+paperless-metadata retire-fields \
+  --apply \
+  --external-writers-disabled \
+  --protected-output /protected/paperless-field-retirement.json
+```
+
+Populated fields, fields referenced by saved views/document types/workflows, duplicate
+definitions, and incompatible definitions are reported but not deleted. Remove dependencies
+or migrate values, rerun `field-audit`, and apply retirement only after the field becomes
+eligible.
 
 Resume uses the original run ID and exact batch/retry configuration:
 
@@ -135,4 +172,5 @@ returns a success-shaped result.
 6. Apply in bounded batches with protected state.
 7. Observe canonical coverage for a normal processing cycle.
 
-Legacy-field retirement is a separate, explicitly reviewed future operation.
+Legacy-field retirement remains explicit and dry-run-first; it is never part of setup or
+backfill.

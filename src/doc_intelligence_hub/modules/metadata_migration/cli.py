@@ -118,6 +118,74 @@ def prepare(
     raise SystemExit(status)
 
 
+@cli.command("field-audit")
+@_connection_options
+@click.option("--batch-size", type=click.IntRange(min=1, max=1000), default=100)
+@click.option(
+    "--protected-output",
+    type=click.Path(dir_okay=False),
+    help="Protected path for deployed field names, IDs, and dependency details.",
+)
+def field_audit(
+    paperless_url: str,
+    paperless_token: str,
+    batch_size: int,
+    protected_output: str | None,
+) -> None:
+    """Review all managed fields and count unmanaged fields without changing Paperless."""
+
+    async def run() -> tuple[str, int]:
+        async with _client(paperless_url, paperless_token) as client:
+            summary = await MetadataMigrationService(client).review_fields(
+                batch_size=batch_size,
+                protected_output=protected_output,
+            )
+            return summary.to_json(), summary.exit_status
+
+    output, status = _run_command(run())
+    click.echo(output)
+    raise SystemExit(status)
+
+
+@cli.command("retire-fields")
+@_connection_options
+@click.option("--apply", is_flag=True, help="Delete eligible empty legacy fields.")
+@click.option(
+    "--external-writers-disabled",
+    is_flag=True,
+    help="Confirm Paperless-AI and other metadata writers are disabled.",
+)
+@click.option("--batch-size", type=click.IntRange(min=1, max=1000), default=100)
+@click.option(
+    "--protected-output",
+    type=click.Path(dir_okay=False),
+    help="Protected path for deployed field names, IDs, and dependency details.",
+)
+def retire_fields(
+    paperless_url: str,
+    paperless_token: str,
+    apply: bool,
+    external_writers_disabled: bool,
+    batch_size: int,
+    protected_output: str | None,
+) -> None:
+    """Dry-run by default; delete only known empty and dependency-free legacy fields."""
+    _require_apply_preflight(apply, external_writers_disabled)
+
+    async def run() -> tuple[str, int]:
+        async with _client(paperless_url, paperless_token) as client:
+            summary = await MetadataMigrationService(client).review_fields(
+                apply=apply,
+                batch_size=batch_size,
+                protected_output=protected_output,
+            )
+            return summary.to_json(), summary.exit_status
+
+    output, status = _run_command(run())
+    click.echo(output)
+    raise SystemExit(status)
+
+
 @cli.command()
 @_connection_options
 @click.option("--apply", is_flag=True, help="Apply canonical-only document updates.")

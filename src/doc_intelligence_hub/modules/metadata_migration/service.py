@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -19,10 +20,12 @@ from doc_intelligence_hub.core.paperless import (
     MetadataCreatePolicy,
     MetadataDiagnosticCode,
     MetadataNormalization,
+    MetadataRetirementPolicy,
     PaperlessClient,
     PaperlessMetadataResolver,
     ResolvedMetadataSchema,
     build_metadata_update,
+    resolve_metadata_schema,
     resolve_metadata_value,
 )
 from doc_intelligence_hub.core.resilience import PaperlessError
@@ -30,6 +33,10 @@ from doc_intelligence_hub.core.resilience import PaperlessError
 from .models import (
     PROTECTED_SCHEMA_VERSION,
     FieldCompatibility,
+    FieldDisposition,
+    FieldReview,
+    FieldReviewState,
+    FieldReviewSummary,
     MigrationAction,
     MigrationResult,
     ProtectedRecord,
@@ -55,6 +62,7 @@ def registry_digest() -> str:
             "normalization": spec.normalization.value,
             "create_policy": spec.create_policy.value,
             "create_type": spec.create_type.value if spec.create_type else None,
+            "retirement_policy": spec.retirement_policy.value,
             "schema_version": spec.schema_version,
         }
         for spec in (PAPERLESS_METADATA_REGISTRY[key] for key in MIGRATION_KEYS)
@@ -82,6 +90,69 @@ def write_protected_artifact(path: str | Path, payload: dict[str, Any]) -> None:
     except OSError:
         pass
     os.replace(temporary, destination)
+
+
+def _field_id(definition: dict[str, Any]) -> int | None:
+    value = definition.get("id", definition.get("field"))
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _has_custom_field_value(value: Any) -> bool:
+    return value not in (None, "", [], {})
+
+
+def _payload_references_field(
+    payload: Any,
+    *,
+    field_id: int,
+    field_name: str,
+    custom_field_context: bool = False,
+) -> bool:
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            key_context = custom_field_context or "custom_field" in str(key).lower()
+            if _payload_references_field(
+                value,
+                field_id=field_id,
+                field_name=field_name,
+                custom_field_context=key_context,
+            ):
+                return True
+        return False
+    if isinstance(payload, list):
+        return any(
+            _payload_references_field(
+                item,
+                field_id=field_id,
+                field_name=field_name,
+                custom_field_context=custom_field_context,
+            )
+            for item in payload
+        )
+    if isinstance(payload, str):
+        stripped = payload.strip()
+        if stripped == field_name:
+            return True
+        if custom_field_context and stripped == str(field_id):
+            return True
+        if stripped.startswith(("[", "{")):
+            try:
+                decoded = json.loads(stripped)
+            except ValueError:
+                return False
+            return _payload_references_field(
+                decoded,
+                field_id=field_id,
+                field_name=field_name,
+                custom_field_context=custom_field_context,
+            )
+        return False
+    return custom_field_context and payload == field_id
 
 
 class MetadataMigrationService:
@@ -123,6 +194,299 @@ class MetadataMigrationService:
                 },
             )
         return summary
+
+    async def review_fields(
+        self,
+        *,
+        apply: bool = False,
+        batch_size: int = 100,
+        protected_output: str | Path | None = None,
+    ) -> FieldReviewSummary:
+        """Review every registered/deployed field and optionally retire safe empty fields."""
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive")
+
+        run_id = str(uuid4())
+        started_at = datetime.now(UTC).isoformat()
+        definitions, saved_views, document_types, workflows = await asyncio.gather(
+            self.client.list_custom_fields(),
+            self.client.list_saved_views(),
+            self.client.list_document_types(),
+            self.client.list_workflows(),
+        )
+        definitions_by_name: dict[str, list[dict[str, Any]]] = {}
+        non_empty_documents: Counter[int] = Counter()
+        for definition in definitions:
+            name = definition.get("name")
+            if isinstance(name, str) and name.strip():
+                definitions_by_name.setdefault(name.strip(), []).append(definition)
+
+        async for page in self.client.iter_document_pages(page_size=batch_size):
+            for document in page.results:
+                seen: set[int] = set()
+                for custom_field in document.get("custom_fields") or []:
+                    if not isinstance(custom_field, dict):
+                        continue
+                    field_id = _field_id(custom_field)
+                    if (
+                        field_id is not None
+                        and field_id not in seen
+                        and _has_custom_field_value(custom_field.get("value"))
+                    ):
+                        non_empty_documents[field_id] += 1
+                        seen.add(field_id)
+
+        known_names = {
+            name
+            for spec in PAPERLESS_METADATA_REGISTRY.values()
+            for name in (spec.canonical_name, *spec.aliases)
+        }
+        unmanaged = [
+            definition
+            for definition in definitions
+            if str(definition.get("name", "")).strip() not in known_names
+        ]
+        reviews: list[FieldReview] = []
+        protected_fields: list[dict[str, Any]] = []
+
+        for spec in PAPERLESS_METADATA_REGISTRY.values():
+            resolved = resolve_metadata_schema(definitions, (spec.key,)).field(spec.key)
+            canonical_diagnostics = tuple(
+                diagnostic.code.value
+                for diagnostic in resolved.diagnostics
+                if diagnostic.field_name == spec.canonical_name
+            )
+            canonical_disposition = (
+                FieldDisposition.RETIRE_WHEN_EMPTY
+                if spec.retirement_policy is MetadataRetirementPolicy.RETIRE_WHEN_EMPTY
+                else FieldDisposition.KEEP
+            )
+            canonical_reviews, canonical_details = self._review_named_field(
+                stable_key=spec.key.value,
+                field_name=spec.canonical_name,
+                role="canonical",
+                expected_types=tuple(item.value for item in spec.compatible_types),
+                disposition=canonical_disposition,
+                definitions=definitions_by_name.get(spec.canonical_name, []),
+                non_empty_documents=non_empty_documents,
+                saved_views=saved_views,
+                document_types=document_types,
+                workflows=workflows,
+                schema_diagnostics=canonical_diagnostics,
+            )
+            reviews.extend(canonical_reviews)
+            protected_fields.extend(canonical_details)
+
+            for alias in spec.aliases:
+                alias_reviews, alias_details = self._review_named_field(
+                    stable_key=f"{spec.key.value}:alias:{alias}",
+                    field_name=alias,
+                    role="alias",
+                    expected_types=tuple(item.value for item in spec.compatible_types),
+                    disposition=FieldDisposition.MIGRATE_THEN_RETIRE,
+                    definitions=definitions_by_name.get(alias, []),
+                    non_empty_documents=non_empty_documents,
+                    saved_views=saved_views,
+                    document_types=document_types,
+                    workflows=workflows,
+                    include_absent=False,
+                )
+                reviews.extend(alias_reviews)
+                protected_fields.extend(alias_details)
+
+        if apply:
+            updated_reviews: list[FieldReview] = []
+            deleted_ids: set[int] = set()
+            for review, detail in zip(reviews, protected_fields, strict=True):
+                field_id = detail.get("field_id")
+                if review.state is FieldReviewState.ELIGIBLE and isinstance(field_id, int):
+                    await self.client.delete_custom_field(field_id)
+                    deleted_ids.add(field_id)
+                    review = replace(review, state=FieldReviewState.DELETED)
+                    detail["state"] = FieldReviewState.DELETED.value
+                updated_reviews.append(review)
+            reviews = updated_reviews
+            remaining_ids = {
+                field_id
+                for definition in await self.client.list_custom_fields()
+                if (field_id := _field_id(definition)) is not None
+            }
+            if deleted_ids & remaining_ids:
+                raise PaperlessError("Paperless custom-field deletion verification failed")
+
+        summary = FieldReviewSummary(
+            run_id=run_id,
+            mode="retire" if apply else "review",
+            started_at=started_at,
+            fields=reviews,
+            unmanaged_fields=len(unmanaged),
+            apply=apply,
+        )
+        summary.finish()
+        if protected_output is not None:
+            write_protected_artifact(
+                protected_output,
+                {
+                    "schema_version": "1.0",
+                    "run_id": run_id,
+                    "mode": summary.mode,
+                    "registry_digest": registry_digest(),
+                    "fields": protected_fields,
+                    "unmanaged_fields": unmanaged,
+                },
+            )
+        return summary
+
+    @staticmethod
+    def _review_named_field(
+        *,
+        stable_key: str,
+        field_name: str,
+        role: str,
+        expected_types: tuple[str, ...],
+        disposition: FieldDisposition,
+        definitions: list[dict[str, Any]],
+        non_empty_documents: Counter[int],
+        saved_views: list[dict],
+        document_types: list[dict],
+        workflows: list[dict],
+        schema_diagnostics: tuple[str, ...] = (),
+        include_absent: bool = True,
+    ) -> tuple[list[FieldReview], list[dict[str, Any]]]:
+        if not definitions:
+            if not include_absent:
+                return [], []
+            return [
+                FieldReview(
+                    stable_key=stable_key,
+                    field_name=field_name,
+                    role=role,
+                    disposition=disposition,
+                    state=FieldReviewState.ABSENT,
+                    deployed_count=0,
+                    expected_types=expected_types,
+                    observed_types=(),
+                    non_empty_documents=0,
+                    saved_view_references=0,
+                    document_type_references=0,
+                    workflow_references=0,
+                )
+            ], [{"stable_key": stable_key, "field_name": field_name, "field_id": None}]
+
+        observed_types = tuple(
+            sorted(
+                {
+                    str(definition.get("data_type"))
+                    for definition in definitions
+                    if definition.get("data_type") is not None
+                }
+            )
+        )
+        duplicate = len(definitions) > 1
+        reviews: list[FieldReview] = []
+        details: list[dict[str, Any]] = []
+        for definition in definitions:
+            field_id = _field_id(definition)
+            populated = non_empty_documents[field_id] if field_id is not None else 0
+            saved_view_refs = (
+                sum(
+                    _payload_references_field(
+                        item,
+                        field_id=field_id,
+                        field_name=field_name,
+                    )
+                    for item in saved_views
+                )
+                if field_id is not None
+                else 0
+            )
+            document_type_refs = (
+                sum(
+                    _payload_references_field(
+                        item,
+                        field_id=field_id,
+                        field_name=field_name,
+                    )
+                    for item in document_types
+                )
+                if field_id is not None
+                else 0
+            )
+            workflow_refs = (
+                sum(
+                    _payload_references_field(
+                        item,
+                        field_id=field_id,
+                        field_name=field_name,
+                    )
+                    for item in workflows
+                )
+                if field_id is not None
+                else 0
+            )
+            actual_type = str(definition.get("data_type"))
+            diagnostic_codes: tuple[str, ...] = ()
+            review_disposition = disposition
+            if duplicate:
+                state = FieldReviewState.DUPLICATE
+                review_disposition = FieldDisposition.REVIEW_REQUIRED
+                diagnostic_codes = (MetadataDiagnosticCode.DUPLICATE_FIELD.value,)
+            elif field_id is None or actual_type not in expected_types:
+                state = FieldReviewState.INCOMPATIBLE
+                review_disposition = FieldDisposition.REVIEW_REQUIRED
+                diagnostic_codes = (MetadataDiagnosticCode.INCOMPATIBLE_TYPE.value,)
+            elif disposition is FieldDisposition.KEEP and any(
+                code
+                in {
+                    MetadataDiagnosticCode.MISSING_SELECT_OPTION.value,
+                    MetadataDiagnosticCode.INVALID_SELECT_OPTION.value,
+                }
+                for code in schema_diagnostics
+            ):
+                state = FieldReviewState.INCOMPATIBLE
+                review_disposition = FieldDisposition.REVIEW_REQUIRED
+                diagnostic_codes = schema_diagnostics
+            elif disposition is FieldDisposition.KEEP:
+                state = FieldReviewState.RETAINED
+            elif saved_view_refs or document_type_refs or workflow_refs:
+                state = FieldReviewState.BLOCKED_DEPENDENCY
+            elif populated:
+                state = FieldReviewState.BLOCKED_POPULATED
+            else:
+                state = FieldReviewState.ELIGIBLE
+
+            reviews.append(
+                FieldReview(
+                    stable_key=stable_key,
+                    field_name=field_name,
+                    role=role,
+                    disposition=review_disposition,
+                    state=state,
+                    deployed_count=len(definitions),
+                    expected_types=expected_types,
+                    observed_types=observed_types,
+                    non_empty_documents=populated,
+                    saved_view_references=saved_view_refs,
+                    document_type_references=document_type_refs,
+                    workflow_references=workflow_refs,
+                    diagnostic_codes=diagnostic_codes,
+                )
+            )
+            details.append(
+                {
+                    "stable_key": stable_key,
+                    "field_name": field_name,
+                    "field_id": field_id,
+                    "role": role,
+                    "disposition": review_disposition.value,
+                    "state": state.value,
+                    "non_empty_documents": populated,
+                    "saved_view_references": saved_view_refs,
+                    "document_type_references": document_type_refs,
+                    "workflow_references": workflow_refs,
+                }
+            )
+        return reviews, details
 
     async def prepare(
         self,
