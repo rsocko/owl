@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+
 class DocumentSummaryContext(StrEnum):
     GENERAL = "general"
     ACCOUNT_REVIEW = "account_review"

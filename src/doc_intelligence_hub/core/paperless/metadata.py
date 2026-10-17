@@ -10,6 +10,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Sequence
 
+
 class MetadataFieldKey(str, Enum):
     ACCOUNT_IDENTIFIER = "account_identifier"
     PATIENT_NAME = "patient_name"
