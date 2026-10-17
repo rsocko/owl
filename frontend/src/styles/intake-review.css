@@ -1,6 +1,6 @@
 .intake-review-page {
   display: grid;
-  grid-template-columns: clamp(17.5rem, 22vw, 21rem) minmax(0, 1fr);
+  grid-template-columns: clamp(20rem, 25vw, 25rem) minmax(0, 1fr);
   height: calc(100dvh - var(--topnav-height));
   min-height: 36rem;
   margin: -20px;
@@ -136,7 +136,7 @@
   text-align: left;
   padding: 0.55rem;
   display: grid;
-  grid-template-columns: 3.3rem minmax(0, 1fr) auto;
+  grid-template-columns: 4.1rem minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.65rem;
   cursor: pointer;
@@ -165,8 +165,8 @@
 }
 
 .intake-queue-item > img {
-  width: 3.3rem;
-  height: 4.15rem;
+  width: 4.1rem;
+  height: 5.15rem;
   object-fit: cover;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -235,6 +235,17 @@
   gap: 1.1rem;
 }
 
+.intake-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.intake-header-actions > a {
+  text-decoration: none;
+}
+
 .intake-document-title {
   min-width: 0;
 }
@@ -295,12 +306,58 @@
 }
 
 .intake-preview {
+  position: relative;
   min-height: 0;
   padding: 0.65rem;
   background:
     radial-gradient(circle at 50% 0%, rgb(255 255 255 / 7%), transparent 35%),
     #293241;
   overflow: hidden;
+}
+
+.intake-preview-tools {
+  position: absolute;
+  z-index: 3;
+  top: 1rem;
+  right: 1rem;
+  display: flex;
+  gap: 0.35rem;
+  opacity: 0;
+  transform: translateY(-0.2rem);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.intake-preview:hover .intake-preview-tools,
+.intake-preview:focus-within .intake-preview-tools {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.intake-preview-tools button,
+.intake-preview-tools a {
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: var(--radius-sm);
+  background: rgb(24 34 49 / 92%);
+  color: #fff;
+  padding: 0.48rem 0.62rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 750;
+  text-decoration: none;
+  box-shadow: 0 5px 16px rgb(0 0 0 / 24%);
+  cursor: pointer;
+}
+
+.intake-preview-tools button:hover,
+.intake-preview-tools button:focus-visible,
+.intake-preview-tools a:hover,
+.intake-preview-tools a:focus-visible {
+  border-color: rgb(255 255 255 / 50%);
+  background: rgb(35 50 72 / 98%);
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 
 .intake-preview iframe {
@@ -977,6 +1034,61 @@
   max-width: 100%;
 }
 
+.intake-tag-control {
+  min-height: 2.6rem;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, var(--text-muted) 16%);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 0.34rem 0.48rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.36rem;
+  color: var(--text-muted);
+}
+
+.intake-tag-control:focus-within {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-bg);
+}
+
+.intake-tag-control > input {
+  min-width: 12rem;
+  height: 1.75rem;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.77rem;
+}
+
+.intake-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-hover);
+  padding: 0.24rem 0.28rem 0.24rem 0.58rem;
+  font-size: 0.68rem;
+  font-weight: 750;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 12%);
+}
+
+.intake-tag-pill button {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 26%);
+  color: currentColor;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
 .intake-combobox-menu > button > i {
   width: 0.65rem;
   height: 0.65rem;
@@ -1005,6 +1117,34 @@
   margin-top: 1.05rem;
   padding-top: 1rem;
   border-top: 1px solid var(--border);
+}
+
+.intake-currency-input {
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, var(--text-muted) 16%);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+}
+
+.intake-currency-input:focus-within {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-bg);
+}
+
+.intake-currency-input > span {
+  padding-left: 0.62rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.intake-currency-input > input {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  padding-left: 0.28rem;
 }
 
 .intake-readonly-field {
@@ -1248,9 +1388,88 @@
   gap: 0.38rem;
 }
 
+.intake-preview-overlay {
+  position: fixed;
+  z-index: 1800;
+  inset: 0;
+  background: #202a38;
+  display: flex;
+  flex-direction: column;
+}
+
+.intake-preview-overlay-header {
+  min-height: 3.7rem;
+  border-bottom: 1px solid rgb(255 255 255 / 12%);
+  background: #17202d;
+  color: #fff;
+  padding: 0.55rem 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.intake-preview-overlay-header > div:first-child {
+  min-width: 0;
+  display: grid;
+}
+
+.intake-preview-overlay-header > div:first-child span {
+  color: rgb(255 255 255 / 58%);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.intake-preview-overlay-header > div:first-child strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+
+.intake-preview-overlay-header > div:last-child {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.intake-preview-overlay-header a,
+.intake-preview-overlay-header button {
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 7%);
+  color: #fff;
+  padding: 0.45rem 0.58rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 750;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.intake-preview-overlay-header a:hover,
+.intake-preview-overlay-header a:focus-visible,
+.intake-preview-overlay-header button:hover,
+.intake-preview-overlay-header button:focus-visible {
+  background: rgb(255 255 255 / 14%);
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.intake-preview-overlay > iframe {
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  border: 0;
+  background: white;
+}
+
 @media (max-width: 1120px) {
   .intake-review-page {
-    grid-template-columns: 16.5rem minmax(0, 1fr);
+    grid-template-columns: 18.5rem minmax(0, 1fr);
   }
 
   .intake-document-header {
@@ -1339,6 +1558,13 @@
     font-size: 0;
     min-width: 2.2rem;
     padding-inline: 0.55rem;
+  }
+
+  .intake-header-actions > a,
+  .intake-header-actions > .btn {
+    min-width: 2.2rem;
+    padding-inline: 0.55rem;
+    font-size: 0;
   }
 
   .intake-form-grid,

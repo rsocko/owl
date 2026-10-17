@@ -40,6 +40,15 @@ function LegacyRouteRedirect({ to }: { to: string }) {
   return <Navigate to={`${to}${search}`} replace />;
 }
 
+function LegacyIntakeReviewRedirect() {
+  const { documentId } = useParams();
+  const { search } = useLocation();
+  const params = new URLSearchParams(search);
+  if (documentId && !params.has('document')) params.set('document', documentId);
+  const query = params.toString();
+  return <Navigate to={`/inbox-review${query ? `?${query}` : ''}`} replace />;
+}
+
 function CanonicalActionRedirect() {
   const { actionId } = useParams();
   const [target, setTarget] = useState<string | null>(null);
@@ -86,8 +95,10 @@ function App() {
             <Route path="/eob/benchmarks" element={<BenchmarkHistory />} />
             <Route path="/eob/manual-search" element={<ManualMatchSearch />} />
             <Route path="/action-queue" element={<ActionQueue />} />
-            <Route path="/intake-review" element={<IntakeReview />} />
-            <Route path="/intake-review/:documentId" element={<IntakeReview />} />
+            <Route path="/inbox-review" element={<IntakeReview />} />
+            <Route path="/inbox-review/:documentId" element={<IntakeReview />} />
+            <Route path="/intake-review" element={<LegacyIntakeReviewRedirect />} />
+            <Route path="/intake-review/:documentId" element={<LegacyIntakeReviewRedirect />} />
             <Route path="/actions/:actionId" element={<CanonicalActionRedirect />} />
             <Route path="/action-queue/operations" element={<ActionQueueOperations />} />
             <Route path="/needs-review" element={<TriageQueue />} />

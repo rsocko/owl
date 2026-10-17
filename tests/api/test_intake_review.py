@@ -55,8 +55,35 @@ def test_document_detail_combines_metadata_suggestions_actions_and_ocr(client, m
         ("correspondent", "Aetna"),
         ("document_type", "Letter"),
         ("title", "October utility bill"),
-        ("tags", "Utilities"),
     }
+    assert payload["paperless_url"] == "https://paperless.browser.test/documents/42/details"
+
+
+def test_tag_suggestions_only_use_existing_paperless_tags(client, mock_paperless):
+    intake_review._taxonomy_cache = None
+    mock_paperless.get_document.return_value = _document(tags=[1])
+    mock_paperless.list_tags.return_value = [
+        {"id": 1, "name": "Inbox", "color": "#1f6feb"},
+        {"id": 2, "name": "Utilities", "color": "#fbca04"},
+    ]
+    mock_paperless.get_document_suggestions.return_value = {}
+    mock_paperless.get_document_ai_suggestions.return_value = {
+        "suggested_tags": ["Utilities", "Brand New Tag"],
+    }
+
+    response = client.get("/api/intake/documents/42/suggestions?refresh=true")
+
+    assert response.status_code == 200
+    assert response.json()["suggestions"] == [
+        {
+            "field": "tags",
+            "source": "paperless_ai",
+            "id": 2,
+            "name": "Utilities",
+            "color": "#fbca04",
+            "colour": "#fbca04",
+        }
+    ]
 
 
 def test_core_document_load_does_not_wait_for_suggestions_or_ocr(client, mock_paperless):

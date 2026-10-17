@@ -1,17 +1,17 @@
 ---
-title: Intake Review User Guide
-sidebar_label: Intake Review
+title: Inbox Review User Guide
+sidebar_label: Inbox Review
 sidebar_position: 2
 ---
 
-# Intake Review
+# Inbox Review
 
-Intake Review is OWL's document-focused Paperless Inbox workspace. It keeps the
+Inbox Review is OWL's document-focused Paperless Inbox workspace. It keeps the
 source document visible while metadata, action assessment, and OCR quality are
 reviewed together. Filing the document and confirming its actions remain
 independent decisions.
 
-Open **Workflow → Intake Review** in the OWL web interface. The document list is
+Open **Workflow → Inbox Review** in the OWL web interface. The document list is
 loaded from the Action Queue's configured intake tags (normally `Inbox`). Each
 row includes a Paperless thumbnail, resolved correspondent and document type,
 and an **Action needed** indicator where applicable. Search and filters narrow
@@ -23,7 +23,8 @@ The workspace keeps the live document date, correspondent, and document type
 visible above the preview. The right panel contains:
 
 - **Metadata** — current Paperless metadata, field-local Paperless ML/AI
-  suggestions, removable Paperless-colored tags, storage path, and relevant
+  suggestions, removable Paperless-colored tags in one searchable entry
+  control, storage path, and relevant
   Paperless custom fields. Operational Action/Obligation projections are not
   presented as editable document metadata.
 - **Actions** — all inferred and user-added actions for the source document.
@@ -37,7 +38,7 @@ document. Press **Enter** or click a row to select it.
 
 The selected document is stored in the `document` query parameter, so a review
 can be bookmarked or shared, for example
-`#/intake-review?document=123&tab=actions`.
+`#/inbox-review?document=123&tab=actions`.
 
 ## Metadata and filing decisions
 
@@ -52,6 +53,10 @@ rejects a save if Paperless changed while the document was open.
 | **File only** | File the document while leaving proposed actions pending |
 | **Confirm action(s) & file** | Confirm active actions and file the document |
 
+Saving in place keeps the current document selected and visible, even when an
+edit means it no longer matches the active queue filter. The item leaves that
+filtered list after the reviewer selects another document, defers, or files it.
+
 Tags, correspondents, document types, and storage paths use one searchable
 combobox for selection and creation. Typing a value that does not exist offers
 an explicit create action when Paperless permits it. OWL prevents
@@ -63,6 +68,11 @@ tags or document types from being added.
 Tag options retain Paperless colors. Names containing hierarchy separators
 such as `Parent / Child` or `Parent::Child` are displayed with parent context
 while preserving the original Paperless tag name.
+
+Tag suggestions are restricted to tags that already exist in Paperless. Novel
+AI-generated tag names are not offered as suggestions; reviewers can still
+create a new tag explicitly by typing it into the tag control. This is enforced
+by OWL and does not require a Paperless setting change.
 
 ## Action editing and audit history
 
@@ -92,8 +102,13 @@ for the current source revision. It is blocked while metadata edits are
 unsaved, and a changed Paperless revision returns a conflict.
 
 OCR remediation continues through OWL's OCR Quality workflow. After accepting
-new OCR, return to Intake Review and refresh analysis so metadata suggestions
+new OCR, return to Inbox Review and refresh analysis so metadata suggestions
 and inferred actions are evaluated against the new searchable text.
+
+Hover the document preview to reveal **Expand** and **New tab** controls.
+Expanded preview uses the full browser viewport and closes with Escape. When a
+browser-facing Paperless URL is configured, **Open in Paperless** is also
+available in the document header and expanded viewer.
 
 ## API
 
