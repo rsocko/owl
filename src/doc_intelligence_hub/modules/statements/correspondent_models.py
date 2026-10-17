@@ -919,6 +919,9 @@ class MetadataPolicySuggestion(PolicyModel):
     policy: MetadataPolicy = Field(default_factory=MetadataPolicy)
     tag_names: dict[int, str] = Field(default_factory=dict)
     required_document_type_name: str | None = None
+    dominant_document_type_name: str | None = None
+    document_type_counts: dict[str, int] = Field(default_factory=dict)
+    document_type_exception_ids: list[int] = Field(default_factory=list)
     confidence: float | None = Field(default=None, ge=0, le=1)
     reason_codes: list[str] = Field(default_factory=list)
 

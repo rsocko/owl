@@ -293,6 +293,42 @@ def test_discover_providers_with_document_type_mapping_does_not_suppress_keyword
     assert "Custom Co" in provider_names, "Mapping-matched provider must be found"
 
 
+def test_discovery_keeps_same_style_document_with_outlier_type() -> None:
+    config = load_config("config/config.fixture.yaml")
+    documents = [
+        DocumentRecord(
+            id=1,
+            title="City Utilities Statement January 2026",
+            correspondent_id=20,
+            correspondent_name="City Utilities",
+            document_type="Statement",
+            created=date(2026, 1, 15),
+        ),
+        DocumentRecord(
+            id=2,
+            title="City Utilities Statement February 2026",
+            correspondent_id=20,
+            correspondent_name="City Utilities",
+            document_type="Statement",
+            created=date(2026, 2, 15),
+        ),
+        DocumentRecord(
+            id=3,
+            title="City Utilities Invoice March 2026",
+            correspondent_id=20,
+            correspondent_name="City Utilities",
+            document_type="Record",
+            created=date(2026, 3, 15),
+        ),
+    ]
+
+    result = discover_providers(documents, config.analysis)
+
+    assert len(result.providers) == 1
+    assert result.providers[0].document_count == 3
+    assert result.providers[0].sample_document_ids == [1, 2, 3]
+
+
 def test_validate_source_config_requires_token_for_paperless(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
