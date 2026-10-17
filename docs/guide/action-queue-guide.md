@@ -10,7 +10,7 @@ mockups:
 
 The Action Queue is OWL's primary workflow module. It scans your Paperless-ngx inbox, classifies each document using an LLM, assigns urgency scores, and surfaces recommended actions — turning a pile of unprocessed documents into a prioritized task list.
 
-For document-by-document filing, use [Intake Review](./intake-review-guide.md).
+For document-by-document filing, use [Inbox Review](./intake-review-guide.md).
 Action Queue's **Review document** control opens that shared workspace on the
 Actions tab, keeping action lifecycle management and Paperless filing
 independent.

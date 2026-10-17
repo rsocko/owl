@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -260,11 +261,18 @@ def _normalize_suggestions(
     seen: set[tuple[str, str]] = set()
     for field, (keys, catalog) in field_specs.items():
         applied = set(current.get(field) or []) if field == "tags" else {current.get(field)}
+        catalog_by_name = {
+            str(item.get("name") or "").strip().casefold(): item
+            for item in catalog.values()
+            if item.get("name")
+        }
         for raw in _suggestion_values(payload, *keys):
             item = _catalog_value(catalog, raw)
             if item is None and isinstance(raw, str):
                 name = raw.strip()
-                item = {"id": None, "name": name, "create": True} if name else None
+                item = catalog_by_name.get(name.casefold()) if name else None
+                if item is None and name and field != "tags":
+                    item = {"id": None, "name": name, "create": True}
             if item is None or item.get("id") in applied:
                 continue
             identity = (field, str(item.get("id") or item.get("name", "")).casefold())
@@ -332,13 +340,31 @@ async def _fetch_taxonomies(client: Any) -> dict[str, list[dict[str, Any]]]:
         client.list_storage_paths(),
         client.list_custom_fields(),
     )
+    normalized_tags = [
+        {
+            **tag,
+            "colour": tag.get("colour") or tag.get("color"),
+        }
+        for tag in tags
+    ]
     return {
-        "tags": tags,
+        "tags": normalized_tags,
         "correspondents": correspondents,
         "document_types": document_types,
         "storage_paths": storage_paths,
         "custom_fields": custom_fields,
     }
+
+
+def _paperless_document_url(request: Request, document_id: int) -> str | None:
+    settings = request.app.state.hub_settings
+    base_url = settings.paperless_browser_url or settings.paperless_url
+    if not base_url:
+        return None
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    return f"{base_url.rstrip('/')}/documents/{document_id}/details"
 
 
 def _metadata_spec_by_name(name: str) -> tuple[MetadataFieldKey, Any] | None:
@@ -431,6 +457,29 @@ def _native_document_payload(
     }
 
 
+def _sanitize_tag_suggestions(
+    suggestions: list[dict[str, Any]],
+    taxonomies: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    tags = _catalog_map(taxonomies["tags"])
+    sanitized: list[dict[str, Any]] = []
+    for suggestion in suggestions:
+        if suggestion.get("field") != "tags":
+            sanitized.append(suggestion)
+            continue
+        tag = _catalog_value(tags, suggestion.get("id"))
+        if tag is not None and not tag.get("unresolved"):
+            sanitized.append(
+                {
+                    **suggestion,
+                    **tag,
+                    "field": "tags",
+                    "source": suggestion.get("source"),
+                }
+            )
+    return sanitized
+
+
 async def _suggestions_for_document(
     client: Any,
     document: dict[str, Any],
@@ -450,7 +499,11 @@ async def _suggestions_for_document(
             and _utcnow_naive() - snapshot.fetched_at < _SUGGESTION_CACHE_TTL
             and all(state.get("available") for state in (snapshot.source_states or {}).values())
         ):
-            return list(snapshot.suggestions or []), dict(snapshot.source_states or {}), True
+            return (
+                _sanitize_tag_suggestions(list(snapshot.suggestions or []), taxonomies),
+                dict(snapshot.source_states or {}),
+                True,
+            )
 
         catalogs = {
             key: _catalog_map(taxonomies[key])
@@ -488,6 +541,7 @@ async def _suggestions_for_document(
                 continue
             source_states[source] = {"available": True, "status": 200, "error": None}
             suggestions.extend(_normalize_suggestions(result, source, catalogs, current))
+        suggestions = _sanitize_tag_suggestions(suggestions, taxonomies)
 
         if snapshot is None:
             snapshot = IntakeSuggestionSnapshot(document_id=int(document["id"]))
@@ -581,6 +635,7 @@ async def _document_detail(request: Request, document_id: int) -> dict[str, Any]
             },
             "preview_url": f"/api/statements/documents/{document_id}/preview",
             "download_url": f"/api/documents/{document_id}/download",
+            "paperless_url": _paperless_document_url(request, document_id),
             "write_enabled": bool(request.app.state.hub_settings.write_to_paperless),
             "monitor_tags": _monitor_tags(),
         }
@@ -703,6 +758,7 @@ async def get_intake_document_core(request: Request, document_id: int) -> dict[s
             "taxonomies": taxonomies,
             "preview_url": f"/api/statements/documents/{document_id}/preview",
             "download_url": f"/api/documents/{document_id}/download",
+            "paperless_url": _paperless_document_url(request, document_id),
             "write_enabled": bool(request.app.state.hub_settings.write_to_paperless),
             "monitor_tags": _monitor_tags(),
         }
@@ -896,7 +952,7 @@ async def save_intake_document(
                     status_code=422,
                     detail={
                         "code": "custom_field_not_editable",
-                        "message": "One or more custom fields are read-only in Intake Review.",
+                        "message": "One or more custom fields are read-only in Inbox Review.",
                         "field_ids": disallowed,
                     },
                 )

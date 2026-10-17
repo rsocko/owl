@@ -3,9 +3,12 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleAlert,
+  ExternalLink,
   FileCheck2,
   FileClock,
   FilePlus2,
+  Maximize2,
+  Minimize2,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -30,6 +33,7 @@ interface TaxonomyValue {
   id: number;
   name: string;
   colour?: string | null;
+  color?: string | null;
   data_type?: string | null;
 }
 
@@ -110,6 +114,7 @@ interface IntakeCore {
     custom_fields: TaxonomyValue[];
   };
   preview_url: string;
+  paperless_url?: string | null;
   write_enabled: boolean;
   monitor_tags: string[];
 }
@@ -197,12 +202,62 @@ function tagHierarchy(name: string): { parents: string[]; leaf: string } {
   return { parents: parts.slice(0, -1), leaf: parts.at(-1) || name };
 }
 
-function contrastText(colour?: string | null): string {
+function normalizeTagColour(tag?: TaxonomyValue): string | null {
+  const raw = tag?.colour || tag?.color;
+  if (!raw) return null;
+  const match = raw.trim().match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!match) return null;
+  const hex = match[1].length === 3
+    ? match[1].split('').map((value) => value + value).join('')
+    : match[1];
+  return `#${hex}`;
+}
+
+function contrastText(colour: string | null): string {
   if (!colour) return '#243147';
-  const hex = colour.replace('#', '');
-  if (!/^[0-9a-f]{6}$/i.test(hex)) return '#243147';
+  const hex = colour.slice(1);
   const [r, g, b] = [0, 2, 4].map((index) => Number.parseInt(hex.slice(index, index + 2), 16));
   return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? '#172033' : '#ffffff';
+}
+
+function matchesQueueFilter(item: IntakeListItem, query: string, filter: QueueFilter): boolean {
+  if (filter === 'actions' && item.pending_action_count === 0) return false;
+  if (filter === 'missing_type' && item.document_type_name) return false;
+  const needle = query.trim().toLocaleLowerCase();
+  return !needle || [item.title, item.correspondent_name, item.document_type_name]
+    .some((value) => value?.toLocaleLowerCase().includes(needle));
+}
+
+function CurrencyInput({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  const numericValue = Number(value.replaceAll(',', '').replaceAll('$', ''));
+  const displayValue = !focused && value && Number.isFinite(numericValue)
+    ? numericValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : value;
+  return (
+    <div className="intake-currency-input">
+      <span aria-hidden="true">$</span>
+      <input
+        aria-label={label}
+        inputMode="decimal"
+        value={displayValue}
+        disabled={disabled}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onChange={(event) => onChange(event.target.value.replace(/[^0-9.,-]/g, '').replaceAll(',', ''))}
+      />
+    </div>
+  );
 }
 
 function SuggestionLinks({
@@ -363,33 +418,34 @@ function TagPicker({
   return (
     <section className="intake-tags">
       <div className="intake-field-label">Tags</div>
-      <div className="intake-tag-list">
-        {selectedIds.map((tagId) => {
-          const tag = values.find((item) => String(item.id) === tagId);
-          if (!tag) return null;
-          return (
-            <span
-              key={tagId}
-              style={{
-                backgroundColor: tag.colour ? `#${tag.colour.replace('#', '')}` : undefined,
-                color: contrastText(tag.colour),
-              }}
-            >
-              {tag.name}
-              <button
-                type="button"
-                aria-label={`Remove ${tag.name}`}
-                disabled={disabled}
-                onClick={() => onChange(selectedIds.filter((value) => value !== tagId))}
-              >
-                <X size={13} />
-              </button>
-            </span>
-          );
-        })}
-      </div>
       <div className="intake-combobox intake-tag-combobox">
-        <div className="intake-combobox-input">
+        <div className="intake-tag-control">
+          {selectedIds.map((tagId) => {
+            const tag = values.find((item) => String(item.id) === tagId);
+            if (!tag) return null;
+            const colour = normalizeTagColour(tag);
+            return (
+              <span
+                className="intake-tag-pill"
+                key={tagId}
+                style={{
+                  backgroundColor: colour || undefined,
+                  borderColor: colour || undefined,
+                  color: contrastText(colour),
+                }}
+              >
+                {tag.name}
+                <button
+                  type="button"
+                  aria-label={`Remove ${tag.name}`}
+                  disabled={disabled}
+                  onClick={() => onChange(selectedIds.filter((value) => value !== tagId))}
+                >
+                  <X size={13} />
+                </button>
+              </span>
+            );
+          })}
           <Search aria-hidden="true" size={16} />
           <input
             role="combobox"
@@ -410,6 +466,7 @@ function TagPicker({
           <div className="intake-combobox-menu" role="listbox">
             {available.map((tag) => {
               const hierarchy = tagHierarchy(tag.name);
+              const colour = normalizeTagColour(tag);
               return (
                 <button
                   type="button"
@@ -422,7 +479,7 @@ function TagPicker({
                     setQuery('');
                   }}
                 >
-                  <i style={{ backgroundColor: tag.colour ? `#${tag.colour.replace('#', '')}` : undefined }} />
+                  <i style={{ backgroundColor: colour || undefined }} />
                   <span className="intake-tag-option">
                     {hierarchy.parents.length ? <small>{hierarchy.parents.join(' / ')}</small> : null}
                     <strong>{hierarchy.leaf}</strong>
@@ -533,6 +590,7 @@ export default function IntakeReview() {
   const [focusedId, setFocusedId] = useState<number | null>(selectedId);
   const [queueQuery, setQueueQuery] = useState('');
   const [queueFilter, setQueueFilter] = useState<QueueFilter>('all');
+  const [pinnedFilteredId, setPinnedFilteredId] = useState<number | null>(null);
   const [core, setCore] = useState<IntakeCore | null>(null);
   const [metadata, setMetadata] = useState<MetadataDraft | null>(null);
   const [baseline, setBaseline] = useState<MetadataDraft | null>(null);
@@ -555,6 +613,7 @@ export default function IntakeReview() {
   const [toast, setToast] = useState<{ message: string; tone?: 'success' | 'error' } | null>(null);
   const [newActionOpen, setNewActionOpen] = useState(false);
   const [newAction, setNewAction] = useState<ActionDraft>(EMPTY_ACTION);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
   const queueButtonRefs = useRef(new Map<number, HTMLButtonElement>());
   const requestId = useRef(0);
 
@@ -562,14 +621,10 @@ export default function IntakeReview() {
   const pendingActions = actions.filter((action) => !['completed', 'not_an_action', 'dismissed'].includes(action.status));
   const selectedQueueItem = queue.find((item) => item.id === selectedId);
   const filteredQueue = useMemo(() => {
-    const needle = queueQuery.trim().toLocaleLowerCase();
-    return queue.filter((item) => {
-      if (queueFilter === 'actions' && item.pending_action_count === 0) return false;
-      if (queueFilter === 'missing_type' && item.document_type_name) return false;
-      return !needle || [item.title, item.correspondent_name, item.document_type_name]
-        .some((value) => value?.toLocaleLowerCase().includes(needle));
-    });
-  }, [queue, queueFilter, queueQuery]);
+    return queue.filter(
+      (item) => item.id === pinnedFilteredId || matchesQueueFilter(item, queueQuery, queueFilter),
+    );
+  }, [pinnedFilteredId, queue, queueFilter, queueQuery]);
 
   const showToast = useCallback((message: string, tone: 'success' | 'error' = 'success') => {
     setToast({ message, tone });
@@ -577,7 +632,7 @@ export default function IntakeReview() {
     if (duration) window.setTimeout(() => setToast(null), duration);
   }, []);
 
-  const loadQueue = useCallback(async () => {
+  const loadQueue = useCallback(async (): Promise<IntakeListItem[]> => {
     setLoadingQueue(true);
     setQueueError('');
     try {
@@ -585,8 +640,10 @@ export default function IntakeReview() {
       setQueue(response.documents);
       setSelectedId((current) => current ?? response.documents[0]?.id ?? null);
       setFocusedId((current) => current ?? response.documents[0]?.id ?? null);
+      return response.documents;
     } catch (error) {
       setQueueError(errorMessage(error));
+      return [];
     } finally {
       setLoadingQueue(false);
     }
@@ -671,6 +728,19 @@ export default function IntakeReview() {
   useEffect(() => {
     if (selectedId != null) void loadDocument(selectedId);
   }, [loadDocument, selectedId]);
+  useEffect(() => {
+    if (!previewExpanded) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewExpanded(false);
+    };
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [previewExpanded]);
 
   const updateUrl = (document: number | null, nextTab = tab) => {
     const nextParams = new URLSearchParams(searchParams);
@@ -686,11 +756,16 @@ export default function IntakeReview() {
     updateUrl(selectedId, next);
   };
 
-  const selectDocument = (id: number) => {
-    if (dirty && !window.confirm('Discard unsaved metadata changes and open another document?')) return;
+  const activateDocument = (id: number) => {
+    setPinnedFilteredId(null);
     setSelectedId(id);
     setFocusedId(id);
     updateUrl(id);
+  };
+
+  const selectDocument = (id: number) => {
+    if (dirty && !window.confirm('Discard unsaved metadata changes and open another document?')) return;
+    activateDocument(id);
   };
 
   const moveQueueFocus = (direction: -1 | 1) => {
@@ -761,7 +836,15 @@ export default function IntakeReview() {
           ...((core.document.review_fields || []).some((field) => field.editable) ? {
             custom_fields: (core.document.review_fields || [])
               .filter((field) => field.editable)
-              .map((field) => ({ field: field.field, value: metadata.customFields[String(field.field)] || null })),
+              .map((field) => {
+                const value = metadata.customFields[String(field.field)] || '';
+                return {
+                  field: field.field,
+                  value: ['float', 'decimal', 'integer', 'monetary'].includes(field.data_type || '')
+                    ? value ? Number(value) : null
+                    : value || null,
+                };
+              }),
           } : {}),
         },
         disposition,
@@ -770,9 +853,13 @@ export default function IntakeReview() {
           : {},
       }) as { filed: boolean };
       showToast(disposition === 'defer' ? 'Changes saved; document kept in the Inbox.' : response.filed ? 'Document filed.' : 'Changes saved.');
+      const refreshedQueue = await loadQueue();
+      const matchingQueue = refreshedQueue.filter((item) => matchesQueueFilter(item, queueQuery, queueFilter));
       if (response.filed || disposition === 'defer') {
-        await loadQueue();
-        if (nextDocument) selectDocument(nextDocument.id);
+        setPinnedFilteredId(null);
+        const nextMatching = matchingQueue.find((item) => item.id !== core.document.id)
+          || (nextDocument && refreshedQueue.find((item) => item.id === nextDocument.id));
+        if (nextMatching) activateDocument(nextMatching.id);
         else if (response.filed) {
           setSelectedId(null);
           updateUrl(null);
@@ -781,6 +868,12 @@ export default function IntakeReview() {
           await loadDocument(core.document.id);
         }
       } else {
+        const refreshedCurrent = refreshedQueue.find((item) => item.id === core.document.id);
+        setPinnedFilteredId(
+          refreshedCurrent && !matchesQueueFilter(refreshedCurrent, queueQuery, queueFilter)
+            ? core.document.id
+            : null,
+        );
         await loadDocument(core.document.id);
       }
     } catch (error) {
@@ -895,18 +988,24 @@ export default function IntakeReview() {
     <div className="intake-review-page">
       <aside className="intake-queue" aria-label="Inbox documents">
         <div className="intake-queue-header">
-          <div><span className="intake-eyebrow">Paperless inbox</span><h1>Intake Review</h1><p>{queue.length} awaiting review</p></div>
+          <div><span className="intake-eyebrow">Paperless inbox</span><h1>Inbox Review</h1><p>{queue.length} awaiting review</p></div>
           <Button size="sm" aria-label="Reload queue" disabled={loadingQueue} onClick={() => void loadQueue()}><RefreshCw size={15} /></Button>
         </div>
         <div className="intake-queue-tools">
-          <label><Search size={16} /><input aria-label="Search intake documents" placeholder="Search documents…" value={queueQuery} onChange={(event) => setQueueQuery(event.target.value)} /></label>
+          <label><Search size={16} /><input aria-label="Search intake documents" placeholder="Search documents…" value={queueQuery} onChange={(event) => {
+            setPinnedFilteredId(null);
+            setQueueQuery(event.target.value);
+          }} /></label>
           <div className="intake-filter-chips" aria-label="Filter documents">
             {([
               ['all', 'All'],
               ['actions', 'Action needed'],
               ['missing_type', 'Missing type'],
             ] as const).map(([value, label]) => (
-              <button key={value} type="button" className={queueFilter === value ? 'active' : ''} onClick={() => setQueueFilter(value)}>{label}</button>
+              <button key={value} type="button" className={queueFilter === value ? 'active' : ''} onClick={() => {
+                setPinnedFilteredId(null);
+                setQueueFilter(value);
+              }}>{label}</button>
             ))}
           </div>
         </div>
@@ -964,12 +1063,27 @@ export default function IntakeReview() {
                 <div><dt>Correspondent</dt><dd>{core && metadata ? optionName(core.taxonomies.correspondents, metadata.correspondent) : 'Loading…'}</dd></div>
                 <div><dt>Type</dt><dd>{core && metadata ? optionName(core.taxonomies.document_types, metadata.document_type) : 'Loading…'}</dd></div>
               </dl>
-              <Button disabled={busyKey === 'refresh' || !core} onClick={() => void refreshAnalysis()}><RefreshCw size={16} /> {busyKey === 'refresh' ? 'Refreshing…' : 'Refresh analysis'}</Button>
+              <div className="intake-header-actions">
+                {core?.paperless_url ? (
+                  <a className="btn ghost" href={core.paperless_url} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink size={16} /> Open in Paperless
+                  </a>
+                ) : null}
+                <Button disabled={busyKey === 'refresh' || !core} onClick={() => void refreshAnalysis()}><RefreshCw size={16} /> {busyKey === 'refresh' ? 'Refreshing…' : 'Refresh analysis'}</Button>
+              </div>
             </header>
 
             <div className="intake-workspace-grid">
               <section className="intake-preview" aria-label="Document preview">
                 <iframe title={`Preview of ${title}`} src={previewUrl} />
+                <div className="intake-preview-tools">
+                  <button type="button" onClick={() => setPreviewExpanded(true)}>
+                    <Maximize2 size={16} /> Expand
+                  </button>
+                  <a href={previewUrl} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink size={16} /> New tab
+                  </a>
+                </div>
               </section>
 
               <section className="intake-review-panel">
@@ -1031,13 +1145,22 @@ export default function IntakeReview() {
                             {(core.document.review_fields || []).map((field) => field.editable ? (
                               <label className="intake-field" key={field.field}>
                                 <span>{field.name}</span>
-                                <input
-                                  type={field.data_type === 'date' ? 'date' : ['float', 'decimal', 'integer', 'monetary'].includes(field.data_type || '') ? 'number' : 'text'}
-                                  step={['float', 'decimal', 'monetary'].includes(field.data_type || '') ? '0.01' : undefined}
-                                  value={metadata.customFields[String(field.field)] || ''}
-                                  disabled={!core.write_enabled}
-                                  onChange={(event) => setMetadata({ ...metadata, customFields: { ...metadata.customFields, [String(field.field)]: event.target.value } })}
-                                />
+                                {field.name === 'Document Amount' ? (
+                                  <CurrencyInput
+                                    label={field.name}
+                                    value={metadata.customFields[String(field.field)] || ''}
+                                    disabled={!core.write_enabled}
+                                    onChange={(value) => setMetadata({ ...metadata, customFields: { ...metadata.customFields, [String(field.field)]: value } })}
+                                  />
+                                ) : (
+                                  <input
+                                    type={field.data_type === 'date' ? 'date' : ['float', 'decimal', 'integer', 'monetary'].includes(field.data_type || '') ? 'number' : 'text'}
+                                    step={['float', 'decimal', 'monetary'].includes(field.data_type || '') ? '0.01' : undefined}
+                                    value={metadata.customFields[String(field.field)] || ''}
+                                    disabled={!core.write_enabled}
+                                    onChange={(event) => setMetadata({ ...metadata, customFields: { ...metadata.customFields, [String(field.field)]: event.target.value } })}
+                                  />
+                                )}
                               </label>
                             ) : (
                               <div className="intake-readonly-field" key={field.field}>
@@ -1124,6 +1247,21 @@ export default function IntakeReview() {
           </>
         )}
       </main>
+      {previewExpanded && selectedId ? (
+        <div className="intake-preview-overlay" role="dialog" aria-modal="true" aria-label={`Expanded preview of ${title}`}>
+          <div className="intake-preview-overlay-header">
+            <div><span>Document #{selectedId}</span><strong>{title}</strong></div>
+            <div>
+              {core?.paperless_url ? (
+                <a href={core.paperless_url} target="_blank" rel="noopener noreferrer"><ExternalLink size={16} /> Paperless</a>
+              ) : null}
+              <a href={previewUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={16} /> New tab</a>
+              <button type="button" autoFocus onClick={() => setPreviewExpanded(false)}><Minimize2 size={16} /> Close</button>
+            </div>
+          </div>
+          <iframe title={`Expanded preview of ${title}`} src={previewUrl} />
+        </div>
+      ) : null}
       {toast ? <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} /> : null}
     </div>
   );
