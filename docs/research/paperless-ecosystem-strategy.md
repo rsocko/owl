@@ -23,6 +23,16 @@ tracking:
 
 # Paperless-ngx Ecosystem — Capability Assessment & Integration Strategy
 
+:::warning Tagvico assumptions superseded
+The Tagvico conclusions in this July 2026 ecosystem snapshot predate Tagvico
+v3.4 and v3.5. Tagvico subsequently repositioned around household Action Cases,
+deadlines, approvals, chat, and bots; metadata filing became an optional
+utility, and OCR rescue entered maintenance mode. OWL does not require Tagvico
+in its pipeline. See
+[Intake Triage and Action Routing](../design/active/intake-triage-and-action-routing.md)
+for the current decision.
+:::
+
 ## Purpose
 
 This document maps the full open source ecosystem around Paperless-ngx

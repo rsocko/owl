@@ -235,7 +235,7 @@ Ready items expose this source action:
 }
 ```
 
-Ready FILE and ARCHIVE items additionally expose:
+Legacy ready FILE items additionally expose:
 
 ```json
 {
@@ -249,8 +249,11 @@ Ready FILE and ARCHIVE items additionally expose:
 OWL omits `file_document` while Paperless writes are disabled.
 `file_document` removes only configured intake/monitor tags, writes the source
 status, and completes the OWL action. It is filing, not deletion or a separate
-Paperless archival operation. Failure is returned rather than converted into a
-successful local completion.
+Paperless archival operation. New filing decisions belong to the OWL intake
+workspace and do not become Mission Control tasks. Ordinary ARCHIVE
+classifications are no-action dispositions and are also excluded from Mission
+Control. Failure is returned rather than converted into a successful local
+completion.
 
 ## Change lifecycle status
 

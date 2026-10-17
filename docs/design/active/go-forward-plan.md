@@ -160,7 +160,7 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 | # | Title |
 |---|-------|
 | 836 | Migrate DocIntel to its own repo |
-| 815 | Coordinate pipeline with Tagvico |
+| 815 | Supersede required Tagvico pipeline with native Paperless intake design |
 | 795 | Use Bifrost virtual key for LLM auth |
 | 816 | Evaluate Copilot SDK as AI provider |
 | 865 | DocType/Tag review for DocIntel |
@@ -280,7 +280,7 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 | Priority | Issue | Description | Status |
 |----------|-------|-------------|--------|
 | P5 | #836 | Migrate DocIntel to its own repo | Open |
-| P5 | #815 | Coordinate pipeline with Tagvico | Open |
+| P5 | #815 | Supersede required Tagvico pipeline; track native Paperless intake replacement | Design resolved |
 | P5 | #795 | Use Bifrost virtual key (hardening — LLM auth already working) | Open |
 | P5 | #816 | Evaluate Copilot SDK as AI provider | Open |
 | P5 | #865 | DocType/Tag review | Open |
@@ -291,7 +291,8 @@ This document captures the results of a comprehensive audit comparing all 14 UI 
 | P5 | #805 | Mobile/responsive experience | Open |
 | P5 | #847 | Historical trending + run history dashboard | Open |
 
-**Exit Criteria:** DI Hub is standalone, integrated with Tagvico, and has a polished UX.
+**Exit Criteria:** OWL is standalone, reuses native Paperless suggestions,
+supports a polished intake workspace, and does not require Tagvico.
 
 ---
 
@@ -350,7 +351,7 @@ Automatic replacement is out of scope for the initial release.
 
 **Phase 5 — Infrastructure & Integration:**
 - #836 — Migrate DocIntel to its own repo
-- #815 — Coordinate pipeline with Tagvico
+- #815 — Supersede required Tagvico pipeline with native Paperless intake design
 - #795 — Use Bifrost virtual key for LLM auth
 - #816 — Evaluate Copilot SDK as AI provider
 - #865 — DocType/Tag review
