@@ -2,6 +2,7 @@
 
 const byId = (id) => document.getElementById(id);
 const fields = ["title", "correspondent", "type", "date", "storage", "tags"];
+let nextActionDraftId = 1;
 const documents = [
   {
     id: 1042, short: "Northline Energy · payment confirmation", provider: "Northline Energy",
@@ -38,7 +39,10 @@ const documents = [
   }
 ];
 for (const doc of documents) doc.correspondent = doc.provider;
-for (const doc of documents) doc.actionStatus = doc.assessment === "pay" ? "proposed" : "none";
+for (const doc of documents) {
+  doc.actionStatus = doc.assessment === "pay" ? "proposed" : "none";
+  doc.actionDrafts = doc.assessment === "pay" ? [createActionDraft(doc, "suggested")] : [];
+}
 const history = [
   { id: 1038, title: "Harbor Bank · September statement", source: "Automated", confidence: 98, sampled: false, reason: "Reference statement; no outstanding obligation.", fingerprint: "1038:r8:v3", time: "Oct 16, 05:42 UTC" },
   { id: 1040, title: "Northline · service information", source: "Human", confidence: 88, sampled: false, reason: "Reviewer confirmed informational notice.", fingerprint: "1040:r9:v3", time: "Oct 16, 05:46 UTC" },
@@ -47,6 +51,8 @@ const history = [
 const actions = [{ id: 1031, title: "Pay October water bill", provider: "Riverwater Utilities", amount: "$62.10", due: "Oct 24", completed: false }];
 let current = documents[0];
 let dirty = false;
+let actionDirty = false;
+let actionDraftSnapshot = "";
 let conflictPending = false;
 let externalTitle = "";
 let scenario = "ready";
@@ -58,6 +64,7 @@ let previewScope = null;
 let auditEntry = null;
 let actionReviewDocument = null;
 let activeWorkspaceTab = "metadata";
+let activeQueueTab = "actions";
 const selection = new Set();
 const existingTypes = new Set(["Receipt", "Invoice", "Statement"]);
 
@@ -66,6 +73,97 @@ function node(tag, text, className) {
   if (text !== undefined) element.textContent = text;
   if (className) element.className = className;
   return element;
+}
+function createActionDraft(doc, origin = "new") {
+  const sequence = nextActionDraftId++;
+  return {
+    id: `${doc.id}-action-${sequence}`,
+    origin,
+    type: origin === "suggested" ? "PAY" : "FOLLOW_UP",
+    title: origin === "suggested" ? `Pay ${doc.provider} invoice` : `Follow up on ${doc.provider} document`,
+    payee: doc.provider,
+    amount: origin === "suggested" ? doc.amount : "",
+    due: origin === "suggested" ? (doc.due || "") : "",
+    reference: doc.reference || "",
+    removed: false
+  };
+}
+function activeActionDrafts(doc = current) {
+  return (doc.actionDrafts || []).filter((draft) => !draft.removed);
+}
+function actionTypeLabel(type) {
+  return { PAY: "Pay", FOLLOW_UP: "Follow up", CALL: "Call", REVIEW: "Review" }[type] || type;
+}
+function markActionDirty() {
+  actionDirty = true;
+  updateControls();
+  if (actionReviewDocument) {
+    byId("review-save").disabled = false;
+    byId("queue-refresh").disabled = true;
+  }
+}
+function labeledActionField(labelText, value, onInput, options = {}) {
+  const label = node("label");
+  if (options.wide) label.className = "wide";
+  label.append(document.createTextNode(labelText));
+  const input = options.select ? document.createElement("select") : document.createElement("input");
+  if (options.select) {
+    options.select.forEach(([valueOption, text]) => {
+      const option = node("option", text);
+      option.value = valueOption;
+      input.append(option);
+    });
+  } else {
+    input.type = options.type || "text";
+    if (options.placeholder) input.placeholder = options.placeholder;
+  }
+  input.value = value;
+  input.addEventListener(options.select ? "change" : "input", () => onInput(input.value));
+  label.append(input);
+  return label;
+}
+function renderActionCards(containerId, doc, context) {
+  const container = byId(containerId);
+  container.replaceChildren();
+  activeActionDrafts(doc).forEach((draft, index) => {
+    const card = node("article", undefined, "action-candidate-card");
+    const heading = node("div", undefined, "action-candidate-heading");
+    heading.append(node("span", draft.type, "pill purple"), node("strong", draft.title), node("span", `${draft.origin === "suggested" ? "Suggested" : "Added"} action ${index + 1}`, "muted"));
+    const fieldsContainer = node("div", undefined, "inline-action-fields");
+    fieldsContainer.append(
+      labeledActionField("Action type", draft.type, (value) => { draft.type = value; heading.querySelector(".pill").textContent = value; markActionDirty(); }, { select: [["PAY", "Pay"], ["FOLLOW_UP", "Follow up"], ["CALL", "Call"], ["REVIEW", "Review"]] }),
+      labeledActionField("Action title", draft.title, (value) => { draft.title = value; heading.querySelector("strong").textContent = value || "Untitled action"; markActionDirty(); }, { wide: true }),
+      labeledActionField("Payee / owner", draft.payee, (value) => { draft.payee = value; markActionDirty(); }),
+      labeledActionField("Amount", draft.amount, (value) => { draft.amount = value; markActionDirty(); }, { placeholder: "Optional" }),
+      labeledActionField("Due date", draft.due, (value) => { draft.due = value; markActionDirty(); }, { placeholder: "Optional" }),
+      labeledActionField("Reference", draft.reference, (value) => { draft.reference = value; markActionDirty(); }, { placeholder: "Optional" })
+    );
+    const controls = node("div", undefined, "action-card-controls");
+    const remove = node("button", draft.origin === "suggested" ? "Not an action" : "Delete action", "danger-text");
+    remove.type = "button";
+    remove.addEventListener("click", () => {
+      draft.removed = true;
+      markActionDirty();
+      renderActionCards(containerId, doc, context);
+      if (context === "intake") renderIntakeActionState();
+      else updateQueueActionState();
+    });
+    const complete = node("button", "Mark done");
+    complete.type = "button";
+    complete.addEventListener("click", () => {
+      actions.push({ id: `${doc.id}-${draft.id}`, sourceId: doc.id, draftId: draft.id, type: draft.type, title: draft.title, provider: draft.payee || doc.provider, amount: draft.amount || "No amount", due: draft.due || "No due date", completed: true });
+      draft.removed = true;
+      actionDirty = true;
+      commitActionDrafts(doc);
+      renderActionCards(containerId, doc, context);
+      renderActions();
+      renderIntakeActionState();
+      toast(`“${draft.title}” recorded as already done. The document remains available for its own filing decision.`);
+    });
+    controls.append(remove, complete);
+    card.append(heading, fieldsContainer, controls);
+    container.append(card);
+  });
 }
 function toast(message) {
   clearTimeout(toastTimer);
@@ -93,7 +191,8 @@ function visibleDocuments() {
   return pendingDocuments().filter((doc) => `${doc.short} ${doc.title} ${doc.correspondent}`.toLowerCase().includes(query));
 }
 function selectDocument(doc) {
-  if (dirty && !window.confirm("Discard unsaved metadata changes and review another document?")) return false;
+  if ((dirty || actionDirty) && !window.confirm("Discard unsaved metadata or action changes and review another document?")) return false;
+  if (actionDirty) current.actionDrafts = JSON.parse(actionDraftSnapshot);
   current = doc;
   conflictPending = false;
   loadDocument();
@@ -201,18 +300,13 @@ function loadDocument() {
   const actionCandidate = current.assessment === "pay";
   const uncertain = current.assessment === "review";
   byId("disposition-heading").textContent = actionCandidate ? "Proposed action found" : uncertain ? "Needs a closer look" : "Ready to file";
-  byId("intake-action-count").textContent = actionCandidate ? "1" : "0";
-  byId("action-candidates").hidden = !actionCandidate;
-  byId("no-action-state").hidden = actionCandidate;
   byId("no-action-title").textContent = uncertain ? "Action details need human interpretation" : "No action details to confirm";
   byId("no-action-message").textContent = uncertain
     ? "The source may require a response, but the deadline and obligation were not reliably extracted."
     : "File the document when its metadata is ready, or keep it in Inbox for another reviewer.";
-  byId("intake-action-title").textContent = `Pay ${current.provider} invoice`;
-  byId("intake-action-payee").textContent = current.provider;
-  byId("intake-action-amount").textContent = current.amount;
-  byId("intake-action-due").textContent = current.due || "Not extracted";
-  byId("intake-action-reference").textContent = current.reference;
+  actionDraftSnapshot = JSON.stringify(current.actionDrafts);
+  actionDirty = false;
+  renderIntakeActionState();
   selectWorkspaceTab("metadata");
   updateSuggestionVisibility();
   dirty = false;
@@ -233,13 +327,15 @@ function updateFreshness() {
 }
 function updateControls() {
   const blocked = scenario === "unauthorized" || !pendingDocuments().includes(current);
-  byId("save-metadata").disabled = !dirty || blocked || analysisRunning;
-  byId("save-state").textContent = dirty ? "Unsaved changes" : "No unsaved changes";
-  byId("save-state").className = `pill ${dirty ? "warning" : "neutral"}`;
+  const hasUnsavedChanges = dirty || actionDirty;
+  byId("save-metadata").disabled = !hasUnsavedChanges || blocked || analysisRunning;
+  byId("save-state").textContent = hasUnsavedChanges ? "Unsaved changes" : "No unsaved changes";
+  byId("save-state").className = `pill ${hasUnsavedChanges ? "warning" : "neutral"}`;
   byId("file-document").disabled = blocked || analysisRunning;
-  byId("confirm-action").disabled = blocked || current.assessment !== "pay" || analysisRunning;
+  byId("confirm-action").disabled = blocked || activeActionDrafts().length === 0 || analysisRunning;
   byId("needs-review").disabled = blocked || analysisRunning;
   byId("analyze").disabled = dirty || blocked || analysisRunning;
+  byId("refresh-review").disabled = hasUnsavedChanges || blocked || analysisRunning;
   byId("analyze").textContent = analysisRunning ? "Analyzing…" : "Re-evaluate assessment";
   byId("analysis-hint").textContent = dirty ? "Save metadata before routing or re-evaluating." : current.stale ? "Targeted reanalysis pending · run now to bypass debounce." : "Evaluated against saved metadata.";
   document.querySelectorAll("[data-apply]").forEach((button) => {
@@ -251,9 +347,11 @@ function updateControls() {
 }
 function updateWorkspaceActions() {
   const showActions = activeWorkspaceTab === "actions";
-  const actionCandidate = current.assessment === "pay";
+  const actionCount = activeActionDrafts().length;
+  const actionCandidate = actionCount > 0;
   const uncertain = current.assessment === "review";
   byId("confirm-action").hidden = !showActions || !actionCandidate;
+  byId("confirm-action").textContent = `Confirm ${actionCount > 1 ? `${actionCount} actions` : "action"} & file`;
   byId("file-document").hidden = uncertain;
   byId("file-document").textContent = showActions && actionCandidate ? "File only" : "Save & file";
   byId("file-document").classList.toggle("primary", !showActions || !actionCandidate);
@@ -264,6 +362,13 @@ function updateWorkspaceActions() {
         ? "Keep this document in Inbox until the obligation can be interpreted."
         : "No action was suggested. Filing records a no-action decision and removes Inbox."
     : "Save metadata without leaving Inbox, or finish filing this document.";
+}
+function renderIntakeActionState() {
+  const count = activeActionDrafts().length;
+  byId("intake-action-count").textContent = count;
+  byId("no-action-state").hidden = count > 0;
+  renderActionCards("action-candidates", current, "intake");
+  updateWorkspaceActions();
 }
 function selectWorkspaceTab(tab) {
   activeWorkspaceTab = tab;
@@ -303,9 +408,21 @@ function commitMetadata(markAssessmentStale = true) {
   updateControls();
   renderQueue();
 }
-function saveMetadata() {
-  commitMetadata(true);
-  toast("Metadata saved. Assessment is stale; use Re-evaluate assessment to simulate the targeted rerun. No task created.");
+function commitActionDrafts(doc = current) {
+  const count = activeActionDrafts(doc).length;
+  doc.actionStatus = count ? "proposed" : doc.assessment === "pay" ? "dismissed" : "none";
+  actionDirty = false;
+  if (doc === current) actionDraftSnapshot = JSON.stringify(doc.actionDrafts);
+}
+function saveChanges() {
+  const metadataChanged = dirty;
+  commitMetadata(metadataChanged);
+  commitActionDrafts();
+  updateControls();
+  renderActions();
+  toast(metadataChanged
+    ? "Changes saved. Metadata changed, so the assessment is stale until refreshed."
+    : "Action corrections saved. The document remains in Inbox until you choose a disposition.");
 }
 function showConflict() {
   externalTitle = `${current.provider} — updated in Paperless mobile`;
@@ -327,7 +444,7 @@ function resolveConflict(mode) {
   byId("revision-label").textContent = `Loaded Paperless revision r${current.revision}`;
   markDirty();
   updateFreshness();
-  if (mode === "owl") saveMetadata();
+  if (mode === "owl") saveChanges();
   else {
     toast(mode === "paperless" ? "Current Paperless title kept. Other draft edits preserved; re-evaluate after saving." : "Source refreshed. Your draft is preserved for editing; save when ready.");
     byId("field-title").focus();
@@ -335,27 +452,32 @@ function resolveConflict(mode) {
 }
 function routeDocument(outcome, options = {}) {
   const doc = current;
+  const nextPendingDocument = pendingDocuments().find((candidate) => candidate !== doc) || doc;
   if (outcome !== "review") {
     if (doc.activeHistoryEntry) doc.activeHistoryEntry.reopened = false;
     doc.activeHistoryEntry = null;
   }
   if (outcome === "filed") {
     if (options.dismissAction) doc.actionStatus = "dismissed";
-    const recordsNoAction = doc.assessment !== "pay" || options.dismissAction;
+    const recordsNoAction = doc.actionStatus !== "proposed" || options.dismissAction;
     if (recordsNoAction) {
       const entry = { id: doc.id, title: doc.title, source: "Human", confidence: doc.confidence, sampled: false, reason: doc.assessment === "pay" ? "Reviewer dismissed the PAY suggestion: no action needed." : "Reviewer confirmed no action needed.", fingerprint: `${doc.id}:r${doc.revision}:v3`, time: "Just now · demo" };
       history.unshift(entry);
       doc.activeHistoryEntry = entry;
     }
   }
-  if (outcome === "action" && !actions.some((action) => action.id === doc.id)) {
-    actions.push({ id: doc.id, title: `Pay ${doc.provider} invoice`, provider: doc.provider, amount: doc.amount, due: "Oct 30", completed: false });
+  if (outcome === "action") {
+    activeActionDrafts(doc).forEach((draft) => {
+      if (actions.some((action) => action.sourceId === doc.id && action.draftId === draft.id)) return;
+      actions.push({ id: `${doc.id}-${draft.id}`, sourceId: doc.id, draftId: draft.id, type: draft.type, title: draft.title, provider: draft.payee || doc.provider, amount: draft.amount || "No amount", due: draft.due || "No due date", completed: false });
+    });
     doc.actionStatus = "confirmed";
   }
   doc.status = outcome;
   if (outcome !== "review") doc.tags = doc.tags.split(",").filter((tag) => tag.trim().toLowerCase() !== "inbox").join(",").trim();
   selection.delete(doc.id);
   if (outcome !== "review") current = pendingDocuments()[0] || doc;
+  else if (options.advance) current = nextPendingDocument;
   loadDocument();
   renderQueue();
   const empty = pendingDocuments().length === 0;
@@ -369,7 +491,9 @@ function routeDocument(outcome, options = {}) {
       : "Filed to no-action history. Inbox tag removed; matching remains enabled. No Mission Control task created."
     : outcome === "review"
       ? doc.assessment === "pay"
-        ? "Kept in Inbox as Needs Review. The PAY suggestion remains unconfirmed and no trusted work was created."
+        ? options.advance
+          ? "Deferred as Needs Review. The document remains in Inbox and the next document is ready."
+          : "Kept in Inbox as Needs Review. The PAY suggestion remains unconfirmed and no trusted work was created."
         : "Kept in Needs Review. Not sent to Mission Control."
       : "PAY action confirmed and document filed. Eligible for Mission Control; not marked paid.");
   if (!empty && outcome !== "review") byId("source-heading").scrollIntoView({ block: "nearest" });
@@ -384,24 +508,44 @@ function loadActionReview() {
     return;
   }
   byId("pending-action-review").hidden = false;
-  byId("review-action-title").textContent = `Pay ${reviewDoc.provider} invoice`;
-  byId("review-action-subtitle").textContent = `Paperless #${reviewDoc.id} · ${reviewDoc.status === "filed" ? "filed from Inbox · " : ""}proposed PAY action`;
+  byId("review-action-title").textContent = `${reviewDoc.provider} document actions`;
+  byId("review-action-subtitle").textContent = `Paperless #${reviewDoc.id} · ${reviewDoc.status === "filed" ? "filed from Inbox · " : ""}proposed actions`;
   byId("review-confidence").textContent = `${reviewDoc.confidence}% confidence`;
-  byId("review-payee").textContent = reviewDoc.provider;
-  byId("review-amount").textContent = reviewDoc.amount;
-  byId("review-due").textContent = reviewDoc.due || "Not extracted";
-  byId("review-reference").textContent = reviewDoc.reference;
   byId("review-reason").textContent = reviewDoc.reason;
+  byId("queue-metadata-title").textContent = reviewDoc.title;
+  byId("queue-metadata-correspondent").textContent = reviewDoc.correspondent;
+  byId("queue-metadata-type").textContent = reviewDoc.type;
+  byId("queue-metadata-date").textContent = new Date(`${reviewDoc.date}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
   byId("review-source-kind").textContent = reviewDoc.paperKind;
   byId("review-source-title").textContent = reviewDoc.paperTitle;
   byId("review-source-description").textContent = reviewDoc.paperDescription;
   byId("review-source-callout").textContent = reviewDoc.callout;
+  selectQueueTab("actions");
+  updateQueueActionState();
+}
+function updateQueueActionState() {
+  if (!actionReviewDocument) return;
+  const count = activeActionDrafts(actionReviewDocument).length;
+  byId("queue-action-count").textContent = count;
+  byId("review-save").disabled = !actionDirty;
+  byId("queue-refresh").disabled = actionDirty;
+  byId("review-confirm").disabled = count === 0;
+  byId("review-confirm").textContent = `Confirm ${count > 1 ? `${count} actions` : "action"}`;
+  renderActionCards("queue-action-candidates", actionReviewDocument, "queue");
+}
+function selectQueueTab(tab) {
+  activeQueueTab = tab;
+  const showActions = tab === "actions";
+  byId("queue-metadata-tab").setAttribute("aria-selected", String(!showActions));
+  byId("queue-actions-tab").setAttribute("aria-selected", String(showActions));
+  byId("queue-metadata-panel").hidden = showActions;
+  byId("queue-actions-panel").hidden = !showActions;
 }
 function renderActions() {
   byId("trusted-actions").replaceChildren();
   for (const action of actions) {
     const item = node("article", undefined, "action-item");
-    item.append(node("span", action.completed ? "Completed" : "PAY · confirmed", `pill ${action.completed ? "success" : "warning"}`), node("h3", action.title), node("p", `${action.amount} · due ${action.due} · Paperless #${action.id}`));
+    item.append(node("span", action.completed ? "Completed" : `${actionTypeLabel(action.type || "PAY").toUpperCase()} · confirmed`, `pill ${action.completed ? "success" : "warning"}`), node("h3", action.title), node("p", `${action.amount} · due ${action.due} · Paperless #${action.sourceId || action.id}`));
     item.append(node("div", action.completed ? "Explicit user completion · settlement recorded" : "Human-confirmed · eligible for Mission Control sync", "inline-meta"));
     const complete = node("button", action.completed ? "Completed" : "Mark completed", action.completed ? "" : "primary");
     complete.type = "button";
@@ -415,7 +559,7 @@ function renderActions() {
     byId("trusted-actions").append(item);
   }
   const confirmedCount = actions.filter((action) => !action.completed).length;
-  const proposedCount = documents.filter((doc) => doc.actionStatus === "proposed").length;
+  const proposedCount = documents.reduce((count, doc) => count + (doc.actionStatus === "proposed" ? activeActionDrafts(doc).length : 0), 0);
   byId("action-count").textContent = confirmedCount + proposedCount;
   byId("confirmed-count").textContent = `${confirmedCount} active`;
   loadActionReview();
@@ -544,10 +688,10 @@ function addEvent(title, detail, status, tone) {
 byId("metadata-form").addEventListener("input", markDirty);
 byId("metadata-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  if (!dirty || analysisRunning) return;
+  if ((!dirty && !actionDirty) || analysisRunning) return;
   if (!validateMetadata()) return;
   if (conflictPending) showConflict();
-  else saveMetadata();
+  else saveChanges();
 });
 document.querySelectorAll("[data-apply]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -573,17 +717,25 @@ byId("apply-owl").addEventListener("click", () => resolveConflict("owl"));
 byId("file-document").addEventListener("click", () => {
   if (!validateMetadata()) return;
   commitMetadata(false);
+  commitActionDrafts();
   routeDocument("filed");
 });
 byId("needs-review").addEventListener("click", () => {
   if (!validateMetadata()) return;
   commitMetadata(false);
-  routeDocument("review");
+  commitActionDrafts();
+  routeDocument("review", { advance: true });
 });
 byId("confirm-action").addEventListener("click", () => {
   if (!validateMetadata()) return;
   commitMetadata(false);
+  commitActionDrafts();
   routeDocument("action");
+});
+byId("new-action").addEventListener("click", () => {
+  current.actionDrafts.push(createActionDraft(current));
+  markActionDirty();
+  renderIntakeActionState();
 });
 byId("metadata-tab").addEventListener("click", () => selectWorkspaceTab("metadata"));
 byId("actions-tab").addEventListener("click", () => selectWorkspaceTab("actions"));
@@ -600,18 +752,52 @@ byId("actions-tab").addEventListener("click", () => selectWorkspaceTab("actions"
 byId("review-no-action").addEventListener("click", () => {
   if (!actionReviewDocument) return;
   if (!window.confirm("File this document and record that no action is needed?")) return;
+  actionReviewDocument.actionDrafts.forEach((draft) => { draft.removed = true; });
   current = actionReviewDocument;
+  commitActionDrafts(current);
   routeDocument("filed", { dismissAction: true });
 });
 byId("review-needs-review").addEventListener("click", () => {
   if (!actionReviewDocument) return;
-  current = actionReviewDocument;
-  routeDocument("review");
+  const deferred = actionReviewDocument;
+  commitActionDrafts(actionReviewDocument);
+  const next = documents.find((doc) => doc !== deferred && doc.actionStatus === "proposed");
+  if (next) {
+    current = next;
+    actionReviewDocument = next;
+  }
+  renderActions();
+  toast(next ? "Action corrections saved. The next proposed document is ready." : "Action corrections saved. No other proposed documents are waiting.");
+});
+byId("review-save").addEventListener("click", () => {
+  if (!actionReviewDocument) return;
+  commitActionDrafts(actionReviewDocument);
+  renderActions();
+  toast("Action corrections saved without confirming the work.");
 });
 byId("review-confirm").addEventListener("click", () => {
   if (!actionReviewDocument) return;
   current = actionReviewDocument;
+  commitActionDrafts(current);
   routeDocument("action");
+});
+byId("queue-new-action").addEventListener("click", () => {
+  if (!actionReviewDocument) return;
+  actionReviewDocument.actionDrafts.push(createActionDraft(actionReviewDocument));
+  actionDirty = true;
+  updateQueueActionState();
+});
+byId("queue-metadata-tab").addEventListener("click", () => selectQueueTab("metadata"));
+byId("queue-actions-tab").addEventListener("click", () => selectQueueTab("actions"));
+[byId("queue-metadata-tab"), byId("queue-actions-tab")].forEach((tab, index, tabs) => {
+  tab.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    const nextTab = tabs[nextIndex];
+    selectQueueTab(nextTab === byId("queue-actions-tab") ? "actions" : "metadata");
+    nextTab.focus();
+  });
 });
 byId("analyze").addEventListener("click", () => {
   const doc = current;
@@ -628,10 +814,20 @@ byId("analyze").addEventListener("click", () => {
     toast(`Document #${doc.id} re-evaluated against saved metadata. You can now choose a disposition.`);
   }, 1100);
 });
-byId("refresh-suggestions").addEventListener("click", () => {
+byId("refresh-review").addEventListener("click", () => {
   byId("scenario").value = "ready";
   setScenario("ready");
-  toast("Native suggestions refreshed in simulation. Your unsaved metadata is preserved.");
+  current.stale = false;
+  current.evaluated = true;
+  updateFreshness();
+  toast("Paperless suggestions and OWL action analysis refreshed for this document.");
+});
+byId("queue-refresh").addEventListener("click", () => {
+  if (!actionReviewDocument || actionDirty) return;
+  actionReviewDocument.stale = false;
+  actionReviewDocument.evaluated = true;
+  byId("review-confidence").textContent = `${actionReviewDocument.confidence}% confidence · refreshed`;
+  toast("Paperless source data and action analysis refreshed.");
 });
 byId("scenario").addEventListener("change", (event) => setScenario(event.target.value));
 byId("queue-search").addEventListener("input", renderQueue);

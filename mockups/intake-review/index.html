@@ -59,13 +59,15 @@
 
         <div class="metadata-column">
           <section class="card intake-workspace" aria-label="Document metadata and suggested actions">
-            <div class="workspace-tabs" role="tablist" aria-label="Review details">
-              <button id="metadata-tab" type="button" role="tab" aria-selected="true" aria-controls="metadata-panel">Metadata</button>
-              <button id="actions-tab" type="button" role="tab" aria-selected="false" aria-controls="actions-panel">Actions <span id="intake-action-count" class="tab-count">0</span></button>
-              <span id="save-state" class="pill neutral">No unsaved changes</span>
+            <div class="workspace-header">
+              <div class="workspace-tabs" role="tablist" aria-label="Review details">
+                <button id="metadata-tab" type="button" role="tab" aria-selected="true" aria-controls="metadata-panel">Metadata</button>
+                <button id="actions-tab" type="button" role="tab" aria-selected="false" aria-controls="actions-panel">Actions <span id="intake-action-count" class="tab-count">0</span></button>
+              </div>
+              <div class="workspace-tools"><button id="refresh-review" type="button">Refresh analysis</button><span id="save-state" class="pill neutral">No unsaved changes</span></div>
             </div>
             <div id="metadata-panel" role="tabpanel" aria-labelledby="metadata-tab">
-              <div id="suggestions-bar" class="suggestions-bar"><div><strong>New Paperless suggestions</strong><p>Only values that differ from the current metadata appear.</p></div><button id="refresh-suggestions" type="button">Refresh</button></div>
+              <div id="suggestions-bar" class="suggestions-bar"><div><strong>New Paperless suggestions</strong><p>Only values that differ from the current metadata appear.</p></div></div>
               <div id="suggestion-status" class="notice warning" role="status" hidden></div>
               <form id="metadata-form" class="metadata-form">
                 <label>Title<input id="field-title" name="title" value="Northline Energy — payment confirmation — 2026-10-14"></label>
@@ -87,18 +89,14 @@
                 </div>
                 <div id="stale-notice" class="notice warning" hidden>Metadata changed. Re-evaluate OWL’s assessment, or make your own decision.</div>
                 <button id="analyze" class="analysis-button" type="button" hidden>Re-evaluate assessment</button>
-                <div id="action-candidates" class="action-candidates" hidden>
-                  <article class="action-candidate-card">
-                    <div class="action-candidate-heading"><span class="pill purple">PAY</span><strong id="intake-action-title">Pay Cedar Dental invoice</strong><span class="muted">Suggested action 1</span></div>
-                    <div class="inline-action-fields"><div><span>Payee</span><strong id="intake-action-payee">Cedar Dental</strong></div><div><span>Amount due</span><strong id="intake-action-amount">$128.00</strong></div><div><span>Due date</span><strong id="intake-action-due">October 30, 2026</strong></div><div><span>Reference</span><strong id="intake-action-reference">Account •••• 4821</strong></div></div>
-                  </article>
-                </div>
+                <div class="actions-toolbar"><div><strong>Actions related to this document</strong><p>Correct an inference or add work OWL missed.</p></div><button id="new-action" type="button">+ New action</button></div>
+                <div id="action-candidates" class="action-candidates"></div>
                 <div id="no-action-state" class="no-action-state"><strong id="no-action-title">No action details to confirm</strong><p id="no-action-message">File the document when its metadata is ready, or keep it in Inbox for another reviewer.</p></div>
               </div>
             </div>
             <div class="workspace-footer">
               <div><span id="revision-label">Loaded Paperless revision r12</span><p id="routing-help">Save metadata without leaving Inbox, or finish filing this document.</p></div>
-              <div class="workspace-actions"><button id="needs-review" type="button">Keep in Inbox</button><button id="save-metadata" type="submit" form="metadata-form" disabled>Save metadata</button><button id="file-document" type="button" class="primary">Save &amp; file</button><button id="confirm-action" type="button" class="primary" hidden>Confirm action &amp; file</button></div>
+              <div class="workspace-actions"><button id="needs-review" type="button">Defer &amp; next</button><button id="save-metadata" type="submit" form="metadata-form" disabled>Save changes</button><button id="file-document" type="button" class="primary">Save &amp; file</button><button id="confirm-action" type="button" class="primary" hidden>Confirm action &amp; file</button></div>
             </div>
             <span id="analysis-hint" class="sr-only">Evaluated against saved metadata.</span>
           </section>
@@ -130,12 +128,23 @@
       <div class="page-heading"><div><h1 id="actions-heading">Action Queue</h1><p>Review suggested actions whether or not their source documents have already been filed from Inbox.</p></div><a href="#intake" class="button">Back to intake</a></div>
       <div id="pending-action-review" class="action-review-layout">
         <section class="card action-decision">
-          <div class="panel-heading"><div><h2 id="review-action-title">Pay Cedar Dental invoice</h2><p id="review-action-subtitle" class="muted">Paperless #1043 · proposed PAY action</p></div><span id="review-confidence" class="pill warning">94% confidence</span></div>
-          <div class="action-fields"><div><span>Payee</span><strong id="review-payee">Cedar Dental</strong></div><div><span>Amount due</span><strong id="review-amount">$128.00</strong></div><div><span>Due date</span><strong id="review-due">October 30, 2026</strong></div><div><span>Reference</span><strong id="review-reference">Account •••• 4821</strong></div></div>
-          <div class="review-evidence"><strong>Why OWL proposed an action</strong><p id="review-reason">An unpaid balance is due October 30. Confirm the obligation before it becomes a trusted task.</p></div>
-          <div class="pattern-insight"><strong>Recurring invoice pattern detected</strong><span>Likely monthly Cedar Dental statement. Naming consistency can be applied in intake; missing-statement monitoring remains a separate Statements workflow.</span></div>
-          <div class="review-actions"><button id="review-no-action" type="button">File with no action</button><button id="review-needs-review" type="button">Needs review</button><button id="review-confirm" type="button" class="primary">Confirm PAY action</button></div>
-          <p class="field-help">Confirming creates trusted work. It does not mark the invoice paid.</p>
+          <div class="workspace-header">
+            <div class="workspace-tabs" role="tablist" aria-label="Action Queue review details">
+              <button id="queue-metadata-tab" type="button" role="tab" aria-selected="false" aria-controls="queue-metadata-panel">Metadata</button>
+              <button id="queue-actions-tab" type="button" role="tab" aria-selected="true" aria-controls="queue-actions-panel">Actions <span id="queue-action-count" class="tab-count">1</span></button>
+            </div>
+            <div class="workspace-tools"><button id="queue-refresh" type="button">Refresh analysis</button><span id="review-confidence" class="pill warning">94% confidence</span></div>
+          </div>
+          <div id="queue-metadata-panel" class="queue-metadata-panel" role="tabpanel" aria-labelledby="queue-metadata-tab" hidden>
+            <div class="metadata-summary"><div><span>Title</span><strong id="queue-metadata-title">Cedar Dental — invoice — 2026-10-15</strong></div><div><span>Correspondent</span><strong id="queue-metadata-correspondent">Cedar Dental</strong></div><div><span>Document type</span><strong id="queue-metadata-type">Invoice</strong></div><div><span>Document date</span><strong id="queue-metadata-date">October 15, 2026</strong></div></div>
+          </div>
+          <div id="queue-actions-panel" role="tabpanel" aria-labelledby="queue-actions-tab">
+            <div class="queue-action-summary"><div><h2 id="review-action-title">Cedar Dental invoice actions</h2><p id="review-action-subtitle" class="muted">Paperless #1043 · proposed actions</p></div><button id="queue-new-action" type="button">+ New action</button></div>
+            <div id="queue-action-candidates" class="action-candidates"></div>
+            <div class="review-evidence"><strong>Why OWL proposed this work</strong><p id="review-reason">An unpaid balance is due October 30. Confirm the obligation before it becomes trusted work.</p></div>
+          </div>
+          <div class="review-actions"><button id="review-no-action" type="button">No actions needed</button><button id="review-needs-review" type="button">Defer &amp; next</button><button id="review-save" type="button" disabled>Save corrections</button><button id="review-confirm" type="button" class="primary">Confirm actions</button></div>
+          <p class="field-help">The Action Queue defaults to Actions. Metadata remains available when the source classification needs correction.</p>
         </section>
         <section class="card review-source">
           <div class="panel-heading"><h2>Source evidence</h2><button id="review-paperless-link" type="button" class="text-button">Open in Paperless ↗</button></div>
@@ -171,8 +180,8 @@
     <form method="dialog"><button class="dialog-close" aria-label="Close mode explanation">×</button></form>
     <h2 id="prototype-guide-heading">How the proposed workspaces differ</h2>
     <dl class="mode-list">
-      <div><dt>Intake review</dt><dd>Verify metadata and file quickly. Suggested actions can be confirmed here, or left pending for a separate Action Queue session.</dd></div>
-      <div><dt>Action Queue</dt><dd>Review every pending action suggestion, including those whose source documents were already filed from Inbox.</dd></div>
+      <div><dt>Intake review</dt><dd>Verify metadata, correct or add actions, then file, confirm, or defer to the next Inbox document.</dd></div>
+      <div><dt>Action Queue</dt><dd>Uses the same editor with Actions selected by default. Correct, add, dismiss, complete, or confirm pending work.</dd></div>
       <div><dt>History and Processing</dt><dd>Support audit, quality sampling, and operational troubleshooting outside the fast triage path.</dd></div>
     </dl>
     <p class="notice info">The blue prototype bar and Demo state selector are review aids. They are not proposed product UI.</p>
