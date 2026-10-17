@@ -442,6 +442,79 @@ async def test_field_retirement_deletes_only_empty_dependency_free_candidates():
 
 
 @pytest.mark.asyncio
+async def test_field_retirement_clears_owl_covered_values_before_deletion():
+    document = {
+        "id": 10,
+        "custom_fields": [{"field": 1, "value": "PAY"}],
+    }
+    client = FakeClient(
+        [{"id": 1, "name": "Action Type", "data_type": "select"}],
+        [document],
+    )
+    service = MetadataMigrationService(
+        client,
+        owl_document_coverage={MetadataFieldKey.LEGACY_ACTION_TYPE: {10}},
+    )
+
+    summary = await service.review_fields(apply=True)
+    action_type = next(
+        field
+        for field in summary.fields
+        if field.stable_key == MetadataFieldKey.LEGACY_ACTION_TYPE.value
+    )
+
+    assert client.updates == [(10, [{"field": 1, "value": None}])]
+    assert client.deleted == [1]
+    assert action_type.state is FieldReviewState.DELETED
+    assert summary.cleared_document_values == 1
+
+
+@pytest.mark.asyncio
+async def test_field_retirement_keeps_uncovered_values_without_explicit_discard():
+    client = FakeClient(
+        [{"id": 1, "name": "Action Type", "data_type": "select"}],
+        [
+            {"id": 10, "custom_fields": [{"field": 1, "value": "PAY"}]},
+            {"id": 11, "custom_fields": [{"field": 1, "value": "RESPOND"}]},
+        ],
+    )
+    service = MetadataMigrationService(
+        client,
+        owl_document_coverage={MetadataFieldKey.LEGACY_ACTION_TYPE: {10}},
+    )
+
+    summary = await service.review_fields(apply=True)
+    action_type = next(
+        field
+        for field in summary.fields
+        if field.stable_key == MetadataFieldKey.LEGACY_ACTION_TYPE.value
+    )
+
+    assert client.updates == [(10, [{"field": 1, "value": None}])]
+    assert client.deleted == []
+    assert action_type.state is FieldReviewState.BLOCKED_POPULATED
+    assert action_type.non_empty_documents == 1
+    assert action_type.uncovered_documents == 1
+
+
+@pytest.mark.asyncio
+async def test_explicit_discard_clears_uncovered_retired_values():
+    client = FakeClient(
+        [{"id": 1, "name": "Action Type", "data_type": "select"}],
+        [{"id": 11, "custom_fields": [{"field": 1, "value": "RESPOND"}]}],
+    )
+
+    summary = await MetadataMigrationService(client).review_fields(
+        apply=True,
+        discard_retired_values=True,
+    )
+
+    assert client.updates == [(11, [{"field": 1, "value": None}])]
+    assert client.deleted == [1]
+    assert summary.cleared_document_values == 1
+
+
+@pytest.mark.asyncio
 async def test_field_review_reports_missing_required_select_options():
     client = FakeClient(
         [
@@ -471,3 +544,24 @@ async def test_field_review_reports_missing_required_select_options():
     assert action_status.disposition is FieldDisposition.REVIEW_REQUIRED
     assert "missing_select_option" in action_status.diagnostic_codes
     assert summary.exit_status == 2
+
+
+def test_retire_cli_apply_requires_protected_output(monkeypatch):
+    monkeypatch.delenv("WRITE_TO_PAPERLESS", raising=False)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        [
+            "retire-fields",
+            "--paperless-url",
+            "https://synthetic.invalid",
+            "--paperless-token",
+            "synthetic-token",
+            "--apply",
+            "--external-writers-disabled",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--apply requires --protected-output" in result.output

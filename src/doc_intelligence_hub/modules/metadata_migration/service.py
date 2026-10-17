@@ -6,11 +6,11 @@ import asyncio
 import hashlib
 import json
 import os
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 import httpx
@@ -19,6 +19,7 @@ from doc_intelligence_hub.core.paperless import (
     PAPERLESS_METADATA_REGISTRY,
     MetadataCreatePolicy,
     MetadataDiagnosticCode,
+    MetadataFieldKey,
     MetadataNormalization,
     MetadataRetirementPolicy,
     PaperlessClient,
@@ -156,9 +157,15 @@ def _payload_references_field(
 
 
 class MetadataMigrationService:
-    def __init__(self, client: PaperlessClient):
+    def __init__(
+        self,
+        client: PaperlessClient,
+        *,
+        owl_document_coverage: Mapping[MetadataFieldKey, set[int]] | None = None,
+    ):
         self.client = client
         self.resolver = PaperlessMetadataResolver(client)
+        self.owl_document_coverage = owl_document_coverage or {}
 
     async def inventory(
         self,
@@ -199,6 +206,7 @@ class MetadataMigrationService:
         self,
         *,
         apply: bool = False,
+        discard_retired_values: bool = False,
         batch_size: int = 100,
         protected_output: str | Path | None = None,
     ) -> FieldReviewSummary:
@@ -216,6 +224,7 @@ class MetadataMigrationService:
         )
         definitions_by_name: dict[str, list[dict[str, Any]]] = {}
         non_empty_documents: Counter[int] = Counter()
+        populated_document_ids: dict[int, list[int]] = defaultdict(list)
         for definition in definitions:
             name = definition.get("name")
             if isinstance(name, str) and name.strip():
@@ -223,6 +232,10 @@ class MetadataMigrationService:
 
         async for page in self.client.iter_document_pages(page_size=batch_size):
             for document in page.results:
+                try:
+                    document_id = int(document["id"])
+                except (KeyError, TypeError, ValueError):
+                    continue
                 seen: set[int] = set()
                 for custom_field in document.get("custom_fields") or []:
                     if not isinstance(custom_field, dict):
@@ -234,6 +247,7 @@ class MetadataMigrationService:
                         and _has_custom_field_value(custom_field.get("value"))
                     ):
                         non_empty_documents[field_id] += 1
+                        populated_document_ids[field_id].append(document_id)
                         seen.add(field_id)
 
         known_names = {
@@ -269,6 +283,8 @@ class MetadataMigrationService:
                 disposition=canonical_disposition,
                 definitions=definitions_by_name.get(spec.canonical_name, []),
                 non_empty_documents=non_empty_documents,
+                populated_document_ids=populated_document_ids,
+                owl_document_ids=self.owl_document_coverage.get(spec.key, set()),
                 saved_views=saved_views,
                 document_types=document_types,
                 workflows=workflows,
@@ -286,6 +302,8 @@ class MetadataMigrationService:
                     disposition=FieldDisposition.MIGRATE_THEN_RETIRE,
                     definitions=definitions_by_name.get(alias, []),
                     non_empty_documents=non_empty_documents,
+                    populated_document_ids=populated_document_ids,
+                    owl_document_ids=set(),
                     saved_views=saved_views,
                     document_types=document_types,
                     workflows=workflows,
@@ -297,8 +315,48 @@ class MetadataMigrationService:
         if apply:
             updated_reviews: list[FieldReview] = []
             deleted_ids: set[int] = set()
+            cleared_document_values = 0
             for review, detail in zip(reviews, protected_fields, strict=True):
                 field_id = detail.get("field_id")
+                should_clear_retired_values = (
+                    review.state is FieldReviewState.BLOCKED_POPULATED
+                    and review.disposition is FieldDisposition.RETIRE_WHEN_EMPTY
+                    and isinstance(field_id, int)
+                )
+                if should_clear_retired_values:
+                    covered_document_ids = detail.get("owl_covered_document_ids")
+                    uncovered_document_ids = detail.get("uncovered_document_ids")
+                    if not isinstance(covered_document_ids, list) or not isinstance(
+                        uncovered_document_ids, list
+                    ):
+                        raise PaperlessError(
+                            f"Protected retirement plan is missing documents for {review.field_name}"
+                        )
+                    document_ids = [
+                        *covered_document_ids,
+                        *(uncovered_document_ids if discard_retired_values else []),
+                    ]
+                    for document_id in document_ids:
+                        await self.client.update_custom_fields_verified(
+                            int(document_id),
+                            [{"field": field_id, "value": None}],
+                        )
+                    cleared_document_values += len(document_ids)
+                    detail["cleared_document_values"] = len(document_ids)
+                    remaining = len(uncovered_document_ids) if not discard_retired_values else 0
+                    next_state = (
+                        FieldReviewState.ELIGIBLE
+                        if remaining == 0
+                        else FieldReviewState.BLOCKED_POPULATED
+                    )
+                    detail["state"] = next_state.value
+                    review = replace(
+                        review,
+                        state=next_state,
+                        non_empty_documents=remaining,
+                        owl_covered_documents=0,
+                        uncovered_documents=remaining,
+                    )
                 if review.state is FieldReviewState.ELIGIBLE and isinstance(field_id, int):
                     await self.client.delete_custom_field(field_id)
                     deleted_ids.add(field_id)
@@ -313,14 +371,23 @@ class MetadataMigrationService:
             }
             if deleted_ids & remaining_ids:
                 raise PaperlessError("Paperless custom-field deletion verification failed")
+        else:
+            cleared_document_values = 0
 
         summary = FieldReviewSummary(
             run_id=run_id,
-            mode="retire" if apply else "review",
+            mode=(
+                "retire_discard"
+                if apply and discard_retired_values
+                else "retire"
+                if apply
+                else "review"
+            ),
             started_at=started_at,
             fields=reviews,
             unmanaged_fields=len(unmanaged),
             apply=apply,
+            cleared_document_values=cleared_document_values,
         )
         summary.finish()
         if protected_output is not None:
@@ -347,6 +414,8 @@ class MetadataMigrationService:
         disposition: FieldDisposition,
         definitions: list[dict[str, Any]],
         non_empty_documents: Counter[int],
+        populated_document_ids: dict[int, list[int]],
+        owl_document_ids: set[int],
         saved_views: list[dict],
         document_types: list[dict],
         workflows: list[dict],
@@ -367,6 +436,8 @@ class MetadataMigrationService:
                     expected_types=expected_types,
                     observed_types=(),
                     non_empty_documents=0,
+                    owl_covered_documents=0,
+                    uncovered_documents=0,
                     saved_view_references=0,
                     document_type_references=0,
                     workflow_references=0,
@@ -388,6 +459,9 @@ class MetadataMigrationService:
         for definition in definitions:
             field_id = _field_id(definition)
             populated = non_empty_documents[field_id] if field_id is not None else 0
+            populated_ids = set(populated_document_ids.get(field_id, ()))
+            covered_ids = populated_ids & owl_document_ids
+            uncovered_ids = populated_ids - covered_ids
             saved_view_refs = (
                 sum(
                     _payload_references_field(
@@ -466,6 +540,8 @@ class MetadataMigrationService:
                     expected_types=expected_types,
                     observed_types=observed_types,
                     non_empty_documents=populated,
+                    owl_covered_documents=len(covered_ids),
+                    uncovered_documents=len(uncovered_ids),
                     saved_view_references=saved_view_refs,
                     document_type_references=document_type_refs,
                     workflow_references=workflow_refs,
@@ -481,6 +557,9 @@ class MetadataMigrationService:
                     "disposition": review_disposition.value,
                     "state": state.value,
                     "non_empty_documents": populated,
+                    "populated_document_ids": sorted(populated_ids),
+                    "owl_covered_document_ids": sorted(covered_ids),
+                    "uncovered_document_ids": sorted(uncovered_ids),
                     "saved_view_references": saved_view_refs,
                     "document_type_references": document_type_refs,
                     "workflow_references": workflow_refs,

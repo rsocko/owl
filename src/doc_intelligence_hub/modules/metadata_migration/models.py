@@ -87,6 +87,8 @@ class FieldReview:
     expected_types: tuple[str, ...]
     observed_types: tuple[str, ...]
     non_empty_documents: int
+    owl_covered_documents: int
+    uncovered_documents: int
     saved_view_references: int
     document_type_references: int
     workflow_references: int
@@ -103,6 +105,7 @@ class FieldReviewSummary:
     apply: bool
     finished_at: str | None = None
     deleted_fields: int = 0
+    cleared_document_values: int = 0
     eligible_fields: int = 0
     blocked_populated: int = 0
     blocked_dependencies: int = 0

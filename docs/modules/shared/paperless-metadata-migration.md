@@ -21,9 +21,13 @@ names, aliases, types, or IDs independently.
 - Conflicts, invalid conversions, incompatible definitions, and exhausted retries remain
   actionable outcomes. They are never converted to plausible defaults.
 - Backfill tooling never renames, hides, clears, or deletes legacy fields.
-- Field retirement is a separate dry-run-first command. It deletes only registry-approved
-  retirement candidates that have no non-empty document values and no saved-view,
-  document-type, or workflow references. It never clears values.
+- Field retirement is a separate dry-run-first command. It operates only on registry-approved
+  retirement candidates with no saved-view, document-type, or workflow references.
+- Apply mode clears a populated legacy Action/EOB value only when the corresponding document
+  has authoritative OWL data, verifies the clear, and deletes the definition only after no
+  values remain.
+- Uncovered legacy values require the explicit `--discard-retired-values` option. Aliases are
+  never discarded by that option.
 
 Paperless's native Document Type remains the canonical taxonomy and is outside this
 custom-field migration. The tool does not create or migrate a separate OWL document-type
@@ -129,10 +133,24 @@ paperless-metadata retire-fields \
   --protected-output /protected/paperless-field-retirement.json
 ```
 
-Populated fields, fields referenced by saved views/document types/workflows, duplicate
-definitions, and incompatible definitions are reported but not deleted. Remove dependencies
-or migrate values, rerun `field-audit`, and apply retirement only after the field becomes
-eligible.
+Apply mode records affected document IDs in the protected artifact. Populated legacy
+Action/EOB values backed by OWL records are cleared and verified automatically. Populated
+aliases, fields referenced by saved views/document types/workflows, duplicate definitions,
+and incompatible definitions remain blocked.
+
+If the protected audit confirms that uncovered operational values are stale and should be
+discarded, use the explicit destructive option:
+
+```text
+paperless-metadata retire-fields \
+  --apply \
+  --discard-retired-values \
+  --external-writers-disabled \
+  --protected-output /protected/paperless-field-retirement.json
+```
+
+This option applies only to canonical fields whose registry retirement policy is
+`retire_when_empty`; it cannot clear aliases or unmanaged fields.
 
 Resume uses the original run ID and exact batch/retry configuration:
 
