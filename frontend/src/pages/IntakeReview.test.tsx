@@ -9,6 +9,10 @@ const {
   documentSuggestionsMock,
   documentActionsMock,
   documentOcrMock,
+  documentRelationshipsMock,
+  relationshipCandidatesMock,
+  createRelationshipMock,
+  removeRelationshipMock,
   saveDocumentMock,
   refreshMock,
   createTaxonomyMock,
@@ -21,6 +25,10 @@ const {
   documentSuggestionsMock: vi.fn(),
   documentActionsMock: vi.fn(),
   documentOcrMock: vi.fn(),
+  documentRelationshipsMock: vi.fn(),
+  relationshipCandidatesMock: vi.fn(),
+  createRelationshipMock: vi.fn(),
+  removeRelationshipMock: vi.fn(),
   saveDocumentMock: vi.fn(),
   refreshMock: vi.fn(),
   createTaxonomyMock: vi.fn(),
@@ -37,6 +45,8 @@ vi.mock('../lib/api', () => ({
       documentSuggestions: documentSuggestionsMock,
       documentActions: documentActionsMock,
       documentOcr: documentOcrMock,
+      documentRelationships: documentRelationshipsMock,
+      relationshipCandidates: relationshipCandidatesMock,
       saveDocument: saveDocumentMock,
       refresh: refreshMock,
       createTaxonomy: createTaxonomyMock,
@@ -45,6 +55,20 @@ vi.mock('../lib/api', () => ({
     },
     actionQueue: {
       updateAction: updateActionMock,
+    },
+    relationships: {
+      create: createRelationshipMock,
+      remove: removeRelationshipMock,
+    },
+    documents: {
+      previewUrl: (id: number) => `/api/statements/documents/${id}/preview`,
+      downloadUrl: (id: number) => `/api/documents/${id}/download`,
+      monarchDelivery: {
+        status: vi.fn().mockResolvedValue(null),
+        send: vi.fn(),
+        retry: vi.fn(),
+        reconcile: vi.fn(),
+      },
     },
   },
 }));
@@ -116,6 +140,14 @@ describe('IntakeReview', () => {
       quality_band: 'red',
       poor_quality: true,
       text: 'Searchable text',
+    });
+    documentRelationshipsMock.mockResolvedValue({
+      relationships: [],
+      count: 0,
+    });
+    relationshipCandidatesMock.mockResolvedValue({
+      candidates: [],
+      query: '',
     });
     saveDocumentMock.mockResolvedValue({ filed: false });
   });
@@ -253,6 +285,83 @@ describe('IntakeReview', () => {
     expect(screen.getByRole('button', { name: /Document 2/ })).toBeInTheDocument();
   });
 
+  it('shows suggested related documents and opens their PDF without leaving the workspace', async () => {
+    relationshipCandidatesMock.mockResolvedValue({
+      candidates: [{
+        document: {
+          id: 7,
+          title: 'September utility statement',
+          created: '2026-09-14',
+          correspondent_name: 'Example Co',
+          document_type_name: 'Bill',
+          thumbnail_url: '/thumb/7',
+          preview_url: '/preview/7',
+        },
+        suggested: true,
+        recommendation: {
+          source_document_id: 1,
+          target_document_id: 7,
+          relationship_type: 'same_sequence',
+          confidence: 0.58,
+          reason_codes: ['correspondent_match', 'document_type_match'],
+          priority_adjustment: 0,
+          priority_explanation: 'No relationship priority adjustment',
+        },
+      }],
+      query: '',
+    });
+    renderPage('/inbox-review?document=1&tab=related');
+
+    expect(await screen.findByText('September utility statement')).toBeInTheDocument();
+    expect(screen.getAllByText('Suggested')).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview September utility statement' }));
+    expect(await screen.findByTitle('September utility statement')).toHaveAttribute(
+      'src',
+      '/api/statements/documents/7/preview',
+    );
+  });
+
+  it('adds a suggested relationship using its recommended type', async () => {
+    relationshipCandidatesMock.mockResolvedValue({
+      candidates: [{
+        document: {
+          id: 7,
+          title: 'September utility statement',
+          created: '2026-09-14',
+          correspondent_name: 'Example Co',
+          document_type_name: 'Bill',
+          thumbnail_url: '/thumb/7',
+          preview_url: '/preview/7',
+        },
+        suggested: true,
+        recommendation: {
+          source_document_id: 1,
+          target_document_id: 7,
+          relationship_type: 'same_sequence',
+          confidence: 0.58,
+          reason_codes: ['correspondent_match', 'document_type_match'],
+          priority_adjustment: 0,
+          priority_explanation: 'No relationship priority adjustment',
+        },
+      }],
+      query: '',
+    });
+    createRelationshipMock.mockResolvedValue({ created: true });
+    renderPage('/inbox-review?document=1&tab=related');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add link' }));
+
+    await waitFor(() => expect(createRelationshipMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source_document_id: 1,
+        target_document_id: 7,
+        relationship_type: 'same_sequence',
+        provenance: 'user',
+      }),
+    ));
+  });
+
   it('uses Paperless tag colors inside one combined tag control', async () => {
     documentCoreMock.mockResolvedValue({
       ...core(1),
@@ -292,6 +401,7 @@ describe('IntakeReview', () => {
   it('opens the document preview full screen and exposes external links', async () => {
     renderPage();
 
+    await screen.findByRole('link', { name: /Open in Paperless/ });
     fireEvent.click(await screen.findByRole('button', { name: 'Expand' }));
     expect(screen.getByRole('dialog', { name: 'Expanded preview of Document 1' })).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: /Paperless/ })[0]).toHaveAttribute(

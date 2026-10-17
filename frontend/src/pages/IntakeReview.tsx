@@ -20,11 +20,12 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../components/ui';
+import DocumentRelationshipsPanel from '../components/DocumentRelationshipsPanel';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import '../styles/intake-review.css';
 
-type ReviewTab = 'metadata' | 'actions' | 'ocr';
+type ReviewTab = 'metadata' | 'actions' | 'related' | 'ocr';
 type Disposition = 'save' | 'defer' | 'file_only' | 'confirm_and_file';
 type TaxonomyKind = 'tag' | 'correspondent' | 'document_type' | 'storage_path';
 type QueueFilter = 'all' | 'actions' | 'missing_type';
@@ -752,7 +753,11 @@ export default function IntakeReview() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedDocument = searchParams.get('document') || documentId;
   const requestedTab = searchParams.get('tab');
-  const [tab, setTab] = useState<ReviewTab>(requestedTab === 'actions' || requestedTab === 'ocr' ? requestedTab : 'metadata');
+  const [tab, setTab] = useState<ReviewTab>(
+    requestedTab === 'actions' || requestedTab === 'related' || requestedTab === 'ocr'
+      ? requestedTab
+      : 'metadata',
+  );
   const [queue, setQueue] = useState<IntakeListItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(requestedDocument ? Number(requestedDocument) : null);
   const [focusedId, setFocusedId] = useState<number | null>(selectedId);
@@ -1250,6 +1255,9 @@ export default function IntakeReview() {
                   <button role="tab" aria-selected={tab === 'actions'} className={`${tab === 'actions' ? 'active ' : ''}${pendingActions.length ? 'needs-attention' : ''}`} onClick={() => chooseTab('actions')}>
                     Actions <span>{loadingActions ? '…' : pendingActions.length}</span>
                   </button>
+                  <button role="tab" aria-selected={tab === 'related'} className={tab === 'related' ? 'active' : ''} onClick={() => chooseTab('related')}>
+                    Related
+                  </button>
                   <button role="tab" aria-selected={tab === 'ocr'} aria-label={ocr?.poor_quality ? 'OCR, needs review' : 'OCR'} className={tab === 'ocr' ? 'active' : ''} onClick={() => chooseTab('ocr')}>
                     OCR {ocr?.poor_quality ? <span className="intake-tab-alert" aria-label="Poor OCR quality"><CircleAlert size={13} /> Review</span> : null}
                   </button>
@@ -1351,6 +1359,20 @@ export default function IntakeReview() {
                       )) : null}
                       {!loadingActions && !actionError && !actions.length ? <EmptyState title="No action analysis yet" desc="Refresh analysis or add an action manually." /> : null}
                     </div>
+                  ) : null}
+
+                  {tab === 'related' ? (
+                    <DocumentRelationshipsPanel
+                      document={{
+                        id: selectedId,
+                        title,
+                        created: metadata?.created || core?.document.created,
+                        document_type_name: core && metadata
+                          ? optionName(core.taxonomies.document_types, metadata.document_type)
+                          : selectedQueueItem?.document_type_name,
+                      }}
+                      onToast={showToast}
+                    />
                   ) : null}
 
                   {tab === 'ocr' ? (

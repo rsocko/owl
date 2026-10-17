@@ -256,6 +256,14 @@ export const endpoints = {
     documents: () => api.get('/api/intake/documents'),
     document: (id: string | number) => api.get(`/api/intake/documents/${id}`),
     documentCore: (id: string | number) => api.get(`/api/intake/documents/${id}/core`),
+    documentRelationships: (id: string | number) =>
+      api.get(`/api/intake/documents/${id}/relationships`),
+    relationshipCandidates: (id: string | number, query?: string) =>
+      api.get(
+        `/api/intake/documents/${id}/relationship-candidates${
+          query ? `?q=${encodeURIComponent(query)}` : ''
+        }`,
+      ),
     documentSuggestions: (id: string | number, refresh = false) =>
       api.get(`/api/intake/documents/${id}/suggestions${refresh ? '?refresh=true' : ''}`),
     documentActions: (id: string | number) => api.get(`/api/intake/documents/${id}/actions`),
