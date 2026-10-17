@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from doc_intelligence_hub.api.routers import intake_review
+
 
 def _document(**overrides):
     return {
@@ -57,6 +59,77 @@ def test_document_detail_combines_metadata_suggestions_actions_and_ocr(client, m
     }
 
 
+def test_core_document_load_does_not_wait_for_suggestions_or_ocr(client, mock_paperless):
+    mock_paperless.get_document.return_value = _document()
+
+    response = client.get("/api/intake/documents/42/core")
+
+    assert response.status_code == 200
+    assert response.json()["document"]["title"] == "Utility bill"
+    mock_paperless.get_document_suggestions.assert_not_awaited()
+    mock_paperless.get_document_ai_suggestions.assert_not_awaited()
+    mock_paperless.get_document_content.assert_not_awaited()
+
+
+def test_suggestions_are_cached_for_the_document_revision(client, mock_paperless):
+    mock_paperless.get_document.return_value = _document()
+    mock_paperless.get_document_suggestions.return_value = {"correspondents": [2]}
+    mock_paperless.get_document_ai_suggestions.return_value = {}
+
+    first = client.get("/api/intake/documents/42/suggestions")
+    second = client.get("/api/intake/documents/42/suggestions")
+
+    assert first.status_code == 200
+    assert first.json()["cached"] is False
+    assert second.status_code == 200
+    assert second.json()["cached"] is True
+    mock_paperless.get_document_suggestions.assert_awaited_once_with(42)
+    mock_paperless.get_document_ai_suggestions.assert_awaited_once_with(42)
+
+
+def test_queue_resolves_names_and_includes_action_state(client, mock_paperless):
+    mock_paperless.get_document.return_value = _document()
+    client.post(
+        "/api/intake/documents/42/actions",
+        json={"action_type": "PAY", "title": "Pay utility bill"},
+    )
+    mock_paperless.list_documents.return_value = [_document()]
+
+    response = client.get("/api/intake/documents")
+
+    assert response.status_code == 200
+    item = response.json()["documents"][0]
+    assert item["correspondent_name"] == "UnitedHealth"
+    assert item["document_type_name"] == "Bill"
+    assert item["thumbnail_url"].endswith("/42/thumb")
+    assert item["pending_action_count"] == 1
+
+
+def test_core_hides_operational_fields_and_exposes_editable_document_fields(client, mock_paperless):
+    intake_review._taxonomy_cache = None
+    mock_paperless.get_document.return_value = _document(
+        custom_fields=[
+            {"field": 9, "value": "A-123"},
+            {"field": 10, "value": "84.20"},
+            {"field": 11, "value": "pending"},
+        ]
+    )
+    mock_paperless.list_custom_fields.return_value = [
+        {"id": 9, "name": "Account Identifier", "data_type": "string"},
+        {"id": 10, "name": "Document Amount", "data_type": "monetary"},
+        {"id": 11, "name": "Action Status", "data_type": "string"},
+    ]
+
+    response = client.get("/api/intake/documents/42/core")
+
+    assert response.status_code == 200
+    fields = response.json()["document"]["review_fields"]
+    assert [(field["name"], field["editable"]) for field in fields] == [
+        ("Account Identifier", False),
+        ("Document Amount", True),
+    ]
+
+
 def test_save_rejects_external_edit_conflict(client, mock_paperless):
     mock_paperless.get_document.return_value = _document(modified="2026-10-17T09:00:00Z")
 
@@ -90,6 +163,39 @@ def test_file_only_removes_inbox_without_resolving_actions(client, mock_paperles
     assert response.json()["filed"] is True
     mock_paperless.update_document.assert_awaited_once_with(
         42, {"title": "Filed utility bill", "tags": [2]}
+    )
+
+
+def test_save_merges_editable_custom_fields_without_dropping_audit_fields(client, mock_paperless):
+    mock_paperless.get_document.return_value = _document(
+        custom_fields=[
+            {"field": 9, "value": "A-123"},
+            {"field": 10, "value": 80.0},
+        ]
+    )
+    mock_paperless.list_custom_fields.return_value = [
+        {"id": 9, "name": "Account Identifier", "data_type": "string"},
+        {"id": 10, "name": "Document Amount", "data_type": "float"},
+    ]
+
+    response = client.put(
+        "/api/intake/documents/42",
+        json={
+            "expected_modified": "2026-10-16T12:00:00Z",
+            "metadata": {"custom_fields": [{"field": 10, "value": 84.2}]},
+            "disposition": "save",
+        },
+    )
+
+    assert response.status_code == 200
+    mock_paperless.update_document.assert_awaited_once_with(
+        42,
+        {
+            "custom_fields": [
+                {"field": 9, "value": "A-123"},
+                {"field": 10, "value": 84.2},
+            ]
+        },
     )
 
 

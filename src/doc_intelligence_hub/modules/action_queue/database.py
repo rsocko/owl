@@ -147,6 +147,18 @@ class ActionLifecycleEvent(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class IntakeSuggestionSnapshot(Base):
+    """Cached Paperless suggestions for one source document revision."""
+
+    __tablename__ = "intake_suggestion_snapshots"
+
+    document_id = Column(Integer, primary_key=True)
+    source_modified = Column(String, nullable=False)
+    suggestions = Column(JSON, nullable=False, default=list)
+    source_states = Column(JSON, nullable=False, default=dict)
+    fetched_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class ObligationDocument(Base):
     """A document attached to an obligation timeline."""
 

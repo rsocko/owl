@@ -12,15 +12,20 @@ reviewed together. Filing the document and confirming its actions remain
 independent decisions.
 
 Open **Workflow → Intake Review** in the OWL web interface. The document list is
-loaded from the Action Queue's configured intake tags (normally `Inbox`).
+loaded from the Action Queue's configured intake tags (normally `Inbox`). Each
+row includes a Paperless thumbnail, resolved correspondent and document type,
+and an **Action needed** indicator where applicable. Search and filters narrow
+the queue without changing the selected document.
 
 ## Review workflow
 
 The workspace keeps the live document date, correspondent, and document type
 visible above the preview. The right panel contains:
 
-- **Metadata** — current Paperless metadata, unapplied Paperless ML/AI
-  suggestions, removable tags, storage path, and Paperless custom fields.
+- **Metadata** — current Paperless metadata, field-local Paperless ML/AI
+  suggestions, removable Paperless-colored tags, storage path, and relevant
+  Paperless custom fields. Operational Action/Obligation projections are not
+  presented as editable document metadata.
 - **Actions** — all inferred and user-added actions for the source document.
   Completed actions remain visible as history but are excluded from pending
   counts and confirmation.
@@ -29,6 +34,10 @@ visible above the preview. The right panel contains:
 
 Arrow keys move focus through the document list without changing the active
 document. Press **Enter** or click a row to select it.
+
+The selected document is stored in the `document` query parameter, so a review
+can be bookmarked or shared, for example
+`#/intake-review?document=123&tab=actions`.
 
 ## Metadata and filing decisions
 
@@ -43,9 +52,17 @@ rejects a save if Paperless changed while the document was open.
 | **File only** | File the document while leaving proposed actions pending |
 | **Confirm action(s) & file** | Confirm active actions and file the document |
 
-Tags, correspondents, document types, and storage paths can be created inline
-when Paperless permits it. OWL prevents case-insensitive duplicates and shows
-Paperless permission or validation errors instead of assuming success.
+Tags, correspondents, document types, and storage paths use one searchable
+combobox for selection and creation. Typing a value that does not exist offers
+an explicit create action when Paperless permits it. OWL prevents
+case-insensitive duplicates and shows Paperless permission or validation errors
+instead of assuming success. AI suggestions never create taxonomy values
+automatically, so no Paperless setting change is required to prevent unreviewed
+tags or document types from being added.
+
+Tag options retain Paperless colors. Names containing hierarchy separators
+such as `Parent / Child` or `Parent::Child` are displayed with parent context
+while preserving the original Paperless tag name.
 
 ## Action editing and audit history
 
@@ -63,6 +80,13 @@ the Actions tab rather than maintaining a second document editor.
 
 ## Analysis and OCR freshness
 
+The preview and core Paperless metadata load first. Suggestions, actions, and
+OCR text then load independently with local progress and error states, so a
+slow analysis service does not blank the entire workspace. Suggestions are
+cached by document ID and Paperless `modified` revision for up to six hours.
+Changing the source revision or choosing **Refresh analysis** bypasses the
+snapshot.
+
 **Refresh analysis** reloads Paperless suggestions and forces action analysis
 for the current source revision. It is blocked while metadata edits are
 unsaved, and a changed Paperless revision returns a conflict.
@@ -77,6 +101,10 @@ and inferred actions are evaluated against the new searchable text.
 |---|---|
 | `GET /api/intake/documents` | List configured intake documents |
 | `GET /api/intake/documents/{id}` | Load the review contract |
+| `GET /api/intake/documents/{id}/core` | Load source metadata and taxonomies |
+| `GET /api/intake/documents/{id}/suggestions` | Load revision-cached suggestions |
+| `GET /api/intake/documents/{id}/actions` | Load actions and analysis state |
+| `GET /api/intake/documents/{id}/ocr` | Load searchable text and OCR quality |
 | `PUT /api/intake/documents/{id}` | Save metadata and disposition |
 | `POST /api/intake/documents/{id}/refresh` | Refresh suggestions and analysis |
 | `POST /api/intake/taxonomies/{kind}` | Create a Paperless taxonomy value |
