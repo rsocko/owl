@@ -221,24 +221,24 @@ describe('IntakeReview', () => {
     );
   });
 
-  it('removes a saved document from the active missing-type filter', async () => {
-    documentsMock
-      .mockResolvedValueOnce({
+  it('keeps the active document selected after it stops matching the missing-type filter', async () => {
+    documentsMock.mockImplementation(() => Promise.resolve(
+      saveDocumentMock.mock.calls.length === 0 ? {
         documents: [
           { id: 1, title: 'Document 1', created: '2026-10-14', thumbnail_url: '/thumb/1', pending_action_count: 0 },
           { id: 2, title: 'Document 2', created: '2026-10-15', thumbnail_url: '/thumb/2', pending_action_count: 0 },
         ],
         total: 2,
         monitor_tags: ['Inbox'],
-      })
-      .mockResolvedValueOnce({
+      } : {
         documents: [
           { id: 1, title: 'Document 1', created: '2026-10-14', thumbnail_url: '/thumb/1', pending_action_count: 0, document_type_name: 'Bill' },
           { id: 2, title: 'Document 2', created: '2026-10-15', thumbnail_url: '/thumb/2', pending_action_count: 0 },
         ],
         total: 2,
         monitor_tags: ['Inbox'],
-      });
+      },
+    ));
     documentCoreMock.mockImplementation((id: number) => Promise.resolve({
       ...core(id),
       document: { ...core(id).document, document_type: id === 1 ? null : 1 },
@@ -254,8 +254,9 @@ describe('IntakeReview', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Bill' }));
     fireEvent.click(screen.getByRole('button', { name: /Save changes/ }));
 
-    await waitFor(() => expect(documentCoreMock).toHaveBeenCalledWith(2));
-    expect(screen.queryByRole('button', { name: /Document 1/ })).not.toBeInTheDocument();
-    expect(screen.getByText('Document 2', { selector: 'h2' })).toBeInTheDocument();
+    await waitFor(() => expect(documentCoreMock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('button', { name: /Document 1/ })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('Document 1', { selector: 'h2' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Document 2/ })).toBeInTheDocument();
   });
 });

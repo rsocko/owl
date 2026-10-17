@@ -53,6 +53,10 @@ rejects a save if Paperless changed while the document was open.
 | **File only** | File the document while leaving proposed actions pending |
 | **Confirm action(s) & file** | Confirm active actions and file the document |
 
+Saving in place keeps the current document selected and visible, even when an
+edit means it no longer matches the active queue filter. The item leaves that
+filtered list after the reviewer selects another document, defers, or files it.
+
 Tags, correspondents, document types, and storage paths use one searchable
 combobox for selection and creation. Typing a value that does not exist offers
 an explicit create action when Paperless permits it. OWL prevents

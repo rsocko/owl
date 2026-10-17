@@ -590,6 +590,7 @@ export default function IntakeReview() {
   const [focusedId, setFocusedId] = useState<number | null>(selectedId);
   const [queueQuery, setQueueQuery] = useState('');
   const [queueFilter, setQueueFilter] = useState<QueueFilter>('all');
+  const [pinnedFilteredId, setPinnedFilteredId] = useState<number | null>(null);
   const [core, setCore] = useState<IntakeCore | null>(null);
   const [metadata, setMetadata] = useState<MetadataDraft | null>(null);
   const [baseline, setBaseline] = useState<MetadataDraft | null>(null);
@@ -620,8 +621,10 @@ export default function IntakeReview() {
   const pendingActions = actions.filter((action) => !['completed', 'not_an_action', 'dismissed'].includes(action.status));
   const selectedQueueItem = queue.find((item) => item.id === selectedId);
   const filteredQueue = useMemo(() => {
-    return queue.filter((item) => matchesQueueFilter(item, queueQuery, queueFilter));
-  }, [queue, queueFilter, queueQuery]);
+    return queue.filter(
+      (item) => item.id === pinnedFilteredId || matchesQueueFilter(item, queueQuery, queueFilter),
+    );
+  }, [pinnedFilteredId, queue, queueFilter, queueQuery]);
 
   const showToast = useCallback((message: string, tone: 'success' | 'error' = 'success') => {
     setToast({ message, tone });
@@ -754,6 +757,7 @@ export default function IntakeReview() {
   };
 
   const activateDocument = (id: number) => {
+    setPinnedFilteredId(null);
     setSelectedId(id);
     setFocusedId(id);
     updateUrl(id);
@@ -852,6 +856,7 @@ export default function IntakeReview() {
       const refreshedQueue = await loadQueue();
       const matchingQueue = refreshedQueue.filter((item) => matchesQueueFilter(item, queueQuery, queueFilter));
       if (response.filed || disposition === 'defer') {
+        setPinnedFilteredId(null);
         const nextMatching = matchingQueue.find((item) => item.id !== core.document.id)
           || (nextDocument && refreshedQueue.find((item) => item.id === nextDocument.id));
         if (nextMatching) activateDocument(nextMatching.id);
@@ -862,17 +867,13 @@ export default function IntakeReview() {
         } else {
           await loadDocument(core.document.id);
         }
-      } else if (!matchingQueue.some((item) => item.id === core.document.id)) {
-        const nextMatching = matchingQueue[0];
-        if (nextMatching) activateDocument(nextMatching.id);
-        else {
-          setSelectedId(null);
-          updateUrl(null);
-          setCore(null);
-          setMetadata(null);
-          setBaseline(null);
-        }
       } else {
+        const refreshedCurrent = refreshedQueue.find((item) => item.id === core.document.id);
+        setPinnedFilteredId(
+          refreshedCurrent && !matchesQueueFilter(refreshedCurrent, queueQuery, queueFilter)
+            ? core.document.id
+            : null,
+        );
         await loadDocument(core.document.id);
       }
     } catch (error) {
@@ -991,14 +992,20 @@ export default function IntakeReview() {
           <Button size="sm" aria-label="Reload queue" disabled={loadingQueue} onClick={() => void loadQueue()}><RefreshCw size={15} /></Button>
         </div>
         <div className="intake-queue-tools">
-          <label><Search size={16} /><input aria-label="Search intake documents" placeholder="Search documents…" value={queueQuery} onChange={(event) => setQueueQuery(event.target.value)} /></label>
+          <label><Search size={16} /><input aria-label="Search intake documents" placeholder="Search documents…" value={queueQuery} onChange={(event) => {
+            setPinnedFilteredId(null);
+            setQueueQuery(event.target.value);
+          }} /></label>
           <div className="intake-filter-chips" aria-label="Filter documents">
             {([
               ['all', 'All'],
               ['actions', 'Action needed'],
               ['missing_type', 'Missing type'],
             ] as const).map(([value, label]) => (
-              <button key={value} type="button" className={queueFilter === value ? 'active' : ''} onClick={() => setQueueFilter(value)}>{label}</button>
+              <button key={value} type="button" className={queueFilter === value ? 'active' : ''} onClick={() => {
+                setPinnedFilteredId(null);
+                setQueueFilter(value);
+              }}>{label}</button>
             ))}
           </div>
         </div>
