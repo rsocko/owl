@@ -13,8 +13,10 @@ from doc_intelligence_hub.core.paperless import (
     MetadataCreatePolicy,
     MetadataDiagnosticCode,
     MetadataFieldKey,
+    MetadataRetirementPolicy,
     MetadataSchemaError,
     MetadataValueError,
+    MetadataWritePolicy,
     PaperlessMetadataResolver,
     build_account_identifier_update,
     build_metadata_update,
@@ -84,6 +86,15 @@ def test_obligation_projection_fields_are_creatable() -> None:
     assert obligation_id.create_definition()["data_type"] == "string"
     assert role.canonical_name == "Obligation Role"
     assert role.select_options == ("invoice", "receipt", "reminder", "revision", "supporting")
+
+
+def test_action_analyzed_is_disabled_and_approved_for_retirement() -> None:
+    spec = get_metadata_field_spec(MetadataFieldKey.ACTION_ANALYZED)
+
+    assert spec.create_policy is MetadataCreatePolicy.NEVER
+    assert spec.create_type is None
+    assert spec.write_policy is MetadataWritePolicy.DISABLED
+    assert spec.retirement_policy is MetadataRetirementPolicy.RETIRE_WHEN_EMPTY
 
 
 def test_document_link_metadata_supports_multiple_values() -> None:

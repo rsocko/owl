@@ -470,6 +470,34 @@ async def test_field_retirement_clears_owl_covered_values_before_deletion():
 
 
 @pytest.mark.asyncio
+async def test_action_analyzed_retirement_clears_action_queue_documents_before_deletion():
+    document = {
+        "id": 10,
+        "custom_fields": [{"field": 1, "value": "2026-08-15"}],
+    }
+    client = FakeClient(
+        [{"id": 1, "name": "Action Analyzed", "data_type": "date"}],
+        [document],
+    )
+    service = MetadataMigrationService(
+        client,
+        owl_document_coverage={MetadataFieldKey.ACTION_ANALYZED: {10}},
+    )
+
+    summary = await service.review_fields(apply=True)
+    action_analyzed = next(
+        field
+        for field in summary.fields
+        if field.stable_key == MetadataFieldKey.ACTION_ANALYZED.value
+    )
+
+    assert client.updates == [(10, [{"field": 1, "value": None}])]
+    assert client.deleted == [1]
+    assert action_analyzed.state is FieldReviewState.DELETED
+    assert summary.cleared_document_values == 1
+
+
+@pytest.mark.asyncio
 async def test_field_retirement_keeps_uncovered_values_without_explicit_discard():
     client = FakeClient(
         [{"id": 1, "name": "Action Type", "data_type": "select"}],

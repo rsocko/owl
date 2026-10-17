@@ -22,7 +22,6 @@ _ACTION_KEYS = (
     MetadataFieldKey.DOCUMENT_AMOUNT,
     MetadataFieldKey.DOCUMENT_DUE_DATE,
     MetadataFieldKey.ACTION_STATUS,
-    MetadataFieldKey.ACTION_ANALYZED,
     MetadataFieldKey.LEGACY_ACTION_TYPE,
     MetadataFieldKey.LEGACY_ACTION_DUE_DATE,
     MetadataFieldKey.LEGACY_ACTION_URGENCY,
@@ -62,7 +61,6 @@ def _prime_schema(enricher: PaperlessEnricher, *, include_legacy: bool = False) 
                 ]
             },
         },
-        {"id": 3, "name": "Action Analyzed", "data_type": "date"},
     ]
     if include_legacy:
         definitions.extend(
@@ -91,6 +89,7 @@ def test_action_status_field_supports_full_lifecycle():
         "dismissed",
         "not_an_action",
     }
+    assert all(field["name"] != "Action Analyzed" for field in CUSTOM_FIELD_DEFINITIONS)
 
 
 @pytest.mark.asyncio
@@ -269,7 +268,7 @@ async def test_enrich_document_writes_only_neutral_metadata(enricher):
     values = {field["field"]: field["value"] for field in fields}
     assert values[1] == 123.45
     assert values[2] == 20
-    assert not {5, 6, 7, 8, 9}.intersection(values)
+    assert not {3, 5, 6, 7, 8, 9}.intersection(values)
 
 
 @pytest.mark.asyncio
@@ -359,7 +358,6 @@ async def test_existing_action_amount_field_is_renamed(enricher):
                 ]
             },
         },
-        {"id": 3, "name": "Action Analyzed", "data_type": "date"},
     ]
     final_definitions = [
         {"id": 1, "name": "Document Amount", "data_type": "float"},
@@ -378,7 +376,6 @@ async def test_existing_action_amount_field_is_renamed(enricher):
                 ]
             },
         },
-        {"id": 3, "name": "Action Analyzed", "data_type": "date"},
     ]
     enricher.client.list_custom_fields.side_effect = [
         initial_definitions,
@@ -677,9 +674,7 @@ async def test_enrich_document_skips_all_correctable_fields_when_corrected(monke
     fields = enricher.client.update_custom_fields_verified.await_args.args[1]
     values = {field["field"]: field["value"] for field in fields}
     assert not {1, 4, 10, 11}.intersection(values)
-    # Action-analyzed date is not correctable via the metadata API and is
-    # always written.
-    assert 3 in values
+    assert values == {2: 20}
 
 
 @pytest.mark.asyncio
