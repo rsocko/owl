@@ -8,7 +8,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func
 
@@ -700,14 +700,59 @@ async def _document_detail(request: Request, document_id: int) -> dict[str, Any]
 
 
 @router.get("/documents")
-async def list_intake_documents(request: Request, limit: int = 100) -> dict[str, Any]:
+async def list_intake_documents(
+    request: Request,
+    page_size: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = None,
+    search: str = Query(default="", max_length=200),
+    queue_filter: Literal["all", "actions", "missing_type"] = "all",
+) -> dict[str, Any]:
     client = make_paperless_client(request, timeout=30.0)
     try:
         try:
-            documents, taxonomies = await asyncio.gather(
-                client.list_documents(tags=_monitor_tags(), limit=min(limit, 200)),
+            tag_ids = await client.resolve_tag_ids(_monitor_tags())
+            scope_params = {
+                "tags__id__in": ",".join(str(tag_id) for tag_id in tag_ids) if tag_ids else "0",
+                "ordering": "-id",
+            }
+            if search.strip():
+                scope_params["query"] = search.strip()
+            if queue_filter == "missing_type":
+                scope_params["document_type__isnull"] = "true"
+            elif queue_filter == "actions":
+                init_db()
+                db = get_session()
+                try:
+                    active_document_ids = [
+                        document_id
+                        for (document_id,) in (
+                            db.query(Action.document_id)
+                            .filter(
+                                Action.superseded_by_action_id.is_(None),
+                                Action.status.notin_({"completed", "dismissed", "not_an_action"}),
+                            )
+                            .distinct()
+                            .all()
+                        )
+                    ]
+                finally:
+                    db.close()
+                scope_params["id__in"] = (
+                    ",".join(str(document_id) for document_id in active_document_ids)
+                    if active_document_ids
+                    else "0"
+                )
+            page, taxonomies = await asyncio.gather(
+                client.list_document_page(
+                    page_size=page_size,
+                    cursor=cursor,
+                    scope_params=scope_params,
+                ),
                 _load_taxonomies(client),
             )
+            documents = list(page.results)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
             _raise_paperless_error(exc, "loading the intake queue")
         document_ids = [document.get("id") for document in documents if document.get("id")]
@@ -786,7 +831,8 @@ async def list_intake_documents(request: Request, limit: int = 100) -> dict[str,
                 }
                 for document in documents
             ],
-            "total": len(documents),
+            "total": page.total_count,
+            "next_cursor": page.next_cursor,
             "monitor_tags": _monitor_tags(),
         }
     finally:
