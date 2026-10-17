@@ -19,9 +19,14 @@ from doc_intelligence_hub.api.routers.action_queue import (
     _sync_action_queue_settings,
 )
 from doc_intelligence_hub.core.paperless import (
+    AccountIdentifierClass,
     MetadataFieldKey,
     MetadataProjectionPolicy,
+    MetadataSchemaError,
+    MetadataValueError,
+    build_account_identifier_update,
     get_metadata_field_spec,
+    resolve_metadata_schema,
 )
 from doc_intelligence_hub.modules.action_queue.database import (
     VALID_ACTION_TYPES,
@@ -56,6 +61,7 @@ _INBOX_TAG_NAME = "Inbox"
 _taxonomy_cache: tuple[datetime, dict[str, list[dict[str, Any]]]] | None = None
 _taxonomy_cache_lock = asyncio.Lock()
 _EDITABLE_CUSTOM_FIELD_KEYS = {
+    MetadataFieldKey.ACCOUNT_IDENTIFIER,
     MetadataFieldKey.DOCUMENT_AMOUNT,
     MetadataFieldKey.DOCUMENT_DUE_DATE,
 }
@@ -79,6 +85,12 @@ def _utcnow_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+class IntakeCustomFieldPatch(BaseModel):
+    field: int = Field(gt=0)
+    value: Any = None
+    identifier_class: AccountIdentifierClass | None = None
+
+
 class IntakeMetadataPatch(BaseModel):
     title: str | None = None
     correspondent: int | None = Field(default=None, ge=1)
@@ -86,7 +98,7 @@ class IntakeMetadataPatch(BaseModel):
     storage_path: int | None = Field(default=None, ge=1)
     created: date | None = None
     tags: list[int] | None = None
-    custom_fields: list[dict[str, Any]] | None = None
+    custom_fields: list[IntakeCustomFieldPatch] | None = None
 
     @field_validator("title")
     @classmethod
@@ -111,17 +123,12 @@ class IntakeMetadataPatch(BaseModel):
 
     @field_validator("custom_fields")
     @classmethod
-    def valid_custom_fields(cls, value: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    def valid_custom_fields(
+        cls, value: list[IntakeCustomFieldPatch] | None
+    ) -> list[IntakeCustomFieldPatch] | None:
         if value is None:
             return None
-        field_ids: list[int] = []
-        for item in value:
-            field_id = item.get("field")
-            if isinstance(field_id, bool) or not isinstance(field_id, int) or field_id <= 0:
-                raise ValueError("custom fields require a positive integer field ID")
-            if "value" not in item:
-                raise ValueError("custom fields require a value")
-            field_ids.append(field_id)
+        field_ids = [item.field for item in value]
         if len(field_ids) != len(set(field_ids)):
             raise ValueError("custom fields cannot contain duplicate field IDs")
         return value
@@ -423,11 +430,12 @@ def _review_custom_fields(
         fields.append(
             {
                 "field": item.get("field"),
+                "field_key": key.value if key else None,
                 "name": name,
                 "value": item.get("value"),
                 "data_type": definition.get("data_type"),
                 "editable": key in _EDITABLE_CUSTOM_FIELD_KEYS,
-                "audit": key is MetadataFieldKey.ACCOUNT_IDENTIFIER,
+                "audit": False,
             }
         )
     return fields
@@ -1197,16 +1205,16 @@ async def save_intake_document(
                 definitions = await client.list_custom_fields()
             except Exception as exc:
                 _raise_paperless_error(exc, "validating custom field updates")
-            editable_ids = {
-                definition["id"]
+            editable_keys_by_id = {
+                definition["id"]: matched[0]
                 for definition in definitions
                 if isinstance(definition, dict)
                 and definition.get("id")
                 and (matched := _metadata_spec_by_name(str(definition.get("name") or "")))
                 and matched[0] in _EDITABLE_CUSTOM_FIELD_KEYS
             }
-            requested_ids = {item["field"] for item in body.metadata.custom_fields}
-            disallowed = sorted(requested_ids - editable_ids)
+            requested_ids = {item.field for item in body.metadata.custom_fields}
+            disallowed = sorted(requested_ids - editable_keys_by_id.keys())
             if disallowed:
                 raise HTTPException(
                     status_code=422,
@@ -1216,7 +1224,41 @@ async def save_intake_document(
                         "field_ids": disallowed,
                     },
                 )
-            requested_by_id = {item["field"]: item["value"] for item in body.metadata.custom_fields}
+            requested_by_id: dict[int, Any] = {}
+            for item in body.metadata.custom_fields:
+                key = editable_keys_by_id[item.field]
+                if key is MetadataFieldKey.ACCOUNT_IDENTIFIER:
+                    if item.identifier_class is None:
+                        raise HTTPException(
+                            status_code=422,
+                            detail={
+                                "code": "account_identifier_class_required",
+                                "message": "Identifier type is required for Account Identifier.",
+                                "field_ids": [item.field],
+                            },
+                        )
+                    try:
+                        schema = resolve_metadata_schema(
+                            definitions, (MetadataFieldKey.ACCOUNT_IDENTIFIER,)
+                        )
+                        update, _projection = build_account_identifier_update(
+                            item.value,
+                            item.identifier_class,
+                            1.0,
+                            schema,
+                        )
+                    except (MetadataSchemaError, MetadataValueError) as exc:
+                        raise HTTPException(
+                            status_code=422,
+                            detail={
+                                "code": "invalid_account_identifier",
+                                "message": str(exc),
+                                "field_ids": [item.field],
+                            },
+                        ) from exc
+                    requested_by_id[int(update["field"])] = update["value"]
+                else:
+                    requested_by_id[item.field] = item.value
             merged_custom_fields = [
                 {
                     "field": item["field"],

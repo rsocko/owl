@@ -22,6 +22,10 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../components/ui';
 import DocumentRelationshipsPanel from '../components/DocumentRelationshipsPanel';
 import { endpoints } from '../lib/api';
+import {
+  ACCOUNT_IDENTIFIER_CLASSES,
+  type AccountIdentifierClass,
+} from '../lib/accountIdentifier';
 import { getToastDuration } from '../lib/toast';
 import '../styles/intake-review.css';
 
@@ -91,6 +95,7 @@ interface Suggestion {
 
 interface ReviewField {
   field: number;
+  field_key?: string | null;
   name: string;
   value: unknown;
   data_type?: string | null;
@@ -770,6 +775,8 @@ export default function IntakeReview() {
   const [core, setCore] = useState<IntakeCore | null>(null);
   const [metadata, setMetadata] = useState<MetadataDraft | null>(null);
   const [baseline, setBaseline] = useState<MetadataDraft | null>(null);
+  const [accountIdentifierClass, setAccountIdentifierClass] =
+    useState<AccountIdentifierClass>('service_account');
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [suggestionSources, setSuggestionSources] = useState<Record<string, { available: boolean; error?: string | null }>>({});
   const [suggestionsCached, setSuggestionsCached] = useState(false);
@@ -880,6 +887,7 @@ export default function IntakeReview() {
     setCore(null);
     setMetadata(null);
     setBaseline(null);
+    setAccountIdentifierClass('service_account');
     setSuggestions([]);
     setActions([]);
     setOcr(null);
@@ -1075,6 +1083,9 @@ export default function IntakeReview() {
                   value: ['float', 'decimal', 'integer', 'monetary'].includes(field.data_type || '')
                     ? value ? Number(value) : null
                     : value || null,
+                  ...(field.field_key === 'account_identifier'
+                    ? { identifier_class: accountIdentifierClass }
+                    : {}),
                 };
               }),
           } : {}),
@@ -1405,9 +1416,46 @@ export default function IntakeReview() {
                         {(core.document.review_fields || []).length ? (
                           <div className="intake-form-grid intake-review-fields">
                             {(core.document.review_fields || []).map((field) => field.editable ? (
-                              <label className="intake-field" key={field.field}>
-                                <span>{field.name}</span>
-                                {field.name === 'Document Amount' ? (
+                              field.field_key === 'account_identifier' ? (
+                                <div className="intake-field" key={field.field}>
+                                  <label className="intake-field-label" htmlFor={`review-field-${field.field}`}>
+                                    {field.name}
+                                  </label>
+                                  <input
+                                    id={`review-field-${field.field}`}
+                                    value={metadata.customFields[String(field.field)] || ''}
+                                    disabled={!core.write_enabled}
+                                    onChange={(event) => setMetadata({
+                                      ...metadata,
+                                      customFields: {
+                                        ...metadata.customFields,
+                                        [String(field.field)]: event.target.value,
+                                      },
+                                    })}
+                                  />
+                                  <label className="intake-field-label" htmlFor={`review-field-class-${field.field}`}>
+                                    Identifier type
+                                  </label>
+                                  <select
+                                    id={`review-field-class-${field.field}`}
+                                    value={accountIdentifierClass}
+                                    disabled={!core.write_enabled}
+                                    onChange={(event) =>
+                                      setAccountIdentifierClass(event.target.value as AccountIdentifierClass)
+                                    }
+                                  >
+                                    {ACCOUNT_IDENTIFIER_CLASSES.map((option) => (
+                                      <option key={option.value} value={option.value}>
+                                        {option.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <small>The full value is stored exactly in Paperless.</small>
+                                </div>
+                              ) : (
+                                <label className="intake-field" key={field.field}>
+                                  <span>{field.name}</span>
+                                  {field.name === 'Document Amount' ? (
                                   <CurrencyInput
                                     label={field.name}
                                     value={metadata.customFields[String(field.field)] || ''}
@@ -1422,8 +1470,9 @@ export default function IntakeReview() {
                                     disabled={!core.write_enabled}
                                     onChange={(event) => setMetadata({ ...metadata, customFields: { ...metadata.customFields, [String(field.field)]: event.target.value } })}
                                   />
-                                )}
-                              </label>
+                                  )}
+                                </label>
+                              )
                             ) : (
                               <div className="intake-readonly-field" key={field.field}>
                                 <span>{field.name}{field.audit ? ' · audit' : ''}</span>
