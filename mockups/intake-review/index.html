@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OWL · Intake review — interactive UX proposal</title>
+  <link rel="stylesheet" href="review.css">
+  <script src="review.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to workspace</a>
+  <div class="prototype-banner" role="note">
+    <strong>Prototype controls — not part of the product</strong>
+    <span>Synthetic documents · local simulation · no Paperless or Mission Control writes</span>
+    <button id="prototype-guide" type="button">Explain the modes</button>
+    <button id="reset-demo" type="button">Reset demo</button>
+  </div>
+  <header class="topnav">
+    <a class="brand" href="#intake"><span class="owl-mark" aria-hidden="true">◉</span> OWL <span>Organize. Watch. Learn.</span></a>
+    <nav aria-label="Proposed workspaces">
+      <a href="#intake" data-route="intake">Intake review <span id="intake-count" class="count">3</span></a>
+      <a href="#actions" data-route="actions">Action Queue <span id="action-count" class="count">2</span></a>
+      <a href="#history" data-route="history">No-action history</a>
+      <a href="#processing" data-route="processing">Processing</a>
+    </nav>
+    <span class="connection"><span class="dot"></span> Paperless connected <small>Demo</small></span>
+  </header>
+  <main id="main" tabindex="-1">
+    <section id="intake" class="screen" aria-labelledby="intake-heading">
+      <div class="page-heading">
+        <div><h1 id="intake-heading">Intake review</h1><p>Clean up imported documents quickly, or validate a suggested action while the source is already in view.</p></div>
+        <label class="scenario">Demo state <small>Prototype control only</small>
+          <select id="scenario">
+            <option value="ready">Ready to review</option>
+            <option value="loading">Loading suggestions</option>
+            <option value="unavailable">AI suggestions unavailable</option>
+            <option value="unauthorized">Document access denied</option>
+            <option value="malformed">Malformed suggestion response</option>
+            <option value="conflict">External edit conflict</option>
+            <option value="empty">Inbox cleared</option>
+          </select>
+        </label>
+      </div>
+      <div id="access-error" class="notice danger" role="alert" hidden>Document access denied. Preview, metadata, and suggestions are hidden. Ask a Paperless administrator to restore access.</div>
+      <div id="inbox-empty" class="empty-state card" hidden>
+        <span class="empty-symbol" aria-hidden="true">✓</span><h2>Intake is clear</h2>
+        <p>Filed documents are still eligible for matching and reanalysis when related evidence arrives.</p>
+        <a href="#history" class="button primary">Review no-action history</a>
+      </div>
+      <div id="intake-layout" class="intake-layout">
+        <aside class="card queue-panel" aria-label="Documents awaiting intake">
+          <div class="panel-heading"><h2>Awaiting review</h2><span id="awaiting-count" class="pill neutral">3 documents</span></div>
+          <label class="search-label">Find a document<input id="queue-search" type="search" placeholder="Search title or correspondent"></label>
+          <div class="bulk-toolbar"><label><input id="select-all" type="checkbox"> Select visible</label><button id="bulk-review" type="button" disabled>Mark needs review</button></div>
+          <div id="document-list" class="document-list"></div>
+          <p id="queue-empty" class="muted padded" hidden>No documents match your search.</p>
+          <div class="queue-footer"><strong>Fast triage</strong><p>Receipts and reference documents can be filed without becoming tasks.</p><small><kbd>↑</kbd><kbd>↓</kbd> switch documents immediately</small></div>
+        </aside>
+
+        <div class="metadata-column">
+          <section class="card intake-workspace" aria-label="Document metadata and suggested actions">
+            <div class="workspace-header">
+              <div class="workspace-tabs" role="tablist" aria-label="Review details">
+                <button id="metadata-tab" type="button" role="tab" aria-selected="true" aria-controls="metadata-panel">Metadata</button>
+                <button id="actions-tab" type="button" role="tab" aria-selected="false" aria-controls="actions-panel">Actions <span id="intake-action-count" class="tab-count">0</span></button>
+                <button id="ocr-tab" type="button" role="tab" aria-selected="false" aria-controls="ocr-panel">OCR <span id="ocr-quality-count" class="tab-count">96</span></button>
+              </div>
+              <div class="workspace-tools"><button id="refresh-review" type="button">Refresh analysis</button><span id="save-state" class="pill neutral">No unsaved changes</span></div>
+            </div>
+            <div id="metadata-panel" role="tabpanel" aria-labelledby="metadata-tab">
+              <div id="suggestions-bar" class="suggestions-bar"><div><strong>New Paperless suggestions</strong><p>Only values that differ from the current metadata appear.</p></div></div>
+              <div id="suggestion-status" class="notice warning" role="status" hidden></div>
+              <form id="metadata-form" class="metadata-form">
+                <label>Title<input id="field-title" name="title" value="Northline Energy — payment confirmation — 2026-10-14"></label>
+                <button class="suggestion-link" type="button" data-suggestion="title" data-apply="title"><small>Paperless AI · suggested title</small><span id="suggested-title">Northline Energy — payment confirmation — 2026-10-14</span></button>
+                <div class="field-pair">
+                  <div><label>Correspondent<input id="field-correspondent" name="correspondent" value="Northline Energy" list="correspondents"></label><datalist id="correspondents"><option value="Northline Energy"></option><option value="Cedar Dental"></option><option value="Harbor Bank"></option></datalist><button class="suggestion-link" type="button" data-suggestion="correspondent" data-apply="correspondent"><small>Traditional · existing #18</small><span id="suggested-correspondent">Northline Energy</span></button></div>
+                  <div><label>Document type<input id="field-type" name="type" value="Receipt" list="document-types"></label><datalist id="document-types"><option value="Receipt"></option><option value="Invoice"></option><option value="Statement"></option><option value="Payment confirmation"></option></datalist><button class="suggestion-link" type="button" data-suggestion="type" data-apply="type"><small id="type-provenance">Paperless AI · new name</small><span id="suggested-type">Payment confirmation</span></button></div>
+                </div>
+                <div class="field-pair"><label>Document date<input id="field-date" name="date" type="date" value="2026-10-14"></label><label>Storage path<select id="field-storage" name="storage"><option>Household / Utilities</option><option>Household / Health</option><option>Household / Banking</option></select></label></div>
+                <div id="custom-metadata-fields" class="custom-metadata-fields" hidden></div>
+                <div class="tag-field"><label for="tag-input">Tags <small>Remove with ×, or type a new tag and press Enter.</small></label><div id="tag-editor" class="tag-editor"><div id="tag-pills" class="tag-pills"></div><input id="tag-input" aria-label="Add a tag" placeholder="Add tag"></div><input id="field-tags" name="tags" type="hidden" value="Inbox, Utilities"></div>
+              </form>
+            </div>
+            <div id="actions-panel" role="tabpanel" aria-labelledby="actions-tab" hidden>
+              <div class="decision-panel">
+                <span id="disposition-heading" class="sr-only">OWL analysis</span><strong id="assessment-title" class="sr-only">No suggested actions</strong><span id="assessment-icon" class="sr-only" aria-hidden="true">✓</span><p id="assessment-reason" class="sr-only">A completed payment is evidence, not a new obligation.</p>
+                <div id="stale-notice" class="notice warning" hidden>Metadata changed. Re-evaluate OWL’s assessment, or make your own decision.</div>
+                <button id="analyze" class="analysis-button" type="button" hidden>Re-evaluate assessment</button>
+                <div class="actions-toolbar"><div><strong>Actions related to this document</strong><p><span id="assessment-confidence">96% confidence</span> · <span id="assessment-time">Evaluated 2 minutes ago</span> · <span id="freshness" class="pill success">Current · source r12</span></p></div><button id="new-action" type="button">+ New action</button></div>
+                <div id="action-candidates" class="action-candidates"></div>
+                <div id="no-action-state" class="no-action-state"><strong id="no-action-title">No action details to confirm</strong><p id="no-action-message">File the document when its metadata is ready, or keep it in Inbox for another reviewer.</p></div>
+              </div>
+            </div>
+            <div id="ocr-panel" role="tabpanel" aria-labelledby="ocr-tab" hidden>
+              <div class="ocr-review">
+                <div class="ocr-score"><div><span>OCR quality</span><strong id="ocr-score">96</strong><small>/ 100</small></div><span id="ocr-status" class="pill success">Text ready</span></div>
+                <div class="ocr-facts"><div><span>Language</span><strong id="ocr-language">English</strong></div><div><span>Pages</span><strong id="ocr-pages">1 page</strong></div><div><span>Orientation</span><strong id="ocr-orientation">Correct</strong></div><div><span>Low-confidence regions</span><strong id="ocr-regions">0 detected</strong></div></div>
+                <label class="ocr-text-label">Searchable OCR text<textarea id="ocr-text" rows="10" readonly></textarea></label>
+                <div class="ocr-actions"><p>Use OCR review when poor recognition could affect metadata or action extraction.</p><button id="rerun-ocr" type="button">Re-run OCR</button></div>
+              </div>
+            </div>
+            <div class="workspace-footer">
+              <div><span id="revision-label">Loaded Paperless revision r12</span><p id="routing-help">Save metadata without leaving Inbox, or finish filing this document.</p></div>
+              <div class="workspace-actions"><button id="needs-review" type="button">Defer &amp; next</button><button id="save-metadata" type="submit" form="metadata-form" disabled>Save changes</button><button id="file-document" type="button" class="primary">Save &amp; file</button><button id="confirm-action" type="button" class="primary" hidden>Confirm action &amp; file</button></div>
+            </div>
+            <span id="analysis-hint" class="sr-only">Evaluated against saved metadata.</span>
+          </section>
+        </div>
+
+        <div class="review-column">
+          <section class="card preview-card" aria-labelledby="source-heading">
+            <div class="panel-heading"><h2 id="source-heading">Payment confirmation</h2><button id="paperless-link" type="button" class="text-button">Open in Paperless ↗</button></div>
+            <div class="source-metadata-strip"><div><span>Date</span><strong id="preview-metadata-date">Oct 14, 2026</strong></div><div><span>Correspondent</span><strong id="preview-metadata-correspondent">Northline Energy</strong></div><div><span>Type</span><strong id="preview-metadata-type">Receipt</strong></div></div>
+            <div class="preview-toolbar"><span>Illustrative document preview</span><span>1 / 1 <button id="zoom-preview" type="button" aria-pressed="false">Zoom +</button></span></div>
+            <div class="document-canvas">
+              <article class="paper" aria-label="Synthetic document text">
+                <div class="paper-wordmark" id="paper-provider">NORTHLINE ENERGY</div>
+                <p class="paper-kicker" id="paper-kind">PAYMENT CONFIRMATION</p>
+                <h3 id="paper-title">Thank you for your payment.</h3>
+                <p id="paper-description">Your payment has been received and the account balance is $0.00.</p>
+                <dl class="paper-details"><div><dt>Document date</dt><dd id="paper-date">October 14, 2026</dd></div><div><dt>Account</dt><dd>•••• 4821</dd></div><div><dt id="paper-amount-label">Amount received</dt><dd id="paper-amount">$84.20</dd></div></dl>
+                <div id="paper-callout" class="paper-callout">PAYMENT RECEIVED · BALANCE $0.00</div>
+                <div class="paper-lines" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+                <p class="paper-footnote">Fictional sample for design review. All document content is synthetic.</p>
+              </article>
+            </div>
+            <div class="preview-footer"><span id="source-id">Paperless #1042</span><button id="source-status-info" type="button" class="source-status">OCR text ready · original file</button><span class="pill neutral">Inbox</span></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section id="actions" class="screen" aria-labelledby="actions-heading" hidden>
+      <div class="page-heading"><div><h1 id="actions-heading">Action Queue</h1><p>Review suggested actions whether or not their source documents have already been filed from Inbox.</p></div><a href="#intake" class="button">Back to intake</a></div>
+      <div id="pending-action-review" class="action-review-layout">
+        <section class="card action-decision">
+          <div class="workspace-header">
+            <div class="workspace-tabs" role="tablist" aria-label="Action Queue review details">
+              <button id="queue-metadata-tab" type="button" role="tab" aria-selected="false" aria-controls="queue-metadata-panel">Metadata</button>
+              <button id="queue-actions-tab" type="button" role="tab" aria-selected="true" aria-controls="queue-actions-panel">Actions <span id="queue-action-count" class="tab-count">1</span></button>
+              <button id="queue-ocr-tab" type="button" role="tab" aria-selected="false" aria-controls="queue-ocr-panel">OCR <span id="queue-ocr-quality-count" class="tab-count">94</span></button>
+            </div>
+            <div class="workspace-tools"><button id="queue-refresh" type="button">Refresh analysis</button><span id="review-confidence" class="pill warning">94% confidence</span></div>
+          </div>
+          <div id="queue-metadata-panel" class="queue-metadata-panel" role="tabpanel" aria-labelledby="queue-metadata-tab" hidden>
+            <div class="metadata-summary"><div><span>Title</span><strong id="queue-metadata-title">Cedar Dental — invoice — 2026-10-15</strong></div><div><span>Correspondent</span><strong id="queue-metadata-correspondent">Cedar Dental</strong></div><div><span>Document type</span><strong id="queue-metadata-type">Invoice</strong></div><div><span>Document date</span><strong id="queue-metadata-date">October 15, 2026</strong></div></div>
+            <div id="queue-custom-metadata" class="queue-custom-metadata"></div>
+          </div>
+          <div id="queue-actions-panel" role="tabpanel" aria-labelledby="queue-actions-tab">
+            <div class="queue-action-summary"><div><h2 id="review-action-title">Cedar Dental invoice actions</h2><p id="review-action-subtitle" class="muted">Paperless #1043 · proposed actions</p></div><button id="queue-new-action" type="button">+ New action</button></div>
+            <div id="queue-action-candidates" class="action-candidates"></div>
+            <details class="review-evidence"><summary>Why OWL suggested this work</summary><p id="review-reason">An unpaid balance is due October 30. Confirm the obligation before it becomes trusted work.</p></details>
+          </div>
+          <div id="queue-ocr-panel" role="tabpanel" aria-labelledby="queue-ocr-tab" hidden>
+            <div class="ocr-review compact"><div class="ocr-score"><div><span>OCR quality</span><strong id="queue-ocr-score">94</strong><small>/ 100</small></div><span id="queue-ocr-status" class="pill success">Good quality</span></div><label class="ocr-text-label">Searchable OCR text<textarea id="queue-ocr-text" rows="12" readonly></textarea></label></div>
+          </div>
+          <div class="review-actions"><button id="review-no-action" type="button">No actions needed</button><button id="review-needs-review" type="button">Defer &amp; next</button><button id="review-save" type="button" disabled>Save corrections</button><button id="review-confirm" type="button" class="primary">Confirm actions</button></div>
+          <p class="field-help">The Action Queue defaults to Actions. Metadata remains available when the source classification needs correction.</p>
+        </section>
+        <section class="card review-source">
+          <div class="panel-heading"><h2>Source evidence</h2><button id="review-paperless-link" type="button" class="text-button">Open in Paperless ↗</button></div>
+          <div class="source-metadata-strip"><div><span>Date</span><strong id="queue-preview-date">Oct 15, 2026</strong></div><div><span>Correspondent</span><strong id="queue-preview-correspondent">Cedar Dental</strong></div><div><span>Type</span><strong id="queue-preview-type">Invoice</strong></div></div>
+          <div class="review-source-sheet"><span id="review-source-kind">INVOICE</span><h3 id="review-source-title">Your account statement.</h3><p id="review-source-description">Services have been billed. Please arrange payment of the balance shown below by October 30, 2026.</p><div id="review-source-callout" class="paper-callout">BALANCE DUE · October 30, 2026</div></div>
+        </section>
+      </div>
+      <section class="card confirmed-actions"><div class="panel-heading"><h2>Confirmed actions</h2><span id="confirmed-count" class="pill neutral">1 active</span></div><div id="trusted-actions"></div></section>
+    </section>
+
+    <section id="history" class="screen" aria-labelledby="history-heading" hidden>
+      <div class="page-heading"><div><p class="eyebrow">03 / AUDIT &amp; QUALITY</p><h1 id="history-heading">Review no-action decisions.</h1><p>Inspect automated decisions, review quality samples, and reopen anything that needs attention.</p></div><a href="#intake" class="button">Return to intake →</a></div>
+      <div class="card filters"><label>Decision source<select id="history-source"><option value="all">All decisions</option><option value="Automated">Automated</option><option value="Human">Human-confirmed</option></select></label><label>Confidence<select id="history-confidence"><option value="all">All confidence bands</option><option value="high">High · 90–100%</option><option value="lower">Below 90%</option></select></label><label class="checkbox-filter"><input id="history-sampled" type="checkbox"> Quality samples only</label><span id="history-count" class="muted"></span></div>
+      <div class="two-column history-layout">
+        <section class="card table-card"><table><caption class="sr-only">No-action audit history</caption><thead><tr><th scope="col">Document / decision</th><th scope="col">Source</th><th scope="col">Confidence</th><th scope="col">Review</th></tr></thead><tbody id="history-rows"></tbody></table><p id="history-empty" class="empty-state" hidden>No decisions match these filters.</p></section>
+        <aside class="card padded"><p class="eyebrow">QUALITY SAMPLING</p><h2>Trust, with a feedback loop.</h2><p>Send a bounded sample of confident automated no-action decisions back for human audit.</p><label class="range-label" for="sample-rate">Sampling rate <output id="sample-output" for="sample-rate">5%</output><input id="sample-rate" type="range" min="0" max="20" value="5" step="1"></label><p class="field-help">Proposal: sample up to 10 documents per run. This demo setting does not change server configuration.</p><div class="notice info">Quality samples go to Needs Review and stay outside Mission Control.</div><h3>Every decision keeps</h3><ul class="check-list"><li>Who decided, when, and why</li><li>Confidence and analyzer version</li><li>Evaluated source fingerprint</li><li>Reopen and correction trail</li></ul><p class="field-help">The audit view retains provenance while excluding full OCR text and exact protected identifiers.</p></aside>
+      </div>
+    </section>
+
+    <section id="processing" class="screen" aria-labelledby="processing-heading" hidden>
+      <div class="page-heading"><div><p class="eyebrow">04 / DISCOVERY &amp; FRESHNESS</p><h1 id="processing-heading">Process changes, not the whole archive.</h1><p>Native Paperless metadata feeds targeted OWL analysis. Existing Paperless web and mobile workflows stay supported.</p></div><button id="discover" type="button" class="primary">Discover changed documents</button></div>
+      <div class="summary-grid"><div class="card metric"><span>Discovery cursor · UTC</span><strong class="small-value" id="cursor-value">Oct 16 · 05:58</strong><small>Modified time + document ID · overlap enabled</small></div><div class="card metric"><span>Analysis freshness</span><strong id="freshness-metric">1 stale</strong><small>Only affected stages rerun</small></div><div class="card metric"><span>Safety net</span><strong class="small-value">Incremental reconciliation</strong><small>Recovers missed webhook events</small></div></div>
+      <div class="two-column">
+        <section class="card"><div class="panel-heading"><h2>Changed-document processing</h2><span class="pill success">Simulation</span></div><ol class="pipeline"><li><span class="step-number">1</span><div><h3>Discover</h3><p>Webhook or cursor-based reconciliation. Inbox membership is not an eligibility gate.</p></div></li><li><span class="step-number">2</span><div><h3>Compare fingerprint</h3><p>Effective file / OCR, material metadata, governed inputs, analyzer, prompt, and rules versions.</p></div></li><li><span class="step-number">3</span><div><h3>Coalesce &amp; analyze</h3><p>Debounce saved changes. Reuse unaffected deterministic results. Reject stale run results.</p></div></li><li><span class="step-number">4</span><div><h3>Route</h3><p>Trusted action → Action Queue. Uncertain → Needs Review. No action → auditable history.</p></div></li></ol><div class="padded"><div class="notice info">An OWL-only projection change is ignored unless it changes a real analyzer input. Confirmed decisions are not silently replaced.</div></div></section>
+        <section class="card padded"><p class="eyebrow">BOUNDED REPROCESSING</p><h2>Preview before running.</h2><form id="backfill-form"><label>Scope<select id="backfill-scope"><option value="date">Document date range</option><option value="ids">Paperless ID range</option><option value="view">Saved view</option></select></label><div id="date-scope" class="field-pair scope-fields"><label>From<input type="date" value="2026-10-01" id="backfill-from" required></label><label>Through<input type="date" value="2026-10-16" id="backfill-through" required></label></div><div id="ids-scope" class="field-pair scope-fields" hidden><label>First ID<input type="number" min="1" value="1040" id="backfill-first" disabled required></label><label>Last ID<input type="number" min="1" value="1050" id="backfill-last" disabled required></label></div><label id="view-scope" class="scope-fields" hidden>Saved view<select id="backfill-view" disabled><option>Recent utilities</option><option>Needs metadata review</option></select></label><button type="submit">Preview affected documents</button></form><div id="backfill-preview" class="notice info" role="status" hidden></div><button id="run-backfill" type="button" class="primary" hidden>Run scoped analysis</button><p class="field-help">Demo counts are illustrative, not a query against your archive. No full-corpus default.</p></section>
+      </div>
+      <section class="card processing-events"><div class="panel-heading"><h2>Recent processing events</h2><span class="muted">All timestamps UTC · illustrative</span></div><div id="event-list"><div class="event"><time>05:58:12</time><span class="pill warning">Stale</span><div><strong>#1050 · Correspondent edited in Paperless mobile</strong><p>Material input changed · targeted rerun queued · prior confirmed action preserved</p></div></div><div class="event"><time>05:57:48</time><span class="pill neutral">Skipped</span><div><strong>#1039 · OWL status projection updated</strong><p>Analyzer inputs unchanged · no recursive run</p></div></div><div class="event"><time>05:56:04</time><span class="pill success">Recovered</span><div><strong>#1048 · Missed webhook recovered</strong><p>Cursor overlap discovered document · idempotent analysis scheduled</p></div></div></div></section>
+    </section>
+  </main>
+  <footer class="prototype-footer"><span>Proposed UX, not an implemented integration.</span><span>Scope: <a href="https://github.com/rsocko/owl/issues/239">intake #239</a> · <a href="https://github.com/rsocko/owl/issues/231">native suggestions #231</a> · <a href="https://github.com/rsocko/owl/issues/260">reanalysis #260</a></span><span><a href="../index.html">All mockups</a> · <a href="../triage-correction/triage-unified.html">Earlier triage mockup</a></span></footer>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <dialog id="prototype-guide-dialog" aria-labelledby="prototype-guide-heading">
+    <form method="dialog"><button class="dialog-close" aria-label="Close mode explanation">×</button></form>
+    <h2 id="prototype-guide-heading">How the proposed workspaces differ</h2>
+    <dl class="mode-list">
+      <div><dt>Intake review</dt><dd>Verify metadata, correct or add actions, then file, confirm, or defer to the next Inbox document.</dd></div>
+      <div><dt>Action Queue</dt><dd>Uses the same editor with Actions selected by default. Correct, add, dismiss, complete, or confirm pending work.</dd></div>
+      <div><dt>History and Processing</dt><dd>Support audit, quality sampling, and operational troubleshooting outside the fast triage path.</dd></div>
+    </dl>
+    <p class="notice info">The blue prototype bar and Demo state selector are review aids. They are not proposed product UI.</p>
+  </dialog>
+  <dialog id="source-status-dialog" aria-labelledby="source-status-heading">
+    <form method="dialog"><button class="dialog-close" aria-label="Close source status explanation">×</button></form>
+    <h2 id="source-status-heading">OCR text ready · original file</h2>
+    <p>OWL can search and analyze the document’s OCR text. “Original file” means the preview is based on the current Paperless file, with no replacement or transformed file selected.</p>
+    <p class="field-help">The earlier “effective file v1” label described an internal fingerprint input. It is intentionally removed from the triage UI.</p>
+  </dialog>
+  <dialog id="conflict-dialog" aria-labelledby="conflict-heading">
+    <form method="dialog"><button class="dialog-close" aria-label="Close conflict dialog">×</button></form>
+    <p class="eyebrow">EXTERNAL EDIT DETECTED</p><h2 id="conflict-heading">Paperless changed while you reviewed.</h2>
+    <p>Nothing was overwritten. Review the changed field before choosing which value to keep.</p>
+    <div class="conflict-grid"><div><small>Your unsaved title</small><strong id="conflict-local"></strong><span id="conflict-local-revision"></span></div><div><small>Current Paperless title</small><strong id="conflict-remote"></strong><span id="conflict-remote-revision"></span></div></div>
+    <p class="field-help">This scenario changes only the title. Other draft fields remain intact. Re-edit refreshes the source revision and preserves your draft.</p>
+    <div class="dialog-actions"><button id="keep-paperless" type="button">Keep Paperless title</button><button id="re-edit" type="button">Re-edit my draft</button><button id="apply-owl" type="button" class="primary">Apply my title instead</button></div>
+  </dialog>
+  <dialog id="taxonomy-dialog" aria-labelledby="taxonomy-heading">
+    <form method="dialog"><button class="dialog-close" aria-label="Cancel creating document type">×</button></form>
+    <p class="eyebrow">NEW TAXONOMY VALUE</p><h2 id="taxonomy-heading">Create “Payment confirmation”?</h2><p>Paperless AI suggested a name, not an existing document-type ID. Creating a taxonomy value requires permission and explicit approval.</p>
+    <p class="notice info">Demo only: approval stages the value. Save metadata remains a separate action.</p>
+    <div class="dialog-actions"><button id="cancel-taxonomy" type="button">Keep existing type</button><button id="create-taxonomy" type="button" class="primary">Approve &amp; use new type</button></div>
+  </dialog>
+  <dialog id="audit-dialog" aria-labelledby="audit-heading">
+    <form method="dialog"><button class="dialog-close" aria-label="Close decision details">×</button></form>
+    <p class="eyebrow">NO-ACTION DECISION · AUDIT DETAIL</p><h2 id="audit-heading"></h2>
+    <p id="audit-reason"></p><p id="audit-provenance"></p>
+    <p id="audit-superseded" class="notice warning" hidden>A newer disposition superseded this decision. This record is read-only; the current action or intake workspace owns further changes.</p>
+    <div class="notice info">Illustrative source excerpt · “For your records. This document is not a request for payment.”</div>
+    <p>In the proposed product, the original Paperless document opens alongside this decision. This prototype uses synthetic source excerpts only.</p>
+    <div class="dialog-actions"><button id="audit-reopen" type="button">Send to Needs Review</button><button id="audit-confirm" type="button" class="primary">Confirm no action needed</button></div>
+  </dialog>
+</body>
+</html>
