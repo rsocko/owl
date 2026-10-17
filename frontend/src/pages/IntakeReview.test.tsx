@@ -96,7 +96,6 @@ function core(id: number) {
     preview_url: `/preview/${id}`,
     paperless_url: `https://paperless.test/documents/${id}/details`,
     write_enabled: true,
-    monitor_tags: ['Inbox'],
   };
 }
 
@@ -120,7 +119,6 @@ describe('IntakeReview', () => {
       ],
       total: 2,
       next_cursor: null,
-      monitor_tags: ['Inbox'],
     });
     documentCoreMock.mockImplementation((id: number) => Promise.resolve(core(id)));
     documentSuggestionsMock.mockResolvedValue({
@@ -440,7 +438,6 @@ describe('IntakeReview', () => {
         ],
         total: 2,
         next_cursor: null,
-        monitor_tags: ['Inbox'],
       } : {
         documents: [
           { id: 1, title: 'Document 1', created: '2026-10-14', thumbnail_url: '/thumb/1', pending_action_count: 0, document_type_name: 'Bill' },
@@ -448,7 +445,6 @@ describe('IntakeReview', () => {
         ],
         total: 2,
         next_cursor: null,
-        monitor_tags: ['Inbox'],
       },
     ));
     documentCoreMock.mockImplementation((id: number) => Promise.resolve({
@@ -480,7 +476,6 @@ describe('IntakeReview', () => {
         ],
         total: 213,
         next_cursor: '2',
-        monitor_tags: ['Inbox'],
       })
       .mockResolvedValueOnce({
         documents: [
@@ -488,7 +483,6 @@ describe('IntakeReview', () => {
         ],
         total: 213,
         next_cursor: '3',
-        monitor_tags: ['Inbox'],
       });
 
     renderPage();
