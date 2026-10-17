@@ -58,45 +58,48 @@
         </aside>
 
         <div class="metadata-column">
-          <section class="card" aria-labelledby="metadata-heading">
-            <div class="panel-heading"><h2 id="metadata-heading">Document metadata</h2><span id="save-state" class="pill neutral">No unsaved changes</span></div>
-            <div id="suggestions-bar" class="suggestions-bar"><div><strong>New Paperless suggestions</strong><p>Only values that differ from the current metadata appear.</p></div><button id="refresh-suggestions" type="button">Refresh</button></div>
-            <div id="suggestion-status" class="notice warning" role="status" hidden></div>
-            <form id="metadata-form" class="metadata-form">
-              <label>Title<input id="field-title" name="title" value="Northline Energy — payment confirmation — 2026-10-14"></label>
-              <button class="suggestion-link" type="button" data-suggestion="title" data-apply="title"><small>Paperless AI · suggested title</small><span id="suggested-title">Northline Energy — payment confirmation — 2026-10-14</span></button>
-              <div class="field-pair">
-                <div><label>Correspondent<input id="field-correspondent" name="correspondent" value="Northline Energy" list="correspondents"></label><datalist id="correspondents"><option value="Northline Energy"></option><option value="Cedar Dental"></option><option value="Harbor Bank"></option></datalist><button class="suggestion-link" type="button" data-suggestion="correspondent" data-apply="correspondent"><small>Traditional · existing #18</small><span id="suggested-correspondent">Northline Energy</span></button></div>
-                <div><label>Document type<input id="field-type" name="type" value="Receipt" list="document-types"></label><datalist id="document-types"><option value="Receipt"></option><option value="Invoice"></option><option value="Statement"></option><option value="Payment confirmation"></option></datalist><button class="suggestion-link" type="button" data-suggestion="type" data-apply="type"><small id="type-provenance">Paperless AI · new name</small><span id="suggested-type">Payment confirmation</span></button></div>
-              </div>
-              <div class="field-pair"><label>Document date<input id="field-date" name="date" type="date" value="2026-10-14"></label><label>Storage path<select id="field-storage" name="storage"><option>Household / Utilities</option><option>Household / Health</option><option>Household / Banking</option></select></label></div>
-              <div class="tag-field"><label for="tag-input">Tags <small>Remove with ×, or type a new tag and press Enter.</small></label><div id="tag-editor" class="tag-editor"><div id="tag-pills" class="tag-pills"></div><input id="tag-input" aria-label="Add a tag" placeholder="Add tag"></div><input id="field-tags" name="tags" type="hidden" value="Inbox, Utilities"></div>
-              <div class="save-row"><span id="revision-label">Loaded Paperless revision r12</span><button id="save-metadata" type="submit" disabled>Save metadata only</button></div>
-            </form>
-          </section>
-          <section class="card decision-panel" aria-labelledby="assessment-title">
-            <div class="decision-summary">
-              <span id="assessment-icon" class="assessment-icon" aria-hidden="true">✓</span>
-              <div><span id="disposition-heading" class="decision-label">Ready to file</span><h2 id="assessment-title">No action needed</h2><p id="assessment-reason">A completed payment is evidence, not a new obligation. Keep it available for statement matching.</p><div class="inline-meta"><span id="assessment-confidence">96% confidence</span><span id="assessment-time">Evaluated 2 minutes ago</span></div></div>
-              <span id="freshness" class="pill success">Current · source r12</span>
+          <section class="card intake-workspace" aria-label="Document metadata and suggested actions">
+            <div class="workspace-tabs" role="tablist" aria-label="Review details">
+              <button id="metadata-tab" type="button" role="tab" aria-selected="true" aria-controls="metadata-panel">Metadata</button>
+              <button id="actions-tab" type="button" role="tab" aria-selected="false" aria-controls="actions-panel">Actions <span id="intake-action-count" class="tab-count">0</span></button>
+              <span id="save-state" class="pill neutral">No unsaved changes</span>
             </div>
-            <div id="stale-notice" class="notice warning" hidden>Metadata changed. Re-evaluate OWL’s assessment, or make your own decision.</div>
-            <button id="analyze" class="analysis-button" type="button" hidden>Re-evaluate assessment</button>
-            <div id="action-intake-workspace" class="action-intake-workspace" hidden>
-              <div class="decision-tabs" role="tablist" aria-label="Intake decision">
-                <button id="file-tab" type="button" role="tab" aria-selected="true" aria-controls="file-panel">File document</button>
-                <button id="action-tab" type="button" role="tab" aria-selected="false" aria-controls="action-panel">Action details <span class="tab-status">Suggested</span></button>
-              </div>
-              <div id="file-panel" class="decision-tab-panel" role="tabpanel" aria-labelledby="file-tab">
-                <div><strong>Finish the Inbox cleanup now</strong><p>Save the metadata and remove the Inbox tag. The suggested PAY action will remain in Action Queue for later review.</p></div>
-                <div class="disposition-actions"><button id="needs-review" type="button">Keep in Inbox</button><button id="file-document" type="button" class="primary">Save &amp; file</button></div>
-              </div>
-              <div id="action-panel" class="decision-tab-panel action-inline-review" role="tabpanel" aria-labelledby="action-tab" hidden>
-                <div class="inline-action-fields"><div><span>Payee</span><strong id="intake-action-payee">Cedar Dental</strong></div><div><span>Amount due</span><strong id="intake-action-amount">$128.00</strong></div><div><span>Due date</span><strong id="intake-action-due">October 30, 2026</strong></div><div><span>Reference</span><strong id="intake-action-reference">Account •••• 4821</strong></div></div>
-                <div class="inline-action-footer"><p>Confirming creates trusted work and files the document in one step. It does not mark the obligation paid.</p><div class="disposition-actions"><button id="file-only" type="button">File only</button><button id="confirm-action" type="button" class="primary">Confirm action &amp; file</button></div></div>
+            <div id="metadata-panel" role="tabpanel" aria-labelledby="metadata-tab">
+              <div id="suggestions-bar" class="suggestions-bar"><div><strong>New Paperless suggestions</strong><p>Only values that differ from the current metadata appear.</p></div><button id="refresh-suggestions" type="button">Refresh</button></div>
+              <div id="suggestion-status" class="notice warning" role="status" hidden></div>
+              <form id="metadata-form" class="metadata-form">
+                <label>Title<input id="field-title" name="title" value="Northline Energy — payment confirmation — 2026-10-14"></label>
+                <button class="suggestion-link" type="button" data-suggestion="title" data-apply="title"><small>Paperless AI · suggested title</small><span id="suggested-title">Northline Energy — payment confirmation — 2026-10-14</span></button>
+                <div class="field-pair">
+                  <div><label>Correspondent<input id="field-correspondent" name="correspondent" value="Northline Energy" list="correspondents"></label><datalist id="correspondents"><option value="Northline Energy"></option><option value="Cedar Dental"></option><option value="Harbor Bank"></option></datalist><button class="suggestion-link" type="button" data-suggestion="correspondent" data-apply="correspondent"><small>Traditional · existing #18</small><span id="suggested-correspondent">Northline Energy</span></button></div>
+                  <div><label>Document type<input id="field-type" name="type" value="Receipt" list="document-types"></label><datalist id="document-types"><option value="Receipt"></option><option value="Invoice"></option><option value="Statement"></option><option value="Payment confirmation"></option></datalist><button class="suggestion-link" type="button" data-suggestion="type" data-apply="type"><small id="type-provenance">Paperless AI · new name</small><span id="suggested-type">Payment confirmation</span></button></div>
+                </div>
+                <div class="field-pair"><label>Document date<input id="field-date" name="date" type="date" value="2026-10-14"></label><label>Storage path<select id="field-storage" name="storage"><option>Household / Utilities</option><option>Household / Health</option><option>Household / Banking</option></select></label></div>
+                <div class="tag-field"><label for="tag-input">Tags <small>Remove with ×, or type a new tag and press Enter.</small></label><div id="tag-editor" class="tag-editor"><div id="tag-pills" class="tag-pills"></div><input id="tag-input" aria-label="Add a tag" placeholder="Add tag"></div><input id="field-tags" name="tags" type="hidden" value="Inbox, Utilities"></div>
+              </form>
+            </div>
+            <div id="actions-panel" role="tabpanel" aria-labelledby="actions-tab" hidden>
+              <div class="decision-panel">
+                <div class="decision-summary">
+                  <span id="assessment-icon" class="assessment-icon" aria-hidden="true">✓</span>
+                  <div><span id="disposition-heading" class="decision-label">Ready to file</span><h2 id="assessment-title">No action needed</h2><p id="assessment-reason">A completed payment is evidence, not a new obligation. Keep it available for statement matching.</p><div class="inline-meta"><span id="assessment-confidence">96% confidence</span><span id="assessment-time">Evaluated 2 minutes ago</span></div></div>
+                  <span id="freshness" class="pill success">Current · source r12</span>
+                </div>
+                <div id="stale-notice" class="notice warning" hidden>Metadata changed. Re-evaluate OWL’s assessment, or make your own decision.</div>
+                <button id="analyze" class="analysis-button" type="button" hidden>Re-evaluate assessment</button>
+                <div id="action-candidates" class="action-candidates" hidden>
+                  <article class="action-candidate-card">
+                    <div class="action-candidate-heading"><span class="pill purple">PAY</span><strong id="intake-action-title">Pay Cedar Dental invoice</strong><span class="muted">Suggested action 1</span></div>
+                    <div class="inline-action-fields"><div><span>Payee</span><strong id="intake-action-payee">Cedar Dental</strong></div><div><span>Amount due</span><strong id="intake-action-amount">$128.00</strong></div><div><span>Due date</span><strong id="intake-action-due">October 30, 2026</strong></div><div><span>Reference</span><strong id="intake-action-reference">Account •••• 4821</strong></div></div>
+                  </article>
+                </div>
+                <div id="no-action-state" class="no-action-state"><strong id="no-action-title">No action details to confirm</strong><p id="no-action-message">File the document when its metadata is ready, or keep it in Inbox for another reviewer.</p></div>
               </div>
             </div>
-            <div id="standard-decision-footer" class="decision-footer"><p id="routing-help">Saves metadata, removes Inbox, and records no action. Matching remains enabled.</p><div class="disposition-actions"><button id="standard-needs-review" type="button">Needs review</button><button id="standard-file-document" type="button" class="primary">Save &amp; file</button></div></div>
+            <div class="workspace-footer">
+              <div><span id="revision-label">Loaded Paperless revision r12</span><p id="routing-help">Save metadata without leaving Inbox, or finish filing this document.</p></div>
+              <div class="workspace-actions"><button id="needs-review" type="button">Keep in Inbox</button><button id="save-metadata" type="submit" form="metadata-form" disabled>Save metadata</button><button id="file-document" type="button" class="primary">Save &amp; file</button><button id="confirm-action" type="button" class="primary" hidden>Confirm action &amp; file</button></div>
+            </div>
             <span id="analysis-hint" class="sr-only">Evaluated against saved metadata.</span>
           </section>
         </div>

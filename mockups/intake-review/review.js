@@ -57,6 +57,7 @@ let toastTimer;
 let previewScope = null;
 let auditEntry = null;
 let actionReviewDocument = null;
+let activeWorkspaceTab = "metadata";
 const selection = new Set();
 const existingTypes = new Set(["Receipt", "Invoice", "Statement"]);
 
@@ -193,7 +194,6 @@ function loadDocument() {
   document.querySelector('[data-suggestion="correspondent"] small').textContent = `Traditional · existing #${current.correspondentId}`;
   byId("suggested-type").textContent = current.suggestedType;
   byId("type-provenance").textContent = existingTypes.has(current.suggestedType) ? "Traditional · existing type" : "Paperless AI · new name";
-  byId("metadata-heading").textContent = "Document metadata";
   byId("assessment-title").textContent = current.assessment === "pay" ? "PAY · provisional action" : current.assessment === "review" ? "Needs human review" : "No action needed";
   byId("assessment-reason").textContent = current.reason;
   byId("assessment-confidence").textContent = `${current.confidence}% confidence`;
@@ -201,20 +201,19 @@ function loadDocument() {
   const actionCandidate = current.assessment === "pay";
   const uncertain = current.assessment === "review";
   byId("disposition-heading").textContent = actionCandidate ? "Proposed action found" : uncertain ? "Needs a closer look" : "Ready to file";
-  byId("routing-help").textContent = actionCandidate
-    ? "File the source now, or validate the suggested action without leaving Intake."
-    : uncertain
-      ? "Keep this document in review without creating trusted work."
-      : "Saves metadata, removes Inbox, and records no action. Matching remains enabled.";
-  byId("action-intake-workspace").hidden = !actionCandidate;
-  byId("standard-decision-footer").hidden = actionCandidate;
-  byId("standard-file-document").hidden = uncertain;
-  byId("standard-needs-review").textContent = uncertain ? "Keep in Needs Review" : "Needs review";
+  byId("intake-action-count").textContent = actionCandidate ? "1" : "0";
+  byId("action-candidates").hidden = !actionCandidate;
+  byId("no-action-state").hidden = actionCandidate;
+  byId("no-action-title").textContent = uncertain ? "Action details need human interpretation" : "No action details to confirm";
+  byId("no-action-message").textContent = uncertain
+    ? "The source may require a response, but the deadline and obligation were not reliably extracted."
+    : "File the document when its metadata is ready, or keep it in Inbox for another reviewer.";
+  byId("intake-action-title").textContent = `Pay ${current.provider} invoice`;
   byId("intake-action-payee").textContent = current.provider;
   byId("intake-action-amount").textContent = current.amount;
   byId("intake-action-due").textContent = current.due || "Not extracted";
   byId("intake-action-reference").textContent = current.reference;
-  selectIntakeDecisionTab("file");
+  selectWorkspaceTab("metadata");
   updateSuggestionVisibility();
   dirty = false;
   byId("revision-label").textContent = `Loaded Paperless revision r${current.revision}`;
@@ -238,11 +237,8 @@ function updateControls() {
   byId("save-state").textContent = dirty ? "Unsaved changes" : "No unsaved changes";
   byId("save-state").className = `pill ${dirty ? "warning" : "neutral"}`;
   byId("file-document").disabled = blocked || analysisRunning;
-  byId("file-only").disabled = blocked || analysisRunning;
-  byId("standard-file-document").disabled = blocked || analysisRunning;
   byId("confirm-action").disabled = blocked || current.assessment !== "pay" || analysisRunning;
   byId("needs-review").disabled = blocked || analysisRunning;
-  byId("standard-needs-review").disabled = blocked || analysisRunning;
   byId("analyze").disabled = dirty || blocked || analysisRunning;
   byId("analyze").textContent = analysisRunning ? "Analyzing…" : "Re-evaluate assessment";
   byId("analysis-hint").textContent = dirty ? "Save metadata before routing or re-evaluating." : current.stale ? "Targeted reanalysis pending · run now to bypass debounce." : "Evaluated against saved metadata.";
@@ -251,13 +247,32 @@ function updateControls() {
   });
   byId("metadata-form").querySelectorAll("input:not([readonly]), select").forEach((field) => { field.disabled = blocked || analysisRunning; });
   byId("tag-pills").querySelectorAll("button").forEach((button) => { button.disabled = blocked || analysisRunning; });
+  updateWorkspaceActions();
 }
-function selectIntakeDecisionTab(tab) {
-  const showAction = tab === "action";
-  byId("file-tab").setAttribute("aria-selected", String(!showAction));
-  byId("action-tab").setAttribute("aria-selected", String(showAction));
-  byId("file-panel").hidden = showAction;
-  byId("action-panel").hidden = !showAction;
+function updateWorkspaceActions() {
+  const showActions = activeWorkspaceTab === "actions";
+  const actionCandidate = current.assessment === "pay";
+  const uncertain = current.assessment === "review";
+  byId("confirm-action").hidden = !showActions || !actionCandidate;
+  byId("file-document").hidden = uncertain;
+  byId("file-document").textContent = showActions && actionCandidate ? "File only" : "Save & file";
+  byId("file-document").classList.toggle("primary", !showActions || !actionCandidate);
+  byId("routing-help").textContent = showActions
+    ? actionCandidate
+      ? "Confirm the suggested action and file, or file only and leave it pending in Action Queue."
+      : uncertain
+        ? "Keep this document in Inbox until the obligation can be interpreted."
+        : "No action was suggested. Filing records a no-action decision and removes Inbox."
+    : "Save metadata without leaving Inbox, or finish filing this document.";
+}
+function selectWorkspaceTab(tab) {
+  activeWorkspaceTab = tab;
+  const showActions = tab === "actions";
+  byId("metadata-tab").setAttribute("aria-selected", String(!showActions));
+  byId("actions-tab").setAttribute("aria-selected", String(showActions));
+  byId("metadata-panel").hidden = showActions;
+  byId("actions-panel").hidden = !showActions;
+  updateWorkspaceActions();
 }
 function markDirty() {
   dirty = fields.some((field) => byId(`field-${field}`).value !== current[field]);
@@ -560,22 +575,7 @@ byId("file-document").addEventListener("click", () => {
   commitMetadata(false);
   routeDocument("filed");
 });
-byId("file-only").addEventListener("click", () => {
-  if (!validateMetadata()) return;
-  commitMetadata(false);
-  routeDocument("filed");
-});
-byId("standard-file-document").addEventListener("click", () => {
-  if (!validateMetadata()) return;
-  commitMetadata(false);
-  routeDocument("filed");
-});
 byId("needs-review").addEventListener("click", () => {
-  if (!validateMetadata()) return;
-  commitMetadata(false);
-  routeDocument("review");
-});
-byId("standard-needs-review").addEventListener("click", () => {
   if (!validateMetadata()) return;
   commitMetadata(false);
   routeDocument("review");
@@ -585,8 +585,18 @@ byId("confirm-action").addEventListener("click", () => {
   commitMetadata(false);
   routeDocument("action");
 });
-byId("file-tab").addEventListener("click", () => selectIntakeDecisionTab("file"));
-byId("action-tab").addEventListener("click", () => selectIntakeDecisionTab("action"));
+byId("metadata-tab").addEventListener("click", () => selectWorkspaceTab("metadata"));
+byId("actions-tab").addEventListener("click", () => selectWorkspaceTab("actions"));
+[byId("metadata-tab"), byId("actions-tab")].forEach((tab, index, tabs) => {
+  tab.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    const nextTab = tabs[nextIndex];
+    selectWorkspaceTab(nextTab === byId("actions-tab") ? "actions" : "metadata");
+    nextTab.focus();
+  });
+});
 byId("review-no-action").addEventListener("click", () => {
   if (!actionReviewDocument) return;
   if (!window.confirm("File this document and record that no action is needed?")) return;
