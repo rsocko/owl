@@ -149,8 +149,9 @@ class TaxonomyCreateRequest(BaseModel):
 class UserActionCreateRequest(BaseModel):
     action_type: str
     title: str = Field(min_length=1, max_length=500)
+    summary: str | None = Field(default=None, max_length=10_000)
     payee_or_owner: str | None = None
-    amount: float | None = None
+    amount: float | None = Field(default=None, ge=0)
     due_date: date | None = None
     reference: str | None = None
 
@@ -170,12 +171,18 @@ class UserActionCreateRequest(BaseModel):
             raise ValueError("title cannot be blank")
         return normalized
 
-    @field_validator("payee_or_owner", "reference")
+    @field_validator("summary", "payee_or_owner", "reference")
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
         return value.strip() or None
+
+    @model_validator(mode="after")
+    def require_payment_amount(self) -> "UserActionCreateRequest":
+        if self.action_type == "PAY" and self.amount is None:
+            raise ValueError("amount is required for PAY actions")
+        return self
 
 
 def _raise_paperless_error(exc: Exception, operation: str) -> None:
@@ -1081,6 +1088,7 @@ async def create_user_action(
             document_title=document.get("title") or f"Document {document_id}",
             action_type=body.action_type,
             title=body.title,
+            summary=body.summary,
             payee_or_owner=body.payee_or_owner,
             amount=body.amount,
             due_date=body.due_date,
