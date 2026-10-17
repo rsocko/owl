@@ -468,10 +468,7 @@ def _relationship_document_payload(
     document: dict[str, Any],
     taxonomies: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
-    catalogs = {
-        key: _catalog_map(taxonomies[key])
-        for key in ("correspondents", "document_types")
-    }
+    catalogs = {key: _catalog_map(taxonomies[key]) for key in ("correspondents", "document_types")}
     document_id = int(document["id"])
     return {
         "id": document_id,
@@ -931,14 +928,12 @@ async def get_intake_relationship_candidates(
             if proposal:
                 recommendation = proposal.to_dict()
             else:
-                same_correspondent = (
-                    current.get("correspondent") is not None
-                    and current.get("correspondent") == document.get("correspondent")
-                )
-                same_type = (
-                    current.get("document_type") is not None
-                    and current.get("document_type") == document.get("document_type")
-                )
+                same_correspondent = current.get("correspondent") is not None and current.get(
+                    "correspondent"
+                ) == document.get("correspondent")
+                same_type = current.get("document_type") is not None and current.get(
+                    "document_type"
+                ) == document.get("document_type")
                 recommendation = {
                     "source_document_id": document_id,
                     "target_document_id": candidate_id,
