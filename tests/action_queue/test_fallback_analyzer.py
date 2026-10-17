@@ -210,6 +210,20 @@ class TestFileDetection:
         assert result["actions"][0]["action_type"] == "PAY"
         assert result["document_assessment"]["requires_action"] is True
 
+    def test_receipt_with_balance_due_routes_to_review(self, analyzer):
+        result = analyzer.analyze_document(
+            {
+                "title": "Payment receipt",
+                "content": "We received your payment. Remaining balance due: $42.00.",
+                "document_type_name": "Receipt",
+                "tag_names": ["Inbox"],
+            }
+        )
+
+        assert result["actions"][0]["action_type"] == "REVIEW"
+        assert result["document_assessment"]["requires_action"] is True
+        assert result["document_assessment"]["overall_confidence"] < 70
+
     def test_tax_form(self, analyzer):
         result = analyzer.analyze_document(
             {

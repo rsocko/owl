@@ -75,6 +75,7 @@ IMPORTANT:
 - If the document requires NO action (informational receipt, old statement, etc.), set "requires_action": false and return an empty actions array.
 - PAY requires clear evidence of an unresolved obligation: an amount currently due, a payment request, or an unpaid balance.
 - Receipts, payment confirmations, and successful-transaction notices record completed payments. Return no action for them, even if they contain an amount, payment URL, provider name, or references to a bill or invoice.
+- If receipt metadata conflicts with text indicating an outstanding balance or payment request, create a REVIEW action instead of PAY so a person can resolve the contradiction.
 - When a receipt refers to a bill or invoice, treat the receipt as reconciliation evidence for that source document; never turn the receipt itself into a new PAY action.
 - If the text is unreadable or too garbled, set text_quality to "unreadable" and requires_action to false.
 
@@ -137,8 +138,8 @@ _OUTSTANDING_PAYMENT_REQUEST = re.compile(
 )
 
 
-def is_non_actionable_receipt(document: dict) -> bool:
-    """Return whether metadata/content identifies a completed-payment receipt."""
+def _receipt_signals(document: dict) -> tuple[bool, bool, bool]:
+    """Return receipt metadata, confirmation text, and outstanding-payment signals."""
     document_type = document.get("document_type_name")
     if not document_type:
         raw_document_type = document.get("document_type")
@@ -151,14 +152,56 @@ def is_non_actionable_receipt(document: dict) -> bool:
     )
     text = f"{document.get('title', '')}\n{document.get('content', '')[:2000]}"
     payment_confirmation = bool(_PAYMENT_CONFIRMATION.search(text))
-    return receipt_metadata or (
-        payment_confirmation and not bool(_OUTSTANDING_PAYMENT_REQUEST.search(text))
-    )
+    outstanding_payment = bool(_OUTSTANDING_PAYMENT_REQUEST.search(text))
+    return receipt_metadata, payment_confirmation, outstanding_payment
 
 
-def receipt_no_action_result(document: dict) -> dict | None:
-    """Build a deterministic no-action result for completed-payment receipts."""
-    if not is_non_actionable_receipt(document):
+def is_non_actionable_receipt(document: dict) -> bool:
+    """Return whether metadata/content identifies an unambiguous completed-payment receipt."""
+    receipt_metadata, payment_confirmation, outstanding_payment = _receipt_signals(document)
+    return (receipt_metadata or payment_confirmation) and not outstanding_payment
+
+
+def receipt_classification_result(document: dict) -> dict | None:
+    """Return a deterministic result for completed or internally contradictory receipts."""
+    receipt_metadata, payment_confirmation, outstanding_payment = _receipt_signals(document)
+    if receipt_metadata and outstanding_payment:
+        return {
+            "actions": [
+                {
+                    "action_type": "REVIEW",
+                    "title": "Review receipt with outstanding balance",
+                    "summary": (
+                        "Receipt metadata conflicts with text indicating an unresolved "
+                        "payment obligation."
+                    ),
+                    "due_date": None,
+                    "amount": None,
+                    "urgency": "MEDIUM",
+                    "confidence": 50,
+                    "recommended_cta": {
+                        "id": "review-document",
+                        "label": "Review document",
+                        "url": None,
+                        "phone": None,
+                        "metadata": {},
+                    },
+                }
+            ],
+            "document_assessment": {
+                "primary_action_index": 0,
+                "correspondent": document.get("correspondent_name", document.get("correspondent")),
+                "overall_confidence": 50,
+                "requires_action": True,
+                "reasoning": (
+                    "Receipt metadata conflicts with outstanding-payment language; "
+                    "manual review is required before creating or dismissing an obligation."
+                ),
+                "text_quality": "good",
+                "extracted_data": {},
+            },
+        }
+    if not (receipt_metadata or (payment_confirmation and not outstanding_payment)):
         return None
     return {
         "actions": [],
@@ -172,6 +215,12 @@ def receipt_no_action_result(document: dict) -> dict | None:
             "extracted_data": {},
         },
     }
+
+
+def receipt_no_action_result(document: dict) -> dict | None:
+    """Build a deterministic no-action result for completed-payment receipts."""
+    result = receipt_classification_result(document)
+    return result if result and not result["actions"] else None
 
 
 # ------------------------------------------------------------------
@@ -336,7 +385,7 @@ class OllamaAnalyzer:
             Parsed extraction dict, or None if analysis failed.
         """
         doc_id = document.get("id")
-        receipt_result = receipt_no_action_result(document)
+        receipt_result = receipt_classification_result(document)
         if receipt_result:
             return receipt_result
 
