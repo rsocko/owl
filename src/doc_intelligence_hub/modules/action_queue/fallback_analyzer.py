@@ -14,7 +14,7 @@ from .analyzer import (
     _OUTSTANDING_PAYMENT_REQUEST,
     _normalize_cta,
     normalize_extracted_data,
-    receipt_no_action_result,
+    receipt_classification_result,
 )
 
 # Field name used for stored correction hints on the extracted dollar amount. Matches
@@ -139,7 +139,7 @@ class RuleBasedAnalyzer:
 
         Returns the same format as OllamaAnalyzer for compatibility.
         """
-        receipt_result = receipt_no_action_result(document)
+        receipt_result = receipt_classification_result(document)
         if receipt_result:
             return receipt_result
 

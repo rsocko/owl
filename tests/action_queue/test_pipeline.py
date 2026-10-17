@@ -591,6 +591,47 @@ class TestPipelineErrorIsolation:
         }
 
     @pytest.mark.asyncio
+    async def test_receipt_with_balance_due_routes_to_needs_review(self, db, monkeypatch):
+        pipeline = Pipeline()
+        document = {
+            "id": 1,
+            "title": "Payment receipt",
+            "document_type": "Receipt",
+            "tag_names": ["Inbox"],
+            "added": "2026-01-01",
+        }
+        monkeypatch.setattr(aq_settings, "write_to_paperless", False)
+        monkeypatch.setattr(aq_settings, "confidence_threshold", 70)
+        monkeypatch.setattr(pipeline.paperless, "list_correspondents", AsyncMock(return_value=[]))
+        monkeypatch.setattr(
+            pipeline.paperless, "fetch_all_metadata", AsyncMock(return_value=({}, {}, {}))
+        )
+        monkeypatch.setattr(
+            pipeline.paperless, "list_documents", AsyncMock(return_value=[document])
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "get_document_content",
+            AsyncMock(
+                return_value="We received your payment. Remaining balance due: $42.00."
+            ),
+        )
+        monkeypatch.setattr(pipeline.analyzer, "health_check", AsyncMock(return_value=False))
+
+        stats = await pipeline.run(force=True, dry_run=False)
+
+        session = get_session()
+        try:
+            action = session.query(Action).one()
+            assert action.action_type == "REVIEW"
+            assert action.action_ready is False
+            assert action.review_state == "needs_review"
+            assert action.review_item_id
+        finally:
+            session.close()
+        assert stats["outcomes"]["needs_review"] == 1
+
+    @pytest.mark.asyncio
     async def test_reanalysis_preserves_accepted_human_correction(self, db, monkeypatch):
         pipeline = Pipeline()
         reanalysis = {
