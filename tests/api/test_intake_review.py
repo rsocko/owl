@@ -393,9 +393,7 @@ def test_save_requires_account_identifier_class(client, mock_paperless):
         "/api/intake/documents/42",
         json={
             "expected_modified": "2026-10-16T12:00:00Z",
-            "metadata": {
-                "custom_fields": [{"field": 9, "value": "ACCT-2025-8675309"}]
-            },
+            "metadata": {"custom_fields": [{"field": 9, "value": "ACCT-2025-8675309"}]},
             "disposition": "save",
         },
     )
