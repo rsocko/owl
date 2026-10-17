@@ -12,12 +12,16 @@ reviewed together. Filing the document and confirming its actions remain
 independent decisions.
 
 Open **Workflow → Inbox Review** in the OWL web interface. The document list is
-loaded from the Action Queue's configured intake tags (normally `Inbox`). Each
-row includes a Paperless thumbnail, resolved correspondent and document type,
-and an **Action needed** indicator where applicable. Search and filters apply
-to the full Paperless Inbox without changing the selected document. OWL
-initially loads 100 matching documents and shows the full matching count; use
-**Load more** at the end of the list to retrieve the next page.
+loaded specifically from the Paperless tag named `Inbox`. Action Queue scan
+mode, monitor tags, and saved views do not change Inbox Review's scope. Each row
+includes a Paperless thumbnail, resolved correspondent and document type, and
+an **Action needed** indicator where applicable. Search and filters apply to
+the full Paperless Inbox without changing the selected document. OWL initially
+loads 100 matching documents and shows the full matching count; use **Load
+more** at the end of the list to retrieve the next page.
+
+Paperless must contain a tag named `Inbox`. If that tag is missing, OWL reports
+the configuration problem instead of showing an empty or broader queue.
 
 ## Review workflow
 
@@ -50,8 +54,8 @@ rejects a save if Paperless changed while the document was open.
 | Control | Result |
 |---|---|
 | **Save changes** | Persist metadata without changing Inbox disposition |
-| **Defer & next** | Persist metadata, keep the intake tag, and advance |
-| **Save & file** | Persist metadata, remove configured intake tags, and advance |
+| **Defer & next** | Persist metadata, keep the `Inbox` tag, and advance |
+| **Save & file** | Persist metadata, remove the `Inbox` tag, and advance |
 | **File only** | File the document while leaving proposed actions pending |
 | **Confirm action(s) & file** | Confirm active actions and file the document |
 
@@ -116,7 +120,7 @@ available in the document header and expanded viewer.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/intake/documents` | List configured intake documents |
+| `GET /api/intake/documents` | List documents tagged `Inbox` |
 | `GET /api/intake/documents/{id}` | Load the review contract |
 | `GET /api/intake/documents/{id}/core` | Load source metadata and taxonomies |
 | `GET /api/intake/documents/{id}/suggestions` | Load revision-cached suggestions |
