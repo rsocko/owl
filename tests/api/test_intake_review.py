@@ -134,6 +134,28 @@ def test_core_document_load_does_not_wait_for_suggestions_or_ocr(client, mock_pa
     mock_paperless.get_document_content.assert_not_awaited()
 
 
+def test_relationship_candidates_suggest_same_recurring_series(client, mock_paperless):
+    intake_review._taxonomy_cache = None
+    mock_paperless.get_document.return_value = _document()
+    mock_paperless.list_documents.return_value = [
+        _document(),
+        _document(id=77, title="September utility bill", created="2026-09-14"),
+    ]
+
+    response = client.get("/api/intake/documents/42/relationship-candidates")
+
+    assert response.status_code == 200
+    candidate = response.json()["candidates"][0]
+    assert candidate["document"]["id"] == 77
+    assert candidate["suggested"] is True
+    assert candidate["recommendation"]["relationship_type"] == "same_sequence"
+    assert candidate["recommendation"]["reason_codes"] == [
+        "correspondent_match",
+        "document_type_match",
+    ]
+    mock_paperless.list_documents.assert_awaited_once_with(correspondent_id=1, limit=12)
+
+
 def test_suggestions_are_cached_for_the_document_revision(client, mock_paperless):
     mock_paperless.get_document.return_value = _document()
     mock_paperless.get_document_suggestions.return_value = {"correspondents": [2]}

@@ -36,6 +36,13 @@ from doc_intelligence_hub.modules.action_queue.database import (
 )
 from doc_intelligence_hub.modules.action_queue.lifecycle import mark_action_ready
 from doc_intelligence_hub.modules.action_queue.pipeline import run_pipeline
+from doc_intelligence_hub.modules.triage.relationship_discovery import (
+    normalize_paperless_document,
+)
+from doc_intelligence_hub.modules.triage.relationships import (
+    classify_related_notice,
+    list_document_relationships,
+)
 
 router = APIRouter(prefix="/api/intake", tags=["intake-review"])
 
@@ -457,6 +464,48 @@ def _native_document_payload(
     }
 
 
+def _relationship_document_payload(
+    document: dict[str, Any],
+    taxonomies: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    catalogs = {key: _catalog_map(taxonomies[key]) for key in ("correspondents", "document_types")}
+    document_id = int(document["id"])
+    return {
+        "id": document_id,
+        "title": document.get("title") or f"Document #{document_id}",
+        "created": document.get("created"),
+        "correspondent_name": (
+            _catalog_value(catalogs["correspondents"], document.get("correspondent")) or {}
+        ).get("name"),
+        "document_type_name": (
+            _catalog_value(catalogs["document_types"], document.get("document_type")) or {}
+        ).get("name"),
+        "thumbnail_url": f"/api/statements/documents/{document_id}/thumb",
+        "preview_url": f"/api/statements/documents/{document_id}/preview",
+    }
+
+
+def _relationship_metadata(
+    document: dict[str, Any],
+    taxonomies: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    correspondents = {
+        int(item["id"]): str(item["name"])
+        for item in taxonomies["correspondents"]
+        if isinstance(item.get("id"), int) and item.get("name")
+    }
+    field_names = {
+        int(item["id"]): str(item["name"])
+        for item in taxonomies["custom_fields"]
+        if isinstance(item.get("id"), int) and item.get("name")
+    }
+    return normalize_paperless_document(
+        document,
+        correspondents=correspondents,
+        field_names=field_names,
+    ) or {"document_id": document.get("id"), "title": document.get("title")}
+
+
 def _sanitize_tag_suggestions(
     suggestions: list[dict[str, Any]],
     taxonomies: dict[str, list[dict[str, Any]]],
@@ -808,6 +857,164 @@ async def get_intake_document_core(request: Request, document_id: int) -> dict[s
             "write_enabled": bool(request.app.state.hub_settings.write_to_paperless),
             "monitor_tags": _monitor_tags(),
         }
+    finally:
+        await client.aclose()
+
+
+@router.get("/documents/{document_id}/relationships")
+async def get_intake_document_relationships(
+    request: Request,
+    document_id: int,
+) -> dict[str, Any]:
+    relationships = list_document_relationships(document_id)
+    related_ids = sorted(
+        {
+            relationship["target_document_id"]
+            if relationship["source_document_id"] == document_id
+            else relationship["source_document_id"]
+            for relationship in relationships
+        }
+    )
+    if not related_ids:
+        return {"relationships": [], "count": 0}
+
+    client = make_paperless_client(request, timeout=20.0)
+    try:
+        try:
+            documents, taxonomies = await asyncio.gather(
+                asyncio.gather(*(client.get_document(related_id) for related_id in related_ids)),
+                _load_taxonomies(client),
+            )
+        except Exception as exc:
+            _raise_paperless_error(exc, "loading related documents")
+        documents_by_id = {int(document["id"]): document for document in documents}
+        enriched = []
+        for relationship in relationships:
+            related_id = (
+                relationship["target_document_id"]
+                if relationship["source_document_id"] == document_id
+                else relationship["source_document_id"]
+            )
+            related_document = documents_by_id.get(related_id)
+            enriched.append(
+                {
+                    **relationship,
+                    "direction": (
+                        "outgoing"
+                        if relationship["source_document_id"] == document_id
+                        else "incoming"
+                    ),
+                    "related_document": (
+                        _relationship_document_payload(related_document, taxonomies)
+                        if related_document
+                        else None
+                    ),
+                }
+            )
+        return {"relationships": enriched, "count": len(enriched)}
+    finally:
+        await client.aclose()
+
+
+@router.get("/documents/{document_id}/relationship-candidates")
+async def get_intake_relationship_candidates(
+    request: Request,
+    document_id: int,
+    q: str | None = None,
+    limit: int = 12,
+) -> dict[str, Any]:
+    client = make_paperless_client(request, timeout=20.0)
+    bounded_limit = max(1, min(limit, 25))
+    try:
+        try:
+            current, taxonomies = await asyncio.gather(
+                client.get_document(document_id),
+                _load_taxonomies(client),
+            )
+            query = (q or "").strip()
+            if query:
+                documents = await client.list_documents(query=query, limit=bounded_limit)
+            elif isinstance(current.get("correspondent"), int):
+                documents = await client.list_documents(
+                    correspondent_id=current["correspondent"],
+                    limit=bounded_limit,
+                )
+            else:
+                documents = await client.list_documents(
+                    query=str(current.get("title") or "").strip(),
+                    limit=bounded_limit,
+                )
+        except Exception as exc:
+            _raise_paperless_error(exc, "finding related documents")
+
+        linked_ids = {
+            relationship["target_document_id"]
+            if relationship["source_document_id"] == document_id
+            else relationship["source_document_id"]
+            for relationship in list_document_relationships(document_id)
+        }
+        current_metadata = _relationship_metadata(current, taxonomies)
+        candidates = []
+        for document in documents:
+            candidate_id = document.get("id")
+            if (
+                isinstance(candidate_id, bool)
+                or not isinstance(candidate_id, int)
+                or candidate_id == document_id
+                or candidate_id in linked_ids
+            ):
+                continue
+            candidate_metadata = _relationship_metadata(document, taxonomies)
+            proposal = classify_related_notice(
+                document_id,
+                current_metadata,
+                candidate_id,
+                candidate_metadata,
+            )
+            if proposal:
+                recommendation = proposal.to_dict()
+            else:
+                same_correspondent = current.get("correspondent") is not None and current.get(
+                    "correspondent"
+                ) == document.get("correspondent")
+                same_type = current.get("document_type") is not None and current.get(
+                    "document_type"
+                ) == document.get("document_type")
+                recommendation = {
+                    "source_document_id": document_id,
+                    "target_document_id": candidate_id,
+                    "relationship_type": (
+                        "same_sequence" if same_correspondent and same_type else "supports"
+                    ),
+                    "confidence": 0.58 if same_correspondent and same_type else 0.35,
+                    "reason_codes": [
+                        reason
+                        for matched, reason in (
+                            (same_correspondent, "correspondent_match"),
+                            (same_type, "document_type_match"),
+                            (bool(query), "search_match"),
+                        )
+                        if matched
+                    ],
+                    "priority_adjustment": 0,
+                    "priority_explanation": "No relationship priority adjustment",
+                    "auto_create": False,
+                }
+            candidates.append(
+                {
+                    "document": _relationship_document_payload(document, taxonomies),
+                    "suggested": not bool(query),
+                    "recommendation": recommendation,
+                }
+            )
+        candidates.sort(
+            key=lambda candidate: (
+                -float(candidate["recommendation"]["confidence"]),
+                str(candidate["document"].get("created") or ""),
+                candidate["document"]["id"],
+            )
+        )
+        return {"candidates": candidates[:bounded_limit], "query": query}
     finally:
         await client.aclose()
 
