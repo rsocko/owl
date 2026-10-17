@@ -28,7 +28,7 @@
   <main id="main" tabindex="-1">
     <section id="intake" class="screen" aria-labelledby="intake-heading">
       <div class="page-heading">
-        <div><h1 id="intake-heading">Intake review</h1><p>Check the document, accept or edit metadata, then file it or send a proposed obligation to the Action Queue.</p></div>
+        <div><h1 id="intake-heading">Intake review</h1><p>Clean up imported documents quickly, or validate a suggested action while the source is already in view.</p></div>
         <label class="scenario">Demo state <small>Prototype control only</small>
           <select id="scenario">
             <option value="ready">Ready to review</option>
@@ -81,7 +81,22 @@
               <span id="freshness" class="pill success">Current · source r12</span>
             </div>
             <div id="stale-notice" class="notice warning" hidden>Metadata changed. Re-evaluate OWL’s assessment, or make your own decision.</div>
-            <div class="decision-footer"><p id="routing-help">Saves metadata, removes Inbox, and records no action. Matching remains enabled.</p><div class="disposition-actions"><button id="analyze" type="button" hidden>Re-evaluate assessment</button><button id="needs-review" type="button">Needs review</button><button id="file-document" type="button" class="primary">Save &amp; file</button><button id="confirm-action" type="button" class="primary" hidden>Review in Action Queue</button></div></div>
+            <button id="analyze" class="analysis-button" type="button" hidden>Re-evaluate assessment</button>
+            <div id="action-intake-workspace" class="action-intake-workspace" hidden>
+              <div class="decision-tabs" role="tablist" aria-label="Intake decision">
+                <button id="file-tab" type="button" role="tab" aria-selected="true" aria-controls="file-panel">File document</button>
+                <button id="action-tab" type="button" role="tab" aria-selected="false" aria-controls="action-panel">Action details <span class="tab-status">Suggested</span></button>
+              </div>
+              <div id="file-panel" class="decision-tab-panel" role="tabpanel" aria-labelledby="file-tab">
+                <div><strong>Finish the Inbox cleanup now</strong><p>Save the metadata and remove the Inbox tag. The suggested PAY action will remain in Action Queue for later review.</p></div>
+                <div class="disposition-actions"><button id="needs-review" type="button">Needs review</button><button id="file-document" type="button" class="primary">Save &amp; file</button></div>
+              </div>
+              <div id="action-panel" class="decision-tab-panel action-inline-review" role="tabpanel" aria-labelledby="action-tab" hidden>
+                <div class="inline-action-fields"><div><span>Payee</span><strong id="intake-action-payee">Cedar Dental</strong></div><div><span>Amount due</span><strong id="intake-action-amount">$128.00</strong></div><div><span>Due date</span><strong id="intake-action-due">October 30, 2026</strong></div><div><span>Reference</span><strong id="intake-action-reference">Account •••• 4821</strong></div></div>
+                <div class="inline-action-footer"><p>Confirming creates trusted work and files the document in one step. It does not mark the obligation paid.</p><div class="disposition-actions"><button id="file-only" type="button">File only</button><button id="confirm-action" type="button" class="primary">Confirm action &amp; file</button></div></div>
+              </div>
+            </div>
+            <div id="standard-decision-footer" class="decision-footer"><p id="routing-help">Saves metadata, removes Inbox, and records no action. Matching remains enabled.</p><div class="disposition-actions"><button id="standard-needs-review" type="button">Needs review</button><button id="standard-file-document" type="button" class="primary">Save &amp; file</button></div></div>
             <span id="analysis-hint" class="sr-only">Evaluated against saved metadata.</span>
           </section>
         </div>
@@ -109,7 +124,7 @@
     </section>
 
     <section id="actions" class="screen" aria-labelledby="actions-heading" hidden>
-      <div class="page-heading"><div><h1 id="actions-heading">Action Queue</h1><p>Review proposed actions and work the obligations that have already been confirmed.</p></div><a href="#intake" class="button">Back to intake</a></div>
+      <div class="page-heading"><div><h1 id="actions-heading">Action Queue</h1><p>Review suggested actions whether or not their source documents have already been filed from Inbox.</p></div><a href="#intake" class="button">Back to intake</a></div>
       <div id="pending-action-review" class="action-review-layout">
         <section class="card action-decision">
           <div class="panel-heading"><div><h2 id="review-action-title">Pay Cedar Dental invoice</h2><p id="review-action-subtitle" class="muted">Paperless #1043 · proposed PAY action</p></div><span id="review-confidence" class="pill warning">94% confidence</span></div>
@@ -153,8 +168,8 @@
     <form method="dialog"><button class="dialog-close" aria-label="Close mode explanation">×</button></form>
     <h2 id="prototype-guide-heading">How the proposed workspaces differ</h2>
     <dl class="mode-list">
-      <div><dt>Intake review</dt><dd>Verify the source and Paperless metadata. Finish with Save &amp; file, Needs review, or Review in Action Queue.</dd></div>
-      <div><dt>Action Queue</dt><dd>Review proposed obligations, then work the actions that have been confirmed.</dd></div>
+      <div><dt>Intake review</dt><dd>Verify metadata and file quickly. Suggested actions can be confirmed here, or left pending for a separate Action Queue session.</dd></div>
+      <div><dt>Action Queue</dt><dd>Review every pending action suggestion, including those whose source documents were already filed from Inbox.</dd></div>
       <div><dt>History and Processing</dt><dd>Support audit, quality sampling, and operational troubleshooting outside the fast triage path.</dd></div>
     </dl>
     <p class="notice info">The blue prototype bar and Demo state selector are review aids. They are not proposed product UI.</p>

@@ -20,7 +20,7 @@ const documents = [
     suggestedType: "Invoice", date: "2026-10-15", storage: "Household / Health",
     tags: "Inbox, Health", amount: "$128.00", confidence: 94, assessment: "pay",
     due: "October 30, 2026", reference: "Account •••• 4821", recurring: "Likely monthly invoice",
-    reason: "An unpaid balance is due October 30. Review the extracted action details before confirming it in the Action Queue.",
+    reason: "An unpaid balance is due October 30. Review the extracted payee, amount, and due date before confirming trusted work.",
     paperTitle: "Your account statement.", paperKind: "INVOICE",
     paperDescription: "Services have been billed. Please arrange payment of the balance shown below by October 30, 2026.",
     callout: "BALANCE DUE · October 30, 2026", correspondentId: 23, revision: 12, status: "pending", stale: false
@@ -38,6 +38,7 @@ const documents = [
   }
 ];
 for (const doc of documents) doc.correspondent = doc.provider;
+for (const doc of documents) doc.actionStatus = doc.assessment === "pay" ? "proposed" : "none";
 const history = [
   { id: 1038, title: "Harbor Bank · September statement", source: "Automated", confidence: 98, sampled: false, reason: "Reference statement; no outstanding obligation.", fingerprint: "1038:r8:v3", time: "Oct 16, 05:42 UTC" },
   { id: 1040, title: "Northline · service information", source: "Human", confidence: 88, sampled: false, reason: "Reviewer confirmed informational notice.", fingerprint: "1040:r9:v3", time: "Oct 16, 05:46 UTC" },
@@ -201,13 +202,19 @@ function loadDocument() {
   const uncertain = current.assessment === "review";
   byId("disposition-heading").textContent = actionCandidate ? "Proposed action found" : uncertain ? "Needs a closer look" : "Ready to file";
   byId("routing-help").textContent = actionCandidate
-    ? "Review payee, amount, and due date alongside the other proposed actions."
+    ? "File the source now, or validate the suggested action without leaving Intake."
     : uncertain
       ? "Keep this document in review without creating trusted work."
       : "Saves metadata, removes Inbox, and records no action. Matching remains enabled.";
-  byId("file-document").hidden = actionCandidate || uncertain;
-  byId("confirm-action").hidden = !actionCandidate;
-  byId("needs-review").textContent = uncertain ? "Keep in Needs Review" : "Needs review";
+  byId("action-intake-workspace").hidden = !actionCandidate;
+  byId("standard-decision-footer").hidden = actionCandidate;
+  byId("standard-file-document").hidden = uncertain;
+  byId("standard-needs-review").textContent = uncertain ? "Keep in Needs Review" : "Needs review";
+  byId("intake-action-payee").textContent = current.provider;
+  byId("intake-action-amount").textContent = current.amount;
+  byId("intake-action-due").textContent = current.due || "Not extracted";
+  byId("intake-action-reference").textContent = current.reference;
+  selectIntakeDecisionTab("file");
   updateSuggestionVisibility();
   dirty = false;
   byId("revision-label").textContent = `Loaded Paperless revision r${current.revision}`;
@@ -231,8 +238,11 @@ function updateControls() {
   byId("save-state").textContent = dirty ? "Unsaved changes" : "No unsaved changes";
   byId("save-state").className = `pill ${dirty ? "warning" : "neutral"}`;
   byId("file-document").disabled = blocked || analysisRunning;
+  byId("file-only").disabled = blocked || analysisRunning;
+  byId("standard-file-document").disabled = blocked || analysisRunning;
   byId("confirm-action").disabled = blocked || current.assessment !== "pay" || analysisRunning;
   byId("needs-review").disabled = blocked || analysisRunning;
+  byId("standard-needs-review").disabled = blocked || analysisRunning;
   byId("analyze").disabled = dirty || blocked || analysisRunning;
   byId("analyze").textContent = analysisRunning ? "Analyzing…" : "Re-evaluate assessment";
   byId("analysis-hint").textContent = dirty ? "Save metadata before routing or re-evaluating." : current.stale ? "Targeted reanalysis pending · run now to bypass debounce." : "Evaluated against saved metadata.";
@@ -241,6 +251,13 @@ function updateControls() {
   });
   byId("metadata-form").querySelectorAll("input:not([readonly]), select").forEach((field) => { field.disabled = blocked || analysisRunning; });
   byId("tag-pills").querySelectorAll("button").forEach((button) => { button.disabled = blocked || analysisRunning; });
+}
+function selectIntakeDecisionTab(tab) {
+  const showAction = tab === "action";
+  byId("file-tab").setAttribute("aria-selected", String(!showAction));
+  byId("action-tab").setAttribute("aria-selected", String(showAction));
+  byId("file-panel").hidden = showAction;
+  byId("action-panel").hidden = !showAction;
 }
 function markDirty() {
   dirty = fields.some((field) => byId(`field-${field}`).value !== current[field]);
@@ -301,19 +318,24 @@ function resolveConflict(mode) {
     byId("field-title").focus();
   }
 }
-function routeDocument(outcome) {
+function routeDocument(outcome, options = {}) {
   const doc = current;
   if (outcome !== "review") {
     if (doc.activeHistoryEntry) doc.activeHistoryEntry.reopened = false;
     doc.activeHistoryEntry = null;
   }
   if (outcome === "filed") {
-    const entry = { id: doc.id, title: doc.title, source: "Human", confidence: doc.confidence, sampled: false, reason: doc.assessment === "pay" ? "Reviewer overrode the PAY candidate: no action needed." : "Reviewer confirmed no action needed.", fingerprint: `${doc.id}:r${doc.revision}:v3`, time: "Just now · demo" };
-    history.unshift(entry);
-    doc.activeHistoryEntry = entry;
+    if (options.dismissAction) doc.actionStatus = "dismissed";
+    const recordsNoAction = doc.assessment !== "pay" || options.dismissAction;
+    if (recordsNoAction) {
+      const entry = { id: doc.id, title: doc.title, source: "Human", confidence: doc.confidence, sampled: false, reason: doc.assessment === "pay" ? "Reviewer dismissed the PAY suggestion: no action needed." : "Reviewer confirmed no action needed.", fingerprint: `${doc.id}:r${doc.revision}:v3`, time: "Just now · demo" };
+      history.unshift(entry);
+      doc.activeHistoryEntry = entry;
+    }
   }
   if (outcome === "action" && !actions.some((action) => action.id === doc.id)) {
     actions.push({ id: doc.id, title: `Pay ${doc.provider} invoice`, provider: doc.provider, amount: doc.amount, due: "Oct 30", completed: false });
+    doc.actionStatus = "confirmed";
   }
   doc.status = outcome;
   if (outcome !== "review") doc.tags = doc.tags.split(",").filter((tag) => tag.trim().toLowerCase() !== "inbox").join(",").trim();
@@ -326,13 +348,19 @@ function routeDocument(outcome) {
   byId("inbox-empty").hidden = !empty;
   renderActions();
   renderHistory();
-  toast(outcome === "filed" ? "Filed to no-action history. Inbox tag removed; matching remains enabled. No Mission Control task created." : outcome === "review" ? "Kept in Needs Review. Not sent to Mission Control." : "PAY action confirmed. Eligible for Mission Control; not marked paid.");
+  toast(outcome === "filed"
+    ? doc.actionStatus === "proposed"
+      ? "Document filed and Inbox tag removed. The PAY suggestion remains in Action Queue for later review."
+      : "Filed to no-action history. Inbox tag removed; matching remains enabled. No Mission Control task created."
+    : outcome === "review"
+      ? "Kept in Needs Review. Not sent to Mission Control."
+      : "PAY action confirmed and document filed. Eligible for Mission Control; not marked paid.");
   if (!empty && outcome !== "review") byId("source-heading").scrollIntoView({ block: "nearest" });
 }
 function loadActionReview() {
-  const reviewDoc = current.assessment === "pay" && current.status === "pending"
+  const reviewDoc = current.actionStatus === "proposed"
     ? current
-    : documents.find((doc) => doc.status === "pending" && doc.assessment === "pay");
+    : documents.find((doc) => doc.actionStatus === "proposed");
   actionReviewDocument = reviewDoc || null;
   if (!reviewDoc) {
     byId("pending-action-review").hidden = true;
@@ -340,7 +368,7 @@ function loadActionReview() {
   }
   byId("pending-action-review").hidden = false;
   byId("review-action-title").textContent = `Pay ${reviewDoc.provider} invoice`;
-  byId("review-action-subtitle").textContent = `Paperless #${reviewDoc.id} · proposed PAY action`;
+  byId("review-action-subtitle").textContent = `Paperless #${reviewDoc.id} · ${reviewDoc.status === "filed" ? "filed from Inbox · " : ""}proposed PAY action`;
   byId("review-confidence").textContent = `${reviewDoc.confidence}% confidence`;
   byId("review-payee").textContent = reviewDoc.provider;
   byId("review-amount").textContent = reviewDoc.amount;
@@ -370,7 +398,7 @@ function renderActions() {
     byId("trusted-actions").append(item);
   }
   const confirmedCount = actions.filter((action) => !action.completed).length;
-  const proposedCount = documents.filter((doc) => doc.status === "pending" && doc.assessment === "pay").length;
+  const proposedCount = documents.filter((doc) => doc.actionStatus === "proposed").length;
   byId("action-count").textContent = confirmedCount + proposedCount;
   byId("confirmed-count").textContent = `${confirmedCount} active`;
   loadActionReview();
@@ -530,7 +558,22 @@ byId("file-document").addEventListener("click", () => {
   commitMetadata(false);
   routeDocument("filed");
 });
+byId("file-only").addEventListener("click", () => {
+  if (!validateMetadata()) return;
+  commitMetadata(false);
+  routeDocument("filed");
+});
+byId("standard-file-document").addEventListener("click", () => {
+  if (!validateMetadata()) return;
+  commitMetadata(false);
+  routeDocument("filed");
+});
 byId("needs-review").addEventListener("click", () => {
+  if (!validateMetadata()) return;
+  commitMetadata(false);
+  routeDocument("review");
+});
+byId("standard-needs-review").addEventListener("click", () => {
   if (!validateMetadata()) return;
   commitMetadata(false);
   routeDocument("review");
@@ -538,13 +581,15 @@ byId("needs-review").addEventListener("click", () => {
 byId("confirm-action").addEventListener("click", () => {
   if (!validateMetadata()) return;
   commitMetadata(false);
-  location.hash = "actions";
+  routeDocument("action");
 });
+byId("file-tab").addEventListener("click", () => selectIntakeDecisionTab("file"));
+byId("action-tab").addEventListener("click", () => selectIntakeDecisionTab("action"));
 byId("review-no-action").addEventListener("click", () => {
   if (!actionReviewDocument) return;
   if (!window.confirm("File this document and record that no action is needed?")) return;
   current = actionReviewDocument;
-  routeDocument("filed");
+  routeDocument("filed", { dismissAction: true });
 });
 byId("review-needs-review").addEventListener("click", () => {
   if (!actionReviewDocument) return;
