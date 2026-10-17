@@ -63,6 +63,7 @@ interface IntakeAction {
   document_id: number;
   action_type: string;
   title: string;
+  summary?: string | null;
   payee_or_owner?: string | null;
   amount?: number | null;
   due_date?: string | null;
@@ -143,6 +144,7 @@ interface MetadataDraft {
 interface ActionDraft {
   action_type: string;
   title: string;
+  details: string;
   payee_or_owner: string;
   amount: string;
   due_date: string;
@@ -150,9 +152,61 @@ interface ActionDraft {
 }
 
 const ACTION_TYPES = ['PAY', 'RESPOND', 'REVIEW', 'SCHEDULE', 'SHARE', 'SIGN', 'TASK'] as const;
+type ActionType = typeof ACTION_TYPES[number];
+
+interface ActionFieldSchema {
+  ownerLabel?: string;
+  dueDateLabel: string;
+  referenceLabel?: string;
+  amount: boolean;
+}
+
+const ACTION_FIELD_SCHEMAS: Record<ActionType, ActionFieldSchema> = {
+  PAY: {
+    ownerLabel: 'Payee',
+    dueDateLabel: 'Pay by',
+    referenceLabel: 'Invoice or reference',
+    amount: true,
+  },
+  RESPOND: {
+    ownerLabel: 'Recipient',
+    dueDateLabel: 'Respond by',
+    referenceLabel: 'Case or reference',
+    amount: false,
+  },
+  REVIEW: {
+    dueDateLabel: 'Review by',
+    amount: false,
+  },
+  SCHEDULE: {
+    ownerLabel: 'With or provider',
+    dueDateLabel: 'Event date',
+    referenceLabel: 'Confirmation or reference',
+    amount: false,
+  },
+  SHARE: {
+    ownerLabel: 'Recipient',
+    dueDateLabel: 'Share by',
+    amount: false,
+  },
+  SIGN: {
+    ownerLabel: 'Counterparty or recipient',
+    dueDateLabel: 'Sign by',
+    referenceLabel: 'Agreement or reference',
+    amount: false,
+  },
+  TASK: {
+    ownerLabel: 'Owner',
+    dueDateLabel: 'Due date',
+    referenceLabel: 'Reference',
+    amount: false,
+  },
+};
+
 const EMPTY_ACTION: ActionDraft = {
   action_type: 'TASK',
   title: '',
+  details: '',
   payee_or_owner: '',
   amount: '',
   due_date: '',
@@ -180,10 +234,43 @@ function actionDraft(action: IntakeAction): ActionDraft {
   return {
     action_type: action.action_type || 'TASK',
     title: action.title || '',
+    details: action.summary || '',
     payee_or_owner: action.payee_or_owner || '',
     amount: action.amount == null ? '' : String(action.amount),
     due_date: action.due_date?.slice(0, 10) || '',
     reference: action.reference || '',
+  };
+}
+
+function actionType(value: string): ActionType {
+  return ACTION_TYPES.includes(value as ActionType) ? value as ActionType : 'TASK';
+}
+
+function actionFieldSchema(value: string): ActionFieldSchema {
+  return ACTION_FIELD_SCHEMAS[actionType(value)];
+}
+
+function actionDraftValid(draft: ActionDraft): boolean {
+  const amount = Number(draft.amount);
+  return Boolean(
+    draft.title.trim()
+    && (
+      actionType(draft.action_type) !== 'PAY'
+      || (draft.amount.trim() && Number.isFinite(amount) && amount >= 0)
+    ),
+  );
+}
+
+function actionMutation(draft: ActionDraft) {
+  const schema = actionFieldSchema(draft.action_type);
+  return {
+    action_type: actionType(draft.action_type),
+    title: draft.title.trim(),
+    summary: draft.details.trim() || null,
+    payee_or_owner: schema.ownerLabel ? draft.payee_or_owner.trim() || null : null,
+    amount: schema.amount && draft.amount ? Number(draft.amount) : null,
+    due_date: draft.due_date || null,
+    reference: schema.referenceLabel ? draft.reference.trim() || null : null,
   };
 }
 
@@ -260,6 +347,94 @@ function CurrencyInput({
         onBlur={() => setFocused(false)}
         onChange={(event) => onChange(event.target.value.replace(/[^0-9.,-]/g, '').replaceAll(',', ''))}
       />
+    </div>
+  );
+}
+
+function ActionFields({
+  draft,
+  disabled = false,
+  onChange,
+}: {
+  draft: ActionDraft;
+  disabled?: boolean;
+  onChange: (draft: ActionDraft) => void;
+}) {
+  const schema = actionFieldSchema(draft.action_type);
+  return (
+    <div className="intake-action-grid">
+      <label>
+        <span>Type</span>
+        <select
+          value={draft.action_type}
+          disabled={disabled}
+          onChange={(event) => onChange({ ...draft, action_type: event.target.value })}
+        >
+          {ACTION_TYPES.map((type) => <option key={type}>{type}</option>)}
+        </select>
+      </label>
+      <label className="intake-action-title">
+        <span>Title</span>
+        <input
+          value={draft.title}
+          disabled={disabled}
+          onChange={(event) => onChange({ ...draft, title: event.target.value })}
+        />
+      </label>
+      {schema.ownerLabel ? (
+        <label>
+          <span>{schema.ownerLabel}</span>
+          <input
+            value={draft.payee_or_owner}
+            disabled={disabled}
+            onChange={(event) => onChange({ ...draft, payee_or_owner: event.target.value })}
+          />
+        </label>
+      ) : null}
+      {schema.amount ? (
+        <label>
+          <span>Amount</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            required
+            value={draft.amount}
+            disabled={disabled}
+            onChange={(event) => onChange({ ...draft, amount: event.target.value })}
+          />
+        </label>
+      ) : null}
+      <label>
+        <span>{schema.dueDateLabel}</span>
+        <input
+          type="date"
+          value={draft.due_date}
+          disabled={disabled}
+          onChange={(event) => onChange({ ...draft, due_date: event.target.value })}
+        />
+      </label>
+      {schema.referenceLabel ? (
+        <label>
+          <span>{schema.referenceLabel}</span>
+          <input
+            value={draft.reference}
+            disabled={disabled}
+            onChange={(event) => onChange({ ...draft, reference: event.target.value })}
+          />
+        </label>
+      ) : null}
+      <label className="intake-action-details">
+        <span>Details</span>
+        <textarea
+          value={draft.details}
+          disabled={disabled}
+          rows={3}
+          maxLength={10_000}
+          placeholder="What needs to be done, special instructions, or useful context"
+          onChange={(event) => onChange({ ...draft, details: event.target.value })}
+        />
+      </label>
     </div>
   );
 }
@@ -544,16 +719,9 @@ function ActionEditor({
         </div>
         {action.confidence != null ? <span>{action.confidence}% confidence</span> : null}
       </div>
-      <div className="intake-action-grid">
-        <label><span>Type</span><select value={draft.action_type} disabled={busy} onChange={(event) => setDraft({ ...draft, action_type: event.target.value })}>{ACTION_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>
-        <label className="intake-action-title"><span>Title</span><input value={draft.title} disabled={busy} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
-        <label><span>Payee or owner</span><input value={draft.payee_or_owner} disabled={busy} onChange={(event) => setDraft({ ...draft, payee_or_owner: event.target.value })} /></label>
-        <label><span>Amount</span><input type="number" min="0" step="0.01" value={draft.amount} disabled={busy} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} /></label>
-        <label><span>Due date</span><input type="date" value={draft.due_date} disabled={busy} onChange={(event) => setDraft({ ...draft, due_date: event.target.value })} /></label>
-        <label><span>Reference</span><input value={draft.reference} disabled={busy} onChange={(event) => setDraft({ ...draft, reference: event.target.value })} /></label>
-      </div>
+      <ActionFields draft={draft} disabled={busy} onChange={setDraft} />
       <div className="intake-action-controls">
-        <Button size="sm" variant="primary" disabled={busy || !draft.title.trim()} onClick={() => void onSave(action, draft)}><Save size={15} /> Save action</Button>
+        <Button size="sm" variant="primary" disabled={busy || !actionDraftValid(draft)} onClick={() => void onSave(action, draft)}><Save size={15} /> Save action</Button>
         {completed ? (
           <Button size="sm" disabled={busy} onClick={() => void onStatus(action, 'pending')}><RotateCcw size={15} /> Undo completion</Button>
         ) : (
@@ -959,12 +1127,7 @@ export default function IntakeReview() {
     try {
       const updated = await endpoints.actionQueue.updateAction(String(action.id), {
         version: action.version,
-        action_type: draft.action_type,
-        title: draft.title.trim(),
-        payee_or_owner: draft.payee_or_owner.trim() || null,
-        amount: draft.amount ? Number(draft.amount) : null,
-        due_date: draft.due_date || null,
-        reference: draft.reference.trim() || null,
+        ...actionMutation(draft),
       }) as IntakeAction;
       setActions((current) => current.map((item) => item.id === updated.id ? updated : item));
       showToast('Action saved.');
@@ -1006,12 +1169,7 @@ export default function IntakeReview() {
     setBusyKey('new-action');
     try {
       const created = await endpoints.intake.createAction(core.document.id, {
-        action_type: newAction.action_type,
-        title: newAction.title.trim(),
-        payee_or_owner: newAction.payee_or_owner.trim() || null,
-        amount: newAction.amount ? Number(newAction.amount) : null,
-        due_date: newAction.due_date || null,
-        reference: newAction.reference.trim() || null,
+        ...actionMutation(newAction),
       }) as IntakeAction;
       setActions((current) => [...current, created]);
       setNewAction(EMPTY_ACTION);
@@ -1290,15 +1448,8 @@ export default function IntakeReview() {
                       {loadingActions ? <div className="intake-inline-state"><RefreshCw className="intake-spin" size={15} /> Loading action analysis…</div> : null}
                       {newActionOpen ? (
                         <div className="intake-new-action">
-                          <div className="intake-action-grid">
-                            <label><span>Type</span><select value={newAction.action_type} onChange={(event) => setNewAction({ ...newAction, action_type: event.target.value })}>{ACTION_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>
-                            <label className="intake-action-title"><span>Title</span><input value={newAction.title} onChange={(event) => setNewAction({ ...newAction, title: event.target.value })} /></label>
-                            <label><span>Payee or owner</span><input value={newAction.payee_or_owner} onChange={(event) => setNewAction({ ...newAction, payee_or_owner: event.target.value })} /></label>
-                            <label><span>Amount</span><input type="number" min="0" step="0.01" value={newAction.amount} onChange={(event) => setNewAction({ ...newAction, amount: event.target.value })} /></label>
-                            <label><span>Due date</span><input type="date" value={newAction.due_date} onChange={(event) => setNewAction({ ...newAction, due_date: event.target.value })} /></label>
-                            <label><span>Reference</span><input value={newAction.reference} onChange={(event) => setNewAction({ ...newAction, reference: event.target.value })} /></label>
-                          </div>
-                          <Button variant="primary" disabled={busyKey === 'new-action' || !newAction.title.trim()} onClick={() => void addAction()}><FilePlus2 size={16} /> {busyKey === 'new-action' ? 'Adding…' : 'Add action'}</Button>
+                          <ActionFields draft={newAction} onChange={setNewAction} />
+                          <Button variant="primary" disabled={busyKey === 'new-action' || !actionDraftValid(newAction)} onClick={() => void addAction()}><FilePlus2 size={16} /> {busyKey === 'new-action' ? 'Adding…' : 'Add action'}</Button>
                         </div>
                       ) : null}
                       {!loadingActions && !actionError && actions.length ? actions.map((action) => (

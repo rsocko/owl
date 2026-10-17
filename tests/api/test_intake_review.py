@@ -176,7 +176,7 @@ def test_queue_resolves_names_and_includes_action_state(client, mock_paperless):
     mock_paperless.get_document.return_value = _document()
     client.post(
         "/api/intake/documents/42/actions",
-        json={"action_type": "PAY", "title": "Pay utility bill"},
+        json={"action_type": "PAY", "title": "Pay utility bill", "amount": 84.2},
     )
     mock_paperless.resolve_tag_ids.return_value = [1]
     mock_paperless.list_document_page.return_value = PaperlessPage(
@@ -302,7 +302,7 @@ def test_confirm_and_file_checks_action_revision_before_paperless_write(client, 
     mock_paperless.get_document.return_value = _document()
     created = client.post(
         "/api/intake/documents/42/actions",
-        json={"action_type": "PAY", "title": "Pay utility bill"},
+        json={"action_type": "PAY", "title": "Pay utility bill", "amount": 84.2},
     ).json()
     mock_paperless.update_document.reset_mock()
 
@@ -337,6 +337,7 @@ def test_user_action_can_be_created_and_deleted(client, mock_paperless):
         json={
             "action_type": "PAY",
             "title": "Pay utility bill",
+            "summary": "Use the household checking account.",
             "payee_or_owner": "Utility Co",
             "amount": 84.2,
             "due_date": "2026-10-25",
@@ -347,8 +348,19 @@ def test_user_action_can_be_created_and_deleted(client, mock_paperless):
     assert created.status_code == 200
     action = created.json()
     assert action["origin"] == "user"
+    assert action["summary"] == "Use the household checking account."
     assert action["payee_or_owner"] == "Utility Co"
     assert action["history"][0]["event_type"] == "created"
 
     deleted = client.delete(f"/api/intake/actions/{action['id']}")
     assert deleted.status_code == 204
+
+
+def test_user_pay_action_requires_amount(client, mock_paperless):
+    response = client.post(
+        "/api/intake/documents/42/actions",
+        json={"action_type": "PAY", "title": "Pay utility bill"},
+    )
+
+    assert response.status_code == 422
+    mock_paperless.get_document.assert_not_awaited()
