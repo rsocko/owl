@@ -868,6 +868,7 @@
 }
 
 .intake-field input,
+.intake-field select,
 .intake-action-grid input,
 .intake-action-grid select,
 .intake-action-grid textarea,
@@ -882,12 +883,19 @@
 }
 
 .intake-field input:focus,
+.intake-field select:focus,
 .intake-action-grid input:focus,
 .intake-action-grid select:focus,
 .intake-action-grid textarea:focus,
 .intake-ocr-text textarea:focus {
   border-color: var(--accent);
   outline: 2px solid var(--accent-bg);
+}
+
+.intake-field small {
+  color: var(--text-muted);
+  font-size: 0.64rem;
+  line-height: 1.4;
 }
 
 .intake-action-grid textarea {

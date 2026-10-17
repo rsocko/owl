@@ -80,6 +80,11 @@ AI-generated tag names are not offered as suggestions; reviewers can still
 create a new tag explicitly by typing it into the tag control. This is enforced
 by OWL and does not require a Paperless setting change.
 
+Durable review fields such as Document Amount, Document Due Date, and Account
+Identifier are editable in the metadata panel. Account Identifier shows the
+exact Paperless value in this trusted review flow and requires an identifier
+type when changed so OWL can validate the value before writing it back.
+
 ## Action editing and audit history
 
 Actions can be edited directly. Fields include type, title, payee or owner,

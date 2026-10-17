@@ -15,6 +15,10 @@ import {
 } from '../components/ui';
 import { endpoints, type DocumentSummaryModel } from '../lib/api';
 import DocumentSummary from '../components/DocumentSummary';
+import {
+  ACCOUNT_IDENTIFIER_CLASSES,
+  type AccountIdentifierClass,
+} from '../lib/accountIdentifier';
 import { getToastDuration } from '../lib/toast';
 import '../styles/metadata-correction.css';
 
@@ -62,13 +66,6 @@ interface WritebackResponse {
 }
 
 type ToastState = { message: string; tone: 'success' | 'error' } | null;
-type AccountIdentifierClass =
-  | 'provider_account'
-  | 'service_account'
-  | 'member'
-  | 'policy'
-  | 'bank_account'
-  | 'payment_card';
 
 // ------------------------------------------------------------------
 // Constants
@@ -83,15 +80,6 @@ const FIELD_LABELS: Record<string, string> = {
   invoice_number: 'Invoice Number',
   account_identifier: 'Account Identifier',
 };
-
-const ACCOUNT_IDENTIFIER_CLASSES: { value: AccountIdentifierClass; label: string }[] = [
-  { value: 'service_account', label: 'Service account' },
-  { value: 'provider_account', label: 'Provider account' },
-  { value: 'member', label: 'Member ID' },
-  { value: 'policy', label: 'Policy ID' },
-  { value: 'bank_account', label: 'Bank account' },
-  { value: 'payment_card', label: 'Payment card' },
-];
 
 // ------------------------------------------------------------------
 // Helpers

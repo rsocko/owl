@@ -247,10 +247,12 @@ def test_core_hides_operational_fields_and_exposes_editable_document_fields(clie
 
     assert response.status_code == 200
     fields = response.json()["document"]["review_fields"]
-    assert [(field["name"], field["editable"]) for field in fields] == [
-        ("Account Identifier", False),
-        ("Document Amount", True),
+    assert [(field["name"], field["field_key"], field["editable"]) for field in fields] == [
+        ("Account Identifier", "account_identifier", True),
+        ("Document Amount", "document_amount", True),
     ]
+    assert fields[0]["value"] == "A-123"
+    assert fields[0]["audit"] is False
 
 
 def test_save_rejects_external_edit_conflict(client, mock_paperless):
@@ -314,7 +316,7 @@ def test_file_only_reports_missing_inbox_tag_without_saving(client, mock_paperle
     mock_paperless.update_document.assert_not_awaited()
 
 
-def test_save_merges_editable_custom_fields_without_dropping_audit_fields(client, mock_paperless):
+def test_save_merges_editable_custom_fields(client, mock_paperless):
     mock_paperless.get_document.return_value = _document(
         custom_fields=[
             {"field": 9, "value": "A-123"},
@@ -345,6 +347,60 @@ def test_save_merges_editable_custom_fields_without_dropping_audit_fields(client
             ]
         },
     )
+
+
+def test_save_updates_exact_classified_account_identifier(client, mock_paperless):
+    mock_paperless.get_document.return_value = _document(
+        custom_fields=[{"field": 9, "value": "ending 2025"}]
+    )
+    mock_paperless.list_custom_fields.return_value = [
+        {"id": 9, "name": "Account Identifier", "data_type": "string"},
+    ]
+
+    response = client.put(
+        "/api/intake/documents/42",
+        json={
+            "expected_modified": "2026-10-16T12:00:00Z",
+            "metadata": {
+                "custom_fields": [
+                    {
+                        "field": 9,
+                        "value": "ACCT-2025-8675309",
+                        "identifier_class": "service_account",
+                    }
+                ]
+            },
+            "disposition": "save",
+        },
+    )
+
+    assert response.status_code == 200
+    mock_paperless.update_document.assert_awaited_once_with(
+        42,
+        {"custom_fields": [{"field": 9, "value": "ACCT-2025-8675309"}]},
+    )
+
+
+def test_save_requires_account_identifier_class(client, mock_paperless):
+    mock_paperless.get_document.return_value = _document(
+        custom_fields=[{"field": 9, "value": "ending 2025"}]
+    )
+    mock_paperless.list_custom_fields.return_value = [
+        {"id": 9, "name": "Account Identifier", "data_type": "string"},
+    ]
+
+    response = client.put(
+        "/api/intake/documents/42",
+        json={
+            "expected_modified": "2026-10-16T12:00:00Z",
+            "metadata": {"custom_fields": [{"field": 9, "value": "ACCT-2025-8675309"}]},
+            "disposition": "save",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "account_identifier_class_required"
+    mock_paperless.update_document.assert_not_awaited()
 
 
 def test_confirm_and_file_checks_action_revision_before_paperless_write(client, mock_paperless):

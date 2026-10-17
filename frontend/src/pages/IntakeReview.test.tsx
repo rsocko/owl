@@ -413,6 +413,46 @@ describe('IntakeReview', () => {
     expect(await screen.findByLabelText('Document Amount')).toHaveValue('1,234.50');
   });
 
+  it('shows and saves the full editable account identifier with its type', async () => {
+    documentCoreMock.mockResolvedValue({
+      ...core(1),
+      document: {
+        ...core(1).document,
+        review_fields: [{
+          field: 9,
+          field_key: 'account_identifier',
+          name: 'Account Identifier',
+          value: 'ACCT-2025-8675309',
+          data_type: 'string',
+          editable: true,
+          audit: false,
+        }],
+      },
+    });
+    renderPage();
+
+    const identifier = await screen.findByLabelText('Account Identifier');
+    expect(identifier).toHaveValue('ACCT-2025-8675309');
+    fireEvent.change(identifier, { target: { value: 'ACCT-2025-1234567' } });
+    fireEvent.change(screen.getByLabelText('Identifier type'), {
+      target: { value: 'provider_account' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(saveDocumentMock).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          custom_fields: [{
+            field: 9,
+            value: 'ACCT-2025-1234567',
+            identifier_class: 'provider_account',
+          }],
+        }),
+      }),
+    ));
+  });
+
   it('opens the document preview full screen and exposes external links', async () => {
     renderPage();
 
