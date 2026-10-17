@@ -240,11 +240,10 @@ def _statement_like_documents(
 
 def _classification_neutral_title(document: DocumentRecord) -> str:
     normalized = normalize_title(document.title)
-    return " ".join(
-        word
-        for word in normalized.split()
-        if word not in {"statement", "bill", "invoice", "eob"}
+    neutral = " ".join(
+        word for word in normalized.split() if word not in {"statement", "bill", "invoice", "eob"}
     )
+    return neutral or normalized
 
 
 def _classify_frequency(intervals: list[int], config: AnalysisConfig) -> str | None:

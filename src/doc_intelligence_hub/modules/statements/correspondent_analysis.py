@@ -124,15 +124,15 @@ def analyze_correspondent_policy(
 
     prepared_groups = [
         (
-            "statement" if group_key in group_series else _dominant_document_kind(grouped_documents),
+            "statement"
+            if group_key in group_series
+            else _dominant_document_kind(grouped_documents),
             group_key,
             _dominant_title_pattern(grouped_documents)
             or _dominant_document_kind(grouped_documents),
             grouped_documents,
         )
-        for group_key, grouped_documents in sorted(
-            groups.items(), key=lambda item: item[0]
-        )
+        for group_key, grouped_documents in sorted(groups.items(), key=lambda item: item[0])
     ]
     duplicate_counts = Counter(
         (kind, normalized_title) for kind, _, normalized_title, _ in prepared_groups
@@ -231,9 +231,7 @@ def _build_suggestion(
     reason_codes = ["paperless_history", cadence_reason]
     signal_reason_code = _group_signal_reason_code(group_key)
     type_ids = {
-        document.document_type_id
-        for document in ordered
-        if document.document_type_id is not None
+        document.document_type_id for document in ordered if document.document_type_id is not None
     }
     if signal_reason_code == "title_pattern_match" and len(type_ids) == 1:
         signal_reason_code = None
@@ -281,15 +279,11 @@ def _suggestion_key(correspondent_id: int, kind: DocumentKind, group_key: str) -
     return f"{correspondent_id}-{kind}-{hashlib.sha256(identity).hexdigest()[:16]}"
 
 
-def _suggestion_identity_group_key(
-    group_key: str, documents: list[DocumentRecord]
-) -> str:
+def _suggestion_identity_group_key(group_key: str, documents: list[DocumentRecord]) -> str:
     if not group_key.startswith("title:"):
         return group_key
     type_ids = {
-        document.document_type_id
-        for document in documents
-        if document.document_type_id is not None
+        document.document_type_id for document in documents if document.document_type_id is not None
     }
     if len(type_ids) == 1:
         return f"document-type-id:{next(iter(type_ids))}"
@@ -352,10 +346,7 @@ def _dominant_title_pattern(documents: list[DocumentRecord]) -> str:
 def _classification_neutral_title(document: DocumentRecord) -> str:
     normalized = _normalized_document_title(document)
     classification_words = {
-        keyword
-        for _, keywords in _KIND_KEYWORDS
-        for keyword in keywords
-        if " " not in keyword
+        keyword for _, keywords in _KIND_KEYWORDS for keyword in keywords if " " not in keyword
     }
     return " ".join(word for word in normalized.split() if word not in classification_words)
 
