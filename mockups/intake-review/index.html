@@ -139,7 +139,7 @@
             <div class="workspace-tabs" role="tablist" aria-label="Action Queue review details">
               <button id="queue-metadata-tab" type="button" role="tab" aria-selected="false" aria-controls="queue-metadata-panel">Metadata</button>
               <button id="queue-actions-tab" type="button" role="tab" aria-selected="true" aria-controls="queue-actions-panel">Actions <span id="queue-action-count" class="tab-count">1</span></button>
-              <button id="queue-ocr-tab" type="button" role="tab" aria-selected="false" aria-controls="queue-ocr-panel">OCR</button>
+              <button id="queue-ocr-tab" type="button" role="tab" aria-selected="false" aria-controls="queue-ocr-panel">OCR <span id="queue-ocr-quality-count" class="tab-count">94</span></button>
             </div>
             <div class="workspace-tools"><button id="queue-refresh" type="button">Refresh analysis</button><span id="review-confidence" class="pill warning">94% confidence</span></div>
           </div>
@@ -153,7 +153,7 @@
             <details class="review-evidence"><summary>Why OWL suggested this work</summary><p id="review-reason">An unpaid balance is due October 30. Confirm the obligation before it becomes trusted work.</p></details>
           </div>
           <div id="queue-ocr-panel" role="tabpanel" aria-labelledby="queue-ocr-tab" hidden>
-            <div class="ocr-review compact"><div class="ocr-score"><div><span>OCR quality</span><strong id="queue-ocr-score">94</strong><small>/ 100</small></div><span class="pill success">Text ready</span></div><label class="ocr-text-label">Searchable OCR text<textarea id="queue-ocr-text" rows="12" readonly></textarea></label></div>
+            <div class="ocr-review compact"><div class="ocr-score"><div><span>OCR quality</span><strong id="queue-ocr-score">94</strong><small>/ 100</small></div><span id="queue-ocr-status" class="pill success">Good quality</span></div><label class="ocr-text-label">Searchable OCR text<textarea id="queue-ocr-text" rows="12" readonly></textarea></label></div>
           </div>
           <div class="review-actions"><button id="review-no-action" type="button">No actions needed</button><button id="review-needs-review" type="button">Defer &amp; next</button><button id="review-save" type="button" disabled>Save corrections</button><button id="review-confirm" type="button" class="primary">Confirm actions</button></div>
           <p class="field-help">The Action Queue defaults to Actions. Metadata remains available when the source classification needs correction.</p>

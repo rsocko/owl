@@ -234,11 +234,29 @@ function updatePreviewMetadata() {
   byId("preview-metadata-correspondent").textContent = byId("field-correspondent").value.trim() || "No correspondent";
   byId("preview-metadata-type").textContent = byId("field-type").value.trim() || "No type";
 }
+function ocrQuality(score) {
+  if (score >= 90) return { level: "good", pill: "success", status: "Good quality" };
+  if (score >= 75) return { level: "caution", pill: "warning", status: "Review quality" };
+  return { level: "poor", pill: "danger", status: "Poor quality" };
+}
+function updateOcrIndicator(prefix, doc) {
+  const quality = ocrQuality(doc.ocr.score);
+  const tab = byId(prefix ? `${prefix}-ocr-tab` : "ocr-tab");
+  const count = byId(prefix ? `${prefix}-ocr-quality-count` : "ocr-quality-count");
+  const score = byId(prefix ? `${prefix}-ocr-score` : "ocr-score");
+  const status = byId(prefix ? `${prefix}-ocr-status` : "ocr-status");
+  count.textContent = quality.level === "poor" ? `! ${doc.ocr.score}` : doc.ocr.score;
+  count.className = `tab-count ocr-quality-${quality.level}`;
+  tab.classList.remove("ocr-quality-good", "ocr-quality-caution", "ocr-quality-poor");
+  tab.classList.add(`ocr-quality-${quality.level}`);
+  tab.setAttribute("aria-label", `OCR, ${quality.status.toLowerCase()}, score ${doc.ocr.score} out of 100`);
+  score.textContent = doc.ocr.score;
+  score.className = `ocr-score-${quality.level}`;
+  status.textContent = quality.status;
+  status.className = `pill ${quality.pill}`;
+}
 function loadOcrReview(doc = current) {
-  byId("ocr-quality-count").textContent = doc.ocr.score;
-  byId("ocr-score").textContent = doc.ocr.score;
-  byId("ocr-status").textContent = doc.ocr.score >= 90 ? "Text ready" : "Review quality";
-  byId("ocr-status").className = `pill ${doc.ocr.score >= 90 ? "success" : "warning"}`;
+  updateOcrIndicator("", doc);
   byId("ocr-language").textContent = doc.ocr.language;
   byId("ocr-pages").textContent = `${doc.ocr.pages} ${doc.ocr.pages === 1 ? "page" : "pages"}`;
   byId("ocr-orientation").textContent = doc.ocr.orientation;
@@ -625,7 +643,7 @@ function loadActionReview() {
   byId("queue-preview-correspondent").textContent = reviewDoc.correspondent;
   byId("queue-preview-type").textContent = reviewDoc.type;
   renderQueueCustomMetadata(reviewDoc);
-  byId("queue-ocr-score").textContent = reviewDoc.ocr.score;
+  updateOcrIndicator("queue", reviewDoc);
   byId("queue-ocr-text").value = reviewDoc.ocr.text;
   byId("review-source-kind").textContent = reviewDoc.paperKind;
   byId("review-source-title").textContent = reviewDoc.paperTitle;
