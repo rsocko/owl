@@ -14,6 +14,8 @@ from doc_intelligence_hub.core.paperless import (
 )
 from doc_intelligence_hub.modules.metadata_migration.cli import cli
 from doc_intelligence_hub.modules.metadata_migration.models import (
+    FieldDisposition,
+    FieldReviewState,
     MigrationAction,
     MigrationResult,
     ProtectedRecord,
@@ -56,6 +58,10 @@ class FakeClient:
         self.documents = {int(item["id"]): item for item in documents}
         self.created: list[dict] = []
         self.updates: list[tuple[int, list[dict]]] = []
+        self.deleted: list[int] = []
+        self.saved_views: list[dict] = []
+        self.document_types: list[dict] = []
+        self.workflows: list[dict] = []
 
     async def list_custom_fields(self) -> list[dict]:
         return self.definitions
@@ -68,6 +74,21 @@ class FakeClient:
 
     async def update_custom_field(self, field_id: int, data: dict) -> dict:
         raise AssertionError("Migration must not rename or mutate legacy definitions")
+
+    async def delete_custom_field(self, field_id: int) -> None:
+        self.deleted.append(field_id)
+        self.definitions = [
+            definition for definition in self.definitions if definition.get("id") != field_id
+        ]
+
+    async def list_saved_views(self) -> list[dict]:
+        return self.saved_views
+
+    async def list_document_types(self) -> list[dict]:
+        return self.document_types
+
+    async def list_workflows(self) -> list[dict]:
+        return self.workflows
 
     async def iter_document_pages(self, *, page_size: int, cursor: str | None = None):
         documents = list(self.documents.values())
@@ -357,3 +378,190 @@ def test_cli_apply_requires_single_writer_preflight(monkeypatch):
     )
     assert result.exit_code != 0
     assert "WRITE_TO_PAPERLESS" in result.output
+
+
+@pytest.mark.asyncio
+async def test_field_review_classifies_keep_retire_alias_and_unmanaged_fields():
+    definitions = [
+        {"id": 1, "name": "Provider Name", "data_type": "string"},
+        {"id": 2, "name": "di_provider_name", "data_type": "string"},
+        {"id": 3, "name": "Action Type", "data_type": "select"},
+        {"id": 4, "name": "EOB Match Score", "data_type": "decimal"},
+        {"id": 5, "name": "Personal Notes", "data_type": "string"},
+    ]
+    client = FakeClient(
+        definitions,
+        [{"id": 10, "custom_fields": [{"field": 4, "value": "0.75"}]}],
+    )
+    client.saved_views = [
+        {
+            "id": 7,
+            "filter_rules": [
+                {
+                    "rule_type": 42,
+                    "value": json.dumps([["di_provider_name", "exists", True]]),
+                }
+            ],
+        }
+    ]
+
+    summary = await MetadataMigrationService(client).review_fields()
+    by_name = {field.field_name: field for field in summary.fields if field.deployed_count}
+
+    assert by_name["Provider Name"].disposition is FieldDisposition.KEEP
+    assert by_name["Provider Name"].state is FieldReviewState.RETAINED
+    assert by_name["di_provider_name"].disposition is FieldDisposition.MIGRATE_THEN_RETIRE
+    assert by_name["di_provider_name"].state is FieldReviewState.BLOCKED_DEPENDENCY
+    assert by_name["Action Type"].disposition is FieldDisposition.RETIRE_WHEN_EMPTY
+    assert by_name["Action Type"].state is FieldReviewState.ELIGIBLE
+    assert by_name["EOB Match Score"].state is FieldReviewState.BLOCKED_POPULATED
+    assert summary.unmanaged_fields == 1
+    assert client.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_field_retirement_deletes_only_empty_dependency_free_candidates():
+    client = FakeClient(
+        [
+            {"id": 1, "name": "Action Type", "data_type": "select"},
+            {"id": 2, "name": "Action Due Date", "data_type": "date"},
+            {"id": 3, "name": "EOB Match Score", "data_type": "decimal"},
+        ],
+        [{"id": 10, "custom_fields": [{"field": 3, "value": "0.80"}]}],
+    )
+    client.document_types = [{"id": 9, "name": "Bill", "custom_fields": [2]}]
+
+    summary = await MetadataMigrationService(client).review_fields(apply=True)
+    by_name = {field.field_name: field for field in summary.fields if field.deployed_count}
+
+    assert client.deleted == [1]
+    assert by_name["Action Type"].state is FieldReviewState.DELETED
+    assert by_name["Action Due Date"].state is FieldReviewState.BLOCKED_DEPENDENCY
+    assert by_name["EOB Match Score"].state is FieldReviewState.BLOCKED_POPULATED
+    assert summary.deleted_fields == 1
+
+
+@pytest.mark.asyncio
+async def test_field_retirement_clears_owl_covered_values_before_deletion():
+    document = {
+        "id": 10,
+        "custom_fields": [{"field": 1, "value": "PAY"}],
+    }
+    client = FakeClient(
+        [{"id": 1, "name": "Action Type", "data_type": "select"}],
+        [document],
+    )
+    service = MetadataMigrationService(
+        client,
+        owl_document_coverage={MetadataFieldKey.LEGACY_ACTION_TYPE: {10}},
+    )
+
+    summary = await service.review_fields(apply=True)
+    action_type = next(
+        field
+        for field in summary.fields
+        if field.stable_key == MetadataFieldKey.LEGACY_ACTION_TYPE.value
+    )
+
+    assert client.updates == [(10, [{"field": 1, "value": None}])]
+    assert client.deleted == [1]
+    assert action_type.state is FieldReviewState.DELETED
+    assert summary.cleared_document_values == 1
+
+
+@pytest.mark.asyncio
+async def test_field_retirement_keeps_uncovered_values_without_explicit_discard():
+    client = FakeClient(
+        [{"id": 1, "name": "Action Type", "data_type": "select"}],
+        [
+            {"id": 10, "custom_fields": [{"field": 1, "value": "PAY"}]},
+            {"id": 11, "custom_fields": [{"field": 1, "value": "RESPOND"}]},
+        ],
+    )
+    service = MetadataMigrationService(
+        client,
+        owl_document_coverage={MetadataFieldKey.LEGACY_ACTION_TYPE: {10}},
+    )
+
+    summary = await service.review_fields(apply=True)
+    action_type = next(
+        field
+        for field in summary.fields
+        if field.stable_key == MetadataFieldKey.LEGACY_ACTION_TYPE.value
+    )
+
+    assert client.updates == [(10, [{"field": 1, "value": None}])]
+    assert client.deleted == []
+    assert action_type.state is FieldReviewState.BLOCKED_POPULATED
+    assert action_type.non_empty_documents == 1
+    assert action_type.uncovered_documents == 1
+
+
+@pytest.mark.asyncio
+async def test_explicit_discard_clears_uncovered_retired_values():
+    client = FakeClient(
+        [{"id": 1, "name": "Action Type", "data_type": "select"}],
+        [{"id": 11, "custom_fields": [{"field": 1, "value": "RESPOND"}]}],
+    )
+
+    summary = await MetadataMigrationService(client).review_fields(
+        apply=True,
+        discard_retired_values=True,
+    )
+
+    assert client.updates == [(11, [{"field": 1, "value": None}])]
+    assert client.deleted == [1]
+    assert summary.cleared_document_values == 1
+
+
+@pytest.mark.asyncio
+async def test_field_review_reports_missing_required_select_options():
+    client = FakeClient(
+        [
+            {
+                "id": 1,
+                "name": "Action Status",
+                "data_type": "select",
+                "extra_data": {
+                    "select_options": [
+                        {"id": 1, "label": "pending"},
+                        {"id": 2, "label": "completed"},
+                    ]
+                },
+            }
+        ],
+        [],
+    )
+
+    summary = await MetadataMigrationService(client).review_fields()
+    action_status = next(
+        field
+        for field in summary.fields
+        if field.stable_key == MetadataFieldKey.ACTION_STATUS.value
+    )
+
+    assert action_status.state is FieldReviewState.INCOMPATIBLE
+    assert action_status.disposition is FieldDisposition.REVIEW_REQUIRED
+    assert "missing_select_option" in action_status.diagnostic_codes
+    assert summary.exit_status == 2
+
+
+def test_retire_cli_apply_requires_protected_output(monkeypatch):
+    monkeypatch.delenv("WRITE_TO_PAPERLESS", raising=False)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        [
+            "retire-fields",
+            "--paperless-url",
+            "https://synthetic.invalid",
+            "--paperless-token",
+            "synthetic-token",
+            "--apply",
+            "--external-writers-disabled",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--apply requires --protected-output" in result.output

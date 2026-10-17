@@ -859,6 +859,11 @@ class PaperlessClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def delete_custom_field(self, field_id: int) -> None:
+        """Delete a Paperless custom field definition."""
+        resp = await self._request("DELETE", f"/api/custom_fields/{field_id}/")
+        resp.raise_for_status()
+
     async def update_custom_fields(self, document_id: int, custom_fields: list[dict]) -> None:
         """Update custom field values on a document (merge, not replace).
 
@@ -1230,6 +1235,11 @@ class PaperlessClient:
         resp = await client.post("/api/custom_fields/", json=field_def)
         resp.raise_for_status()
         return resp.json()
+
+    async def list_workflows(self) -> list[dict]:
+        """List Paperless workflows for custom-field dependency checks."""
+        client = self._get_client()
+        return await self._paginate(client, "/api/workflows/", {"page_size": 100})
 
     # ------------------------------------------------------------------
     # Saved views
