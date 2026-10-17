@@ -59,12 +59,36 @@ sidebar_position: 2
 
 ## Analysis & Recommendations
 
-### 1. Bill vs. Statement — Already Separated! ✅
+### 1. Invoice vs. Statement — Keep the Structural Types Separate
 
-You already have `Invoice / Bill` (636) and `Statement` (4,130) as distinct types. This is the right call:
+The current `Invoice / Bill` type mixes two concepts. **Invoice** describes a document
+structure, while **bill** commonly means any document that asks for payment. Utility and
+medical documents expose the problem because they are often statements structurally and
+bills operationally.
 
-- **Invoice/Bill** → Action Queue generates PAY actions
-- **Statement** → Statement Tracker monitors for patterns/gaps
+- **Invoice** describes a request for payment for a discrete purchase, service, encounter,
+  or assessed charge.
+- **Statement** summarizes activity for an account over a period. It may still contain an
+  amount due and require a `PAY` action, as with credit-card, utility, or patient-account
+  statements.
+
+Document type describes what the document is. Action Queue independently determines what
+must be done from the document's contents. An unresolved amount due, payment request, or
+unpaid balance can produce a `PAY` action for either type. Treat "bill" as informal
+terminology for a payable document rather than as a canonical document type.
+
+For medical documents:
+
+- A periodic patient-account summary showing charges, insurance adjustments, payments, and
+  a running balance is a **Statement**.
+- A payment request for a specific visit, procedure, or service is an **Invoice**,
+  even when the issuer calls it a "patient statement."
+- An insurer's explanation of coverage and patient responsibility is an **EOB**, not a bill
+  or statement.
+
+The same rule applies to utilities: a monthly account summary with prior balance, payments,
+current usage or charges, and a new balance is a **Statement** with a possible `PAY` action.
+A discrete installation, repair, or one-time service charge is an **Invoice**.
 
 ### 2. Conceptual Overlaps
 
@@ -94,7 +118,7 @@ You have **355 correspondents** — many with multiple account relationships:
 
 **Don't change (working well):**
 
-- Your 5 core doc types: Statement, Invoice/Bill, EOB, Receipt, Paystub
+- Your core document concepts: Statement, Invoice, EOB, Receipt, Paystub
 - Your hierarchical tag system (Car:_, House:_, Insurance:*, etc.)
 - Your workflow status tags (Inbox, TODO, Paid)
 
@@ -110,19 +134,22 @@ You have **355 correspondents** — many with multiple account relationships:
 - Consider `Work Related` type → just tags
 
 **For Action Queue intelligence:**  
-The type→action mapping should be:
+Document type should provide classification context, not determine the action by itself:
 
 Plain text
 
 ```
-Invoice/Bill  → PAY (high confidence)
+Invoice       → Often PAY when an unresolved amount is due
 EOB           → REVIEW + cross-match
 Letter        → RESPOND (medium confidence, analyze content)
 Contract      → REVIEW (renewal dates)
 Credit Report → REVIEW
-Statement     → FILE (no action unless anomaly)
+Statement     → PAY when payment is requested; otherwise FILE or no action
 Receipt       → ARCHIVE (no action)
 ```
+
+Action Queue should require content evidence before generating an action. In particular,
+neither `Invoice` nor `Statement` guarantees that payment remains outstanding.
 
 ### 5. Multi-Account Differentiation
 
