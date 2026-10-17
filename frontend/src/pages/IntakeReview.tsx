@@ -988,7 +988,7 @@ export default function IntakeReview() {
     <div className="intake-review-page">
       <aside className="intake-queue" aria-label="Inbox documents">
         <div className="intake-queue-header">
-          <div><span className="intake-eyebrow">Paperless inbox</span><h1>Intake Review</h1><p>{queue.length} awaiting review</p></div>
+          <div><span className="intake-eyebrow">Paperless inbox</span><h1>Inbox Review</h1><p>{queue.length} awaiting review</p></div>
           <Button size="sm" aria-label="Reload queue" disabled={loadingQueue} onClick={() => void loadQueue()}><RefreshCw size={15} /></Button>
         </div>
         <div className="intake-queue-tools">

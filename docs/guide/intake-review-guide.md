@@ -1,17 +1,17 @@
 ---
-title: Intake Review User Guide
-sidebar_label: Intake Review
+title: Inbox Review User Guide
+sidebar_label: Inbox Review
 sidebar_position: 2
 ---
 
-# Intake Review
+# Inbox Review
 
-Intake Review is OWL's document-focused Paperless Inbox workspace. It keeps the
+Inbox Review is OWL's document-focused Paperless Inbox workspace. It keeps the
 source document visible while metadata, action assessment, and OCR quality are
 reviewed together. Filing the document and confirming its actions remain
 independent decisions.
 
-Open **Workflow → Intake Review** in the OWL web interface. The document list is
+Open **Workflow → Inbox Review** in the OWL web interface. The document list is
 loaded from the Action Queue's configured intake tags (normally `Inbox`). Each
 row includes a Paperless thumbnail, resolved correspondent and document type,
 and an **Action needed** indicator where applicable. Search and filters narrow
@@ -38,7 +38,7 @@ document. Press **Enter** or click a row to select it.
 
 The selected document is stored in the `document` query parameter, so a review
 can be bookmarked or shared, for example
-`#/intake-review?document=123&tab=actions`.
+`#/inbox-review?document=123&tab=actions`.
 
 ## Metadata and filing decisions
 
@@ -102,7 +102,7 @@ for the current source revision. It is blocked while metadata edits are
 unsaved, and a changed Paperless revision returns a conflict.
 
 OCR remediation continues through OWL's OCR Quality workflow. After accepting
-new OCR, return to Intake Review and refresh analysis so metadata suggestions
+new OCR, return to Inbox Review and refresh analysis so metadata suggestions
 and inferred actions are evaluated against the new searchable text.
 
 Hover the document preview to reveal **Expand** and **New tab** controls.

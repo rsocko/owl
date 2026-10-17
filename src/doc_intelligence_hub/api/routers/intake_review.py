@@ -952,7 +952,7 @@ async def save_intake_document(
                     status_code=422,
                     detail={
                         "code": "custom_field_not_editable",
-                        "message": "One or more custom fields are read-only in Intake Review.",
+                        "message": "One or more custom fields are read-only in Inbox Review.",
                         "field_ids": disallowed,
                     },
                 )

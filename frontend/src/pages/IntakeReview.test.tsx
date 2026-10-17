@@ -76,11 +76,11 @@ function core(id: number) {
   };
 }
 
-function renderPage(entry = '/intake-review') {
+function renderPage(entry = '/inbox-review') {
   return render(
     <MemoryRouter initialEntries={[entry]}>
       <Routes>
-        <Route path="/intake-review" element={<IntakeReview />} />
+        <Route path="/inbox-review" element={<IntakeReview />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -144,7 +144,7 @@ describe('IntakeReview', () => {
   });
 
   it('selects a document and tab from the query string', async () => {
-    renderPage('/intake-review?document=2&tab=actions');
+    renderPage('/inbox-review?document=2&tab=actions');
 
     await waitFor(() => expect(documentCoreMock).toHaveBeenCalledWith(2));
     expect(await screen.findByRole('tab', { name: /Actions/ })).toHaveAttribute('aria-selected', 'true');

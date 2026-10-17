@@ -25,6 +25,22 @@ describe('TopNav', () => {
     expect(screen.queryByText('Triage')).not.toBeInTheDocument();
   });
 
+  it('uses the Paperless-aligned Inbox Review label and route', () => {
+    render(
+      <MemoryRouter initialEntries={['/inbox-review']}>
+        <TopNav />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Workflow' }));
+
+    expect(screen.getByRole('menuitem', { name: 'Inbox Review' })).toHaveAttribute(
+      'href',
+      '/inbox-review',
+    );
+    expect(screen.queryByText('Intake Review')).not.toBeInTheDocument();
+  });
+
   it('links to the grouped Document Views launcher', () => {
     render(
       <MemoryRouter initialEntries={['/document-views']}>

@@ -31,7 +31,7 @@ const NAV_ENTRIES: NavEntry[] = [
   {
     label: 'Workflow',
     items: [
-      { to: '/intake-review', label: 'Intake Review' },
+      { to: '/inbox-review', label: 'Inbox Review' },
       { to: '/action-queue', label: 'Action Queue' },
       { to: '/needs-review', label: 'Needs Review' },
       { to: '/corrections', label: 'Corrections' },
