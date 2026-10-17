@@ -20,7 +20,7 @@ const documents = [
     suggestedType: "Invoice", date: "2026-10-15", storage: "Household / Health",
     tags: "Inbox, Health", amount: "$128.00", confidence: 94, assessment: "pay",
     due: "October 30, 2026", reference: "Account •••• 4821", recurring: "Likely monthly invoice",
-    reason: "An unpaid balance is due October 30. Confirm the obligation before it becomes a trusted task.",
+    reason: "An unpaid balance is due October 30. Review the extracted action details before confirming it in the Action Queue.",
     paperTitle: "Your account statement.", paperKind: "INVOICE",
     paperDescription: "Services have been billed. Please arrange payment of the balance shown below by October 30, 2026.",
     callout: "BALANCE DUE · October 30, 2026", correspondentId: 23, revision: 12, status: "pending", stale: false
@@ -55,6 +55,7 @@ let analysisRunning = false;
 let toastTimer;
 let previewScope = null;
 let auditEntry = null;
+let actionReviewDocument = null;
 const selection = new Set();
 const existingTypes = new Set(["Receipt", "Invoice", "Statement"]);
 
@@ -71,7 +72,7 @@ function toast(message) {
   toastTimer = setTimeout(() => { byId("toast").hidden = true; }, 6500);
 }
 function navigate() {
-  const route = ["intake", "review", "actions", "history", "processing"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "intake";
+  const route = ["intake", "actions", "history", "processing"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "intake";
   document.querySelectorAll(".screen").forEach((screen) => { screen.hidden = screen.id !== route; });
   document.querySelectorAll("[data-route]").forEach((link) => {
     if (link.dataset.route === route) link.setAttribute("aria-current", "page");
@@ -79,9 +80,8 @@ function navigate() {
   });
   if (route === "history") renderHistory();
   if (route === "actions") renderActions();
-  if (route === "review") loadActionReview();
   window.scrollTo(0, 0);
-  document.title = `OWL · ${ { intake: "Intake review", review: "Action review", actions: "Trusted actions", history: "No-action history", processing: "Processing freshness" }[route]} — UX proposal`;
+  document.title = `OWL · ${ { intake: "Intake review", actions: "Action Queue", history: "No-action history", processing: "Processing freshness" }[route]} — UX proposal`;
 }
 function pendingDocuments() {
   return documents.filter((doc) => ["pending", "review"].includes(doc.status));
@@ -159,6 +159,21 @@ function renderTags() {
     container.append(pill);
   }
 }
+function updateSuggestionVisibility() {
+  const suggestions = {
+    title: current.title,
+    correspondent: current.provider,
+    type: current.suggestedType
+  };
+  let visibleCount = 0;
+  document.querySelectorAll("[data-suggestion]").forEach((element) => {
+    const field = element.dataset.suggestion;
+    const differs = byId(`field-${field}`).value.trim() !== suggestions[field].trim();
+    element.hidden = !["ready", "conflict"].includes(scenario) || !differs;
+    if (!element.hidden) visibleCount += 1;
+  });
+  byId("suggestions-bar").hidden = visibleCount === 0;
+}
 function loadDocument() {
   fields.forEach((field) => { byId(`field-${field}`).value = current[field]; });
   renderTags();
@@ -177,29 +192,23 @@ function loadDocument() {
   document.querySelector('[data-suggestion="correspondent"] small').textContent = `Traditional · existing #${current.correspondentId}`;
   byId("suggested-type").textContent = current.suggestedType;
   byId("type-provenance").textContent = existingTypes.has(current.suggestedType) ? "Traditional · existing type" : "Paperless AI · new name";
-  byId("owned-status").value = current.assessment === "pay" ? "Unconfirmed PAY candidate" : current.assessment === "review" ? "Needs Review" : "No action identified";
   byId("metadata-heading").textContent = "Document metadata";
   byId("assessment-title").textContent = current.assessment === "pay" ? "PAY · provisional action" : current.assessment === "review" ? "Needs human review" : "No action needed";
   byId("assessment-reason").textContent = current.reason;
   byId("assessment-confidence").textContent = `${current.confidence}% confidence`;
   byId("assessment-icon").textContent = current.assessment === "none" ? "✓" : "?";
-  byId("pattern-title").textContent = current.recurring;
-  byId("pattern-detail").textContent = current.assessment === "pay"
-    ? "Naming consistency can be applied here. Amount, due date, and payee are reviewed in the separate Action review."
-    : current.assessment === "review"
-      ? "OWL found a possible series, but the source is too unclear to automate missing-document checks."
-      : "Consistent naming can be applied now; missing-period checks stay in the Statements workflow.";
   const actionCandidate = current.assessment === "pay";
   const uncertain = current.assessment === "review";
   byId("disposition-heading").textContent = actionCandidate ? "Proposed action found" : uncertain ? "Needs a closer look" : "Ready to file";
   byId("routing-help").textContent = actionCandidate
-    ? "Save metadata here, then review payee, amount, and due date in a focused action step."
+    ? "Review payee, amount, and due date alongside the other proposed actions."
     : uncertain
       ? "Keep this document in review without creating trusted work."
       : "Saves metadata, removes Inbox, and records no action. Matching remains enabled.";
   byId("file-document").hidden = actionCandidate || uncertain;
   byId("confirm-action").hidden = !actionCandidate;
   byId("needs-review").textContent = uncertain ? "Keep in Needs Review" : "Needs review";
+  updateSuggestionVisibility();
   dirty = false;
   byId("revision-label").textContent = `Loaded Paperless revision r${current.revision}`;
   byId("paper-title").closest(".paper").classList.remove("zoomed");
@@ -212,6 +221,7 @@ function updateFreshness() {
   byId("freshness").textContent = current.stale ? "Stale · metadata changed" : `Current · source r${current.revision}`;
   byId("freshness").className = `pill ${current.stale ? "warning" : "success"}`;
   byId("stale-notice").hidden = !current.stale;
+  byId("analyze").hidden = !current.stale;
   byId("assessment-time").textContent = current.stale ? "Previous result retained" : current.evaluated ? "Evaluated just now" : "Evaluated 2 minutes ago";
   byId("freshness-metric").textContent = `${documents.filter((doc) => doc.stale).length + 1} stale`;
 }
@@ -224,7 +234,7 @@ function updateControls() {
   byId("confirm-action").disabled = blocked || current.assessment !== "pay" || analysisRunning;
   byId("needs-review").disabled = blocked || analysisRunning;
   byId("analyze").disabled = dirty || blocked || analysisRunning;
-  byId("analyze").textContent = analysisRunning ? "Analyzing…" : "Re-evaluate now";
+  byId("analyze").textContent = analysisRunning ? "Analyzing…" : "Re-evaluate assessment";
   byId("analysis-hint").textContent = dirty ? "Save metadata before routing or re-evaluating." : current.stale ? "Targeted reanalysis pending · run now to bypass debounce." : "Evaluated against saved metadata.";
   document.querySelectorAll("[data-apply]").forEach((button) => {
     button.disabled = blocked || !["ready", "conflict"].includes(scenario) || analysisRunning;
@@ -234,6 +244,7 @@ function updateControls() {
 }
 function markDirty() {
   dirty = fields.some((field) => byId(`field-${field}`).value !== current[field]);
+  updateSuggestionVisibility();
   updateControls();
 }
 function validateMetadata() {
@@ -262,7 +273,7 @@ function commitMetadata(markAssessmentStale = true) {
 }
 function saveMetadata() {
   commitMetadata(true);
-  toast("Metadata saved. Assessment is stale; a targeted rerun is pending. Use Re-evaluate now to simulate it. No task created.");
+  toast("Metadata saved. Assessment is stale; use Re-evaluate assessment to simulate the targeted rerun. No task created.");
 }
 function showConflict() {
   externalTitle = `${current.provider} — updated in Paperless mobile`;
@@ -319,29 +330,27 @@ function routeDocument(outcome) {
   if (!empty && outcome !== "review") byId("source-heading").scrollIntoView({ block: "nearest" });
 }
 function loadActionReview() {
-  if (current.assessment !== "pay" || !pendingDocuments().includes(current)) {
-    const candidate = pendingDocuments().find((doc) => doc.assessment === "pay");
-    if (!candidate) {
-      location.hash = "intake";
-      toast("There are no proposed actions waiting for review.");
-      return;
-    }
-    current = candidate;
-    loadDocument();
-    renderQueue();
+  const reviewDoc = current.assessment === "pay" && current.status === "pending"
+    ? current
+    : documents.find((doc) => doc.status === "pending" && doc.assessment === "pay");
+  actionReviewDocument = reviewDoc || null;
+  if (!reviewDoc) {
+    byId("pending-action-review").hidden = true;
+    return;
   }
-  byId("review-action-title").textContent = `Pay ${current.provider} invoice`;
-  byId("review-action-subtitle").textContent = `Paperless #${current.id} · proposed PAY action`;
-  byId("review-confidence").textContent = `${current.confidence}% confidence`;
-  byId("review-payee").textContent = current.provider;
-  byId("review-amount").textContent = current.amount;
-  byId("review-due").textContent = current.due || "Not extracted";
-  byId("review-reference").textContent = current.reference;
-  byId("review-reason").textContent = current.reason;
-  byId("review-source-kind").textContent = current.paperKind;
-  byId("review-source-title").textContent = current.paperTitle;
-  byId("review-source-description").textContent = current.paperDescription;
-  byId("review-source-callout").textContent = current.callout;
+  byId("pending-action-review").hidden = false;
+  byId("review-action-title").textContent = `Pay ${reviewDoc.provider} invoice`;
+  byId("review-action-subtitle").textContent = `Paperless #${reviewDoc.id} · proposed PAY action`;
+  byId("review-confidence").textContent = `${reviewDoc.confidence}% confidence`;
+  byId("review-payee").textContent = reviewDoc.provider;
+  byId("review-amount").textContent = reviewDoc.amount;
+  byId("review-due").textContent = reviewDoc.due || "Not extracted";
+  byId("review-reference").textContent = reviewDoc.reference;
+  byId("review-reason").textContent = reviewDoc.reason;
+  byId("review-source-kind").textContent = reviewDoc.paperKind;
+  byId("review-source-title").textContent = reviewDoc.paperTitle;
+  byId("review-source-description").textContent = reviewDoc.paperDescription;
+  byId("review-source-callout").textContent = reviewDoc.callout;
 }
 function renderActions() {
   byId("trusted-actions").replaceChildren();
@@ -360,12 +369,11 @@ function renderActions() {
     item.append(complete);
     byId("trusted-actions").append(item);
   }
-  const count = actions.filter((action) => !action.completed).length;
-  byId("action-count").textContent = count;
-  byId("review-nav-count").textContent = documents.filter((doc) => doc.status === "pending" && doc.assessment === "pay").length;
-  byId("confirmed-count").textContent = count;
-  byId("review-count").textContent = documents.filter((doc) => doc.status === "review").length + history.filter((entry) => !isSuperseded(entry) && (entry.reopened || (entry.sampled && !entry.auditConfirmed)) && !documents.some((doc) => doc.id === entry.id)).length;
-  byId("filed-count").textContent = history.filter((entry) => !isSuperseded(entry) && !entry.sampled && !entry.reopened).length;
+  const confirmedCount = actions.filter((action) => !action.completed).length;
+  const proposedCount = documents.filter((doc) => doc.status === "pending" && doc.assessment === "pay").length;
+  byId("action-count").textContent = confirmedCount + proposedCount;
+  byId("confirmed-count").textContent = `${confirmedCount} active`;
+  loadActionReview();
 }
 function isSuperseded(entry) {
   const doc = documents.find((candidate) => candidate.id === entry.id);
@@ -470,7 +478,7 @@ function setScenario(value) {
   };
   byId("suggestion-status").hidden = !messages[value];
   byId("suggestion-status").textContent = messages[value] || "";
-  document.querySelectorAll("[data-suggestion]").forEach((element) => { element.hidden = !["ready", "conflict"].includes(value); });
+  updateSuggestionVisibility();
   conflictPending = value === "conflict";
   if (value === "conflict") {
     byId("field-title").value = `${current.provider} — reviewed title`;
@@ -530,20 +538,23 @@ byId("needs-review").addEventListener("click", () => {
 byId("confirm-action").addEventListener("click", () => {
   if (!validateMetadata()) return;
   commitMetadata(false);
-  location.hash = "review";
+  location.hash = "actions";
 });
 byId("review-no-action").addEventListener("click", () => {
+  if (!actionReviewDocument) return;
   if (!window.confirm("File this document and record that no action is needed?")) return;
+  current = actionReviewDocument;
   routeDocument("filed");
-  location.hash = "intake";
 });
 byId("review-needs-review").addEventListener("click", () => {
+  if (!actionReviewDocument) return;
+  current = actionReviewDocument;
   routeDocument("review");
-  location.hash = "intake";
 });
 byId("review-confirm").addEventListener("click", () => {
+  if (!actionReviewDocument) return;
+  current = actionReviewDocument;
   routeDocument("action");
-  location.hash = "actions";
 });
 byId("analyze").addEventListener("click", () => {
   const doc = current;
@@ -597,14 +608,9 @@ byId("zoom-preview").addEventListener("click", () => {
   byId("zoom-preview").textContent = zoomed ? "Fit page" : "Zoom +";
 });
 byId("paperless-link").addEventListener("click", () => toast(`Production handoff: open Paperless document #${current.id} in its web UI. This mockup has no real Paperless connection.`));
-byId("review-paperless-link").addEventListener("click", () => toast(`Production handoff: open Paperless document #${current.id} in its web UI. This mockup has no real Paperless connection.`));
+byId("review-paperless-link").addEventListener("click", () => toast(`Production handoff: open Paperless document #${actionReviewDocument?.id ?? current.id} in its web UI. This mockup has no real Paperless connection.`));
 byId("prototype-guide").addEventListener("click", () => byId("prototype-guide-dialog").showModal());
 byId("source-status-info").addEventListener("click", () => byId("source-status-dialog").showModal());
-byId("simulate-match").addEventListener("click", () => {
-  byId("match-result").hidden = false;
-  byId("simulate-match").disabled = true;
-  addEvent("#1108 · Later statement matched receipt #1042", "Relationship-only pass · evidence attached · no duplicate action or automatic settlement", "Linked", "success");
-});
 ["history-source", "history-confidence", "history-sampled"].forEach((id) => byId(id).addEventListener("change", renderHistory));
 function finishAudit(reopen) {
   if (!auditEntry) return;
@@ -682,8 +688,9 @@ byId("reset-demo").addEventListener("click", () => {
 });
 window.addEventListener("hashchange", navigate);
 window.addEventListener("keydown", (event) => {
-  if (!["ArrowUp", "ArrowDown"].includes(event.key) || location.hash !== "#intake") return;
-  if (event.target.closest("input, select, textarea, button, a, dialog")) return;
+  if (!["ArrowUp", "ArrowDown"].includes(event.key) || byId("intake").hidden) return;
+  const interactiveTarget = event.target.closest("input, select, textarea, button, a, dialog");
+  if (interactiveTarget && !event.target.closest(".document-select")) return;
   const visible = visibleDocuments();
   if (!visible.length) return;
   event.preventDefault();

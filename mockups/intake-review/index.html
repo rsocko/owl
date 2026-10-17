@@ -19,8 +19,7 @@
     <a class="brand" href="#intake"><span class="owl-mark" aria-hidden="true">◉</span> OWL <span>Organize. Watch. Learn.</span></a>
     <nav aria-label="Proposed workspaces">
       <a href="#intake" data-route="intake">Intake review <span id="intake-count" class="count">3</span></a>
-      <a href="#review" data-route="review">Action review <span id="review-nav-count" class="count">1</span></a>
-      <a href="#actions" data-route="actions">Action Queue <span id="action-count" class="count">1</span></a>
+      <a href="#actions" data-route="actions">Action Queue <span id="action-count" class="count">2</span></a>
       <a href="#history" data-route="history">No-action history</a>
       <a href="#processing" data-route="processing">Processing</a>
     </nav>
@@ -29,7 +28,7 @@
   <main id="main" tabindex="-1">
     <section id="intake" class="screen" aria-labelledby="intake-heading">
       <div class="page-heading">
-        <div><h1 id="intake-heading">Intake review</h1><p>Check the document, accept or edit metadata, then file it or send a proposed obligation to action review.</p></div>
+        <div><h1 id="intake-heading">Intake review</h1><p>Check the document, accept or edit metadata, then file it or send a proposed obligation to the Action Queue.</p></div>
         <label class="scenario">Demo state <small>Prototype control only</small>
           <select id="scenario">
             <option value="ready">Ready to review</option>
@@ -55,13 +54,13 @@
           <div class="bulk-toolbar"><label><input id="select-all" type="checkbox"> Select visible</label><button id="bulk-review" type="button" disabled>Mark needs review</button></div>
           <div id="document-list" class="document-list"></div>
           <p id="queue-empty" class="muted padded" hidden>No documents match your search.</p>
-          <div class="queue-footer"><strong>Fast triage</strong><p>Receipts and reference documents can be filed without becoming tasks.</p><small><kbd>↑</kbd><kbd>↓</kbd> switch documents · <kbd>Enter</kbd> choose focused item</small></div>
+          <div class="queue-footer"><strong>Fast triage</strong><p>Receipts and reference documents can be filed without becoming tasks.</p><small><kbd>↑</kbd><kbd>↓</kbd> switch documents immediately</small></div>
         </aside>
 
         <div class="metadata-column">
           <section class="card" aria-labelledby="metadata-heading">
             <div class="panel-heading"><h2 id="metadata-heading">Document metadata</h2><span id="save-state" class="pill neutral">No unsaved changes</span></div>
-            <div class="suggestions-bar"><div><strong>Paperless suggestions</strong><p>Click a suggested value to use it.</p></div><button id="refresh-suggestions" type="button">Refresh</button></div>
+            <div id="suggestions-bar" class="suggestions-bar"><div><strong>New Paperless suggestions</strong><p>Only values that differ from the current metadata appear.</p></div><button id="refresh-suggestions" type="button">Refresh</button></div>
             <div id="suggestion-status" class="notice warning" role="status" hidden></div>
             <form id="metadata-form" class="metadata-form">
               <label>Title<input id="field-title" name="title" value="Northline Energy — payment confirmation — 2026-10-14"></label>
@@ -72,21 +71,18 @@
               </div>
               <div class="field-pair"><label>Document date<input id="field-date" name="date" type="date" value="2026-10-14"></label><label>Storage path<select id="field-storage" name="storage"><option>Household / Utilities</option><option>Household / Health</option><option>Household / Banking</option></select></label></div>
               <div class="tag-field"><label for="tag-input">Tags <small>Remove with ×, or type a new tag and press Enter.</small></label><div id="tag-editor" class="tag-editor"><div id="tag-pills" class="tag-pills"></div><input id="tag-input" aria-label="Add a tag" placeholder="Add tag"></div><input id="field-tags" name="tags" type="hidden" value="Inbox, Utilities"></div>
-              <div class="field-pair"><label>Account identifier <small>Governed · masked view</small><input value="•••• 4821" readonly aria-describedby="governed-help"></label><label>OWL action status <small>OWL-owned</small><input value="No action identified" id="owned-status" readonly aria-describedby="governed-help"></label></div>
-              <p id="governed-help" class="field-help">Protected identifiers stay masked here. OWL-owned status is read-only; choose the document outcome below.</p>
-              <div id="pattern-insight" class="pattern-insight"><strong id="pattern-title">Recurring utility document detected</strong><span id="pattern-detail">Matches Northline account •••• 4821. Consistent naming can be applied now; missing-period checks stay in Statements.</span></div>
               <div class="save-row"><span id="revision-label">Loaded Paperless revision r12</span><button id="save-metadata" type="submit" disabled>Save metadata only</button></div>
             </form>
           </section>
-          <section class="card assessment" aria-labelledby="assessment-heading">
-            <div class="panel-heading"><h2 id="assessment-heading">OWL assessment</h2><span id="freshness" class="pill success">Current · source r12</span></div>
-            <div class="assessment-body"><span id="assessment-icon" class="assessment-icon" aria-hidden="true">✓</span><div><h3 id="assessment-title">No action needed</h3><p id="assessment-reason">A completed payment is evidence, not a new obligation. Keep it available for statement matching.</p><div class="inline-meta"><span id="assessment-confidence">96% confidence</span><span id="assessment-time">Evaluated 2 minutes ago</span></div></div></div>
-            <div id="stale-notice" class="notice warning" hidden>Metadata changed. Re-evaluate before accepting OWL’s suggestion, or make your own filing decision below.</div>
-            <div class="panel-footer"><span id="analysis-hint">Evaluated against saved metadata.</span><button id="analyze" type="button">Re-evaluate now</button></div>
-          </section>
-          <section class="card disposition" aria-labelledby="disposition-heading">
-            <div><h2 id="disposition-heading">Ready to file</h2><p id="routing-help">Saves metadata, removes Inbox, and records no action. Matching remains enabled.</p></div>
-            <div class="disposition-actions"><button id="needs-review" type="button">Needs review</button><button id="file-document" type="button" class="primary">Save &amp; file</button><button id="confirm-action" type="button" class="primary" hidden>Continue to action review</button></div>
+          <section class="card decision-panel" aria-labelledby="assessment-title">
+            <div class="decision-summary">
+              <span id="assessment-icon" class="assessment-icon" aria-hidden="true">✓</span>
+              <div><span id="disposition-heading" class="decision-label">Ready to file</span><h2 id="assessment-title">No action needed</h2><p id="assessment-reason">A completed payment is evidence, not a new obligation. Keep it available for statement matching.</p><div class="inline-meta"><span id="assessment-confidence">96% confidence</span><span id="assessment-time">Evaluated 2 minutes ago</span></div></div>
+              <span id="freshness" class="pill success">Current · source r12</span>
+            </div>
+            <div id="stale-notice" class="notice warning" hidden>Metadata changed. Re-evaluate OWL’s assessment, or make your own decision.</div>
+            <div class="decision-footer"><p id="routing-help">Saves metadata, removes Inbox, and records no action. Matching remains enabled.</p><div class="disposition-actions"><button id="analyze" type="button" hidden>Re-evaluate assessment</button><button id="needs-review" type="button">Needs review</button><button id="file-document" type="button" class="primary">Save &amp; file</button><button id="confirm-action" type="button" class="primary" hidden>Review in Action Queue</button></div></div>
+            <span id="analysis-hint" class="sr-only">Evaluated against saved metadata.</span>
           </section>
         </div>
 
@@ -112,9 +108,9 @@
       </div>
     </section>
 
-    <section id="review" class="screen" aria-labelledby="review-heading" hidden>
-      <div class="page-heading"><div><h1 id="review-heading">Action review</h1><p>Review action-specific fields only after intake metadata is ready. Nothing reaches the Action Queue until you confirm it.</p></div><a href="#intake" class="button">Back to intake</a></div>
-      <div class="action-review-layout">
+    <section id="actions" class="screen" aria-labelledby="actions-heading" hidden>
+      <div class="page-heading"><div><h1 id="actions-heading">Action Queue</h1><p>Review proposed actions and work the obligations that have already been confirmed.</p></div><a href="#intake" class="button">Back to intake</a></div>
+      <div id="pending-action-review" class="action-review-layout">
         <section class="card action-decision">
           <div class="panel-heading"><div><h2 id="review-action-title">Pay Cedar Dental invoice</h2><p id="review-action-subtitle" class="muted">Paperless #1043 · proposed PAY action</p></div><span id="review-confidence" class="pill warning">94% confidence</span></div>
           <div class="action-fields"><div><span>Payee</span><strong id="review-payee">Cedar Dental</strong></div><div><span>Amount due</span><strong id="review-amount">$128.00</strong></div><div><span>Due date</span><strong id="review-due">October 30, 2026</strong></div><div><span>Reference</span><strong id="review-reference">Account •••• 4821</strong></div></div>
@@ -128,16 +124,7 @@
           <div class="review-source-sheet"><span id="review-source-kind">INVOICE</span><h3 id="review-source-title">Your account statement.</h3><p id="review-source-description">Services have been billed. Please arrange payment of the balance shown below by October 30, 2026.</p><div id="review-source-callout" class="paper-callout">BALANCE DUE · October 30, 2026</div></div>
         </section>
       </div>
-    </section>
-
-    <section id="actions" class="screen" aria-labelledby="actions-heading" hidden>
-      <div class="page-heading"><div><p class="eyebrow">02 / TRUSTED ACTIONS</p><h1 id="actions-heading">Only work that needs doing.</h1><p>Confirmed obligations and follow-ups, not filing chores or payment receipts.</p></div><a href="#intake" class="button">Back to intake →</a></div>
-      <div class="summary-grid"><div class="card metric"><span>Confirmed actions</span><strong id="confirmed-count">1</strong><small>Eligible for Mission Control</small></div><div class="card metric"><span>Needs review</span><strong id="review-count">1</strong><small>Not sent as trusted tasks</small></div><div class="card metric"><span>Filed / no action</span><strong id="filed-count">2</strong><small>Available in history and matching</small></div></div>
-      <div class="notice info">Metadata readiness and action disposition are separate. Saving a title or removing Inbox never completes an obligation.</div>
-      <div class="two-column">
-        <section class="card"><div class="panel-heading"><h2>Action Queue</h2><span class="pill neutral">Confirmed only</span></div><div id="trusted-actions"></div><div class="padded"><h3>Not in this queue</h3><p class="muted">Confident no-action → history. Uncertain assessments → intake review. Legacy FILE / ARCHIVE → migration review, not automatic conversion.</p><a href="#history">Inspect no-action decisions →</a></div></section>
-        <section class="card padded"><p class="eyebrow">RELATIONSHIP EVIDENCE</p><h2>Receipts remain supporting evidence.</h2><div class="evidence-chain"><div><span class="pill neutral">Receipt</span><h3>Northline payment · $84.20</h3><p>Filed as no action · receipt arrived first</p></div><span aria-hidden="true">↓</span><div><span class="pill purple">Later evidence</span><h3>October statement arrives</h3><p>Bounded account + date matching runs after the Inbox tag is removed.</p></div><span aria-hidden="true">↓</span><div><span class="pill success">Linked evidence</span><h3>Evidence attached to obligation</h3><p>Payment evidence can propose completion. Explicit completion settles the action.</p></div></div><button id="simulate-match" type="button">Simulate later statement arriving</button><p id="match-result" class="notice success" role="status" hidden>Statement #1108 matched receipt #1042. Evidence attached without creating another PAY task or settling the obligation.</p></section>
-      </div>
+      <section class="card confirmed-actions"><div class="panel-heading"><h2>Confirmed actions</h2><span id="confirmed-count" class="pill neutral">1 active</span></div><div id="trusted-actions"></div></section>
     </section>
 
     <section id="history" class="screen" aria-labelledby="history-heading" hidden>
@@ -166,9 +153,8 @@
     <form method="dialog"><button class="dialog-close" aria-label="Close mode explanation">×</button></form>
     <h2 id="prototype-guide-heading">How the proposed workspaces differ</h2>
     <dl class="mode-list">
-      <div><dt>Intake review</dt><dd>Verify the source and Paperless metadata. Finish with Save &amp; file, Needs review, or Continue to action review.</dd></div>
-      <div><dt>Action review</dt><dd>Review payee, amount, due date, and other action-specific fields for a proposed obligation.</dd></div>
-      <div><dt>Action Queue</dt><dd>Contains only confirmed work that someone needs to complete.</dd></div>
+      <div><dt>Intake review</dt><dd>Verify the source and Paperless metadata. Finish with Save &amp; file, Needs review, or Review in Action Queue.</dd></div>
+      <div><dt>Action Queue</dt><dd>Review proposed obligations, then work the actions that have been confirmed.</dd></div>
       <div><dt>History and Processing</dt><dd>Support audit, quality sampling, and operational troubleshooting outside the fast triage path.</dd></div>
     </dl>
     <p class="notice info">The blue prototype bar and Demo state selector are review aids. They are not proposed product UI.</p>
