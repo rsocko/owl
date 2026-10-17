@@ -105,9 +105,7 @@ def test_queue_resolves_names_and_includes_action_state(client, mock_paperless):
     assert item["pending_action_count"] == 1
 
 
-def test_core_hides_operational_fields_and_exposes_editable_document_fields(
-    client, mock_paperless
-):
+def test_core_hides_operational_fields_and_exposes_editable_document_fields(client, mock_paperless):
     intake_review._taxonomy_cache = None
     mock_paperless.get_document.return_value = _document(
         custom_fields=[
@@ -168,9 +166,7 @@ def test_file_only_removes_inbox_without_resolving_actions(client, mock_paperles
     )
 
 
-def test_save_merges_editable_custom_fields_without_dropping_audit_fields(
-    client, mock_paperless
-):
+def test_save_merges_editable_custom_fields_without_dropping_audit_fields(client, mock_paperless):
     mock_paperless.get_document.return_value = _document(
         custom_fields=[
             {"field": 9, "value": "A-123"},

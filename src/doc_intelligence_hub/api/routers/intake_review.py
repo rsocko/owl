@@ -104,9 +104,7 @@ class IntakeMetadataPatch(BaseModel):
 
     @field_validator("custom_fields")
     @classmethod
-    def valid_custom_fields(
-        cls, value: list[dict[str, Any]] | None
-    ) -> list[dict[str, Any]] | None:
+    def valid_custom_fields(cls, value: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
         if value is None:
             return None
         field_ids: list[int] = []
@@ -450,10 +448,7 @@ async def _suggestions_for_document(
             and snapshot
             and snapshot.source_modified == source_modified
             and _utcnow_naive() - snapshot.fetched_at < _SUGGESTION_CACHE_TTL
-            and all(
-                state.get("available")
-                for state in (snapshot.source_states or {}).values()
-            )
+            and all(state.get("available") for state in (snapshot.source_states or {}).values())
         ):
             return list(snapshot.suggestions or []), dict(snapshot.source_states or {}), True
 
@@ -637,16 +632,12 @@ async def list_intake_documents(request: Request, limit: int = 100) -> dict[str,
                     "modified": document.get("modified"),
                     "correspondent": document.get("correspondent"),
                     "correspondent_name": (
-                        _catalog_value(
-                            catalogs["correspondents"], document.get("correspondent")
-                        )
+                        _catalog_value(catalogs["correspondents"], document.get("correspondent"))
                         or {}
                     ).get("name"),
                     "document_type": document.get("document_type"),
                     "document_type_name": (
-                        _catalog_value(
-                            catalogs["document_types"], document.get("document_type")
-                        )
+                        _catalog_value(catalogs["document_types"], document.get("document_type"))
                         or {}
                     ).get("name"),
                     "tags": document.get("tags") or [],
@@ -898,9 +889,7 @@ async def save_intake_document(
                 and (matched := _metadata_spec_by_name(str(definition.get("name") or "")))
                 and matched[0] in _EDITABLE_CUSTOM_FIELD_KEYS
             }
-            requested_ids = {
-                item["field"] for item in body.metadata.custom_fields
-            }
+            requested_ids = {item["field"] for item in body.metadata.custom_fields}
             disallowed = sorted(requested_ids - editable_ids)
             if disallowed:
                 raise HTTPException(
@@ -911,9 +900,7 @@ async def save_intake_document(
                         "field_ids": disallowed,
                     },
                 )
-            requested_by_id = {
-                item["field"]: item["value"] for item in body.metadata.custom_fields
-            }
+            requested_by_id = {item["field"]: item["value"] for item in body.metadata.custom_fields}
             merged_custom_fields = [
                 {
                     "field": item["field"],
