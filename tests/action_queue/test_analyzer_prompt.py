@@ -156,6 +156,24 @@ class TestPromptBuildingWithIntegerTags:
         mock_chat.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_receipt_with_outstanding_balance_routes_to_review(self, analyzer):
+        document = {
+            "title": "Payment receipt",
+            "content": "We received your payment. Remaining balance due: $42.00.",
+            "document_type_name": "Receipt",
+            "tag_names": ["Inbox"],
+        }
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.analyzer.chat_json", new_callable=AsyncMock
+        ) as mock_chat:
+            result = await analyzer.analyze_document(document)
+
+        assert result["actions"][0]["action_type"] == "REVIEW"
+        assert result["document_assessment"]["requires_action"] is True
+        assert result["document_assessment"]["overall_confidence"] < 70
+        mock_chat.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_document_type_is_included_in_prompt(self, analyzer):
         document = {
             "title": "Policy notice",
