@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from doc_intelligence_hub.api.routers import intake_review
+from doc_intelligence_hub.core.paperless.client import PaperlessPage
 
 
 def _document(**overrides):
@@ -22,13 +23,48 @@ def _document(**overrides):
 
 
 def test_list_intake_documents_uses_configured_source(client, mock_paperless):
-    mock_paperless.list_documents.return_value = [_document()]
+    mock_paperless.resolve_tag_ids.return_value = [1]
+    mock_paperless.list_document_page.return_value = PaperlessPage(
+        results=(_document(),),
+        next_cursor="2",
+        total_count=213,
+    )
 
     response = client.get("/api/intake/documents")
 
     assert response.status_code == 200
     assert response.json()["documents"][0]["id"] == 42
-    mock_paperless.list_documents.assert_awaited_once_with(tags=["Inbox"], limit=100)
+    assert response.json()["total"] == 213
+    assert response.json()["next_cursor"] == "2"
+    mock_paperless.resolve_tag_ids.assert_awaited_once_with(["Inbox"])
+    mock_paperless.list_document_page.assert_awaited_once_with(
+        page_size=100,
+        cursor=None,
+        scope_params={"tags__id__in": "1", "ordering": "-id"},
+    )
+
+
+def test_list_intake_documents_applies_search_and_missing_type_to_paperless(client, mock_paperless):
+    mock_paperless.resolve_tag_ids.return_value = [1]
+    mock_paperless.list_document_page.return_value = PaperlessPage(
+        results=(),
+        next_cursor=None,
+        total_count=0,
+    )
+
+    response = client.get("/api/intake/documents?search=utility&queue_filter=missing_type")
+
+    assert response.status_code == 200
+    mock_paperless.list_document_page.assert_awaited_once_with(
+        page_size=100,
+        cursor=None,
+        scope_params={
+            "tags__id__in": "1",
+            "ordering": "-id",
+            "query": "utility",
+            "document_type__isnull": "true",
+        },
+    )
 
 
 def test_document_detail_combines_metadata_suggestions_actions_and_ocr(client, mock_paperless):
@@ -98,6 +134,28 @@ def test_core_document_load_does_not_wait_for_suggestions_or_ocr(client, mock_pa
     mock_paperless.get_document_content.assert_not_awaited()
 
 
+def test_relationship_candidates_suggest_same_recurring_series(client, mock_paperless):
+    intake_review._taxonomy_cache = None
+    mock_paperless.get_document.return_value = _document()
+    mock_paperless.list_documents.return_value = [
+        _document(),
+        _document(id=77, title="September utility bill", created="2026-09-14"),
+    ]
+
+    response = client.get("/api/intake/documents/42/relationship-candidates")
+
+    assert response.status_code == 200
+    candidate = response.json()["candidates"][0]
+    assert candidate["document"]["id"] == 77
+    assert candidate["suggested"] is True
+    assert candidate["recommendation"]["relationship_type"] == "same_sequence"
+    assert candidate["recommendation"]["reason_codes"] == [
+        "correspondent_match",
+        "document_type_match",
+    ]
+    mock_paperless.list_documents.assert_awaited_once_with(correspondent_id=1, limit=12)
+
+
 def test_suggestions_are_cached_for_the_document_revision(client, mock_paperless):
     mock_paperless.get_document.return_value = _document()
     mock_paperless.get_document_suggestions.return_value = {"correspondents": [2]}
@@ -118,11 +176,16 @@ def test_queue_resolves_names_and_includes_action_state(client, mock_paperless):
     mock_paperless.get_document.return_value = _document()
     client.post(
         "/api/intake/documents/42/actions",
-        json={"action_type": "PAY", "title": "Pay utility bill"},
+        json={"action_type": "PAY", "title": "Pay utility bill", "amount": 84.2},
     )
-    mock_paperless.list_documents.return_value = [_document()]
+    mock_paperless.resolve_tag_ids.return_value = [1]
+    mock_paperless.list_document_page.return_value = PaperlessPage(
+        results=(_document(),),
+        next_cursor=None,
+        total_count=1,
+    )
 
-    response = client.get("/api/intake/documents")
+    response = client.get("/api/intake/documents?queue_filter=actions")
 
     assert response.status_code == 200
     item = response.json()["documents"][0]
@@ -130,6 +193,15 @@ def test_queue_resolves_names_and_includes_action_state(client, mock_paperless):
     assert item["document_type_name"] == "Bill"
     assert item["thumbnail_url"].endswith("/42/thumb")
     assert item["pending_action_count"] == 1
+    mock_paperless.list_document_page.assert_awaited_once_with(
+        page_size=100,
+        cursor=None,
+        scope_params={
+            "tags__id__in": "1",
+            "ordering": "-id",
+            "id__in": "42",
+        },
+    )
 
 
 def test_core_hides_operational_fields_and_exposes_editable_document_fields(client, mock_paperless):
@@ -230,7 +302,7 @@ def test_confirm_and_file_checks_action_revision_before_paperless_write(client, 
     mock_paperless.get_document.return_value = _document()
     created = client.post(
         "/api/intake/documents/42/actions",
-        json={"action_type": "PAY", "title": "Pay utility bill"},
+        json={"action_type": "PAY", "title": "Pay utility bill", "amount": 84.2},
     ).json()
     mock_paperless.update_document.reset_mock()
 
@@ -265,6 +337,7 @@ def test_user_action_can_be_created_and_deleted(client, mock_paperless):
         json={
             "action_type": "PAY",
             "title": "Pay utility bill",
+            "summary": "Use the household checking account.",
             "payee_or_owner": "Utility Co",
             "amount": 84.2,
             "due_date": "2026-10-25",
@@ -275,8 +348,19 @@ def test_user_action_can_be_created_and_deleted(client, mock_paperless):
     assert created.status_code == 200
     action = created.json()
     assert action["origin"] == "user"
+    assert action["summary"] == "Use the household checking account."
     assert action["payee_or_owner"] == "Utility Co"
     assert action["history"][0]["event_type"] == "created"
 
     deleted = client.delete(f"/api/intake/actions/{action['id']}")
     assert deleted.status_code == 204
+
+
+def test_user_pay_action_requires_amount(client, mock_paperless):
+    response = client.post(
+        "/api/intake/documents/42/actions",
+        json={"action_type": "PAY", "title": "Pay utility bill"},
+    )
+
+    assert response.status_code == 422
+    mock_paperless.get_document.assert_not_awaited()

@@ -8,7 +8,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func
 
@@ -36,6 +36,13 @@ from doc_intelligence_hub.modules.action_queue.database import (
 )
 from doc_intelligence_hub.modules.action_queue.lifecycle import mark_action_ready
 from doc_intelligence_hub.modules.action_queue.pipeline import run_pipeline
+from doc_intelligence_hub.modules.triage.relationship_discovery import (
+    normalize_paperless_document,
+)
+from doc_intelligence_hub.modules.triage.relationships import (
+    classify_related_notice,
+    list_document_relationships,
+)
 
 router = APIRouter(prefix="/api/intake", tags=["intake-review"])
 
@@ -149,8 +156,9 @@ class TaxonomyCreateRequest(BaseModel):
 class UserActionCreateRequest(BaseModel):
     action_type: str
     title: str = Field(min_length=1, max_length=500)
+    summary: str | None = Field(default=None, max_length=10_000)
     payee_or_owner: str | None = None
-    amount: float | None = None
+    amount: float | None = Field(default=None, ge=0)
     due_date: date | None = None
     reference: str | None = None
 
@@ -170,12 +178,18 @@ class UserActionCreateRequest(BaseModel):
             raise ValueError("title cannot be blank")
         return normalized
 
-    @field_validator("payee_or_owner", "reference")
+    @field_validator("summary", "payee_or_owner", "reference")
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
         return value.strip() or None
+
+    @model_validator(mode="after")
+    def require_payment_amount(self) -> "UserActionCreateRequest":
+        if self.action_type == "PAY" and self.amount is None:
+            raise ValueError("amount is required for PAY actions")
+        return self
 
 
 def _raise_paperless_error(exc: Exception, operation: str) -> None:
@@ -457,6 +471,48 @@ def _native_document_payload(
     }
 
 
+def _relationship_document_payload(
+    document: dict[str, Any],
+    taxonomies: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    catalogs = {key: _catalog_map(taxonomies[key]) for key in ("correspondents", "document_types")}
+    document_id = int(document["id"])
+    return {
+        "id": document_id,
+        "title": document.get("title") or f"Document #{document_id}",
+        "created": document.get("created"),
+        "correspondent_name": (
+            _catalog_value(catalogs["correspondents"], document.get("correspondent")) or {}
+        ).get("name"),
+        "document_type_name": (
+            _catalog_value(catalogs["document_types"], document.get("document_type")) or {}
+        ).get("name"),
+        "thumbnail_url": f"/api/statements/documents/{document_id}/thumb",
+        "preview_url": f"/api/statements/documents/{document_id}/preview",
+    }
+
+
+def _relationship_metadata(
+    document: dict[str, Any],
+    taxonomies: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    correspondents = {
+        int(item["id"]): str(item["name"])
+        for item in taxonomies["correspondents"]
+        if isinstance(item.get("id"), int) and item.get("name")
+    }
+    field_names = {
+        int(item["id"]): str(item["name"])
+        for item in taxonomies["custom_fields"]
+        if isinstance(item.get("id"), int) and item.get("name")
+    }
+    return normalize_paperless_document(
+        document,
+        correspondents=correspondents,
+        field_names=field_names,
+    ) or {"document_id": document.get("id"), "title": document.get("title")}
+
+
 def _sanitize_tag_suggestions(
     suggestions: list[dict[str, Any]],
     taxonomies: dict[str, list[dict[str, Any]]],
@@ -644,14 +700,59 @@ async def _document_detail(request: Request, document_id: int) -> dict[str, Any]
 
 
 @router.get("/documents")
-async def list_intake_documents(request: Request, limit: int = 100) -> dict[str, Any]:
+async def list_intake_documents(
+    request: Request,
+    page_size: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = None,
+    search: str = Query(default="", max_length=200),
+    queue_filter: Literal["all", "actions", "missing_type"] = "all",
+) -> dict[str, Any]:
     client = make_paperless_client(request, timeout=30.0)
     try:
         try:
-            documents, taxonomies = await asyncio.gather(
-                client.list_documents(tags=_monitor_tags(), limit=min(limit, 200)),
+            tag_ids = await client.resolve_tag_ids(_monitor_tags())
+            scope_params = {
+                "tags__id__in": ",".join(str(tag_id) for tag_id in tag_ids) if tag_ids else "0",
+                "ordering": "-id",
+            }
+            if search.strip():
+                scope_params["query"] = search.strip()
+            if queue_filter == "missing_type":
+                scope_params["document_type__isnull"] = "true"
+            elif queue_filter == "actions":
+                init_db()
+                db = get_session()
+                try:
+                    active_document_ids = [
+                        document_id
+                        for (document_id,) in (
+                            db.query(Action.document_id)
+                            .filter(
+                                Action.superseded_by_action_id.is_(None),
+                                Action.status.notin_({"completed", "dismissed", "not_an_action"}),
+                            )
+                            .distinct()
+                            .all()
+                        )
+                    ]
+                finally:
+                    db.close()
+                scope_params["id__in"] = (
+                    ",".join(str(document_id) for document_id in active_document_ids)
+                    if active_document_ids
+                    else "0"
+                )
+            page, taxonomies = await asyncio.gather(
+                client.list_document_page(
+                    page_size=page_size,
+                    cursor=cursor,
+                    scope_params=scope_params,
+                ),
                 _load_taxonomies(client),
             )
+            documents = list(page.results)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
             _raise_paperless_error(exc, "loading the intake queue")
         document_ids = [document.get("id") for document in documents if document.get("id")]
@@ -730,7 +831,8 @@ async def list_intake_documents(request: Request, limit: int = 100) -> dict[str,
                 }
                 for document in documents
             ],
-            "total": len(documents),
+            "total": page.total_count,
+            "next_cursor": page.next_cursor,
             "monitor_tags": _monitor_tags(),
         }
     finally:
@@ -762,6 +864,164 @@ async def get_intake_document_core(request: Request, document_id: int) -> dict[s
             "write_enabled": bool(request.app.state.hub_settings.write_to_paperless),
             "monitor_tags": _monitor_tags(),
         }
+    finally:
+        await client.aclose()
+
+
+@router.get("/documents/{document_id}/relationships")
+async def get_intake_document_relationships(
+    request: Request,
+    document_id: int,
+) -> dict[str, Any]:
+    relationships = list_document_relationships(document_id)
+    related_ids = sorted(
+        {
+            relationship["target_document_id"]
+            if relationship["source_document_id"] == document_id
+            else relationship["source_document_id"]
+            for relationship in relationships
+        }
+    )
+    if not related_ids:
+        return {"relationships": [], "count": 0}
+
+    client = make_paperless_client(request, timeout=20.0)
+    try:
+        try:
+            documents, taxonomies = await asyncio.gather(
+                asyncio.gather(*(client.get_document(related_id) for related_id in related_ids)),
+                _load_taxonomies(client),
+            )
+        except Exception as exc:
+            _raise_paperless_error(exc, "loading related documents")
+        documents_by_id = {int(document["id"]): document for document in documents}
+        enriched = []
+        for relationship in relationships:
+            related_id = (
+                relationship["target_document_id"]
+                if relationship["source_document_id"] == document_id
+                else relationship["source_document_id"]
+            )
+            related_document = documents_by_id.get(related_id)
+            enriched.append(
+                {
+                    **relationship,
+                    "direction": (
+                        "outgoing"
+                        if relationship["source_document_id"] == document_id
+                        else "incoming"
+                    ),
+                    "related_document": (
+                        _relationship_document_payload(related_document, taxonomies)
+                        if related_document
+                        else None
+                    ),
+                }
+            )
+        return {"relationships": enriched, "count": len(enriched)}
+    finally:
+        await client.aclose()
+
+
+@router.get("/documents/{document_id}/relationship-candidates")
+async def get_intake_relationship_candidates(
+    request: Request,
+    document_id: int,
+    q: str | None = None,
+    limit: int = 12,
+) -> dict[str, Any]:
+    client = make_paperless_client(request, timeout=20.0)
+    bounded_limit = max(1, min(limit, 25))
+    try:
+        try:
+            current, taxonomies = await asyncio.gather(
+                client.get_document(document_id),
+                _load_taxonomies(client),
+            )
+            query = (q or "").strip()
+            if query:
+                documents = await client.list_documents(query=query, limit=bounded_limit)
+            elif isinstance(current.get("correspondent"), int):
+                documents = await client.list_documents(
+                    correspondent_id=current["correspondent"],
+                    limit=bounded_limit,
+                )
+            else:
+                documents = await client.list_documents(
+                    query=str(current.get("title") or "").strip(),
+                    limit=bounded_limit,
+                )
+        except Exception as exc:
+            _raise_paperless_error(exc, "finding related documents")
+
+        linked_ids = {
+            relationship["target_document_id"]
+            if relationship["source_document_id"] == document_id
+            else relationship["source_document_id"]
+            for relationship in list_document_relationships(document_id)
+        }
+        current_metadata = _relationship_metadata(current, taxonomies)
+        candidates = []
+        for document in documents:
+            candidate_id = document.get("id")
+            if (
+                isinstance(candidate_id, bool)
+                or not isinstance(candidate_id, int)
+                or candidate_id == document_id
+                or candidate_id in linked_ids
+            ):
+                continue
+            candidate_metadata = _relationship_metadata(document, taxonomies)
+            proposal = classify_related_notice(
+                document_id,
+                current_metadata,
+                candidate_id,
+                candidate_metadata,
+            )
+            if proposal:
+                recommendation = proposal.to_dict()
+            else:
+                same_correspondent = current.get("correspondent") is not None and current.get(
+                    "correspondent"
+                ) == document.get("correspondent")
+                same_type = current.get("document_type") is not None and current.get(
+                    "document_type"
+                ) == document.get("document_type")
+                recommendation = {
+                    "source_document_id": document_id,
+                    "target_document_id": candidate_id,
+                    "relationship_type": (
+                        "same_sequence" if same_correspondent and same_type else "supports"
+                    ),
+                    "confidence": 0.58 if same_correspondent and same_type else 0.35,
+                    "reason_codes": [
+                        reason
+                        for matched, reason in (
+                            (same_correspondent, "correspondent_match"),
+                            (same_type, "document_type_match"),
+                            (bool(query), "search_match"),
+                        )
+                        if matched
+                    ],
+                    "priority_adjustment": 0,
+                    "priority_explanation": "No relationship priority adjustment",
+                    "auto_create": False,
+                }
+            candidates.append(
+                {
+                    "document": _relationship_document_payload(document, taxonomies),
+                    "suggested": not bool(query),
+                    "recommendation": recommendation,
+                }
+            )
+        candidates.sort(
+            key=lambda candidate: (
+                -float(candidate["recommendation"]["confidence"]),
+                str(candidate["document"].get("created") or ""),
+                candidate["document"]["id"],
+            )
+        )
+        return {"candidates": candidates[:bounded_limit], "query": query}
     finally:
         await client.aclose()
 
@@ -1081,6 +1341,7 @@ async def create_user_action(
             document_title=document.get("title") or f"Document {document_id}",
             action_type=body.action_type,
             title=body.title,
+            summary=body.summary,
             payee_or_owner=body.payee_or_owner,
             amount=body.amount,
             due_date=body.due_date,

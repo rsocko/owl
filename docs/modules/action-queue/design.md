@@ -118,6 +118,18 @@ The document flyout keeps the PDF preview and exposes the normalized
 external CTA never completes an action. After returning, the user can Mark
 done or Remind later. **Something's wrong** is the exceptional path:
 
+Action editing uses type-relevant fields rather than one generic form. Type and
+title are always visible, and every action may include OWL-owned Details stored
+in the action summary. PAY shows Payee, Amount, Pay by, and Invoice or
+reference; RESPOND shows Recipient, Respond by, and Case or reference; REVIEW
+shows Review by; SCHEDULE shows With or provider, Event date, and Confirmation
+or reference; SHARE shows Recipient and Share by; SIGN shows Counterparty or
+recipient, Sign by, and Agreement or reference; TASK shows Owner, Due date, and
+Reference. Hidden fields are cleared when a changed type is saved so stale
+payment or reference data does not remain attached to an unrelated action.
+Paperless notes remain document-level and are labeled Document notes; they are
+not used as a substitute for per-action Details.
+
 - Wrong action type records `misclassified` feedback, updates the current type
   and CTA, and continues in place when critical details remain sufficient.
 - Relevant title, summary, deadline, amount, urgency, and correspondent details

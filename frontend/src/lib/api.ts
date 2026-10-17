@@ -253,9 +253,30 @@ export const endpoints = {
     metadataDocumentTypes: () => api.get('/api/queue/metadata/document-types'),
   },
   intake: {
-    documents: () => api.get('/api/intake/documents'),
+    documents: (params?: {
+      pageSize?: number;
+      cursor?: string | null;
+      search?: string;
+      filter?: 'all' | 'actions' | 'missing_type';
+    }) => {
+      const query = new URLSearchParams();
+      if (params?.pageSize != null) query.set('page_size', String(params.pageSize));
+      if (params?.cursor) query.set('cursor', params.cursor);
+      if (params?.search?.trim()) query.set('search', params.search.trim());
+      if (params?.filter && params.filter !== 'all') query.set('queue_filter', params.filter);
+      const suffix = query.toString();
+      return api.get(`/api/intake/documents${suffix ? `?${suffix}` : ''}`);
+    },
     document: (id: string | number) => api.get(`/api/intake/documents/${id}`),
     documentCore: (id: string | number) => api.get(`/api/intake/documents/${id}/core`),
+    documentRelationships: (id: string | number) =>
+      api.get(`/api/intake/documents/${id}/relationships`),
+    relationshipCandidates: (id: string | number, query?: string) =>
+      api.get(
+        `/api/intake/documents/${id}/relationship-candidates${
+          query ? `?q=${encodeURIComponent(query)}` : ''
+        }`,
+      ),
     documentSuggestions: (id: string | number, refresh = false) =>
       api.get(`/api/intake/documents/${id}/suggestions${refresh ? '?refresh=true' : ''}`),
     documentActions: (id: string | number) => api.get(`/api/intake/documents/${id}/actions`),

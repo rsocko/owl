@@ -20,11 +20,12 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../components/ui';
+import DocumentRelationshipsPanel from '../components/DocumentRelationshipsPanel';
 import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import '../styles/intake-review.css';
 
-type ReviewTab = 'metadata' | 'actions' | 'ocr';
+type ReviewTab = 'metadata' | 'actions' | 'related' | 'ocr';
 type Disposition = 'save' | 'defer' | 'file_only' | 'confirm_and_file';
 type TaxonomyKind = 'tag' | 'correspondent' | 'document_type' | 'storage_path';
 type QueueFilter = 'all' | 'actions' | 'missing_type';
@@ -51,14 +52,18 @@ interface IntakeListItem {
 interface IntakeQueueResponse {
   documents: IntakeListItem[];
   total: number;
+  next_cursor: string | null;
   monitor_tags: string[];
 }
+
+const QUEUE_PAGE_SIZE = 100;
 
 interface IntakeAction {
   id: number;
   document_id: number;
   action_type: string;
   title: string;
+  summary?: string | null;
   payee_or_owner?: string | null;
   amount?: number | null;
   due_date?: string | null;
@@ -139,6 +144,7 @@ interface MetadataDraft {
 interface ActionDraft {
   action_type: string;
   title: string;
+  details: string;
   payee_or_owner: string;
   amount: string;
   due_date: string;
@@ -146,9 +152,61 @@ interface ActionDraft {
 }
 
 const ACTION_TYPES = ['PAY', 'RESPOND', 'REVIEW', 'SCHEDULE', 'SHARE', 'SIGN', 'TASK'] as const;
+type ActionType = typeof ACTION_TYPES[number];
+
+interface ActionFieldSchema {
+  ownerLabel?: string;
+  dueDateLabel: string;
+  referenceLabel?: string;
+  amount: boolean;
+}
+
+const ACTION_FIELD_SCHEMAS: Record<ActionType, ActionFieldSchema> = {
+  PAY: {
+    ownerLabel: 'Payee',
+    dueDateLabel: 'Pay by',
+    referenceLabel: 'Invoice or reference',
+    amount: true,
+  },
+  RESPOND: {
+    ownerLabel: 'Recipient',
+    dueDateLabel: 'Respond by',
+    referenceLabel: 'Case or reference',
+    amount: false,
+  },
+  REVIEW: {
+    dueDateLabel: 'Review by',
+    amount: false,
+  },
+  SCHEDULE: {
+    ownerLabel: 'With or provider',
+    dueDateLabel: 'Event date',
+    referenceLabel: 'Confirmation or reference',
+    amount: false,
+  },
+  SHARE: {
+    ownerLabel: 'Recipient',
+    dueDateLabel: 'Share by',
+    amount: false,
+  },
+  SIGN: {
+    ownerLabel: 'Counterparty or recipient',
+    dueDateLabel: 'Sign by',
+    referenceLabel: 'Agreement or reference',
+    amount: false,
+  },
+  TASK: {
+    ownerLabel: 'Owner',
+    dueDateLabel: 'Due date',
+    referenceLabel: 'Reference',
+    amount: false,
+  },
+};
+
 const EMPTY_ACTION: ActionDraft = {
   action_type: 'TASK',
   title: '',
+  details: '',
   payee_or_owner: '',
   amount: '',
   due_date: '',
@@ -176,10 +234,43 @@ function actionDraft(action: IntakeAction): ActionDraft {
   return {
     action_type: action.action_type || 'TASK',
     title: action.title || '',
+    details: action.summary || '',
     payee_or_owner: action.payee_or_owner || '',
     amount: action.amount == null ? '' : String(action.amount),
     due_date: action.due_date?.slice(0, 10) || '',
     reference: action.reference || '',
+  };
+}
+
+function actionType(value: string): ActionType {
+  return ACTION_TYPES.includes(value as ActionType) ? value as ActionType : 'TASK';
+}
+
+function actionFieldSchema(value: string): ActionFieldSchema {
+  return ACTION_FIELD_SCHEMAS[actionType(value)];
+}
+
+function actionDraftValid(draft: ActionDraft): boolean {
+  const amount = Number(draft.amount);
+  return Boolean(
+    draft.title.trim()
+    && (
+      actionType(draft.action_type) !== 'PAY'
+      || (draft.amount.trim() && Number.isFinite(amount) && amount >= 0)
+    ),
+  );
+}
+
+function actionMutation(draft: ActionDraft) {
+  const schema = actionFieldSchema(draft.action_type);
+  return {
+    action_type: actionType(draft.action_type),
+    title: draft.title.trim(),
+    summary: draft.details.trim() || null,
+    payee_or_owner: schema.ownerLabel ? draft.payee_or_owner.trim() || null : null,
+    amount: schema.amount && draft.amount ? Number(draft.amount) : null,
+    due_date: draft.due_date || null,
+    reference: schema.referenceLabel ? draft.reference.trim() || null : null,
   };
 }
 
@@ -256,6 +347,94 @@ function CurrencyInput({
         onBlur={() => setFocused(false)}
         onChange={(event) => onChange(event.target.value.replace(/[^0-9.,-]/g, '').replaceAll(',', ''))}
       />
+    </div>
+  );
+}
+
+function ActionFields({
+  draft,
+  disabled = false,
+  onChange,
+}: {
+  draft: ActionDraft;
+  disabled?: boolean;
+  onChange: (draft: ActionDraft) => void;
+}) {
+  const schema = actionFieldSchema(draft.action_type);
+  return (
+    <div className="intake-action-grid">
+      <label>
+        <span>Type</span>
+        <select
+          value={draft.action_type}
+          disabled={disabled}
+          onChange={(event) => onChange({ ...draft, action_type: event.target.value })}
+        >
+          {ACTION_TYPES.map((type) => <option key={type}>{type}</option>)}
+        </select>
+      </label>
+      <label className="intake-action-title">
+        <span>Title</span>
+        <input
+          value={draft.title}
+          disabled={disabled}
+          onChange={(event) => onChange({ ...draft, title: event.target.value })}
+        />
+      </label>
+      {schema.ownerLabel ? (
+        <label>
+          <span>{schema.ownerLabel}</span>
+          <input
+            value={draft.payee_or_owner}
+            disabled={disabled}
+            onChange={(event) => onChange({ ...draft, payee_or_owner: event.target.value })}
+          />
+        </label>
+      ) : null}
+      {schema.amount ? (
+        <label>
+          <span>Amount</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            required
+            value={draft.amount}
+            disabled={disabled}
+            onChange={(event) => onChange({ ...draft, amount: event.target.value })}
+          />
+        </label>
+      ) : null}
+      <label>
+        <span>{schema.dueDateLabel}</span>
+        <input
+          type="date"
+          value={draft.due_date}
+          disabled={disabled}
+          onChange={(event) => onChange({ ...draft, due_date: event.target.value })}
+        />
+      </label>
+      {schema.referenceLabel ? (
+        <label>
+          <span>{schema.referenceLabel}</span>
+          <input
+            value={draft.reference}
+            disabled={disabled}
+            onChange={(event) => onChange({ ...draft, reference: event.target.value })}
+          />
+        </label>
+      ) : null}
+      <label className="intake-action-details">
+        <span>Details</span>
+        <textarea
+          value={draft.details}
+          disabled={disabled}
+          rows={3}
+          maxLength={10_000}
+          placeholder="What needs to be done, special instructions, or useful context"
+          onChange={(event) => onChange({ ...draft, details: event.target.value })}
+        />
+      </label>
     </div>
   );
 }
@@ -540,16 +719,9 @@ function ActionEditor({
         </div>
         {action.confidence != null ? <span>{action.confidence}% confidence</span> : null}
       </div>
-      <div className="intake-action-grid">
-        <label><span>Type</span><select value={draft.action_type} disabled={busy} onChange={(event) => setDraft({ ...draft, action_type: event.target.value })}>{ACTION_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>
-        <label className="intake-action-title"><span>Title</span><input value={draft.title} disabled={busy} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
-        <label><span>Payee or owner</span><input value={draft.payee_or_owner} disabled={busy} onChange={(event) => setDraft({ ...draft, payee_or_owner: event.target.value })} /></label>
-        <label><span>Amount</span><input type="number" min="0" step="0.01" value={draft.amount} disabled={busy} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} /></label>
-        <label><span>Due date</span><input type="date" value={draft.due_date} disabled={busy} onChange={(event) => setDraft({ ...draft, due_date: event.target.value })} /></label>
-        <label><span>Reference</span><input value={draft.reference} disabled={busy} onChange={(event) => setDraft({ ...draft, reference: event.target.value })} /></label>
-      </div>
+      <ActionFields draft={draft} disabled={busy} onChange={setDraft} />
       <div className="intake-action-controls">
-        <Button size="sm" variant="primary" disabled={busy || !draft.title.trim()} onClick={() => void onSave(action, draft)}><Save size={15} /> Save action</Button>
+        <Button size="sm" variant="primary" disabled={busy || !actionDraftValid(draft)} onClick={() => void onSave(action, draft)}><Save size={15} /> Save action</Button>
         {completed ? (
           <Button size="sm" disabled={busy} onClick={() => void onStatus(action, 'pending')}><RotateCcw size={15} /> Undo completion</Button>
         ) : (
@@ -584,8 +756,14 @@ export default function IntakeReview() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedDocument = searchParams.get('document') || documentId;
   const requestedTab = searchParams.get('tab');
-  const [tab, setTab] = useState<ReviewTab>(requestedTab === 'actions' || requestedTab === 'ocr' ? requestedTab : 'metadata');
+  const [tab, setTab] = useState<ReviewTab>(
+    requestedTab === 'actions' || requestedTab === 'related' || requestedTab === 'ocr'
+      ? requestedTab
+      : 'metadata',
+  );
   const [queue, setQueue] = useState<IntakeListItem[]>([]);
+  const [queueTotal, setQueueTotal] = useState(0);
+  const [nextQueueCursor, setNextQueueCursor] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(requestedDocument ? Number(requestedDocument) : null);
   const [focusedId, setFocusedId] = useState<number | null>(selectedId);
   const [queueQuery, setQueueQuery] = useState('');
@@ -600,11 +778,13 @@ export default function IntakeReview() {
   const [actions, setActions] = useState<IntakeAction[]>([]);
   const [ocr, setOcr] = useState<OcrState | null>(null);
   const [loadingQueue, setLoadingQueue] = useState(true);
+  const [loadingMoreQueue, setLoadingMoreQueue] = useState(false);
   const [loadingCore, setLoadingCore] = useState(false);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [loadingActions, setLoadingActions] = useState(false);
   const [loadingOcr, setLoadingOcr] = useState(false);
   const [queueError, setQueueError] = useState('');
+  const [queueMoreError, setQueueMoreError] = useState('');
   const [coreError, setCoreError] = useState('');
   const [suggestionError, setSuggestionError] = useState('');
   const [actionError, setActionError] = useState('');
@@ -615,6 +795,7 @@ export default function IntakeReview() {
   const [newAction, setNewAction] = useState<ActionDraft>(EMPTY_ACTION);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const queueButtonRefs = useRef(new Map<number, HTMLButtonElement>());
+  const queueRequestId = useRef(0);
   const requestId = useRef(0);
 
   const dirty = useMemo(() => Boolean(metadata && baseline && JSON.stringify(metadata) !== JSON.stringify(baseline)), [baseline, metadata]);
@@ -622,9 +803,9 @@ export default function IntakeReview() {
   const selectedQueueItem = queue.find((item) => item.id === selectedId);
   const filteredQueue = useMemo(() => {
     return queue.filter(
-      (item) => item.id === pinnedFilteredId || matchesQueueFilter(item, queueQuery, queueFilter),
+      (item) => item.id === pinnedFilteredId || matchesQueueFilter(item, '', queueFilter),
     );
-  }, [pinnedFilteredId, queue, queueFilter, queueQuery]);
+  }, [pinnedFilteredId, queue, queueFilter]);
 
   const showToast = useCallback((message: string, tone: 'success' | 'error' = 'success') => {
     setToast({ message, tone });
@@ -632,22 +813,69 @@ export default function IntakeReview() {
     if (duration) window.setTimeout(() => setToast(null), duration);
   }, []);
 
-  const loadQueue = useCallback(async (): Promise<IntakeListItem[]> => {
+  const loadQueue = useCallback(async (
+    pageCount = 1,
+    search = '',
+    filter: QueueFilter = 'all',
+  ): Promise<IntakeListItem[]> => {
+    const currentRequest = ++queueRequestId.current;
     setLoadingQueue(true);
     setQueueError('');
     try {
-      const response = await endpoints.intake.documents() as IntakeQueueResponse;
-      setQueue(response.documents);
-      setSelectedId((current) => current ?? response.documents[0]?.id ?? null);
-      setFocusedId((current) => current ?? response.documents[0]?.id ?? null);
-      return response.documents;
+      const documents: IntakeListItem[] = [];
+      let cursor: string | null = null;
+      let total = 0;
+      let pagesLoaded = 0;
+      do {
+        const response = await endpoints.intake.documents({
+          pageSize: QUEUE_PAGE_SIZE,
+          cursor,
+          search,
+          filter,
+        }) as IntakeQueueResponse;
+        documents.push(...response.documents);
+        total = response.total;
+        cursor = response.next_cursor;
+        pagesLoaded += 1;
+      } while (cursor && pagesLoaded < pageCount);
+      if (queueRequestId.current !== currentRequest) return documents;
+      setQueue(documents);
+      setQueueTotal(total);
+      setNextQueueCursor(cursor);
+      setSelectedId((current) => current ?? documents[0]?.id ?? null);
+      setFocusedId((current) => current ?? documents[0]?.id ?? null);
+      return documents;
     } catch (error) {
-      setQueueError(errorMessage(error));
+      if (queueRequestId.current === currentRequest) setQueueError(errorMessage(error));
       return [];
     } finally {
-      setLoadingQueue(false);
+      if (queueRequestId.current === currentRequest) setLoadingQueue(false);
     }
   }, []);
+
+  const loadMoreQueue = useCallback(async () => {
+    if (!nextQueueCursor || loadingMoreQueue) return;
+    setLoadingMoreQueue(true);
+    setQueueMoreError('');
+    try {
+      const response = await endpoints.intake.documents({
+        pageSize: QUEUE_PAGE_SIZE,
+        cursor: nextQueueCursor,
+        search: queueQuery,
+        filter: queueFilter,
+      }) as IntakeQueueResponse;
+      setQueue((current) => {
+        const existingIds = new Set(current.map((item) => item.id));
+        return [...current, ...response.documents.filter((item) => !existingIds.has(item.id))];
+      });
+      setQueueTotal(response.total);
+      setNextQueueCursor(response.next_cursor);
+    } catch (error) {
+      setQueueMoreError(errorMessage(error));
+    } finally {
+      setLoadingMoreQueue(false);
+    }
+  }, [loadingMoreQueue, nextQueueCursor, queueFilter, queueQuery]);
 
   const loadDocument = useCallback(async (id: number) => {
     const currentRequest = ++requestId.current;
@@ -724,7 +952,13 @@ export default function IntakeReview() {
       });
   }, []);
 
-  useEffect(() => { void loadQueue(); }, [loadQueue]);
+  useEffect(() => {
+    const timeout = window.setTimeout(
+      () => void loadQueue(1, queueQuery, queueFilter),
+      queueQuery.trim() ? 250 : 0,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [loadQueue, queueFilter, queueQuery]);
   useEffect(() => {
     if (selectedId != null) void loadDocument(selectedId);
   }, [loadDocument, selectedId]);
@@ -853,8 +1087,12 @@ export default function IntakeReview() {
           : {},
       }) as { filed: boolean };
       showToast(disposition === 'defer' ? 'Changes saved; document kept in the Inbox.' : response.filed ? 'Document filed.' : 'Changes saved.');
-      const refreshedQueue = await loadQueue();
-      const matchingQueue = refreshedQueue.filter((item) => matchesQueueFilter(item, queueQuery, queueFilter));
+      const refreshedQueue = await loadQueue(
+        Math.max(1, Math.ceil(queue.length / QUEUE_PAGE_SIZE)),
+        queueQuery,
+        queueFilter,
+      );
+      const matchingQueue = refreshedQueue;
       if (response.filed || disposition === 'defer') {
         setPinnedFilteredId(null);
         const nextMatching = matchingQueue.find((item) => item.id !== core.document.id)
@@ -869,11 +1107,12 @@ export default function IntakeReview() {
         }
       } else {
         const refreshedCurrent = refreshedQueue.find((item) => item.id === core.document.id);
-        setPinnedFilteredId(
-          refreshedCurrent && !matchesQueueFilter(refreshedCurrent, queueQuery, queueFilter)
-            ? core.document.id
-            : null,
-        );
+        const shouldPinCurrent = !refreshedCurrent
+          || !matchesQueueFilter(refreshedCurrent, '', queueFilter);
+        if (shouldPinCurrent && !refreshedCurrent && selectedQueueItem) {
+          setQueue([selectedQueueItem, ...refreshedQueue]);
+        }
+        setPinnedFilteredId(shouldPinCurrent ? core.document.id : null);
         await loadDocument(core.document.id);
       }
     } catch (error) {
@@ -888,12 +1127,7 @@ export default function IntakeReview() {
     try {
       const updated = await endpoints.actionQueue.updateAction(String(action.id), {
         version: action.version,
-        action_type: draft.action_type,
-        title: draft.title.trim(),
-        payee_or_owner: draft.payee_or_owner.trim() || null,
-        amount: draft.amount ? Number(draft.amount) : null,
-        due_date: draft.due_date || null,
-        reference: draft.reference.trim() || null,
+        ...actionMutation(draft),
       }) as IntakeAction;
       setActions((current) => current.map((item) => item.id === updated.id ? updated : item));
       showToast('Action saved.');
@@ -935,12 +1169,7 @@ export default function IntakeReview() {
     setBusyKey('new-action');
     try {
       const created = await endpoints.intake.createAction(core.document.id, {
-        action_type: newAction.action_type,
-        title: newAction.title.trim(),
-        payee_or_owner: newAction.payee_or_owner.trim() || null,
-        amount: newAction.amount ? Number(newAction.amount) : null,
-        due_date: newAction.due_date || null,
-        reference: newAction.reference.trim() || null,
+        ...actionMutation(newAction),
       }) as IntakeAction;
       setActions((current) => [...current, created]);
       setNewAction(EMPTY_ACTION);
@@ -988,8 +1217,21 @@ export default function IntakeReview() {
     <div className="intake-review-page">
       <aside className="intake-queue" aria-label="Inbox documents">
         <div className="intake-queue-header">
-          <div><span className="intake-eyebrow">Paperless inbox</span><h1>Inbox Review</h1><p>{queue.length} awaiting review</p></div>
-          <Button size="sm" aria-label="Reload queue" disabled={loadingQueue} onClick={() => void loadQueue()}><RefreshCw size={15} /></Button>
+          <div>
+            <span className="intake-eyebrow">Paperless inbox</span>
+            <h1>Inbox Review</h1>
+            <p>{queueTotal} {queueQuery.trim() || queueFilter !== 'all' ? 'matching documents' : 'awaiting review'}</p>
+          </div>
+          <Button
+            size="sm"
+            aria-label="Reload queue"
+            disabled={loadingQueue}
+            onClick={() => void loadQueue(
+              Math.max(1, Math.ceil(queue.length / QUEUE_PAGE_SIZE)),
+              queueQuery,
+              queueFilter,
+            )}
+          ><RefreshCw size={15} /></Button>
         </div>
         <div className="intake-queue-tools">
           <label><Search size={16} /><input aria-label="Search intake documents" placeholder="Search documents…" value={queueQuery} onChange={(event) => {
@@ -1010,7 +1252,7 @@ export default function IntakeReview() {
           </div>
         </div>
         {loadingQueue ? <SkeletonLoader variant="default" /> : queueError ? (
-          <ErrorState message={`Inbox unavailable: ${queueError}`} onRetry={() => void loadQueue()} />
+          <ErrorState message={`Inbox unavailable: ${queueError}`} onRetry={() => void loadQueue(1, queueQuery, queueFilter)} />
         ) : queue.length === 0 ? (
           <EmptyState title="Inbox is clear" desc="No documents match the configured intake tags." />
         ) : filteredQueue.length === 0 ? (
@@ -1021,7 +1263,11 @@ export default function IntakeReview() {
             onKeyDown={(event) => {
               if (event.key === 'ArrowDown') { event.preventDefault(); moveQueueFocus(1); }
               else if (event.key === 'ArrowUp') { event.preventDefault(); moveQueueFocus(-1); }
-              else if (event.key === 'Enter' && focusedId != null) { event.preventDefault(); selectDocument(focusedId); }
+              else if (
+                event.key === 'Enter'
+                && focusedId != null
+                && (event.target as HTMLElement).classList.contains('intake-queue-item')
+              ) { event.preventDefault(); selectDocument(focusedId); }
             }}
           >
             {filteredQueue.map((item) => (
@@ -1047,6 +1293,21 @@ export default function IntakeReview() {
                 <ChevronRight size={17} aria-hidden="true" />
               </button>
             ))}
+            {nextQueueCursor ? (
+              <div className="intake-queue-more">
+                {queueMoreError ? (
+                  <span role="alert">Could not load more documents: {queueMoreError}</span>
+                ) : null}
+                <Button
+                  size="sm"
+                  disabled={loadingMoreQueue}
+                  onClick={() => void loadMoreQueue()}
+                >
+                  {loadingMoreQueue ? <RefreshCw className="intake-spin" size={14} /> : null}
+                  {loadingMoreQueue ? 'Loading…' : `Load more (${queue.length} of ${queueTotal} loaded)`}
+                </Button>
+              </div>
+            ) : null}
           </div>
         )}
       </aside>
@@ -1091,6 +1352,9 @@ export default function IntakeReview() {
                   <button role="tab" aria-selected={tab === 'metadata'} className={tab === 'metadata' ? 'active' : ''} onClick={() => chooseTab('metadata')}>Metadata</button>
                   <button role="tab" aria-selected={tab === 'actions'} className={`${tab === 'actions' ? 'active ' : ''}${pendingActions.length ? 'needs-attention' : ''}`} onClick={() => chooseTab('actions')}>
                     Actions <span>{loadingActions ? '…' : pendingActions.length}</span>
+                  </button>
+                  <button role="tab" aria-selected={tab === 'related'} className={tab === 'related' ? 'active' : ''} onClick={() => chooseTab('related')}>
+                    Related
                   </button>
                   <button role="tab" aria-selected={tab === 'ocr'} aria-label={ocr?.poor_quality ? 'OCR, needs review' : 'OCR'} className={tab === 'ocr' ? 'active' : ''} onClick={() => chooseTab('ocr')}>
                     OCR {ocr?.poor_quality ? <span className="intake-tab-alert" aria-label="Poor OCR quality"><CircleAlert size={13} /> Review</span> : null}
@@ -1184,15 +1448,8 @@ export default function IntakeReview() {
                       {loadingActions ? <div className="intake-inline-state"><RefreshCw className="intake-spin" size={15} /> Loading action analysis…</div> : null}
                       {newActionOpen ? (
                         <div className="intake-new-action">
-                          <div className="intake-action-grid">
-                            <label><span>Type</span><select value={newAction.action_type} onChange={(event) => setNewAction({ ...newAction, action_type: event.target.value })}>{ACTION_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>
-                            <label className="intake-action-title"><span>Title</span><input value={newAction.title} onChange={(event) => setNewAction({ ...newAction, title: event.target.value })} /></label>
-                            <label><span>Payee or owner</span><input value={newAction.payee_or_owner} onChange={(event) => setNewAction({ ...newAction, payee_or_owner: event.target.value })} /></label>
-                            <label><span>Amount</span><input type="number" min="0" step="0.01" value={newAction.amount} onChange={(event) => setNewAction({ ...newAction, amount: event.target.value })} /></label>
-                            <label><span>Due date</span><input type="date" value={newAction.due_date} onChange={(event) => setNewAction({ ...newAction, due_date: event.target.value })} /></label>
-                            <label><span>Reference</span><input value={newAction.reference} onChange={(event) => setNewAction({ ...newAction, reference: event.target.value })} /></label>
-                          </div>
-                          <Button variant="primary" disabled={busyKey === 'new-action' || !newAction.title.trim()} onClick={() => void addAction()}><FilePlus2 size={16} /> {busyKey === 'new-action' ? 'Adding…' : 'Add action'}</Button>
+                          <ActionFields draft={newAction} onChange={setNewAction} />
+                          <Button variant="primary" disabled={busyKey === 'new-action' || !actionDraftValid(newAction)} onClick={() => void addAction()}><FilePlus2 size={16} /> {busyKey === 'new-action' ? 'Adding…' : 'Add action'}</Button>
                         </div>
                       ) : null}
                       {!loadingActions && !actionError && actions.length ? actions.map((action) => (
@@ -1200,6 +1457,20 @@ export default function IntakeReview() {
                       )) : null}
                       {!loadingActions && !actionError && !actions.length ? <EmptyState title="No action analysis yet" desc="Refresh analysis or add an action manually." /> : null}
                     </div>
+                  ) : null}
+
+                  {tab === 'related' ? (
+                    <DocumentRelationshipsPanel
+                      document={{
+                        id: selectedId,
+                        title,
+                        created: metadata?.created || core?.document.created,
+                        document_type_name: core && metadata
+                          ? optionName(core.taxonomies.document_types, metadata.document_type)
+                          : selectedQueueItem?.document_type_name,
+                      }}
+                      onToast={showToast}
+                    />
                   ) : null}
 
                   {tab === 'ocr' ? (

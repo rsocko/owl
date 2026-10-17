@@ -14,8 +14,10 @@ independent decisions.
 Open **Workflow → Inbox Review** in the OWL web interface. The document list is
 loaded from the Action Queue's configured intake tags (normally `Inbox`). Each
 row includes a Paperless thumbnail, resolved correspondent and document type,
-and an **Action needed** indicator where applicable. Search and filters narrow
-the queue without changing the selected document.
+and an **Action needed** indicator where applicable. Search and filters apply
+to the full Paperless Inbox without changing the selected document. OWL
+initially loads 100 matching documents and shows the full matching count; use
+**Load more** at the end of the list to retrieve the next page.
 
 ## Review workflow
 
