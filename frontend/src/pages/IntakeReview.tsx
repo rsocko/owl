@@ -240,7 +240,7 @@ function CurrencyInput({
   onChange: (value: string) => void;
 }) {
   const [focused, setFocused] = useState(false);
-  const numericValue = Number(value.replaceAll(',', '').replace('$', ''));
+  const numericValue = Number(value.replaceAll(',', '').replaceAll('$', ''));
   const displayValue = !focused && value && Number.isFinite(numericValue)
     ? numericValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     : value;
