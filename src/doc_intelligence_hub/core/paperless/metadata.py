@@ -10,8 +10,6 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Sequence
 
-from doc_intelligence_hub.core.masked_identifiers import masked_identifier_suffix
-
 
 class MetadataFieldKey(str, Enum):
     ACCOUNT_IDENTIFIER = "account_identifier"
@@ -1076,12 +1074,7 @@ def govern_account_identifier(
             True,
             "Identifier confidence is below the automatic projection threshold",
         )
-    paperless_value = (
-        display_value
-        if classification
-        in {AccountIdentifierClass.BANK_ACCOUNT, AccountIdentifierClass.PAYMENT_CARD}
-        else str(value).strip()
-    )
+    paperless_value = str(value).strip()
     return AccountIdentifierProjection(
         classification,
         paperless_value,
@@ -1107,14 +1100,10 @@ def build_account_identifier_update(
 
 
 def _validate_write_value(spec: MetadataFieldSpec, value: Any) -> None:
-    if spec.key is not MetadataFieldKey.ACCOUNT_IDENTIFIER or value is None:
-        return
-    masked_value = str(value)
-    if re.fullmatch(r"(?:member\s+)?ending\s+[A-Za-z0-9]{2,8}", masked_value):
-        return
-    if masked_identifier_suffix(masked_value) is not None:
-        return
-    raise MetadataValueError("Account Identifier must contain only an approved masked value")
+    if spec.key is MetadataFieldKey.ACCOUNT_IDENTIFIER and value is not None:
+        normalized = str(value).strip()
+        if not normalized:
+            raise MetadataValueError("Account Identifier cannot be blank")
 
 
 __all__ = [

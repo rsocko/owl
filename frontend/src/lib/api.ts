@@ -418,8 +418,8 @@ export const endpoints = {
     reconcileProjections: () => api.post('/api/relationships/reconcile-projections'),
   },
   metadata: {
-    get: (docId: string | number) => api.get(`/api/metadata/${docId}`),
-    correct: (docId: string | number, body: { field_name: string; corrected_value: string; original_value?: string; confidence?: number; source_region?: unknown; notes?: string }) =>
+    get: (docId: string | number) => api.get(`/api/metadata/${docId}?context=account_review`),
+    correct: (docId: string | number, body: { field_name: string; corrected_value: string; original_value?: string; confidence?: number; source_region?: unknown; notes?: string; identifier_class?: string }) =>
       api.post(`/api/metadata/${docId}/correct`, body),
     confirm: (docId: string | number, body: { field_name: string; current_value?: string; confidence?: number; source_region?: unknown }) =>
       api.post(`/api/metadata/${docId}/confirm`, body),

@@ -1,7 +1,7 @@
 """Account number extraction pipeline.
 
 Extracts account numbers/identifiers from document OCR text using regex patterns
-and optionally LLM fallback. Writes masked results through the metadata registry.
+and optionally LLM fallback. Writes classified results through the metadata registry.
 
 Patterns target common formats found in financial/medical statements:
   - Account #...4321, Account Number: 4321

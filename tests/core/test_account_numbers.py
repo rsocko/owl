@@ -190,13 +190,13 @@ class TestAccountIdentifierPolicy:
         assert decision.projection.identifier_class is AccountIdentifierClass.SERVICE_ACCOUNT
         assert decision.projection.paperless_value == "SERVICE123456"
 
-    def test_bank_account_is_masked_before_projection(self):
+    def test_bank_account_projects_exact_to_paperless(self):
         decision = evaluate_account_identifiers(
             extract_account_numbers("Bank Account Number: 123456789")
         )
         assert decision.projection is not None
         assert decision.projection.identifier_class is AccountIdentifierClass.BANK_ACCOUNT
-        assert decision.projection.paperless_value == "bank account ending 6789"
+        assert decision.projection.paperless_value == "123456789"
 
     def test_unlabeled_suffix_requires_review(self):
         decision = evaluate_account_identifiers(extract_account_numbers("ending in 9876"))
@@ -265,14 +265,17 @@ async def test_write_account_uses_canonical_numeric_field_id() -> None:
 
 
 @pytest.mark.asyncio
-async def test_write_account_rejects_unmasked_value() -> None:
+async def test_write_account_accepts_exact_value() -> None:
     client = AsyncMock()
     client.list_custom_fields.return_value = [
         {"id": 42, "name": "Account Identifier", "data_type": "string"}
     ]
 
-    assert await write_account_to_paperless(100, "SAMPLE123456789", client) is False
-    client.update_custom_fields.assert_not_awaited()
+    assert await write_account_to_paperless(100, "SAMPLE123456789", client) is True
+    client.update_custom_fields.assert_awaited_once_with(
+        100,
+        [{"field": 42, "value": "SAMPLE123456789"}],
+    )
 
 
 @pytest.mark.asyncio
