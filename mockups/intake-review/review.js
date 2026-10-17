@@ -110,6 +110,15 @@ function activeActionDrafts(doc = current) {
 function completedActionDrafts(doc = current) {
   return visibleActionDrafts(doc).filter((draft) => draft.completed);
 }
+function undoDraftCompletion(doc, draft) {
+  const actionIndex = actions.findIndex((action) => action.sourceId === doc.id && action.draftId === draft.id);
+  if (actionIndex >= 0) actions.splice(actionIndex, 1);
+  draft.completed = false;
+  commitActionDrafts(doc);
+  renderActions();
+  if (doc === current) renderIntakeActionState();
+  toast(`“${draft.title}” restored as an active action.`);
+}
 function actionTypeLabel(type) {
   return { PAY: "Pay", FOLLOW_UP: "Follow up", CALL: "Call", REVIEW: "Review" }[type] || type;
 }
@@ -164,10 +173,10 @@ function renderActionCards(containerId, doc, context) {
     );
     const controls = node("div", undefined, "action-card-controls");
     if (draft.completed) {
-      const completed = node("button", "Completed");
-      completed.type = "button";
-      completed.disabled = true;
-      controls.append(completed);
+      const undo = node("button", "Undo completion");
+      undo.type = "button";
+      undo.addEventListener("click", () => undoDraftCompletion(doc, draft));
+      controls.append(undo);
       card.append(heading, fieldsContainer, controls);
       container.append(card);
       return;
@@ -684,13 +693,24 @@ function renderActions() {
     const item = node("article", undefined, "action-item");
     item.append(node("span", action.completed ? "Completed" : `${actionTypeLabel(action.type || "PAY").toUpperCase()} · confirmed`, `pill ${action.completed ? "success" : "warning"}`), node("h3", action.title), node("p", `${action.amount} · due ${action.due} · Paperless #${action.sourceId || action.id}`));
     item.append(node("div", action.completed ? "Explicit user completion · settlement recorded" : "Human-confirmed · eligible for Mission Control sync", "inline-meta"));
-    const complete = node("button", action.completed ? "Completed" : "Mark completed", action.completed ? "" : "primary");
+    const complete = node("button", action.completed ? "Undo completion" : "Mark completed", action.completed ? "" : "primary");
     complete.type = "button";
-    complete.disabled = action.completed;
     complete.addEventListener("click", () => {
-      action.completed = true;
+      if (action.completed) {
+        const source = documents.find((doc) => doc.id === action.sourceId);
+        const draft = source?.actionDrafts.find((candidate) => candidate.id === action.draftId);
+        if (source && draft) {
+          undoDraftCompletion(source, draft);
+          return;
+        }
+        action.completed = false;
+      } else {
+        action.completed = true;
+      }
       renderActions();
-      toast("Explicit completion recorded. Intake tags and metadata remain independent.");
+      toast(action.completed
+        ? "Explicit completion recorded. Intake tags and metadata remain independent."
+        : "Completion undone. The action is active again.");
     });
     item.append(complete);
     byId("trusted-actions").append(item);
