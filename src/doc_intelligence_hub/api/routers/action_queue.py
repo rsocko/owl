@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import httpx
@@ -17,6 +17,7 @@ from starlette.responses import StreamingResponse
 
 from doc_intelligence_hub.api.document_summary import build_document_summary
 from doc_intelligence_hub.api.routers import get_loaded_statement_config, make_paperless_client
+from doc_intelligence_hub.core.datetime_utils import serialize_utc_datetime
 from doc_intelligence_hub.core.paperless import (
     MetadataDiagnosticCode,
     MetadataFieldKey,
@@ -901,7 +902,7 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
     _sync_action_queue_settings(request)
     source_settings = _get_queue_settings(request)
     effective_limit = _effective_run_limit(body, source_settings)
-    started_at = datetime.utcnow().isoformat()
+    started_at = serialize_utc_datetime(datetime.now(UTC))
     request.app.state.last_queue_status = {
         "status": "running",
         "started_at": started_at,
@@ -938,7 +939,7 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
         correspondent=body.correspondent,
         document_type=body.document_type,
     )
-    finished_at = datetime.utcnow().isoformat()
+    finished_at = serialize_utc_datetime(datetime.now(UTC))
 
     # Emit unified alerts for pending actions (best-effort)
     if not body.dry_run:
@@ -1017,7 +1018,7 @@ async def queue_run_stream(
             effective_saved_view_id = source_settings["saved_view_id"]
 
     async def event_generator():
-        started_at = datetime.utcnow().isoformat()
+        started_at = serialize_utc_datetime(datetime.now(UTC))
         request.app.state.last_queue_status = {
             "status": "running",
             "started_at": started_at,
@@ -1087,7 +1088,7 @@ async def queue_run_stream(
 
             # Pipeline finished — get the result
             result = await pipeline_task
-            finished_at = datetime.utcnow().isoformat()
+            finished_at = serialize_utc_datetime(datetime.now(UTC))
 
             # Emit alerts (best-effort)
             if not body.dry_run:
@@ -1122,7 +1123,7 @@ async def queue_run_stream(
                 "started_at": started_at,
                 "finished_at": finished_at,
                 "dry_run": body.dry_run,
-                "limit": body.limit,
+                "limit": effective_limit,
                 "read_only": not action_queue_settings.write_to_paperless,
                 "result": result,
                 "database": await _database_counts(),

@@ -581,6 +581,14 @@ class TestPipelineErrorIsolation:
             session.close()
         assert stats["processed"] == 0
         assert stats["no_action"] == 1
+        assert stats["documents_scanned"] == 1
+        assert stats["outcomes"] == {
+            "action_required": 0,
+            "no_action": 0,
+            "needs_review": 1,
+            "unreadable": 0,
+            "failed": 0,
+        }
 
     @pytest.mark.asyncio
     async def test_reanalysis_preserves_accepted_human_correction(self, db, monkeypatch):
@@ -867,6 +875,8 @@ class TestPipelineErrorIsolation:
         stats = await pipeline.run(force=True, dry_run=False)
 
         assert stats["no_action"] == 1
+        assert stats["documents_scanned"] == 1
+        assert stats["outcomes"]["no_action"] == 1
         pipeline.enricher.sync_status.assert_awaited_once_with(1, "not_an_action")
         session = get_session()
         try:
