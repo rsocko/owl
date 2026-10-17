@@ -183,6 +183,89 @@ describe('IntakeReview', () => {
     expect(screen.getByText('Document 2', { selector: 'h2' })).toBeInTheDocument();
   });
 
+  it('shows only fields relevant to a review action', async () => {
+    documentActionsMock.mockResolvedValue({
+      actions: [{
+        id: 11,
+        document_id: 1,
+        action_type: 'REVIEW',
+        title: 'Review policy changes',
+        summary: 'Decide whether the new terms are acceptable.',
+        payee_or_owner: 'Should not be shown',
+        amount: 125,
+        due_date: '2026-10-31',
+        reference: 'Should not be shown',
+        status: 'pending',
+        version: 1,
+        origin: 'inferred',
+        confidence: 95,
+      }],
+      analysis: { available: true },
+      ocr_quality: { quality_score: 90, quality_band: 'green', poor_quality: false },
+    });
+
+    renderPage('/inbox-review?document=1&tab=actions');
+
+    expect(await screen.findByLabelText('Details')).toHaveValue(
+      'Decide whether the new terms are acceptable.',
+    );
+    expect(screen.getByLabelText('Review by')).toHaveValue('2026-10-31');
+    expect(screen.queryByLabelText('Amount')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Payee')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Invoice or reference')).not.toBeInTheDocument();
+  });
+
+  it('clears fields that do not apply when an action type changes', async () => {
+    const action = {
+      id: 12,
+      document_id: 1,
+      action_type: 'PAY',
+      title: 'Pay utility bill',
+      summary: null,
+      payee_or_owner: 'Utility Co',
+      amount: 84.2,
+      due_date: '2026-10-25',
+      reference: 'INV-42',
+      status: 'pending',
+      version: 1,
+      origin: 'inferred',
+      confidence: 95,
+    };
+    documentActionsMock.mockResolvedValue({
+      actions: [action],
+      analysis: { available: true },
+      ocr_quality: { quality_score: 90, quality_band: 'green', poor_quality: false },
+    });
+    updateActionMock.mockResolvedValue({
+      ...action,
+      action_type: 'REVIEW',
+      summary: 'Check the disputed charge.',
+      payee_or_owner: null,
+      amount: null,
+      reference: null,
+      version: 2,
+    });
+
+    renderPage('/inbox-review?document=1&tab=actions');
+
+    fireEvent.change(await screen.findByLabelText('Type'), { target: { value: 'REVIEW' } });
+    fireEvent.change(screen.getByLabelText('Details'), {
+      target: { value: 'Check the disputed charge.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save action' }));
+
+    await waitFor(() => expect(updateActionMock).toHaveBeenCalledWith('12', {
+      version: 1,
+      action_type: 'REVIEW',
+      title: 'Pay utility bill',
+      summary: 'Check the disputed charge.',
+      payee_or_owner: null,
+      amount: null,
+      due_date: '2026-10-25',
+      reference: null,
+    }));
+  });
+
   it('shows the selected preview while metadata loads progressively', async () => {
     documentCoreMock.mockImplementation(() => new Promise(() => undefined));
     renderPage();

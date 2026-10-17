@@ -846,13 +846,15 @@
 }
 
 .intake-field-wide,
-.intake-action-title {
+.intake-action-title,
+.intake-action-details {
   grid-column: 1 / -1;
 }
 
 .intake-field input,
 .intake-action-grid input,
 .intake-action-grid select,
+.intake-action-grid textarea,
 .intake-ocr-text textarea {
   width: 100%;
   border: 1px solid color-mix(in srgb, var(--border) 84%, var(--text-muted) 16%);
@@ -866,9 +868,16 @@
 .intake-field input:focus,
 .intake-action-grid input:focus,
 .intake-action-grid select:focus,
+.intake-action-grid textarea:focus,
 .intake-ocr-text textarea:focus {
   border-color: var(--accent);
   outline: 2px solid var(--accent-bg);
+}
+
+.intake-action-grid textarea {
+  min-height: 4.8rem;
+  resize: vertical;
+  line-height: 1.45;
 }
 
 .intake-field-suggestions {
@@ -1573,7 +1582,8 @@
   }
 
   .intake-field-wide,
-  .intake-action-title {
+  .intake-action-title,
+  .intake-action-details {
     grid-column: auto;
   }
 
