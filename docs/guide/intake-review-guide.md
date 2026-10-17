@@ -23,7 +23,8 @@ The workspace keeps the live document date, correspondent, and document type
 visible above the preview. The right panel contains:
 
 - **Metadata** — current Paperless metadata, field-local Paperless ML/AI
-  suggestions, removable Paperless-colored tags, storage path, and relevant
+  suggestions, removable Paperless-colored tags in one searchable entry
+  control, storage path, and relevant
   Paperless custom fields. Operational Action/Obligation projections are not
   presented as editable document metadata.
 - **Actions** — all inferred and user-added actions for the source document.
@@ -64,6 +65,11 @@ Tag options retain Paperless colors. Names containing hierarchy separators
 such as `Parent / Child` or `Parent::Child` are displayed with parent context
 while preserving the original Paperless tag name.
 
+Tag suggestions are restricted to tags that already exist in Paperless. Novel
+AI-generated tag names are not offered as suggestions; reviewers can still
+create a new tag explicitly by typing it into the tag control. This is enforced
+by OWL and does not require a Paperless setting change.
+
 ## Action editing and audit history
 
 Actions can be edited directly. Fields include type, title, payee or owner,
@@ -94,6 +100,11 @@ unsaved, and a changed Paperless revision returns a conflict.
 OCR remediation continues through OWL's OCR Quality workflow. After accepting
 new OCR, return to Intake Review and refresh analysis so metadata suggestions
 and inferred actions are evaluated against the new searchable text.
+
+Hover the document preview to reveal **Expand** and **New tab** controls.
+Expanded preview uses the full browser viewport and closes with Escape. When a
+browser-facing Paperless URL is configured, **Open in Paperless** is also
+available in the document header and expanded viewer.
 
 ## API
 
