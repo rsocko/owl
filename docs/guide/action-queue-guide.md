@@ -60,6 +60,9 @@ an amount, payment URL, or references to a bill. It then attempts to reconcile t
 receipt with an existing open payment obligation using invoice/reference number,
 account identifier, correspondent, and amount evidence. A receipt that cannot be
 matched remains a no-action document rather than becoming a speculative payment task.
+If receipt metadata conflicts with text indicating a remaining balance or payment
+request, OWL creates a low-confidence `REVIEW` action and routes it to Needs Review
+instead of suppressing it or creating a new `PAY` action.
 
 ## Action Lifecycle
 
