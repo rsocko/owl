@@ -24,6 +24,7 @@ from doc_intelligence_hub.modules.action_queue.database import (
 from doc_intelligence_hub.modules.action_queue.obligations import sync_obligation_status
 from doc_intelligence_hub.modules.action_queue.payment_reconciliation import (
     IdempotencyConflictError,
+    PaymentCandidateDecisionRequest,
     PaymentCheckInProgressError,
     PaymentCheckRequest,
     PaymentEvidenceSnapshot,
@@ -220,6 +221,24 @@ def _matched_response_with_alternatives(
             },
         }
     )
+
+
+def _ambiguous_response_with_candidates(
+    run_id: str,
+    document_id: int,
+) -> TyrionBillMatchResponseV2:
+    payload = _matched_response_with_alternatives(run_id, document_id).model_dump(
+        by_alias=True,
+        mode="json",
+    )
+    payload.update(
+        {
+            "matchStatus": "ambiguous",
+            "paymentStatus": "ambiguous",
+            "selectedTransactionRef": None,
+        }
+    )
+    return TyrionBillMatchResponseV2.model_validate(payload)
 
 
 def test_tyrion_v2_response_accepts_nullable_candidate_metadata() -> None:
@@ -829,6 +848,95 @@ def test_projection_reports_ranked_alternatives_without_persisting_them_as_payme
     assert projection["search_context"]["candidate_pool_size"] == 18
     assert db.query(PaymentEvidence).count() == 1
     assert db.query(PaymentEvidence).one().transaction_ref == "transaction-selected"
+
+
+def test_ambiguous_candidates_can_be_discarded_and_selected(db) -> None:
+    obligation = _obligation(db)
+    action = _pay_action(db, obligation)
+    service = PaymentReconciliationService(db)
+    run, _request, _replay = service.start_check(
+        action.id,
+        PaymentCheckRequest(
+            revision="v1:1:1",
+            idempotency_key="payment-check-ambiguous-candidates",
+        ),
+    )
+    projection = service.finish_check(
+        run.id,
+        _ambiguous_response_with_candidates(run.id, action.document_id),
+        connector_ref="tyrion-bill-matching-v2",
+    )
+
+    assert projection["state"] == "multiple_matches"
+    revision = projection["revision"]
+    rejected_id = projection["candidates"][0]["id"]
+    selected_id = projection["candidates"][1]["id"]
+
+    rejected = service.review_candidate(
+        action.id,
+        PaymentCandidateDecisionRequest(
+            action="reject",
+            revision=revision,
+            idempotency_key="reject-ambiguous-candidate",
+            evidence_id=rejected_id,
+        ),
+        actor="owl",
+    )
+
+    assert [candidate["id"] for candidate in rejected["payment_check"]["candidates"]] == [
+        selected_id
+    ]
+    confirmed = service.review_candidate(
+        action.id,
+        PaymentCandidateDecisionRequest(
+            action="confirm",
+            revision=rejected["payment_check"]["revision"],
+            idempotency_key="confirm-ambiguous-candidate",
+            evidence_id=selected_id,
+        ),
+        actor="owl",
+    )
+
+    assert confirmed["payment_check"]["state"] == "confirmed"
+    db.refresh(action)
+    assert action.status == "completed"
+    assert (
+        db.query(ObligationPaymentEdge).filter_by(evidence_id=rejected_id).one().state == "rejected"
+    )
+
+
+def test_ambiguous_candidates_can_all_be_rejected(db) -> None:
+    obligation = _obligation(db)
+    action = _pay_action(db, obligation)
+    service = PaymentReconciliationService(db)
+    run, _request, _replay = service.start_check(
+        action.id,
+        PaymentCheckRequest(
+            revision="v1:1:1",
+            idempotency_key="payment-check-reject-all",
+        ),
+    )
+    projection = service.finish_check(
+        run.id,
+        _ambiguous_response_with_candidates(run.id, action.document_id),
+        connector_ref="tyrion-bill-matching-v2",
+    )
+
+    result = service.review_candidate(
+        action.id,
+        PaymentCandidateDecisionRequest(
+            action="reject_all",
+            revision=projection["revision"],
+            idempotency_key="reject-all-ambiguous-candidates",
+        ),
+        actor="owl",
+    )
+
+    assert result["payment_check"]["state"] == "no_match"
+    assert result["payment_check"]["message"] == "You rejected all suggested transactions."
+    assert result["payment_check"]["candidates"] == []
+    db.refresh(action)
+    assert action.status == "pending"
 
 
 def test_manual_rejection_survives_newer_generation(db) -> None:

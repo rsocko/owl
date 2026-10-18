@@ -25,6 +25,7 @@ const {
   paymentCheckMock,
   checkPaymentMock,
   confirmPaymentAndCompleteMock,
+  reviewPaymentCandidateMock,
 } = vi.hoisted(() => ({
   statusMock: vi.fn(),
   actionsMock: vi.fn(),
@@ -38,6 +39,7 @@ const {
   paymentCheckMock: vi.fn(),
   checkPaymentMock: vi.fn(),
   confirmPaymentAndCompleteMock: vi.fn(),
+  reviewPaymentCandidateMock: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
@@ -52,6 +54,7 @@ vi.mock('../lib/api', () => ({
       paymentCheck: paymentCheckMock,
       checkPayment: checkPaymentMock,
       confirmPaymentAndComplete: confirmPaymentAndCompleteMock,
+      reviewPaymentCandidate: reviewPaymentCandidateMock,
     },
     intake: {
       documentOcr: documentOcrMock,
@@ -210,6 +213,14 @@ describe('DocumentWorkspace actions mode', () => {
       },
     });
     confirmPaymentAndCompleteMock.mockResolvedValue({});
+    reviewPaymentCandidateMock.mockResolvedValue({
+      payment_check: {
+        state: 'no_match',
+        revision: 'v1:2:3',
+        message: 'You rejected all suggested transactions.',
+        candidates: [],
+      },
+    });
   });
 
   it('shows each document once while exposing every action on the selected document', async () => {
@@ -414,6 +425,118 @@ describe('DocumentWorkspace actions mode', () => {
     expect(screen.getByText('Date: strong')).toBeInTheDocument();
     expect(screen.getAllByText('Account: not used')).toHaveLength(2);
     expect(screen.getByText("These are the closest results, but none met Tyrion's match threshold.")).toBeInTheDocument();
+    expect(screen.getByText('Search details').closest('details')).not.toHaveAttribute('open');
+    expect(screen.getAllByText('Why this result?')[0].closest('details')).not.toHaveAttribute('open');
+  });
+
+  it('lets the user select, discard, or reject all ambiguous candidates', async () => {
+    actionsMock.mockResolvedValue({
+      actions: actions.map((action) => (
+        action.id === 1 ? { ...action, obligation_id: 'obligation-1' } : { ...action }
+      )),
+      total: actions.length,
+    });
+    paymentCheckMock.mockResolvedValue({
+      payment_check: {
+        state: 'multiple_matches',
+        revision: 'v1:2:3',
+        message: 'Multiple plausible payment candidates require review.',
+        candidates: [
+          {
+            id: 'evidence-1',
+            rank: 1,
+            payee: 'City Utilities',
+            amount: 82.45,
+            currency: 'USD',
+            transaction_date: '2026-10-18',
+            status: 'posted',
+            account_display_name: 'Household checking',
+            confidence: 'high',
+            score: 92,
+            match_reasons: ['amount_exact', 'date_strong'],
+          },
+          {
+            id: 'evidence-2',
+            rank: 2,
+            payee: 'City Services',
+            amount: 82.45,
+            currency: 'USD',
+            transaction_date: '2026-10-17',
+            status: 'pending',
+            account_display_name: 'Rewards card',
+            confidence: 'medium',
+            score: 87,
+            match_reasons: ['amount_exact', 'date_partial'],
+          },
+        ],
+      },
+    });
+    reviewPaymentCandidateMock.mockResolvedValueOnce({
+      payment_check: {
+        state: 'confirmed',
+        revision: 'v1:3:4',
+        message: 'Payment was confirmed and the obligation was completed.',
+        candidates: [],
+      },
+    });
+
+    renderWorkspace();
+
+    fireEvent.click(await screen.findByRole('radio', { name: 'Select City Utilities' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm selected' }));
+    const confirmDialog = screen.getByRole('dialog', { name: 'Confirm this transaction?' });
+    fireEvent.click(within(confirmDialog).getByRole('button', { name: 'Confirm and complete' }));
+
+    await waitFor(() => expect(reviewPaymentCandidateMock).toHaveBeenCalledWith('1', {
+      action: 'confirm',
+      revision: 'v1:2:3',
+      idempotency_key: 'owl-review-payment:confirm:1:v1:2:3:evidence-1',
+      evidence_id: 'evidence-1',
+    }));
+  });
+
+  it('confirms rejecting every ambiguous candidate', async () => {
+    actionsMock.mockResolvedValue({
+      actions: actions.map((action) => (
+        action.id === 1 ? { ...action, obligation_id: 'obligation-1' } : { ...action }
+      )),
+      total: actions.length,
+    });
+    paymentCheckMock.mockResolvedValue({
+      payment_check: {
+        state: 'multiple_matches',
+        revision: 'v1:2:3',
+        message: 'Multiple plausible payment candidates require review.',
+        candidates: [{
+          id: 'evidence-1',
+          rank: 1,
+          payee: 'City Utilities',
+          amount: 82.45,
+          currency: 'USD',
+          transaction_date: '2026-10-18',
+          status: 'posted',
+          confidence: 'high',
+          score: 92,
+          match_reasons: ['amount_exact'],
+        }],
+      },
+    });
+
+    renderWorkspace();
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Discard' }))[0]);
+    const discardDialog = screen.getByRole('dialog', { name: 'Discard this candidate?' });
+    fireEvent.click(within(discardDialog).getByRole('button', { name: 'Cancel' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'None of these' }));
+    const rejectDialog = screen.getByRole('dialog', { name: 'None of these transactions match?' });
+    fireEvent.click(within(rejectDialog).getByRole('button', { name: 'Reject all candidates' }));
+
+    await waitFor(() => expect(reviewPaymentCandidateMock).toHaveBeenCalledWith('1', {
+      action: 'reject_all',
+      revision: 'v1:2:3',
+      idempotency_key: 'owl-review-payment:reject_all:1:v1:2:3:all',
+    }));
   });
 
   it('animates a restored in-progress payment check', async () => {
