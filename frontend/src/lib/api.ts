@@ -255,6 +255,19 @@ export const endpoints = {
         `/api/payment-reconciliation/v2/actions/${id}/confirm-payment-and-complete`,
         body,
       ),
+    reviewPaymentCandidate: (
+      id: string,
+      body: {
+        action: 'confirm' | 'reject' | 'reject_all';
+        revision: string;
+        idempotency_key: string;
+        evidence_id?: string;
+      },
+    ) =>
+      api.post(
+        `/api/payment-reconciliation/v2/actions/${id}/review-payment-candidate`,
+        body,
+      ),
     metadataTags: () => api.get('/api/queue/metadata/tags'),
     metadataSavedViews: () => api.get('/api/queue/metadata/saved-views'),
     metadataCorrespondents: (documentId?: number) => api.get(
