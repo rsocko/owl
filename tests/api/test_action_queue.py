@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 
 class TestQueueCheck:
     """Tests for GET /api/queue/check."""
@@ -66,6 +68,27 @@ class TestQueueRunSettings:
         assert body["started_at"].endswith("Z")
         assert body["finished_at"].endswith("Z")
         assert mock_run.await_args.kwargs["limit"] == 12
+
+    def test_default_run_applies_configured_action_lookback(self, client, mock_paperless):
+        from unittest.mock import AsyncMock, patch
+
+        settings_resp = client.put(
+            "/api/queue/settings",
+            json={"lookback_days": 90},
+        )
+        assert settings_resp.status_code == 200
+
+        mock_run = AsyncMock(return_value={"processed": 0})
+        with patch(
+            "doc_intelligence_hub.api.routers.action_queue.run_pipeline",
+            mock_run,
+        ):
+            response = client.post("/api/queue/run", json={"dry_run": True})
+
+        assert response.status_code == 200
+        assert mock_run.await_args.kwargs["added_after"] == (
+            date.today() - timedelta(days=90)
+        ).isoformat()
 
     def test_all_documents_bypasses_persisted_saved_view(self, client, mock_paperless):
         from unittest.mock import AsyncMock, patch
@@ -641,6 +664,7 @@ class TestQueueSettings:
         assert isinstance(data["monitor_tags"], list)
         assert data["confidence_threshold"] >= 1
         assert data["remove_source_tag_on_resolve"] is True
+        assert data["lookback_days"] == 548
 
     def test_update_settings_tags(self, client, mock_paperless):
         resp = client.put(
@@ -661,6 +685,15 @@ class TestQueueSettings:
         data = resp.json()
         assert data["settings"]["scan_mode"] == "saved_view"
         assert data["settings"]["saved_view_id"] == 5
+
+    def test_update_settings_lookback(self, client, mock_paperless):
+        response = client.put(
+            "/api/queue/settings",
+            json={"lookback_days": 365},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["settings"]["lookback_days"] == 365
 
     def test_update_settings_clear_saved_view(self, client, mock_paperless):
         # Set a saved view first

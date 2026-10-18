@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 from doc_intelligence_hub.core.extractors.account_numbers import (
     normalize_masked_account_identifier,
 )
@@ -103,6 +105,7 @@ async def fetch_paperless_documents(
     api_token: str,
     verify_ssl: bool = True,
     timeout_seconds: int = 30,
+    lookback_days: int | None = 548,
     on_progress: object = None,
 ) -> list[DocumentRecord]:
     client = PaperlessClient(
@@ -115,8 +118,15 @@ async def fetch_paperless_documents(
     # Fetch metadata (correspondents + tags + document types) for enrichment
     correspondents, tags, document_types = await client.fetch_all_metadata(on_progress=on_progress)
 
-    # Fetch all documents with progress
-    raw_documents = await client.list_documents(on_progress=on_progress)
+    created_after = (
+        (date.today() - timedelta(days=lookback_days)).isoformat()
+        if lookback_days is not None
+        else None
+    )
+    raw_documents = await client.list_documents(
+        created_after=created_after,
+        on_progress=on_progress,
+    )
 
     if on_progress:
         await on_progress(

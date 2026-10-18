@@ -7,10 +7,11 @@ any downstream analysis module (Action Queue, EOB matching, statements,
 correspondent review, TYRION, Insights) can adopt to know when its cached
 output no longer reflects current input.
 
-This module intentionally does not depend on issue #28 (a general event
-bus) — it is durable SQLite records plus a small service API, following the
-same ``config.py``/``database.py``/``service.py``/``cli.py`` shape as the
-``ocr_quality`` and ``action_queue`` modules.
+This module intentionally does not depend on a general event bus. It also
+owns restart-safe, bounded Paperless added/modified reconciliation and
+explicit date, ID, saved-view, or document-selection backfills. The first
+incremental run initializes its high-water cursor at the current time rather
+than silently scanning the full historical corpus.
 
 Issue #18 slice 2 ("apply an accepted OCR candidate to Paperless") is the
 real production trigger: ``modules.ocr_quality.application_service

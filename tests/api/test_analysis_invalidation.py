@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
+from doc_intelligence_hub.api.routers.analysis_invalidation import (
+    _matches_action_queue_scope,
+)
 from doc_intelligence_hub.modules.analysis_invalidation import config as ai_config
 from doc_intelligence_hub.modules.analysis_invalidation.database import init_db
 
@@ -71,6 +78,116 @@ class TestInvalidateEndpoint:
         # path — only one document should actually be invalidated.
         assert resp.status_code == 202
         assert resp.json()["invalidated_count"] == 1
+
+
+class TestBackfillEndpoint:
+    def test_requires_one_bounded_scope(self, client, ai_db):
+        response = client.post("/api/analysis-invalidation/backfill", json={})
+
+        assert response.status_code == 422
+
+    def test_rejects_multiple_scopes(self, client, ai_db):
+        response = client.post(
+            "/api/analysis-invalidation/backfill",
+            json={"document_ids": [1], "saved_view_id": 2},
+        )
+
+        assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_action_scope_uses_configured_tags_not_only_inbox():
+    request = SimpleNamespace()
+    client = AsyncMock()
+    client.resolve_tag_names.return_value = {7: "Bills"}
+
+    with (
+        patch(
+            "doc_intelligence_hub.api.routers.analysis_invalidation._get_queue_settings",
+            return_value={
+                "scan_mode": "tags",
+                "monitor_tags": ["Bills"],
+                "lookback_days": 548,
+            },
+        ),
+        patch(
+            "doc_intelligence_hub.api.routers.analysis_invalidation._document_has_existing_action",
+            return_value=False,
+        ),
+    ):
+        matches = await _matches_action_queue_scope(
+            request,
+            client,
+            {
+                "id": 42,
+                "added": datetime.now(UTC).isoformat(),
+                "tags": [7],
+            },
+        )
+
+    assert matches is True
+
+
+@pytest.mark.asyncio
+async def test_action_scope_uses_saved_view_membership():
+    request = SimpleNamespace()
+    client = AsyncMock()
+    client.list_documents.return_value = [{"id": 42}]
+
+    with (
+        patch(
+            "doc_intelligence_hub.api.routers.analysis_invalidation._get_queue_settings",
+            return_value={
+                "scan_mode": "saved_view",
+                "saved_view_id": 9,
+                "lookback_days": 548,
+            },
+        ),
+        patch(
+            "doc_intelligence_hub.api.routers.analysis_invalidation._document_has_existing_action",
+            return_value=False,
+        ),
+    ):
+        matches = await _matches_action_queue_scope(
+            request,
+            client,
+            {
+                "id": 42,
+                "added": datetime.now(UTC).isoformat(),
+                "tags": [],
+            },
+        )
+
+    assert matches is True
+    client.list_documents.assert_awaited_once_with(
+        saved_view=9,
+        id_after=42,
+        id_before=42,
+        limit=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_existing_action_remains_eligible_outside_lookback():
+    request = SimpleNamespace()
+    client = AsyncMock()
+
+    with patch(
+        "doc_intelligence_hub.api.routers.analysis_invalidation._document_has_existing_action",
+        return_value=True,
+    ):
+        matches = await _matches_action_queue_scope(
+            request,
+            client,
+            {
+                "id": 42,
+                "added": (datetime.now(UTC) - timedelta(days=2000)).isoformat(),
+                "tags": [],
+            },
+        )
+
+    assert matches is True
+    client.list_documents.assert_not_awaited()
 
 
 class TestDocumentStatusAndEvents:

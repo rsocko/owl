@@ -180,9 +180,56 @@ Re-analysis occurs when:
 - an analyzer version changes; or
 - a backfill explicitly includes the document.
 
+Intake Review marks a material metadata save stale immediately, writes one
+durable per-document re-analysis request, and debounces rapid edits into the
+latest source fingerprint. Explicit **Analyze** and **Re-evaluate** requests
+bypass the delay. A generation check prevents an older completion from
+resolving a newer request, while Action Queue's existing protected-action
+matching preserves human-confirmed lifecycle state. The workspace exposes
+fresh, stale, reanalyzing, failed, and not-yet-analyzed states together with
+the analyzer version, evaluated source fingerprint, and evaluation time;
+metadata editing remains available in every state.
+
 External Paperless edits are therefore complementary rather than conflicting.
 OWL sees the changed fingerprint and re-evaluates without requiring the edit to
 originate in OWL.
+
+Incremental reconciliation persists separate added and modified high-water
+tuples plus an in-progress page cursor. Each scan replays a bounded overlap
+window, hashes only material analyzer inputs, and retains failed targeted runs
+as privacy-safe pending records so restarts do not lose them. The first scan
+starts at the current time; historical processing requires an explicit bounded
+date range, ID range, saved view, or document selection. Paperless webhook
+delivery remains a complementary path tracked by #81; until that path exists,
+the reconciliation status reports the dependency rather than claiming missed
+webhook recovery.
+
+## Discovery and analysis scope
+
+OWL separates cheap document discovery from the scope of each analyzer:
+
+- **Global discovery** observes every document added or modified after the
+  reconciliation cursor starts. It does not scan prior years on first use.
+- **Action and payment tracking** evaluates documents in the configured tags
+  or saved view, with an 18-month (`548` day) default lookback. Existing active
+  actions remain eligible outside that window so source changes cannot strand
+  ongoing work.
+- **EOB and bill matching** uses a 24-month (`730` day) initial lookback, then
+  continues incrementally from the last successful run.
+- **Statement recurrence and anomaly analysis** uses document dates and an
+  18-month (`548` day) default lookback.
+
+The Paperless `Inbox` tag is an intake state, not the sole analysis boundary.
+Removing it during filing is excluded from the global fingerprint so that the
+workflow transition alone does not trigger broad re-analysis. For Action Queue,
+the recommended source is a dedicated Paperless saved view such as
+`OWL - Action & Payment Candidates`, combining the correspondents, document
+types, tags, and other Paperless filters appropriate for the deployment.
+
+Operators can still run explicit bounded backfills by document selection, date
+range, ID range, or saved view. Those backfills are deliberate exceptions to
+the forward-only discovery bootstrap and should be used when older history is
+needed for a specific analysis.
 
 ## Filing and no-action decisions
 

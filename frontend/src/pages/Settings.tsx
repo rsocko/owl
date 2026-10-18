@@ -196,6 +196,7 @@ export default function Settings() {
     scan_mode: string;
     monitor_tags: string[];
     saved_view_id: number | null;
+    lookback_days: number;
     confidence_threshold: number;
     document_limit: number | null;
     rate_limit_delay: number;
@@ -204,6 +205,7 @@ export default function Settings() {
     scan_mode: 'tags',
     monitor_tags: ['Inbox'],
     saved_view_id: null,
+    lookback_days: 548,
     confidence_threshold: 70,
     document_limit: null,
     rate_limit_delay: 0.25,
@@ -317,6 +319,7 @@ export default function Settings() {
         scan_mode: settingsResp.scan_mode ?? 'tags',
         monitor_tags: settingsResp.monitor_tags ?? ['Inbox'],
         saved_view_id: settingsResp.saved_view_id ?? null,
+        lookback_days: settingsResp.lookback_days ?? 548,
         confidence_threshold: settingsResp.confidence_threshold ?? 70,
         document_limit: settingsResp.document_limit ?? null,
         rate_limit_delay: settingsResp.rate_limit_delay ?? 0.25,
@@ -934,7 +937,7 @@ export default function Settings() {
               actions={<Badge tone="info">{aqSource.scan_mode === 'tags' ? `Tags: ${aqSource.monitor_tags.join(', ')}` : 'Saved view'}</Badge>}
             >
               <div className="text-muted" style={{ fontSize: '0.82rem', marginBottom: 16 }}>
-                Configure what documents the Action Queue pipeline scans by default. Scheduled and manual runs both use this configuration unless overridden with a custom run.
+                Configure what documents the Action Queue pipeline scans by default. A dedicated Paperless saved view is recommended so action and payment tracking is broader than Inbox without scanning the full archive.
               </div>
 
               {aqSourceLoading ? (
@@ -1005,6 +1008,24 @@ export default function Settings() {
                       </div>
                     </div>
                   )}
+
+                  <div className="form-group" style={{ maxWidth: 320, marginBottom: 16 }}>
+                    <label htmlFor="aq-lookback-days">Action/payment lookback</label>
+                    <input
+                      id="aq-lookback-days"
+                      type="number"
+                      min={30}
+                      max={3650}
+                      value={aqSource.lookback_days}
+                      onChange={(e) => setAqSource((prev) => ({
+                        ...prev,
+                        lookback_days: Number(e.target.value) || 548,
+                      }))}
+                    />
+                    <small>
+                      Days considered by default scheduled scans. 548 days (about 18 months) is recommended; explicitly selected documents and custom runs are not restricted.
+                    </small>
+                  </div>
 
                   <details style={{ marginBottom: 16 }}>
                     <summary style={{ cursor: 'pointer', fontWeight: 600, marginBottom: 8 }}>Advanced settings</summary>

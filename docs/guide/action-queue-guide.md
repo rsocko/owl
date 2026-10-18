@@ -6,9 +6,12 @@ mockups:
   - "[triage-unified.html](../../mockups/triage-correction/triage-unified.html)"
 ---
 
-# Action Queue — Inbox Zero for Documents
+# Action Queue — Action and Payment Tracking
 
-The Action Queue is OWL's primary workflow module. It scans your Paperless-ngx inbox, classifies each document using an LLM, assigns urgency scores, and surfaces recommended actions — turning a pile of unprocessed documents into a prioritized task list.
+The Action Queue classifies documents from a configurable Paperless source,
+assigns urgency scores, and surfaces recommended actions. The recommended
+source is a dedicated saved view for action and payment candidates rather than
+the Inbox alone.
 
 For document-by-document filing, use [Inbox Review](./intake-review-guide.md).
 Action Queue's **Review document** control opens that shared workspace on the
@@ -28,7 +31,7 @@ sequenceDiagram
     participant LLM as LLM (Bifrost)
     participant MC as Mission Control
 
-    P->>OWL: Documents in inbox (tagged "Inbox" by default)
+    P->>OWL: Documents in configured tags or saved view
     OWL->>P: Fetch document metadata + OCR text
     OWL->>LLM: Classify document intent & urgency
     LLM-->>OWL: Action type, summary, due date, risk
@@ -318,9 +321,18 @@ complete active OWL metadata registry. The check covers durable document fields,
 status, generic relationships, and obligation projections; setup is offered only when the
 missing fields or select options can be added safely.
 
-The default document source and resolution behavior are durable settings under
-**Settings → Action Queue — Document Source**. The default source is the
-Paperless `Inbox` tag; ad-hoc Custom Run filters do not change that default.
+The default document source, lookback, and resolution behavior are durable
+settings under **Settings → Action Queue — Document Source**. Tag mode remains
+available, but the recommended setup is a Paperless saved view such as
+`OWL - Action & Payment Candidates`. This avoids treating `Inbox` as the sole
+analysis boundary while still allowing intake tags to participate in the
+view's filters.
+
+Configured-source runs use an 18-month (`548` day) lookback by default. Existing
+active actions remain eligible for source-change re-analysis outside that
+window. Explicit document, all-document, custom date, tag, or saved-view runs
+retain their operator-selected scope instead of silently applying the default
+lookback.
 
 When **Remove intake tags when resolved** is enabled (the default), OWL removes
 the configured monitored tags after an action is completed, dismissed, or

@@ -478,6 +478,7 @@ class QueueConfiguration(Base):
     scan_mode = Column(String, nullable=False, default="tags")
     monitor_tags = Column(JSON, nullable=False, default=lambda: ["Inbox"])
     saved_view_id = Column(Integer, nullable=True)
+    lookback_days = Column(Integer, nullable=False, default=548)
     confidence_threshold = Column(Integer, nullable=False, default=70)
     document_limit = Column(Integer, nullable=True)
     rate_limit_delay = Column(Float, nullable=False, default=0.25)
@@ -591,6 +592,9 @@ def _migrate_missing_columns(engine):
             ("rank", "INTEGER"),
             ("score_gap_basis_points", "INTEGER"),
             ("receipt_association", "TEXT"),
+        ],
+        "action_queue_configuration": [
+            ("lookback_days", "INTEGER DEFAULT 548 NOT NULL"),
         ],
     }
 

@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -77,6 +77,15 @@ class RunRequest(ClassifyRequest):
     since_last_run: bool = Field(
         default=False,
         description="Only process documents created since the last successful run. Mutually exclusive with created_after.",
+    )
+    initial_lookback_days: int = Field(
+        default=730,
+        ge=30,
+        le=3650,
+        description=(
+            "When since_last_run has no prior successful run, limit the initial scan "
+            "to this many days."
+        ),
     )
 
 
@@ -489,10 +498,14 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
                 "last_run_finished_at": last_run.finished_at.isoformat(),
             }
         else:
+            resolved_created_after = (
+                datetime.now(UTC) - timedelta(days=body.initial_lookback_days)
+            ).date().isoformat()
             since_last_run_info = {
                 "resolved_from_run_id": None,
-                "resolved_created_after": None,
-                "note": "No prior successful run found — processing all documents.",
+                "resolved_created_after": resolved_created_after,
+                "initial_lookback_days": body.initial_lookback_days,
+                "note": "No prior successful run found — using the configured initial lookback.",
             }
 
     # Determine write mode

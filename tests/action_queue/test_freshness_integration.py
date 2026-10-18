@@ -133,7 +133,7 @@ class TestActionQueueFreshnessIntegration:
         _wire_pipeline(monkeypatch, upgraded, docs)
         result = await upgraded.run(force=False, dry_run=False)
 
-        assert ACTION_QUEUE_ANALYSIS_MODULE_VERSION == "action-queue-analyzer-v2"
+        assert ACTION_QUEUE_ANALYSIS_MODULE_VERSION == "action-queue-analyzer-v3"
         assert result["processed"] == 1
         assert result["skipped"] == 0
 

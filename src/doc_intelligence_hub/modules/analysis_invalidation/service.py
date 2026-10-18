@@ -31,6 +31,7 @@ from .database import (
     ModuleAnalysisFingerprint,
     StaleMark,
 )
+from .fingerprint import analysis_source_fingerprint_from_digests
 from .models import (
     FreshnessResult,
     FreshnessStatus,
@@ -327,6 +328,40 @@ class AnalysisFreshnessService:
                 fingerprint_id=fingerprint.id,
                 checked_at=datetime.utcnow().isoformat(),
             )
+        finally:
+            db.close()
+
+    def get_latest_fingerprint(
+        self,
+        *,
+        document_id: int,
+        module_name: str,
+    ) -> dict[str, Any] | None:
+        """Return privacy-safe details for the latest module analysis."""
+        db = self._session_factory()
+        try:
+            fingerprint = (
+                db.query(ModuleAnalysisFingerprint)
+                .filter_by(document_id=document_id, module_name=module_name)
+                .order_by(ModuleAnalysisFingerprint.id.desc())
+                .first()
+            )
+            if fingerprint is None:
+                return None
+            return {
+                "fingerprint_id": fingerprint.id,
+                "source_fingerprint": analysis_source_fingerprint_from_digests(
+                    fingerprint.content_checksum,
+                    fingerprint.metadata_fingerprint,
+                ),
+                "module_version": fingerprint.module_version,
+                "config_hash": fingerprint.config_hash,
+                "status": fingerprint.status,
+                "stale_reason": fingerprint.stale_reason,
+                "computed_at": (
+                    fingerprint.computed_at.isoformat() if fingerprint.computed_at else None
+                ),
+            }
         finally:
             db.close()
 

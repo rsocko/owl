@@ -40,6 +40,7 @@ async def load_documents(config: AppConfig, on_progress=None):
             api_token=token,
             verify_ssl=config.source.verify_ssl,
             timeout_seconds=config.source.timeout_seconds,
+            lookback_days=config.source.lookback_days,
             on_progress=on_progress,
         )
 

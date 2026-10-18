@@ -44,6 +44,13 @@ class ActionQueueTriggerRule(AnalysisRule):
             )
 
         pipeline_result = outcome.pipeline_result or {}
+        if outcome.status == "completed" and pipeline_result.get("failed", 0) > 0:
+            return RuleExecutionResult(
+                rule_id=self.config.id,
+                success=False,
+                error=f"Action Queue analysis failed for document #{document_id}",
+                document_ids=[document_id],
+            )
         already_processed = (
             outcome.status == "completed"
             and pipeline_result.get("processed", 0) == 0
