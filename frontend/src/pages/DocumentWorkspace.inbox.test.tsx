@@ -310,6 +310,7 @@ describe('DocumentWorkspace inbox mode', () => {
 
     expect(container.querySelector('.document-workspace-frame.intake-review-page')).toBeInTheDocument();
     expect(container.querySelector('.document-workspace-document')).toBeInTheDocument();
+    expect(container.querySelector('.document-workspace-frame-tab-content.intake-tab-content')).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: 'More outcomes for Review policy changes' }));
     expect(await screen.findByRole('button', { name: 'Mark done' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Remind later' })).toBeInTheDocument();

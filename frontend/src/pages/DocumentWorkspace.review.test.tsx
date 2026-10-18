@@ -236,6 +236,7 @@ describe('Needs Review actions', () => {
 
     const type = await screen.findByLabelText('Corrected action type');
     expect(container.querySelector('.document-workspace-detail-host .document-workspace-document')).toBeInTheDocument();
+    expect(container.querySelector('.document-workspace-frame-preview > iframe')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Actions' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'Metadata' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'OCR' })).toBeInTheDocument();
