@@ -7,7 +7,6 @@ import logging
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import ValidationError
 
 from doc_intelligence_hub.api.routers import (
     require_mission_control_auth,
@@ -29,6 +28,7 @@ from doc_intelligence_hub.modules.action_queue.payment_reconciliation import (
     RevisionConflictError,
     TyrionBillMatchingClient,
     TyrionBillMatchIngestRequest,
+    TyrionInvalidResponseError,
     TyrionReceiptEvidenceIngestRequest,
 )
 
@@ -320,12 +320,64 @@ async def _check_payment(request: Request, action_id: int, body: PaymentCheckReq
                     error_code="tyrion_check_cancelled",
                 )
                 raise
-            except (httpx.HTTPError, ValidationError) as exc:
-                logger.warning("Tyrion payment check failed for action %s: %s", action_id, exc)
+            except httpx.TimeoutException as exc:
+                logger.warning("Tyrion payment check timed out for action %s: %s", action_id, exc)
                 projection = service.fail_check(
                     run.id,
                     connector_ref=connector_ref,
-                    error_code="tyrion_source_unavailable",
+                    error_code="tyrion_timeout",
+                )
+                return PaymentCheckResult(
+                    run_id=run.id,
+                    status="source_unavailable",
+                    idempotent=False,
+                    payment=_public_payment_projection(projection),
+                ).model_dump(mode="json")
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                logger.warning(
+                    "Tyrion payment check returned HTTP %s for action %s",
+                    status,
+                    action_id,
+                )
+                projection = service.fail_check(
+                    run.id,
+                    connector_ref=connector_ref,
+                    error_code=f"tyrion_http_{status}",
+                )
+                return PaymentCheckResult(
+                    run_id=run.id,
+                    status="source_unavailable",
+                    idempotent=False,
+                    payment=_public_payment_projection(projection),
+                ).model_dump(mode="json")
+            except httpx.RequestError as exc:
+                logger.warning(
+                    "Tyrion payment check transport failed for action %s: %s",
+                    action_id,
+                    exc,
+                )
+                projection = service.fail_check(
+                    run.id,
+                    connector_ref=connector_ref,
+                    error_code="tyrion_transport_unavailable",
+                )
+                return PaymentCheckResult(
+                    run_id=run.id,
+                    status="source_unavailable",
+                    idempotent=False,
+                    payment=_public_payment_projection(projection),
+                ).model_dump(mode="json")
+            except TyrionInvalidResponseError as exc:
+                logger.warning(
+                    "Tyrion payment check returned an invalid response for action %s: %s",
+                    action_id,
+                    exc,
+                )
+                projection = service.fail_check(
+                    run.id,
+                    connector_ref=connector_ref,
+                    error_code="tyrion_response_invalid",
                 )
                 return PaymentCheckResult(
                     run_id=run.id,
