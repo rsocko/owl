@@ -424,17 +424,13 @@ def test_orphaned_check_recovers_from_legacy_partial_failure_generation(db) -> N
     assert run.status == "source_unavailable"
     assert run.error_code == "tyrion_check_expired"
     recovered_evidence = (
-        db.query(PaymentEvidence)
-        .filter_by(evidence_ref=f"{run.id}:source-unavailable")
-        .one()
+        db.query(PaymentEvidence).filter_by(evidence_ref=f"{run.id}:source-unavailable").one()
     )
     assert recovered_evidence.amount_minor == 10_000
     assert recovered_evidence.currency == "USD"
     generations = {
         row.source_generation
-        for row in db.query(PaymentEvidenceGeneration)
-        .filter_by(obligation_id=obligation.id)
-        .all()
+        for row in db.query(PaymentEvidenceGeneration).filter_by(obligation_id=obligation.id).all()
     }
     assert generations == {run.id, f"{run.id}:source-unavailable"}
 
