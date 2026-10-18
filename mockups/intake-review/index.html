@@ -51,6 +51,14 @@
         <aside class="card queue-panel" aria-label="Documents awaiting intake">
           <div class="panel-heading"><h2>Awaiting review</h2><span id="awaiting-count" class="pill neutral">3 documents</span></div>
           <label class="search-label">Find a document<input id="queue-search" type="search" placeholder="Search title or correspondent"></label>
+          <div class="queue-filter-group">
+            <span class="queue-filter-label">Review focus</span>
+            <div class="queue-filter-row" role="group" aria-label="Inbox review focus">
+              <button type="button" class="active" data-inbox-filter="all">All <span>3</span></button>
+              <button type="button" data-inbox-filter="actions">Action needed <span>1</span></button>
+              <button type="button" data-inbox-filter="missing-type">Missing type <span>0</span></button>
+            </div>
+          </div>
           <div class="bulk-toolbar"><label><input id="select-all" type="checkbox"> Select visible</label><button id="bulk-review" type="button" disabled>Mark needs review</button></div>
           <div id="document-list" class="document-list"></div>
           <p id="queue-empty" class="muted padded" hidden>No documents match your search.</p>

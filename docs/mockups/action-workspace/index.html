@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OWL · Action Review workspace migration study</title>
+  <link rel="stylesheet" href="workspace.css">
+  <script src="workspace.js" defer></script>
+</head>
+<body>
+  <!--
+  THESIS: Action Review is a triage conveyor, not a dashboard or a detail drawer.
+  OWN-WORLD: OWL's restrained blue-gray operating surfaces, dense evidence typography, thumbnails, and direct controls.
+  STORY: Filter the work, verify the source, act or correct, then advance without losing context.
+  FIRST VIEWPORT: Sortable thumbnail rail left, full document evidence center, action-first decision panel right, lifecycle footer fixed below.
+  FORM: Focused three-pane workspace with collapsible, lifecycle-aware rails; surface seed 603fd9e8, grounded candidate 4.
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+  -->
+  <a class="skip-link" href="#workspace">Skip to Action Review</a>
+
+  <div class="prototype-bar">
+    <a href="../index.html">← All OWL mockups</a>
+    <span><strong>Migration study</strong> · synthetic documents · no writes</span>
+    <button type="button" id="open-rationale">Migration plan &amp; decisions</button>
+  </div>
+
+  <header class="topnav">
+    <a class="brand" href="#workspace" aria-label="OWL home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M4 9.5 7.5 5 12 8l4.5-3L20 9.5V15a8 8 0 0 1-16 0Z"/><circle cx="9" cy="13" r="1.5"/><circle cx="15" cy="13" r="1.5"/><path d="m10.5 16 1.5 1.2 1.5-1.2"/></svg>
+      </span>
+      <span>OWL <small>Organize. Watch. Learn.</small></span>
+    </a>
+    <nav aria-label="Workflow destinations">
+      <a class="workflow-link" href="../intake-review/index.html#intake">Inbox <span class="nav-count neutral">3</span></a>
+      <button type="button" class="view-switch active" data-view="workspace">Actions <span class="nav-count" id="action-nav-count">6</span></button>
+      <button type="button" class="view-switch" data-view="needs-review">Needs Review <span class="nav-count warning" id="review-nav-count">5</span></button>
+    </nav>
+    <div class="topnav-status"><span></span> Paperless connected</div>
+  </header>
+
+  <main id="workspace" class="workspace-screen">
+    <aside class="queue" aria-label="Actions to review">
+      <div class="queue-heading">
+        <div>
+          <h1>Action Review</h1>
+          <p><strong id="queue-count">6 of 6 pending</strong> · ordered by due date</p>
+        </div>
+        <button class="icon-button queue-collapse-button" id="toggle-density" type="button" aria-label="Collapse action queue" title="Collapse action queue">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg>
+        </button>
+      </div>
+
+      <div class="queue-tools">
+        <label class="search-box">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+          <input id="queue-search" type="search" placeholder="Find document, action, or correspondent">
+        </label>
+        <div class="filter-group">
+          <span class="filter-label">Status</span>
+          <div class="filter-row status-filter-row" role="group" aria-label="Action status">
+            <button type="button" class="filter-chip active" data-action-status="pending">Pending <span>6</span></button>
+            <button type="button" class="filter-chip" data-action-status="deferred">Remind later <span>0</span></button>
+            <button type="button" class="filter-chip" data-action-status="resolved">Resolved <span>0</span></button>
+          </div>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Due window</span>
+          <div class="filter-row type-filter-row" role="group" aria-label="Action due window">
+            <button type="button" class="filter-chip active" data-filter="active">All <span>6</span></button>
+            <button type="button" class="filter-chip" data-filter="overdue">Overdue <span>1</span></button>
+            <button type="button" class="filter-chip" data-filter="upcoming">Upcoming <span>1</span></button>
+          </div>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Action type</span>
+          <div class="filter-row type-filter-row" role="group" aria-label="Action type">
+            <button type="button" class="filter-chip active" data-action-type="all">All <span>6</span></button>
+            <button type="button" class="filter-chip" data-action-type="PAY">Pay <span>2</span></button>
+            <button type="button" class="filter-chip" data-action-type="RESPOND">Respond <span>1</span></button>
+            <button type="button" class="filter-chip" data-action-type="SIGN">Sign <span>1</span></button>
+            <button type="button" class="filter-chip" data-action-type="REVIEW">Review <span>1</span></button>
+            <button type="button" class="filter-chip" data-action-type="SCHEDULE">Schedule <span>1</span></button>
+            <button type="button" class="filter-chip" data-action-type="SHARE">Share <span>0</span></button>
+            <button type="button" class="filter-chip" data-action-type="TASK">Task <span>0</span></button>
+          </div>
+        </div>
+        <label class="sort-control">
+          <span>Sort</span>
+          <select id="queue-sort">
+            <option value="due">Due date</option>
+            <option value="risk">Highest risk</option>
+            <option value="newest">Newest document</option>
+            <option value="amount">Largest amount</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="queue-section-label">
+        <span id="queue-section-name">Needs attention</span>
+        <kbd>↑</kbd><kbd>↓</kbd>
+      </div>
+      <div id="queue-list" class="queue-list" tabindex="0" aria-label="Action results"></div>
+      <div class="queue-footer">
+        <button type="button" class="text-button" data-show-review-ledger>Review migration decisions</button>
+        <span>Pending, reminders, resolved work, due windows, and action types remain available in this rail.</span>
+      </div>
+    </aside>
+
+    <section class="document-workspace">
+      <header class="document-header">
+        <div class="document-title">
+          <span id="document-position">Action 1 of 6 · Paperless #1043</span>
+          <h2 id="document-title">Cedar Dental · patient balance</h2>
+        </div>
+        <dl class="document-facts">
+          <div><dt>Document date</dt><dd id="document-date">Oct 15, 2026</dd></div>
+          <div><dt>Correspondent</dt><dd id="document-correspondent">Cedar Dental</dd></div>
+          <div><dt>Type</dt><dd id="document-type">Invoice</dd></div>
+        </dl>
+        <button type="button" class="secondary-button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M13 11l6-6M19 14v5H5V5h5"/></svg>
+          Paperless
+        </button>
+      </header>
+
+      <div class="review-stage">
+        <section class="document-preview" aria-label="Source document preview">
+          <div class="preview-toolbar">
+            <span>Source evidence</span>
+            <div>
+              <span>1 / 1</span>
+              <button type="button" id="zoom-document">Fit width</button>
+              <button type="button">Open original</button>
+            </div>
+          </div>
+          <div class="paper-viewport">
+            <article class="paper" id="paper">
+              <div class="paper-provider" id="paper-provider">CEDAR DENTAL</div>
+              <div class="paper-kind" id="paper-kind">PATIENT STATEMENT</div>
+              <h3 id="paper-title">Your account has a balance due.</h3>
+              <p id="paper-description">Please submit payment for the services listed below by October 30, 2026.</p>
+              <div class="paper-rule"></div>
+              <dl class="paper-details">
+                <div><dt>Patient</dt><dd>R. Sample</dd></div>
+                <div><dt>Account</dt><dd id="paper-account">•••• 4821</dd></div>
+                <div><dt id="paper-date-label">Due date</dt><dd id="paper-date">October 30, 2026</dd></div>
+                <div><dt id="paper-amount-label">Balance due</dt><dd id="paper-amount">$248.00</dd></div>
+              </dl>
+              <div class="paper-callout" id="paper-callout">PAYMENT DUE · OCTOBER 30</div>
+              <div class="paper-lines" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+              <p class="paper-note">Synthetic document created for interaction design review.</p>
+            </article>
+          </div>
+          <div class="preview-status">
+            <span><strong>OCR 94</strong> · searchable text ready</span>
+            <span>Original PDF · 1 page</span>
+          </div>
+        </section>
+
+        <section class="action-panel" aria-label="Document review details">
+          <div class="tabs" role="tablist" aria-label="Document workspace tabs">
+              <button id="tab-metadata" type="button" role="tab" data-tab="metadata" aria-controls="panel-metadata" aria-selected="false" tabindex="-1">Metadata</button>
+              <button id="tab-actions" type="button" role="tab" data-tab="actions" aria-controls="panel-actions" aria-selected="true" tabindex="0" class="active">Actions <span id="document-action-count">1</span></button>
+              <button id="tab-related" type="button" role="tab" data-tab="related" aria-controls="panel-related" aria-selected="false" tabindex="-1">Related <span>2</span></button>
+              <button id="tab-ocr" type="button" role="tab" data-tab="ocr" aria-controls="panel-ocr" aria-selected="false" tabindex="-1">OCR</button>
+          </div>
+
+          <div class="tab-content">
+            <section id="panel-actions" class="tab-panel active" role="tabpanel" aria-labelledby="tab-actions" data-panel="actions">
+              <div class="sibling-actions" id="sibling-actions">
+                <div class="action-set-heading">
+                  <span>Actions on this document</span>
+                  <button type="button" class="text-button" id="add-action">+ Add action</button>
+                </div>
+                <div id="sibling-action-list"></div>
+              </div>
+              <div class="action-context">
+                <div>
+                  <span class="status-badge" id="action-status-badge">Pending</span>
+                  <span class="action-origin" id="action-origin">Inferred</span>
+                  <span class="risk-badge" id="risk-badge">Due in 13 days</span>
+                </div>
+                <span id="confidence-value">94% confidence</span>
+              </div>
+
+              <form class="action-edit-form" id="action-edit-form">
+                <label><span>Type</span><select id="action-type-input"><option>PAY</option><option>RESPOND</option><option>REVIEW</option><option>SCHEDULE</option><option>SHARE</option><option>SIGN</option><option>TASK</option></select></label>
+                <label class="wide-field"><span>Title</span><input id="action-title-input" value="Pay Cedar Dental balance"></label>
+                <label id="action-owner-field"><span id="action-owner-label">Payee</span><input id="action-owner-input" value="Cedar Dental"></label>
+                <label id="action-amount-field"><span>Amount</span><div class="currency-field"><span>$</span><input id="action-amount-input" type="number" min="0" step="0.01" value="248.00"></div></label>
+                <label><span id="action-due-label">Pay by</span><input id="action-due-input" type="date" value="2026-10-30"></label>
+                <label id="action-reference-field"><span id="action-reference-label">Invoice or reference</span><input id="action-reference-input" value="ACCT-4821"></label>
+                <label class="wide-field"><span>Details</span><textarea id="action-details-input" rows="3">A patient statement shows an unpaid balance of $248.00 due October 30.</textarea></label>
+              </form>
+              <div class="action-save-row">
+                <button type="button" class="primary-button" id="save-action">Save action</button>
+                <span id="action-save-status">Fields are editable by default, matching Inbox.</span>
+              </div>
+
+              <div class="quick-actions">
+                <h4>Do the work</h4>
+                <div class="quick-action-buttons" id="quick-actions"></div>
+                <p>Links and contact details are extracted from this document. They open outside OWL.</p>
+              </div>
+
+              <details class="confidence">
+                <summary>
+                  <span><strong>Why OWL suggested this</strong><small>Evidence and classifier reasoning</small></span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+                </summary>
+                <p id="confidence-reason">The statement includes “balance due,” a future due date, and a payment URL. No receipt or payment confirmation was found.</p>
+              </details>
+
+              <details class="confidence action-history">
+                <summary>
+                  <span><strong>Action history</strong><small id="action-history-summary">Created from this document · no lifecycle changes</small></span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+                </summary>
+                <ol id="action-history-list"></ol>
+              </details>
+            </section>
+
+            <section id="panel-metadata" class="tab-panel metadata-panel" role="tabpanel" aria-labelledby="tab-metadata" data-panel="metadata" hidden>
+              <div class="panel-heading">
+                <div><h3>Document metadata</h3><p>Paperless remains authoritative.</p></div>
+                <button type="button" class="secondary-button">Edit metadata</button>
+              </div>
+              <dl class="metadata-list">
+                <div><dt>Title</dt><dd id="metadata-title">Cedar Dental · patient balance</dd></div>
+                <div><dt>Correspondent</dt><dd id="metadata-correspondent">Cedar Dental</dd></div>
+                <div><dt>Document type</dt><dd id="metadata-type">Invoice</dd></div>
+                <div><dt>Storage path</dt><dd>Household / Health</dd></div>
+                <div><dt>Tags</dt><dd><span class="tag">Medical</span><span class="tag">Needs payment</span></dd></div>
+              </dl>
+              <div class="scope-note"><strong>Keep filing separate.</strong> Resolving this action does not remove the document from Inbox or change Paperless metadata.</div>
+            </section>
+
+            <section id="panel-related" class="tab-panel related-panel" role="tabpanel" aria-labelledby="tab-related" data-panel="related" hidden>
+              <div class="panel-heading"><div><h3>Related evidence</h3><p>Documents associated with this obligation.</p></div></div>
+              <ol class="timeline">
+                <li class="current"><time>Oct 15</time><div><strong>Patient statement</strong><span>Current source · $248.00 due</span></div></li>
+                <li><time>Oct 12</time><div><strong>Insurance explanation of benefits</strong><span>Potential adjustment · matched at 88%</span></div></li>
+                <li><time>Sep 29</time><div><strong>Dental visit receipt</strong><span>Supporting document · $40.00 paid</span></div></li>
+              </ol>
+              <button type="button" class="secondary-button wide">Manage document relationships</button>
+            </section>
+
+            <section id="panel-ocr" class="tab-panel ocr-panel" role="tabpanel" aria-labelledby="tab-ocr" data-panel="ocr" hidden>
+              <div class="ocr-score"><strong>94</strong><span>OCR quality<br><small>Good · analysis is current</small></span></div>
+              <label>Searchable text<textarea readonly>CEDAR DENTAL
+PATIENT STATEMENT
+Balance due: $248.00
+Payment due by October 30, 2026
+Pay online at billing.cedardental.example</textarea></label>
+              <button type="button" class="secondary-button">Review OCR quality</button>
+            </section>
+          </div>
+        </section>
+      </div>
+
+      <footer class="lifecycle-bar">
+        <div class="selection-progress">
+          <span id="selection-dot"></span>
+          <span><strong id="footer-title">Pay Cedar Dental balance</strong><small id="footer-action-scope">Choose the action outcome, then OWL advances.</small></span>
+        </div>
+        <div class="lifecycle-actions" id="active-action-outcomes">
+          <button type="button" class="feedback-button" data-outcome="not-action">Not an action</button>
+          <button type="button" class="quiet-danger" data-outcome="wont-do">Won't do</button>
+          <div class="reminder-wrap">
+            <button type="button" class="secondary-button" id="remind-action" aria-expanded="false" aria-controls="reminder-menu">Remind me later</button>
+            <div class="reminder-menu" id="reminder-menu" hidden>
+              <button type="button" data-reminder="Tomorrow at 9:00 AM">Tomorrow at 9:00 AM</button>
+              <button type="button" data-reminder="Next Monday at 9:00 AM">Next Monday at 9:00 AM</button>
+              <label>Pick a date<input type="date" value="2026-10-20"></label>
+            </div>
+          </div>
+          <button type="button" class="secondary-button" id="next-document">Next doc</button>
+          <div class="done-split">
+            <button type="button" class="primary-button" id="done-action" data-outcome="done">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+              <span id="done-action-label">Done</span>
+            </button>
+            <button type="button" class="primary-button done-menu-toggle" id="done-menu-toggle" aria-label="More completion options" aria-expanded="false" aria-controls="done-menu">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+            </button>
+            <div class="done-menu" id="done-menu" hidden>
+              <button type="button" id="done-selected-action">Mark selected action done</button>
+              <button type="button" id="done-all-actions">Mark all pending actions done…</button>
+            </div>
+          </div>
+        </div>
+        <div class="lifecycle-actions" id="resolved-action-outcomes" hidden>
+          <button type="button" class="secondary-button" id="reopen-action">Move back to Pending</button>
+        </div>
+      </footer>
+    </section>
+  </main>
+
+  <main id="needs-review" class="workspace-screen review-workspace" hidden>
+    <aside class="queue review-queue" aria-label="Items needing human review">
+      <div class="queue-heading">
+        <div>
+          <h1>Needs Review</h1>
+          <p><strong id="review-queue-count">5 of 5 pending</strong> · oldest first</p>
+        </div>
+        <button class="icon-button queue-collapse-button" id="toggle-review-density" type="button" aria-label="Collapse review queue" title="Collapse review queue">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg>
+        </button>
+      </div>
+
+      <div class="queue-tools">
+        <label class="search-box">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+          <input id="review-search" type="search" placeholder="Find review item or reason">
+        </label>
+        <div class="filter-group">
+          <span class="filter-label">Status</span>
+          <div class="filter-row status-filter-row" role="group" aria-label="Needs Review status">
+            <button type="button" class="filter-chip active" data-review-status="pending">Pending <span>5</span></button>
+            <button type="button" class="filter-chip" data-review-status="deferred">Review later <span>0</span></button>
+            <button type="button" class="filter-chip" data-review-status="resolved">Resolved <span>0</span></button>
+          </div>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Review type</span>
+          <div class="filter-row type-filter-row" role="group" aria-label="Needs Review type">
+            <button type="button" class="filter-chip active" data-review-filter="all">All <span>5</span></button>
+            <button type="button" class="filter-chip" data-review-filter="action">Actions <span>1</span></button>
+            <button type="button" class="filter-chip" data-review-filter="relationship">Relationships <span>4</span></button>
+          </div>
+        </div>
+        <label class="sort-control">
+          <span>Sort</span>
+          <select id="review-sort">
+            <option value="oldest">Oldest first</option>
+            <option value="confidence">Lowest confidence</option>
+            <option value="priority">Highest priority</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="queue-section-label">
+        <span id="review-section-name">OWL needs your judgment</span>
+        <kbd>↑</kbd><kbd>↓</kbd>
+      </div>
+      <div id="review-list" class="queue-list" tabindex="0" aria-label="Needs Review results"></div>
+      <div class="queue-footer">
+        <button type="button" class="text-button" data-show-review-ledger>Review migration decisions</button>
+        <span>Pending, deferred, resolved, and review-type filters remain available in this rail.</span>
+      </div>
+    </aside>
+
+    <section class="document-workspace">
+      <header class="document-header review-document-header">
+        <div class="document-title">
+          <span id="review-position">Review 1 of 5 · action classification</span>
+          <h2 id="review-document-title">Northline Energy · payment notice</h2>
+        </div>
+        <dl class="document-facts">
+          <div><dt>Flagged because</dt><dd id="review-header-reason">Conflicting payment signals</dd></div>
+          <div><dt>Confidence</dt><dd id="review-header-confidence">62%</dd></div>
+          <div><dt>Waiting</dt><dd id="review-header-age">2 days</dd></div>
+        </dl>
+        <button type="button" class="secondary-button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M13 11l6-6M19 14v5H5V5h5"/></svg>
+          Paperless
+        </button>
+      </header>
+
+      <div class="review-stage">
+        <section class="document-preview" aria-label="Evidence under review">
+          <div class="preview-toolbar">
+            <span id="review-evidence-title">Source evidence</span>
+            <div>
+              <span id="review-evidence-count">1 document</span>
+              <button type="button">Open original</button>
+            </div>
+          </div>
+          <div class="paper-viewport review-paper-viewport" id="review-evidence"></div>
+          <div class="preview-status">
+            <span id="review-source-status"><strong>OCR 87</strong> · analysis current</span>
+            <span id="review-source-kind">Action classification</span>
+          </div>
+        </section>
+
+        <section class="action-panel review-decision-panel" aria-label="Needs Review decision">
+          <div class="tabs review-tabs" role="tablist" aria-label="Needs Review workspace tabs">
+            <button id="review-tab-metadata" type="button" role="tab" data-review-tab="metadata" aria-controls="review-panel-metadata" aria-selected="false" tabindex="-1">Metadata</button>
+            <button id="review-tab-decision" type="button" role="tab" data-review-tab="decision" aria-controls="review-panel-decision" aria-selected="true" tabindex="0" class="active">Decision</button>
+            <button id="review-tab-related" type="button" role="tab" data-review-tab="related" aria-controls="review-panel-related" aria-selected="false" tabindex="-1">Related <span>2</span></button>
+            <button id="review-tab-ocr" type="button" role="tab" data-review-tab="ocr" aria-controls="review-panel-ocr" aria-selected="false" tabindex="-1">OCR</button>
+          </div>
+
+          <div class="tab-content">
+            <section id="review-panel-decision" class="tab-panel active" role="tabpanel" aria-labelledby="review-tab-decision" data-review-panel="decision">
+              <div class="resolved-review-warning" id="resolved-review-warning" hidden>
+                <strong>This decision has already affected downstream work.</strong>
+                <p>You can revise it at any time. If a generated action is already Done, OWL preserves that history and records the revision instead of silently rewriting completed work.</p>
+              </div>
+              <div class="review-reason-banner">
+                <div>
+                  <span>OWL needs your judgment</span>
+                  <strong id="review-reason-title">Conflicting payment signals</strong>
+                </div>
+                <span class="confidence-pill" id="review-confidence-pill">62% confidence</span>
+                <p id="review-reason-copy">The document says “payment received” and “remaining balance due.” OWL cannot safely decide whether this is evidence or an unpaid obligation.</p>
+              </div>
+
+              <div id="action-classification-decision">
+                <div class="review-proposed-actions">
+                  <div class="action-set-heading">
+                    <span>Proposed actions on this document</span>
+                    <button type="button" class="text-button" id="add-review-action">+ Add action</button>
+                  </div>
+                  <div id="review-proposed-action-list"></div>
+                </div>
+                <div class="decision-heading">
+                  <div>
+                    <span>Selected proposed action</span>
+                    <h3 id="review-suggestion-title">Review Northline Energy balance</h3>
+                    <p>Correct the proposal before it becomes trusted work.</p>
+                  </div>
+                  <button type="button" class="text-button" id="reset-review-suggestion">Reset suggestion</button>
+                </div>
+
+                <form class="correction-form" id="review-correction-form">
+                  <label><span>Action type</span><select id="review-action-type"><option>PAY</option><option selected>REVIEW</option><option>RESPOND</option><option>TASK</option><option>SCHEDULE</option><option>SIGN</option></select></label>
+                  <label><span>Task name</span><input id="review-action-title" value="Review Northline Energy balance"></label>
+                  <label class="wide-field"><span>Summary</span><textarea id="review-action-summary" rows="3">Determine whether the notice confirms a partial payment or requests the remaining $84.20 balance.</textarea></label>
+                  <label><span>Due date</span><input id="review-action-due" type="date" value="2026-10-24"></label>
+                  <label><span>Amount</span><div class="currency-field"><span>$</span><input id="review-action-amount" type="number" value="84.20" step="0.01"></div></label>
+                </form>
+
+                <div class="trust-gate">
+                  <strong>Trust gate</strong>
+                  <p id="review-action-trust-copy">Accepting or correcting publishes the proposed actions to this document in Action Review and Mission Control. It does not mark them done.</p>
+                </div>
+              </div>
+
+              <div id="relationship-decision" hidden>
+                <div class="decision-heading">
+                  <div>
+                    <span>Proposed relationship</span>
+                    <h3 id="relationship-title">Match EOB to provider bill</h3>
+                    <p id="relationship-summary">OWL found a likely pair but the amounts differ.</p>
+                  </div>
+                  <span class="type-badge neutral" id="relationship-type">EOB MATCH</span>
+                </div>
+                <dl class="comparison-facts">
+                  <div><dt id="relationship-provider-label">Provider</dt><dd id="relationship-provider">City Medical</dd></div>
+                  <div><dt id="relationship-date-label">Service date</dt><dd id="relationship-date">Sep 28, 2026</dd></div>
+                  <div class="mismatch"><dt id="relationship-left-label">Patient responsibility</dt><dd id="relationship-left-amount">$36.00</dd></div>
+                  <div class="mismatch"><dt id="relationship-right-label">Bill balance</dt><dd id="relationship-right-amount">$42.00</dd></div>
+                </dl>
+                <div class="alternative-match">
+                  <div><strong id="alternative-title">Alternative candidate</strong><span id="alternative-copy">City Medical statement · 58% match</span></div>
+                  <button type="button" class="secondary-button" id="alternative-action">Choose another match</button>
+                </div>
+                <div class="trust-gate">
+                  <strong id="relationship-outcome-title">Relationship outcome</strong>
+                  <p id="relationship-outcome-copy">Confirming links the documents and re-runs obligation analysis. It may close an existing action, create Needs Review, or create no action.</p>
+                </div>
+              </div>
+            </section>
+
+            <section id="review-panel-metadata" class="tab-panel metadata-panel" role="tabpanel" aria-labelledby="review-tab-metadata" data-review-panel="metadata" hidden>
+              <div class="panel-heading"><div><h3>Evidence metadata</h3><p>Correct source facts before resolving the review.</p></div><button type="button" class="secondary-button">Edit in Paperless</button></div>
+              <dl class="metadata-list">
+                <div><dt>Title</dt><dd id="review-metadata-title">Northline Energy · payment notice</dd></div>
+                <div><dt>Correspondent</dt><dd id="review-metadata-correspondent">Northline Energy</dd></div>
+                <div><dt>Document type</dt><dd id="review-metadata-type">Payment notice</dd></div>
+                <div><dt>Analysis freshness</dt><dd>Current · source revision r18</dd></div>
+              </dl>
+              <div class="scope-note"><strong>Metadata can change the answer.</strong> Saving a material correction marks this review stale and triggers targeted re-analysis.</div>
+            </section>
+
+            <section id="review-panel-related" class="tab-panel related-panel" role="tabpanel" aria-labelledby="review-tab-related" data-review-panel="related" hidden>
+              <div class="panel-heading"><div><h3>Related evidence</h3><p>Use related documents to resolve uncertainty, not as hidden classifier input.</p></div></div>
+              <ol class="timeline">
+                <li class="current"><time>Oct 15</time><div><strong>Payment notice</strong><span>Current source · ambiguous balance language</span></div></li>
+                <li><time>Oct 2</time><div><strong>Northline Energy invoice</strong><span>$84.20 originally due</span></div></li>
+                <li><time>Oct 14</time><div><strong>Bank transaction</strong><span>$40.00 payment candidate</span></div></li>
+              </ol>
+              <button type="button" class="secondary-button wide">Search or change related evidence</button>
+            </section>
+
+            <section id="review-panel-ocr" class="tab-panel ocr-panel" role="tabpanel" aria-labelledby="review-tab-ocr" data-review-panel="ocr" hidden>
+              <div class="ocr-score warning"><strong>87</strong><span>OCR quality<br><small>Usable · one low-confidence amount</small></span></div>
+              <label>Searchable text<textarea readonly>PAYMENT RECEIVED: $40.00
+REMAINING BALANCE: $84.20
+Please pay the remaining balance by October 24, 2026.</textarea></label>
+              <button type="button" class="secondary-button">Review OCR quality</button>
+            </section>
+          </div>
+        </section>
+      </div>
+
+      <footer class="lifecycle-bar review-resolution-bar">
+        <div class="selection-progress review-progress">
+          <span></span>
+          <span><strong id="review-footer-title">Conflicting payment signals</strong><small id="review-footer-copy">Resolve what OWL should believe; do not complete the real-world task here.</small></span>
+        </div>
+        <div class="lifecycle-actions" id="action-review-outcomes">
+          <button type="button" class="feedback-button" data-review-outcome="no-action">No action needed</button>
+          <button type="button" class="secondary-button" data-review-outcome="reanalyze">Analyze again</button>
+          <button type="button" class="secondary-button" data-review-outcome="defer">Review later</button>
+          <button type="button" class="primary-button" data-review-outcome="accept">Accept suggestion &amp; next</button>
+        </div>
+        <div class="lifecycle-actions" id="relationship-review-outcomes" hidden>
+          <button type="button" class="quiet-danger" id="reject-relationship" data-review-outcome="reject">Reject match</button>
+          <button type="button" class="secondary-button" data-review-outcome="defer">Review later</button>
+          <button type="button" class="primary-button" id="confirm-relationship" data-review-outcome="confirm-match">Confirm match &amp; next</button>
+        </div>
+        <div class="lifecycle-actions" id="resolved-review-outcomes" hidden>
+          <button type="button" class="secondary-button" id="reopen-review">Move back to Pending</button>
+        </div>
+      </footer>
+    </section>
+  </main>
+
+  <aside id="rationale" class="rationale" aria-label="Migration rationale" hidden>
+    <div class="rationale-header">
+      <div><h2>Migration plan &amp; decisions</h2><p>What moves, changes, stays separate, or remains open.</p></div>
+      <button type="button" class="icon-button" id="close-rationale" aria-label="Close rationale">×</button>
+    </div>
+    <div class="rationale-content">
+      <section>
+        <h3>Promote into the shared workspace</h3>
+        <ul>
+          <li><strong>Stable tabs, contextual default.</strong> Document tabs retain the shared Metadata, Actions/Decision, Related, OCR order. Action Review opens Actions; Needs Review opens Decision.</li>
+          <li><strong>Actions stay editable with explicit Save.</strong> The selected action uses the same type-aware editable fields as Inbox instead of requiring a separate Edit mode. Lifecycle outcomes wait until field edits are saved so the audit event is intentional.</li>
+          <li><strong>Documents appear once; actions stay distinct.</strong> The rail contains one row per document. Its Actions tab shows the complete set of inferred and manually created actions, with an independent lifecycle for each action.</li>
+          <li><strong>Action outcomes are visibly scoped.</strong> Multi-action documents offer Done beside each action and label the sticky outcome bar as applying only to the selected action.</li>
+          <li><strong>Add and history stay inline.</strong> New actions are created beside the document’s action set, and each selected action exposes its own audit history in the same tab.</li>
+          <li><strong>Document-derived work controls.</strong> Pay, call, email, sign, and source links appear beside the action they support.</li>
+          <li><strong>Complete lifecycle.</strong> Done, remind later, won't do, not an action, reopen, and audit history stay available.</li>
+          <li><strong>Correction without context switching.</strong> Type-aware fields, confidence reasoning, urgency, amount, reference, and due date remain editable.</li>
+          <li><strong>Related evidence.</strong> Receipts, revisions, reminders, and authoritative documents remain one tab away.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Adapt for the left rail</h3>
+        <ul>
+          <li>Show each document once with its thumbnail, correspondent, document type, action count and types, nearest deadline, and combined amount—not duplicate rows for each action.</li>
+          <li>Provide search, lifecycle status, due-window and action-type facets, sorting, and a manual desktop rail-collapse control.</li>
+          <li>Preserve keyboard next/previous navigation and selection through filtering.</li>
+          <li>Group only when it improves scanning; overdue and today can become section headers without rebuilding the old dashboard.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Defer as a possible later table view</h3>
+        <ul>
+          <li>Wide many-column comparison and bulk outcomes across unrelated documents are not required for the initial migration.</li>
+          <li>If usage proves a need, add a contextual table or Manage view inside Actions and Needs Review—not a new top-level destination.</li>
+          <li>Pipeline run controls and system status, which are administration—not review.</li>
+          <li>Needs Review confidence thresholds or bulk decisions require separate safety validation before implementation.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Removed from the primary review UI by choice</h3>
+        <ul>
+          <li><strong>The Action Queue detail drawer</strong> is replaced by the persistent workspace; keeping both would create two competing detail experiences.</li>
+          <li><strong>Grouped-list versus table toggle</strong> leaves the initial review surface. A contextual table view is tracked as a later enhancement if wide comparison or bulk work proves necessary.</li>
+          <li><strong>Pipeline status and run controls</strong> move to Operations. They describe system execution, not the decision on the current document.</li>
+          <li><strong>Acknowledged</strong> is removed from the target experience. It was a legacy “seen” state created by a control that no longer exists—not a completed or resolved outcome. Action Review uses explicit Pending, Done, Remind later, Won’t do, and Not an action outcomes instead.</li>
+          <li><strong>FILE actions</strong> are omitted entirely from the target Action Review UI. Filing is an Intake operation, and the separate legacy-data cleanup should not shape the future workspace.</li>
+          <li><strong>Global bulk controls inside the document workspace</strong> are removed to prevent an outcome intended for one evidence set from affecting unrelated items.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Material behavior changes</h3>
+        <ul>
+          <li><strong>Accept in Needs Review does not mean Done.</strong> It establishes trust and may publish a new pending action.</li>
+          <li><strong>Confidence becomes explanatory.</strong> The UI pairs the score with the reason, conflicting fields, and alternative evidence instead of showing a bar alone.</li>
+          <li><strong>Different queues show different facts.</strong> Action Review emphasizes due date, amount, urgency, and work links; Needs Review emphasizes review type, reason, confidence, age, and priority.</li>
+          <li><strong>Multi-document reviews adapt the center pane.</strong> A relationship item shows side-by-side evidence instead of forcing every review into a single-document preview.</li>
+          <li><strong>Action classification reviews are document reviews.</strong> Needs Review shows every proposed action attached to the document and accepts or corrects the set together.</li>
+          <li><strong>Resolved decisions remain revisable.</strong> Revising a decision appends audit history; if downstream work is already completed, OWL warns and preserves that completed history rather than rewriting it.</li>
+          <li><strong>Queue advancement respects context.</strong> Save-and-next and resolution outcomes select the next item in the active lifecycle, facet, search, and sort view.</li>
+          <li><strong>Not an action is separated from rejection.</strong> For action classification it records a false positive; for a proposed relationship, Reject means the pairing is wrong.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Possibly missed or intentionally not fully mocked</h3>
+        <ul>
+          <li>Statement split/merge, duplicate consolidation, grouping correction, and orphan search still need production API contracts and complete edge states.</li>
+          <li>Source conflicts, permission failures, loading, empty, and stale-analysis states need production designs.</li>
+          <li>Bulk selection, shift-select, keyboard Y/N shortcuts, and confidence-threshold confirmation are deferred with the possible table view.</li>
+          <li>Multiple actions use one document rail row plus an in-tab action set; production must validate ordering, bulk outcomes, and dirty-state behavior.</li>
+          <li>Real Paperless thumbnails, dark theme verification, localization, and narrow-screen focus management remain implementation requirements.</li>
+        </ul>
+      </section>
+      <section class="decision-callout">
+        <h3>Important semantic boundary</h3>
+        <p><strong>Done</strong> means the real-world action was completed. <strong>Won't do</strong> means it was real but intentionally declined. <strong>Not an action</strong> means OWL was wrong and should retain classifier feedback. <strong>Next doc</strong> changes only the selected document. None of these implicitly files or edits the Paperless document.</p>
+      </section>
+    </div>
+  </aside>
+
+  <div id="outcome-confirmation" class="confirmation-backdrop" hidden>
+    <section class="confirmation" role="dialog" aria-modal="true" aria-labelledby="confirmation-title" aria-describedby="confirmation-copy">
+      <h2 id="confirmation-title">Mark as not an action?</h2>
+      <p id="confirmation-copy">Use this only when OWL identified work that does not exist. The correction is retained as classifier feedback; it does not file or edit the Paperless document.</p>
+      <div>
+        <button type="button" class="secondary-button" id="cancel-confirmation">Cancel</button>
+        <button type="button" class="feedback-button confirm" id="confirm-no-action">Save feedback &amp; next</button>
+      </div>
+
+      <div id="bulk-done-confirmation" class="confirmation-backdrop" hidden>
+        <section class="confirmation" role="dialog" aria-modal="true" aria-labelledby="bulk-done-title" aria-describedby="bulk-done-copy">
+          <h2 id="bulk-done-title">Mark every pending action done?</h2>
+          <p id="bulk-done-copy">This completes each pending action attached to the current document:</p>
+          <ul id="bulk-done-list"></ul>
+          <div>
+            <button type="button" class="secondary-button" id="cancel-bulk-done">Cancel</button>
+            <button type="button" class="primary-button" id="confirm-bulk-done">Mark all done</button>
+          </div>
+        </section>
+      </div>
+    </section>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

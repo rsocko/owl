@@ -1,4 +1,4 @@
-# OWL Product Context
+# Product
 
 <!-- impeccable:product-schema 1 -->
 
@@ -22,6 +22,12 @@ The same person may work directly in OWL, edit documents in Paperless-ngx, or
 review trusted cross-system work in Mission Control. OWL must treat all three
 paths as valid parts of one operating environment rather than assuming that
 every decision originates in OWL.
+
+In Action Review, the operator's primary job is fast sequential triage:
+understand the source evidence, complete or defer the real-world work, and move
+to the next item without losing document context. In Needs Review, the job is
+to supply judgment where OWL cannot yet safely decide what a document or
+relationship means.
 
 ## Product Purpose
 
@@ -81,6 +87,10 @@ Typical work includes:
 
 - reviewing Paperless Inbox metadata and suggestions;
 - deciding whether a document creates an action;
+- completing, deferring, declining, or correcting trusted work in Action
+  Review while keeping its source visible;
+- accepting, correcting, rejecting, matching, re-evaluating, or deferring
+  uncertain beliefs in Needs Review;
 - resolving uncertain classifications, matches, duplicates, and groupings;
 - matching medical EOBs to bills and reviewing discrepancies;
 - tracking recurring statements and investigating gaps;
@@ -214,6 +224,18 @@ The durable boundary is:
 - OWL is optimized for one household operator, but data models and audit
   history must not depend on hidden memory or implementation knowledge to be
   understandable later.
+- Inbox Review, Action Review, and Needs Review share a document-workspace
+  shell with persistent source evidence, a queue, and focused Metadata,
+  Actions, Related, and OCR surfaces. Each workflow must retain its distinct
+  default decision surface and queue semantics.
+- Action Review optimizes for rapid sequential work and opens actionable
+  details by default. Needs Review exposes review type, reason, confidence,
+  age, and priority and treats confirmation as establishing trust rather than
+  completing a task.
+- Action and review lifecycles remain explicit and auditable. Supported
+  outcomes include completion, snooze, dismissal, false-positive correction,
+  reopening, confirmation, rejection, re-evaluation, matching, and deferral
+  where appropriate to the record type.
 
 ## Brand Commitments
 
@@ -236,6 +258,15 @@ behavior and these authorities rather than inventing capabilities or claims.
 
 Key evidence includes:
 
+- current review implementations in
+  `frontend/src/pages/IntakeReview.tsx`,
+  `frontend/src/pages/ActionWorkspace.tsx`, and
+  `frontend/src/pages/TriageQueue.tsx`;
+- current visual foundations in `frontend/src/styles/theme.css`,
+  `frontend/src/styles/intake-review.css`, and
+  `frontend/src/styles/document-workspace.css`;
+- interactive workspace proposals under `mockups/intake-review/` and
+  `mockups/action-workspace/`;
 - [Architecture Overview](docs/architecture/index.md) for current application
   boundaries, modules, and data flow;
 - [Intake Triage and Action Routing](docs/design/active/intake-triage-and-action-routing.md)
@@ -293,6 +324,8 @@ without erasing why the earlier decision existed.
 What OWL believes about a document, whether Paperless metadata is ready, and
 what the operator should do are related but independent decisions. The product
 may streamline them in one workspace without collapsing their lifecycles.
+Action Review and Needs Review should remain visually connected through that
+workspace while staying semantically distinct.
 
 ### 6. Use density in service of decisions
 
@@ -328,7 +361,7 @@ Exact thresholds are intentionally not fixed here. Each module must establish
 its own baseline, consequence-aware target, and sampling or evaluation method
 before expanding unattended automation.
 
-## Accessibility and Inclusion
+## Accessibility & Inclusion
 
 OWL must support WCAG AA contrast for text and controls, keyboard-operable
 review workflows, visible focus, and status communication that does not depend

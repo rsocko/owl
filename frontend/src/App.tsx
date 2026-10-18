@@ -9,7 +9,7 @@ import Statements from './pages/Statements';
 import StatementSeriesDetail from './pages/StatementSeriesDetail';
 import CorrespondentReview from './pages/CorrespondentReview';
 import EobWorkspace from './pages/EobWorkspace';
-import ActionQueue from './pages/ActionQueue';
+import ActionWorkspace from './pages/ActionWorkspace';
 import ActionQueueOperations from './pages/ActionQueueOperations';
 import TriageQueue from './pages/TriageQueue';
 import MetadataCorrection from './pages/MetadataCorrection';
@@ -94,7 +94,7 @@ function App() {
             <Route path="/eob/unmatched" element={<Navigate to="/eob?tab=unmatched" replace />} />
             <Route path="/eob/benchmarks" element={<BenchmarkHistory />} />
             <Route path="/eob/manual-search" element={<ManualMatchSearch />} />
-            <Route path="/action-queue" element={<ActionQueue />} />
+            <Route path="/action-queue" element={<ActionWorkspace />} />
             <Route path="/inbox-review" element={<IntakeReview />} />
             <Route path="/inbox-review/:documentId" element={<IntakeReview />} />
             <Route path="/intake-review" element={<LegacyIntakeReviewRedirect />} />

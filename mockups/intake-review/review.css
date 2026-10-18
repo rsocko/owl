@@ -68,6 +68,23 @@ main { padding: 26px 28px; max-width: 1920px; margin: auto; }
 .purple { background: #efeafa; color: #65429e; }
 .queue-panel .panel-heading { align-items: flex-start; flex-direction: column; }
 .search-label { padding: 14px 14px 8px; }
+.queue-filter-group { padding: 0 14px 12px; }
+.queue-filter-label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase; }
+.queue-filter-row { display: flex; gap: 5px; overflow-x: auto; }
+.queue-filter-row button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+}
+.queue-filter-row button span { margin-left: 3px; }
+.queue-filter-row button:hover,
+.queue-filter-row button.active { border-color: #9fc7e6; background: var(--selected); color: var(--accent); }
 .bulk-toolbar { padding: 0 12px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .bulk-toolbar label, .bulk-toolbar button { font-size: 10px; }
 .bulk-toolbar button { min-height: 28px; padding: 4px 6px; }

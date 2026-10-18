@@ -226,6 +226,7 @@ async def _resolve_action_classification(
 ) -> dict[str, Any]:
     """Apply action review outcomes through Action Queue lifecycle helpers."""
     from doc_intelligence_hub.modules.action_queue.database import (
+        VALID_ACTION_TYPES,
         Action,
     )
     from doc_intelligence_hub.modules.action_queue.database import (
@@ -261,7 +262,67 @@ async def _resolve_action_classification(
         if not action:
             raise HTTPException(status_code=404, detail="Source action not found")
         payload = body.payload or {}
+        resolution_payload = payload
+        proposed_actions = payload.get("actions")
+        normalized_proposals: list[dict[str, Any]] | None = None
+        if proposed_actions is not None:
+            if not isinstance(proposed_actions, list) or not proposed_actions:
+                raise HTTPException(
+                    status_code=422,
+                    detail="actions must be a non-empty list",
+                )
+            if len(proposed_actions) > 20:
+                raise HTTPException(
+                    status_code=422,
+                    detail="A document review can accept at most 20 actions",
+                )
+            normalized_proposals = []
+            for position, proposal in enumerate(proposed_actions, start=1):
+                if not isinstance(proposal, dict):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Action {position} must be an object",
+                    )
+                action_type = str(proposal.get("action_type") or "").strip().upper()
+                title = str(proposal.get("title") or "").strip()
+                if action_type not in VALID_ACTION_TYPES:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Action {position} has an unsupported action type",
+                    )
+                if not title:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Action {position} requires a title",
+                    )
+                amount = proposal.get("amount")
+                if action_type == "PAY" and amount is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Action {position} requires an amount",
+                    )
+                due_date = proposal.get("due_date")
+                if due_date:
+                    from datetime import date
+
+                    try:
+                        due_date = date.fromisoformat(str(due_date))
+                    except ValueError as exc:
+                        raise HTTPException(
+                            status_code=422,
+                            detail=f"Action {position} has an invalid due date",
+                        ) from exc
+                normalized_proposals.append(
+                    {
+                        "action_type": action_type,
+                        "title": title,
+                        "summary": proposal.get("summary"),
+                        "amount": amount,
+                        "due_date": due_date,
+                    }
+                )
         original_version = action.version or 1
+        created_actions: list[Action] = []
         if body.action == "confirm":
             if not action_has_critical_details(action):
                 return {
@@ -278,6 +339,8 @@ async def _resolve_action_classification(
             )
             mark_action_ready(action)
         elif body.action == "correct":
+            if normalized_proposals is not None:
+                payload = normalized_proposals[0]
             corrected_type = payload.get("action_type")
             if corrected_type and corrected_type.upper() != action.action_type:
                 record_action_feedback(
@@ -291,7 +354,7 @@ async def _resolve_action_classification(
                 if field not in payload:
                     continue
                 value = payload[field]
-                if field == "due_date" and value:
+                if field == "due_date" and isinstance(value, str):
                     from datetime import date
 
                     value = date.fromisoformat(value)
@@ -332,6 +395,55 @@ async def _resolve_action_classification(
                     "reason": reason,
                 }
             mark_action_ready(action)
+            if normalized_proposals is not None:
+                max_index = max(
+                    (
+                        sibling.action_index
+                        for sibling in db.query(Action)
+                        .filter_by(document_id=action.document_id)
+                        .all()
+                        if sibling.action_index is not None
+                    ),
+                    default=-1,
+                )
+                for offset, proposal in enumerate(normalized_proposals[1:], start=1):
+                    sibling = Action(
+                        document_id=action.document_id,
+                        document_title=action.document_title,
+                        correspondent=action.correspondent,
+                        document_date=action.document_date,
+                        document_type=action.document_type,
+                        tags=action.tags,
+                        action_type=proposal["action_type"],
+                        title=proposal["title"],
+                        summary=proposal["summary"],
+                        due_date=proposal["due_date"],
+                        amount=proposal["amount"],
+                        document_amount=action.document_amount,
+                        document_due_date=action.document_due_date,
+                        document_amount_overridden=action.document_amount_overridden,
+                        document_due_date_overridden=action.document_due_date_overridden,
+                        urgency=action.urgency,
+                        confidence=action.confidence,
+                        status="pending",
+                        action_ready=True,
+                        review_state="ready",
+                        action_index=max(max_index + offset, 1000 + offset - 1),
+                        is_primary=False,
+                        parent_action_id=action.id,
+                        origin="manual",
+                        version=1,
+                    )
+                    mark_human_corrections(
+                        sibling,
+                        CLASSIFICATION_FIELDS,
+                        classification_reviewed=True,
+                    )
+                    recalculate_action_risk(sibling)
+                    refresh_recommended_cta(sibling)
+                    db.add(sibling)
+                    created_actions.append(sibling)
+                db.flush()
         elif body.action == "no_action":
             record_action_feedback(
                 db,
@@ -376,10 +488,11 @@ async def _resolve_action_classification(
             await sync_action_status(
                 db, action, "not_an_action", logger=logging.getLogger(__name__)
             )
-        resolved = resolve_queue_item(item["id"], body.action, payload)
+        resolved = resolve_queue_item(item["id"], body.action, resolution_payload)
         return {
             **(resolved or item),
             "action_id": action.id,
+            "action_ids": [action.id, *(created.id for created in created_actions)],
             "action_ready": bool(action.action_ready),
             "review_state": action.review_state,
         }
@@ -417,10 +530,41 @@ async def undo_item(item_id: str) -> dict[str, Any]:
     """Undo a resolution — reset item back to pending."""
     current = get_queue_item(item_id)
     if current and current["item_type"] == "action_classification":
-        raise HTTPException(
-            status_code=422,
-            detail="Action classification lifecycle changes cannot be undone from triage",
+        from doc_intelligence_hub.modules.action_queue.database import Action
+        from doc_intelligence_hub.modules.action_queue.database import (
+            get_session as get_action_session,
         )
+        from doc_intelligence_hub.modules.action_queue.database import (
+            init_db as init_action_db,
+        )
+        from doc_intelligence_hub.modules.action_queue.lifecycle import (
+            project_action_metadata,
+            transition_action_status,
+        )
+
+        init_action_db()
+        action_db = get_action_session()
+        try:
+            action = action_db.query(Action).filter_by(id=int(current["target_id"])).first()
+            if not action:
+                raise HTTPException(status_code=404, detail="Source action not found")
+            action.action_ready = False
+            action.review_state = "needs_review"
+            action.review_item_id = item_id
+            if action.status == "not_an_action":
+                transition_action_status(action, "pending")
+            action.version = (action.version or 1) + 1
+            try:
+                await project_action_metadata(action, action_status=None)
+            except Exception as exc:
+                action_db.rollback()
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Could not reopen review because Paperless metadata cleanup failed: {exc}",
+                ) from exc
+            action_db.commit()
+        finally:
+            action_db.close()
     item = undo_resolution(item_id)
     if not item:
         raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
