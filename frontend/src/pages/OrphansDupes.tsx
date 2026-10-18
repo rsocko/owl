@@ -745,7 +745,7 @@ export default function OrphansDupes() {
                                       ? ` (${scanRun.projection.error_code.replaceAll('_', ' ')})`
                                       : ''}.
                                   </span>
-                                  <a href="#/action-queue/operations">Repair Paperless sync</a>
+                                  <a href="#/actions/operations">Repair Paperless sync</a>
                                 </div>
                               )}
                           </>

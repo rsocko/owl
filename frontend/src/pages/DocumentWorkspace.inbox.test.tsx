@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import IntakeReview from './IntakeReview';
+import DocumentWorkspace from './DocumentWorkspace';
 
 vi.mock('../components/OcrFocusInspector', () => ({
   default: ({ documentId, onReturn }: { documentId: number; onReturn?: () => void }) => (
@@ -121,17 +121,17 @@ function core(id: number) {
   };
 }
 
-function renderPage(entry = '/inbox-review') {
+function renderPage(entry = '/inbox') {
   return render(
     <MemoryRouter initialEntries={[entry]}>
       <Routes>
-        <Route path="/inbox-review" element={<IntakeReview />} />
+        <Route path="/inbox" element={<DocumentWorkspace mode="inbox" />} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
-describe('IntakeReview', () => {
+describe('DocumentWorkspace inbox mode', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     documentsMock.mockResolvedValue({
@@ -208,7 +208,7 @@ describe('IntakeReview', () => {
   });
 
   it('renders the authoritative shared OCR summary', async () => {
-    renderPage('/inbox-review?document=1&tab=ocr');
+    renderPage('/inbox?document=1&tab=ocr');
 
     expect(await screen.findByRole('heading', { name: 'OCR assessment' })).toBeInTheDocument();
     expect(screen.getByText('Review Recommended')).toBeInTheDocument();
@@ -219,7 +219,7 @@ describe('IntakeReview', () => {
   });
 
   it('opens OCR focus mode and returns to the same document and tab', async () => {
-    renderPage('/inbox-review?document=1&tab=ocr');
+    renderPage('/inbox?document=1&tab=ocr');
 
     fireEvent.click(await screen.findByRole('button', { name: 'Inspect OCR' }));
     expect(screen.getByLabelText('OCR focus inspector')).toHaveTextContent('Focus document 1');
@@ -231,7 +231,7 @@ describe('IntakeReview', () => {
   });
 
   it('selects a document and tab from the query string', async () => {
-    renderPage('/inbox-review?document=2&tab=actions');
+    renderPage('/inbox?document=2&tab=actions');
 
     await waitFor(() => expect(documentCoreMock).toHaveBeenCalledWith(2));
     expect(await screen.findByRole('tab', { name: /Actions/ })).toHaveAttribute('aria-selected', 'true');
@@ -259,7 +259,7 @@ describe('IntakeReview', () => {
       ocr_quality: { quality_score: 90, quality_band: 'green', poor_quality: false },
     });
 
-    renderPage('/inbox-review?document=1&tab=actions');
+    renderPage('/inbox?document=1&tab=actions');
 
     expect(await screen.findByLabelText('Details')).toHaveValue(
       'Decide whether the new terms are acceptable.',
@@ -297,7 +297,7 @@ describe('IntakeReview', () => {
       origin: 'inferred',
     });
 
-    const { container } = renderPage('/inbox-review?document=1&tab=actions');
+    const { container } = renderPage('/inbox?document=1&tab=actions');
 
     expect(container.querySelector('.document-workspace-frame.intake-review-page')).toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: 'More outcomes for Review policy changes' }));
@@ -345,7 +345,7 @@ describe('IntakeReview', () => {
       version: 2,
     });
 
-    renderPage('/inbox-review?document=1&tab=actions');
+    renderPage('/inbox?document=1&tab=actions');
 
     fireEvent.change(await screen.findByLabelText('Type'), { target: { value: 'REVIEW' } });
     fireEvent.change(screen.getByLabelText('Details'), {
@@ -425,7 +425,7 @@ describe('IntakeReview', () => {
       }],
       query: '',
     });
-    renderPage('/inbox-review?document=1&tab=related');
+    renderPage('/inbox?document=1&tab=related');
 
     expect(await screen.findByText('September utility statement')).toBeInTheDocument();
     expect(screen.getAllByText('Suggested')).toHaveLength(2);
@@ -450,7 +450,7 @@ describe('IntakeReview', () => {
         paperless_ai: { available: true },
       },
     });
-    renderPage('/inbox-review?document=1&tab=related');
+    renderPage('/inbox?document=1&tab=related');
 
     await waitFor(() => expect(documentRelationshipsMock).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh analysis' }));
@@ -487,7 +487,7 @@ describe('IntakeReview', () => {
       query: '',
     });
     createRelationshipMock.mockResolvedValue({ created: true });
-    renderPage('/inbox-review?document=1&tab=related');
+    renderPage('/inbox?document=1&tab=related');
 
     fireEvent.click(await screen.findByRole('button', { name: 'Add link' }));
 
@@ -535,7 +535,7 @@ describe('IntakeReview', () => {
       },
     });
     updateActionMock.mockResolvedValue({ id: 12, status: 'completed', version: 5 });
-    renderPage('/inbox-review?document=1&tab=related');
+    renderPage('/inbox?document=1&tab=related');
 
     fireEvent.click(await screen.findByRole('button', { name: 'Add link' }));
 

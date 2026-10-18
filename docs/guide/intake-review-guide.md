@@ -45,7 +45,7 @@ document. Press **Enter** or click a row to select it.
 
 The selected document is stored in the `document` query parameter, so a review
 can be bookmarked or shared, for example
-`#/inbox-review?document=123&tab=actions`.
+`#/inbox?document=123&tab=actions`.
 
 ## Metadata and filing decisions
 

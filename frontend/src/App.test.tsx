@@ -26,6 +26,6 @@ describe('canonicalActionTarget', () => {
       status: 'pending',
       review_state: 'ready',
       needs_review_url: null,
-    })).toBe('/action-queue?action=306&status=pending');
+    })).toBe('/actions?action=306&status=pending');
   });
 });

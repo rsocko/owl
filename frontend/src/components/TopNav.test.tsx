@@ -22,13 +22,13 @@ describe('TopNav', () => {
 
   it('promotes Inbox and Actions to top-level workflow destinations', () => {
     render(
-      <MemoryRouter initialEntries={['/inbox-review']}>
+      <MemoryRouter initialEntries={['/inbox']}>
         <TopNav />
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('link', { name: 'Inbox' })).toHaveAttribute('href', '/inbox-review');
-    expect(screen.getByRole('link', { name: 'Actions' })).toHaveAttribute('href', '/action-queue');
+    expect(screen.getByRole('link', { name: 'Inbox' })).toHaveAttribute('href', '/inbox');
+    expect(screen.getByRole('link', { name: 'Actions' })).toHaveAttribute('href', '/actions');
     expect(screen.queryByText('Intake Review')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Workflow' })).not.toBeInTheDocument();
   });

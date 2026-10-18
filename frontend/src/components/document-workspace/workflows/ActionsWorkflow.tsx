@@ -11,25 +11,25 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../components/ui';
+import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../../ui';
 import {
   DocumentWorkspaceBody,
   DocumentWorkspaceFrame,
   DocumentWorkspaceHeader,
   DocumentWorkspaceTabs,
-} from '../components/DocumentWorkspace';
-import DocumentActionsPanel from '../components/DocumentActionsPanel';
+} from '../../DocumentWorkspace';
+import DocumentActionsPanel from '../../DocumentActionsPanel';
 import {
   documentActionMutation,
   type DocumentActionDraft,
   type DocumentActionStatus,
-} from '../lib/documentActions';
-import OcrSummaryPanel from '../components/OcrSummaryPanel';
-import OcrFocusInspector from '../components/OcrFocusInspector';
-import { useOcrSummary } from '../hooks/useOcrSummary';
-import { endpoints, type DocumentSummaryModel } from '../lib/api';
-import { getToastDuration } from '../lib/toast';
-import '../styles/document-workspace.css';
+} from '../../../lib/documentActions';
+import OcrSummaryPanel from '../../OcrSummaryPanel';
+import OcrFocusInspector from '../../OcrFocusInspector';
+import { useOcrSummary } from '../../../hooks/useOcrSummary';
+import { endpoints, type DocumentSummaryModel } from '../../../lib/api';
+import { getToastDuration } from '../../../lib/toast';
+import '../../../styles/document-workspace.css';
 
 type LifecycleFilter = 'pending' | 'snoozed' | 'resolved';
 type DueFilter = 'all' | 'overdue' | 'upcoming';
@@ -216,7 +216,7 @@ function nextMondayAtNine() {
   return date.toISOString();
 }
 
-export default function ActionWorkspace() {
+export default function ActionsWorkflow() {
   const [searchParams, setSearchParams] = useSearchParams();
   const linkedActionId = Number(searchParams.get('action')) || null;
   const ocrFocus = searchParams.get('inspect') === 'ocr';
@@ -697,7 +697,7 @@ export default function ActionWorkspace() {
                     <div className="workspace-metadata">
                       <div className="workspace-panel-heading">
                         <div><h3>Document metadata</h3><p>Paperless remains authoritative.</p></div>
-                        <a className="btn" href={`#/inbox-review?document=${selectedGroup.documentId}&tab=metadata`}>Edit in Inbox</a>
+                        <a className="btn" href={`#/inbox?document=${selectedGroup.documentId}&tab=metadata`}>Edit in Inbox</a>
                       </div>
                       <dl>
                         <div><dt>Title</dt><dd>{selectedAction.document_title || 'Not set'}</dd></div>

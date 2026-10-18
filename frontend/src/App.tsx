@@ -9,9 +9,8 @@ import Statements from './pages/Statements';
 import StatementSeriesDetail from './pages/StatementSeriesDetail';
 import CorrespondentReview from './pages/CorrespondentReview';
 import EobWorkspace from './pages/EobWorkspace';
-import ActionWorkspace from './pages/ActionWorkspace';
+import DocumentWorkspace from './pages/DocumentWorkspace';
 import ActionQueueOperations from './pages/ActionQueueOperations';
-import TriageQueue from './pages/TriageQueue';
 import MetadataCorrection from './pages/MetadataCorrection';
 import ManualMatchSearch from './pages/ManualMatchSearch';
 import RulesConfig from './pages/RulesConfig';
@@ -24,7 +23,6 @@ import NotFound from './pages/NotFound';
 import DocumentViews from './pages/DocumentViews';
 import OcrQualityDashboard from './pages/OcrQualityDashboard';
 import OcrFocusInspectorPage from './pages/OcrFocusInspectorPage';
-import IntakeReview from './pages/IntakeReview';
 import { endpoints } from './lib/api';
 import { canonicalActionTarget, type CanonicalActionLocation } from './lib/canonicalAction';
 import { legacyOcrQueueTarget } from './lib/ocrNavigation';
@@ -40,13 +38,13 @@ function LegacyRouteRedirect({ to }: { to: string }) {
   return <Navigate to={`${to}${search}`} replace />;
 }
 
-function LegacyIntakeReviewRedirect() {
+function LegacyInboxRedirect() {
   const { documentId } = useParams();
   const { search } = useLocation();
   const params = new URLSearchParams(search);
   if (documentId && !params.has('document')) params.set('document', documentId);
   const query = params.toString();
-  return <Navigate to={`/inbox-review${query ? `?${query}` : ''}`} replace />;
+  return <Navigate to={`/inbox${query ? `?${query}` : ''}`} replace />;
 }
 
 function LegacyOcrQueueRedirect() {
@@ -73,7 +71,7 @@ function CanonicalActionRedirect() {
   }, [actionId]);
 
   if (target) return <Navigate to={target} replace />;
-  if (failed) return <Navigate to="/action-queue" replace />;
+  if (failed) return <Navigate to="/actions" replace />;
   return <div role="status">Opening action…</div>;
 }
 
@@ -99,14 +97,18 @@ function App() {
             <Route path="/eob/unmatched" element={<Navigate to="/eob?tab=unmatched" replace />} />
             <Route path="/eob/benchmarks" element={<BenchmarkHistory />} />
             <Route path="/eob/manual-search" element={<ManualMatchSearch />} />
-            <Route path="/action-queue" element={<ActionWorkspace />} />
-            <Route path="/inbox-review" element={<IntakeReview />} />
-            <Route path="/inbox-review/:documentId" element={<IntakeReview />} />
-            <Route path="/intake-review" element={<LegacyIntakeReviewRedirect />} />
-            <Route path="/intake-review/:documentId" element={<LegacyIntakeReviewRedirect />} />
+            <Route path="/inbox" element={<DocumentWorkspace mode="inbox" />} />
+            <Route path="/inbox/:documentId" element={<DocumentWorkspace mode="inbox" />} />
+            <Route path="/actions" element={<DocumentWorkspace mode="actions" />} />
+            <Route path="/actions/operations" element={<ActionQueueOperations />} />
             <Route path="/actions/:actionId" element={<CanonicalActionRedirect />} />
-            <Route path="/action-queue/operations" element={<ActionQueueOperations />} />
-            <Route path="/needs-review" element={<TriageQueue />} />
+            <Route path="/needs-review" element={<DocumentWorkspace mode="review" />} />
+            <Route path="/inbox-review" element={<LegacyRouteRedirect to="/inbox" />} />
+            <Route path="/inbox-review/:documentId" element={<LegacyInboxRedirect />} />
+            <Route path="/intake-review" element={<LegacyInboxRedirect />} />
+            <Route path="/intake-review/:documentId" element={<LegacyInboxRedirect />} />
+            <Route path="/action-queue" element={<LegacyRouteRedirect to="/actions" />} />
+            <Route path="/action-queue/operations" element={<LegacyRouteRedirect to="/actions/operations" />} />
             <Route path="/needs-review/manual-search" element={<ManualMatchSearch />} />
             <Route path="/triage" element={<LegacyRouteRedirect to="/needs-review" />} />
             <Route
