@@ -402,8 +402,6 @@ export default function ActionWorkspace() {
     const response = await endpoints.actionQueue.paymentCheck(String(actionId)) as {
       payment_check: PaymentCheck;
     };
-    setPaymentCheck(response.payment_check);
-    setPaymentError(null);
     return response.payment_check;
   }, []);
 
@@ -421,14 +419,27 @@ export default function ActionWorkspace() {
 
   useEffect(() => {
     if (!selectedAction || paymentCheck?.state !== 'checking') return;
+    let active = true;
     const poll = window.setInterval(() => {
-      void fetchPaymentCheck(selectedAction.id).catch((pollError) => {
-        setPaymentError(
-          pollError instanceof Error ? pollError.message : 'Could not refresh payment status.',
-        );
-      });
+      void fetchPaymentCheck(selectedAction.id)
+        .then((nextPaymentCheck) => {
+          if (active) {
+            setPaymentCheck(nextPaymentCheck);
+            setPaymentError(null);
+          }
+        })
+        .catch((pollError) => {
+          if (active) {
+            setPaymentError(
+              pollError instanceof Error ? pollError.message : 'Could not refresh payment status.',
+            );
+          }
+        });
     }, 5_000);
-    return () => window.clearInterval(poll);
+    return () => {
+      active = false;
+      window.clearInterval(poll);
+    };
   }, [fetchPaymentCheck, selectedAction, paymentCheck?.state]);
 
   useEffect(() => {
@@ -443,6 +454,12 @@ export default function ActionWorkspace() {
     setPaymentError(null);
     setPaymentLoading(true);
     void fetchPaymentCheck(selectedAction.id)
+      .then((nextPaymentCheck) => {
+        if (active) {
+          setPaymentCheck(nextPaymentCheck);
+          setPaymentError(null);
+        }
+      })
       .catch((loadError) => {
         if (active) {
           setPaymentCheck(null);
@@ -649,6 +666,7 @@ export default function ActionWorkspace() {
     setPaymentError(null);
     try {
       const currentPaymentCheck = paymentCheck ?? await fetchPaymentCheck(selectedAction.id);
+      setPaymentCheck(currentPaymentCheck);
       const response = await endpoints.actionQueue.checkPayment(String(selectedAction.id), {
         revision: currentPaymentCheck.revision,
         idempotency_key: `owl-check-payment:${selectedAction.id}:${currentPaymentCheck.revision}`,

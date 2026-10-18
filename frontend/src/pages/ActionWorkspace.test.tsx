@@ -429,4 +429,38 @@ describe('ActionWorkspace', () => {
     }));
     expect(await screen.findByText('Posted payment found')).toBeInTheDocument();
   });
+
+  it('ignores a late payment status response after switching documents', async () => {
+    actionsMock.mockResolvedValue({
+      actions: actions.map((action) => (
+        action.id === 1 ? { ...action, obligation_id: 'obligation-1' } : { ...action }
+      )),
+      total: actions.length,
+    });
+    let resolvePaymentStatus: ((value: unknown) => void) | undefined;
+    paymentCheckMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolvePaymentStatus = resolve;
+    }));
+    renderWorkspace();
+
+    await screen.findByRole('heading', { name: 'Utility bill' });
+    fireEvent.click(screen.getByRole('button', { name: 'Next doc' }));
+    expect(await screen.findByRole('heading', { name: 'Insurance renewal' })).toBeInTheDocument();
+
+    await act(async () => {
+      resolvePaymentStatus?.({
+        payment_check: {
+          state: 'checking',
+          checked_at: '2026-10-18T16:14:08.398188',
+          stale_after: null,
+          source: 'tyrion_bill_match',
+          revision: 'v1:2:2',
+          message: 'Checking all financial accounts except any configured exclusions.',
+          candidates: [],
+        },
+      });
+    });
+
+    expect(screen.queryByRole('region', { name: 'Payment check' })).not.toBeInTheDocument();
+  });
 });
