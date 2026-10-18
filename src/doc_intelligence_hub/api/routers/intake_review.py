@@ -1007,7 +1007,10 @@ async def get_intake_relationship_candidates(
                         limit=bounded_limit,
                     )
                 reference_documents = await asyncio.gather(
-                    *(client.get_document(related_id) for related_id in sorted(reference_document_ids))
+                    *(
+                        client.get_document(related_id)
+                        for related_id in sorted(reference_document_ids)
+                    )
                 )
                 documents_by_id = {
                     int(document["id"]): document

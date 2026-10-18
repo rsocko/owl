@@ -302,8 +302,7 @@ async def create_payment_evidence_relationship(
         (
             item
             for item in list_document_relationships(receipt_id, direction="outgoing")
-            if item["relationship_type"] == "supports"
-            and item["target_document_id"] == invoice_id
+            if item["relationship_type"] == "supports" and item["target_document_id"] == invoice_id
         ),
         None,
     )

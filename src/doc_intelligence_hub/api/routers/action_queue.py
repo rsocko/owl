@@ -881,9 +881,7 @@ async def queue_setup_metadata_schema(request: Request) -> dict[str, Any]:
         schema = await resolver.ensure(keys)
         result = _metadata_schema_readiness(schema, write_enabled=True)
         result["requeued_relationships"] = (
-            requeue_active_relationship_projections()
-            if native_relationship_field_missing
-            else 0
+            requeue_active_relationship_projections() if native_relationship_field_missing else 0
         )
         return result
     except HTTPException:

@@ -14,13 +14,9 @@ from doc_intelligence_hub.modules.triage.reference_discovery import (
 
 
 def test_labeled_extraction_keeps_short_contextual_invoice_number() -> None:
-    references = extract_labeled_references(
-        "Payment applies to invoice 4826, dated 2026-02-01."
-    )
+    references = extract_labeled_references("Payment applies to invoice 4826, dated 2026-02-01.")
 
-    assert [(reference.kind, reference.value) for reference in references] == [
-        ("invoice", "4826")
-    ]
+    assert [(reference.kind, reference.value) for reference in references] == [("invoice", "4826")]
 
 
 def test_title_extraction_rejects_bare_short_number_and_year() -> None:
@@ -33,17 +29,13 @@ def test_title_extraction_rejects_bare_short_number_and_year() -> None:
 async def test_llm_augments_unusual_explicit_reference_wording() -> None:
     with patch(
         "doc_intelligence_hub.core.llm.chat_json",
-        new=AsyncMock(
-            return_value={"references": [{"kind": "case", "value": "CV-2026-1042"}]}
-        ),
+        new=AsyncMock(return_value={"references": [{"kind": "case", "value": "CV-2026-1042"}]}),
     ) as chat_json:
         references = await extract_explicit_references(
             "This notice concerns the case identified in our prior correspondence as CV-2026-1042."
         )
 
-    assert references == [
-        ExplicitReference(kind="case", value="CV-2026-1042", source="llm")
-    ]
+    assert references == [ExplicitReference(kind="case", value="CV-2026-1042", source="llm")]
     chat_json.assert_awaited_once()
 
 
@@ -71,8 +63,7 @@ async def test_resolver_requires_whole_reference_and_excludes_source_document() 
 async def test_resolver_fails_closed_for_ambiguous_reference() -> None:
     client = AsyncMock()
     client.search_documents_by_content.return_value = [
-        {"id": document_id, "content": "Case CV-2026-1042"}
-        for document_id in range(2, 6)
+        {"id": document_id, "content": "Case CV-2026-1042"} for document_id in range(2, 6)
     ]
 
     result = await resolve_reference(

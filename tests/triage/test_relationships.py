@@ -110,7 +110,9 @@ def test_payment_receipt_supports_invoice_and_auto_creates():
         },
         20,
         {
-            **_bill(title="Pool Fence - 4826 Payment Receipt", document_date="2026-02-05", amount=1913),
+            **_bill(
+                title="Pool Fence - 4826 Payment Receipt", document_date="2026-02-05", amount=1913
+            ),
             "invoice_number": None,
             "document_type_name": "Receipt",
         },

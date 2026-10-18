@@ -65,7 +65,11 @@ def _reference_key(value: str) -> str:
 
 def _valid_reference(kind: str, value: str) -> bool:
     normalized = _normalized_reference(value)
-    if len(normalized) < 4 or len(normalized) > 64 or not any(char.isdigit() for char in normalized):
+    if (
+        len(normalized) < 4
+        or len(normalized) > 64
+        or not any(char.isdigit() for char in normalized)
+    ):
         return False
     compact = _reference_key(normalized)
     if not compact or (len(compact) == 4 and compact.startswith(("19", "20"))):
@@ -84,15 +88,15 @@ def _deduplicate(references: Iterable[ExplicitReference]) -> list[ExplicitRefere
         if key in seen or not _valid_reference(reference.kind, value):
             continue
         seen.add(key)
-        results.append(
-            ExplicitReference(kind=reference.kind, value=value, source=reference.source)
-        )
+        results.append(ExplicitReference(kind=reference.kind, value=value, source=reference.source))
         if len(results) >= MAX_EXTRACTED_REFERENCES:
             break
     return results
 
 
-def extract_labeled_references(text: str, *, source: str = "deterministic") -> list[ExplicitReference]:
+def extract_labeled_references(
+    text: str, *, source: str = "deterministic"
+) -> list[ExplicitReference]:
     """Extract explicitly labeled document identifiers without guessing bare numbers."""
     references: list[ExplicitReference] = []
     for match in _LABELED_REFERENCE_PATTERN.finditer(text or ""):
@@ -100,9 +104,7 @@ def extract_labeled_references(text: str, *, source: str = "deterministic") -> l
             (candidate for candidate in _REFERENCE_LABELS if match.group(candidate)),
             "reference",
         )
-        references.append(
-            ExplicitReference(kind=kind, value=match.group("value"), source=source)
-        )
+        references.append(ExplicitReference(kind=kind, value=match.group("value"), source=source))
     return _deduplicate(references)
 
 
@@ -243,4 +245,6 @@ async def resolve_references(
             for reference in list(references)[:MAX_EXTRACTED_REFERENCES]
         )
     )
-    return sorted(results, key=lambda result: (_reference_key(result.reference.value), result.status))
+    return sorted(
+        results, key=lambda result: (_reference_key(result.reference.value), result.status)
+    )

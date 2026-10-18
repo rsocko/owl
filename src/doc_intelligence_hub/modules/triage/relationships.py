@@ -145,9 +145,7 @@ def _document_text(metadata: dict[str, Any]) -> str:
 def classify_document_role(metadata: dict[str, Any]) -> str | None:
     title = str(metadata.get("title") or "")
     document_type = str(metadata.get("document_type_name") or metadata.get("doc_type") or "")
-    content = " ".join(
-        str(metadata.get(key) or "") for key in ("summary", "content", "text")
-    )
+    content = " ".join(str(metadata.get(key) or "") for key in ("summary", "content", "text"))
     if _RECEIPT_PATTERN.search(title):
         return "receipt"
     if _INVOICE_PATTERN.search(title):
@@ -529,10 +527,7 @@ def create_document_relationship(
             .all()
         )
         for existing in active:
-            if (
-                relationship_type == "supports"
-                and existing.relationship_type == "same_sequence"
-            ):
+            if relationship_type == "supports" and existing.relationship_type == "same_sequence":
                 existing.source_document_id = source_document_id
                 existing.target_document_id = target_document_id
                 existing.relationship_type = relationship_type
@@ -628,10 +623,11 @@ def create_document_relationship(
         session.commit()
         session.refresh(relationship)
         result = _relationship_to_dict(relationship)
-        if (
-            reconcile_action_queue
-            and relationship_type in {"follows", "supersedes", "same_sequence"}
-        ):
+        if reconcile_action_queue and relationship_type in {
+            "follows",
+            "supersedes",
+            "same_sequence",
+        }:
             from doc_intelligence_hub.modules.action_queue.obligations import (
                 reconcile_relationship_change,
             )
