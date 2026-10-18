@@ -264,9 +264,7 @@ async def _check_payment(request: Request, action_id: int, body: PaymentCheckReq
                     payment=_public_payment_projection(projection),
                 ).model_dump(mode="json")
             token = (
-                settings.tyrion_bill_matching_api_token.get_secret_value()
-                if settings.tyrion_bill_matching_api_token
-                else None
+                settings.tyrion_api_token.get_secret_value() if settings.tyrion_api_token else None
             )
             try:
                 response = await TyrionBillMatchingClient(
