@@ -377,7 +377,7 @@ def test_orphaned_check_uses_the_configured_connector_reference(db) -> None:
 
 
 def test_orphaned_check_recovers_from_legacy_partial_failure_generation(db) -> None:
-    obligation = _obligation(db)
+    obligation = _obligation(db, expected=None)
     action = _pay_action(db, obligation)
     service = PaymentReconciliationService(db)
     run, _request, _replay = service.start_check(
@@ -423,6 +423,13 @@ def test_orphaned_check_recovers_from_legacy_partial_failure_generation(db) -> N
     assert projection["state"] == "source_unavailable"
     assert run.status == "source_unavailable"
     assert run.error_code == "tyrion_check_expired"
+    recovered_evidence = (
+        db.query(PaymentEvidence)
+        .filter_by(evidence_ref=f"{run.id}:source-unavailable")
+        .one()
+    )
+    assert recovered_evidence.amount_minor == 10_000
+    assert recovered_evidence.currency == "USD"
     generations = {
         row.source_generation
         for row in db.query(PaymentEvidenceGeneration)
@@ -430,6 +437,16 @@ def test_orphaned_check_recovers_from_legacy_partial_failure_generation(db) -> N
         .all()
     }
     assert generations == {run.id, f"{run.id}:source-unavailable"}
+
+    retry, _request, replay = service.start_check(
+        action.id,
+        PaymentCheckRequest(
+            revision=projection["revision"],
+            idempotency_key="payment-check-after-partial-failure",
+        ),
+    )
+    assert retry.status == "checking"
+    assert replay is False
 
 
 def test_active_check_rejects_a_different_idempotency_key(db) -> None:
