@@ -316,6 +316,7 @@ export default function ActionWorkspace() {
   const [confirmAllDone, setConfirmAllDone] = useState(false);
   const [paymentCheck, setPaymentCheck] = useState<PaymentCheck | null>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const [confirmPayment, setConfirmPayment] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -397,6 +398,15 @@ export default function ActionWorkspace() {
     : -1;
   const dirty = JSON.stringify(draft) !== JSON.stringify(savedDraft);
 
+  const fetchPaymentCheck = useCallback(async (actionId: number) => {
+    const response = await endpoints.actionQueue.paymentCheck(String(actionId)) as {
+      payment_check: PaymentCheck;
+    };
+    setPaymentCheck(response.payment_check);
+    setPaymentError(null);
+    return response.payment_check;
+  }, []);
+
   useEffect(() => {
     if (!selectedAction) {
       setDraft(null);
@@ -412,29 +422,34 @@ export default function ActionWorkspace() {
   useEffect(() => {
     if (!selectedAction || paymentCheck?.state !== 'checking') return;
     const poll = window.setInterval(() => {
-      void endpoints.actionQueue.paymentCheck(String(selectedAction.id))
-        .then((response) => {
-          setPaymentCheck((response as { payment_check: PaymentCheck }).payment_check);
-        })
-        .catch(() => undefined);
+      void fetchPaymentCheck(selectedAction.id).catch((pollError) => {
+        setPaymentError(
+          pollError instanceof Error ? pollError.message : 'Could not refresh payment status.',
+        );
+      });
     }, 5_000);
     return () => window.clearInterval(poll);
-  }, [selectedAction, paymentCheck?.state]);
+  }, [fetchPaymentCheck, selectedAction, paymentCheck?.state]);
 
   useEffect(() => {
     if (!selectedAction || normalizedType(selectedAction.action_type) !== 'PAY' || !selectedAction.obligation_id) {
       setPaymentCheck(null);
+      setPaymentError(null);
       setPaymentLoading(false);
       return;
     }
     let active = true;
+    setPaymentCheck(null);
+    setPaymentError(null);
     setPaymentLoading(true);
-    void endpoints.actionQueue.paymentCheck(String(selectedAction.id))
-      .then((response) => {
-        if (active) setPaymentCheck((response as { payment_check: PaymentCheck }).payment_check);
-      })
-      .catch(() => {
-        if (active) setPaymentCheck(null);
+    void fetchPaymentCheck(selectedAction.id)
+      .catch((loadError) => {
+        if (active) {
+          setPaymentCheck(null);
+          setPaymentError(
+            loadError instanceof Error ? loadError.message : 'Could not load payment status.',
+          );
+        }
       })
       .finally(() => {
         if (active) setPaymentLoading(false);
@@ -442,7 +457,7 @@ export default function ActionWorkspace() {
     return () => {
       active = false;
     };
-  }, [selectedAction]);
+  }, [fetchPaymentCheck, selectedAction]);
 
   useEffect(() => {
     if (!selectedAction) return;
@@ -629,12 +644,14 @@ export default function ActionWorkspace() {
   };
 
   const checkForPayment = async () => {
-    if (!selectedAction || !paymentCheck) return;
+    if (!selectedAction) return;
     setBusy(`payment-${selectedAction.id}`);
+    setPaymentError(null);
     try {
+      const currentPaymentCheck = paymentCheck ?? await fetchPaymentCheck(selectedAction.id);
       const response = await endpoints.actionQueue.checkPayment(String(selectedAction.id), {
-        revision: paymentCheck.revision,
-        idempotency_key: `owl-check-payment:${selectedAction.id}:${paymentCheck.revision}`,
+        revision: currentPaymentCheck.revision,
+        idempotency_key: `owl-check-payment:${selectedAction.id}:${currentPaymentCheck.revision}`,
       }) as { payment: PaymentCheck };
       setPaymentCheck(response.payment);
       setToast({
@@ -644,8 +661,12 @@ export default function ActionWorkspace() {
         tone: 'success',
       });
     } catch (paymentError) {
+      const message = paymentError instanceof Error
+        ? paymentError.message
+        : 'Could not check for payment.';
+      setPaymentError(message);
       setToast({
-        message: paymentError instanceof Error ? paymentError.message : 'Could not check for payment.',
+        message,
         tone: 'error',
       });
     } finally {
@@ -975,6 +996,7 @@ export default function ActionWorkspace() {
                           {normalizedType(selectedAction.action_type) === 'PAY' && selectedAction.obligation_id ? (
                             <PaymentCheckPanel
                               paymentCheck={paymentCheck}
+                              error={paymentError}
                               loading={paymentLoading}
                               busy={busy === `payment-${selectedAction.id}`}
                               eligible={Boolean(
@@ -1153,6 +1175,7 @@ export default function ActionWorkspace() {
 
 function PaymentCheckPanel({
   paymentCheck,
+  error,
   loading,
   busy,
   eligible,
@@ -1160,6 +1183,7 @@ function PaymentCheckPanel({
   onConfirm,
 }: {
   paymentCheck: PaymentCheck | null;
+  error: string | null;
   loading: boolean;
   busy: boolean;
   eligible: boolean;
@@ -1168,6 +1192,7 @@ function PaymentCheckPanel({
 }) {
   const candidate = paymentCheck?.candidates[0];
   const checking = busy || paymentCheck?.state === 'checking';
+  const unavailable = !loading && !paymentCheck && Boolean(error);
   const stateLabel: Record<PaymentCheckState, string> = {
     unchecked: 'Ready to check',
     checking: 'Checking accounts',
@@ -1187,7 +1212,13 @@ function PaymentCheckPanel({
       <div className="payment-check-heading">
         <div>
           <span>Payment reconciliation</span>
-          <strong aria-live="polite">{loading ? 'Loading payment status…' : stateLabel[paymentCheck?.state || 'unchecked']}</strong>
+          <strong aria-live="polite">
+            {loading
+              ? 'Loading payment status…'
+              : unavailable
+                ? 'Payment status unavailable'
+                : stateLabel[paymentCheck?.state || 'unchecked']}
+          </strong>
         </div>
         <Button
           size="sm"
@@ -1195,8 +1226,10 @@ function PaymentCheckPanel({
           onClick={onCheck}
         >
           <RefreshCw size={15} className={checking ? 'spin' : ''} />
-          {paymentCheck?.state === 'checking'
+          {checking
             ? 'Checking…'
+            : unavailable
+              ? 'Retry check'
             : paymentCheck?.state === 'unchecked'
               ? 'Check for payment'
               : 'Check again'}
@@ -1205,6 +1238,8 @@ function PaymentCheckPanel({
       <p>
         {!eligible
           ? 'Add a payee, amount, and due or bill date before checking for payment.'
+          : unavailable
+            ? error
           : paymentCheck?.message || 'Search all financial accounts except any configured exclusions for a matching transaction.'}
       </p>
       {candidate ? (
