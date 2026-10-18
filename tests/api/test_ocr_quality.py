@@ -491,9 +491,7 @@ class TestAssessDocument:
         assert body["has_stage2_analysis"] is False
         mock_paperless.get_document.assert_awaited_once_with(9924)
 
-    def test_repeated_assessment_is_idempotent(
-        self, client, ocr_quality_db, mock_paperless
-    ):
+    def test_repeated_assessment_is_idempotent(self, client, ocr_quality_db, mock_paperless):
         mock_paperless.get_document.return_value = {
             "id": 9924,
             "content": "Existing searchable OCR text.",
@@ -511,9 +509,7 @@ class TestAssessDocument:
         finally:
             db.close()
 
-    def test_concurrent_assessment_returns_conflict(
-        self, client, ocr_quality_db, mock_paperless
-    ):
+    def test_concurrent_assessment_returns_conflict(self, client, ocr_quality_db, mock_paperless):
         ocr_quality_router._active_manual_stage1_document_ids.add(9924)
         try:
             resp = client.post("/api/ocr-quality/documents/9924/assess")
