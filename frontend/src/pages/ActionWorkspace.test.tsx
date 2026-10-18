@@ -11,6 +11,9 @@ const {
   bulkMock,
   feedbackMock,
   documentOcrMock,
+  paymentCheckMock,
+  checkPaymentMock,
+  confirmPaymentAndCompleteMock,
 } = vi.hoisted(() => ({
   statusMock: vi.fn(),
   actionsMock: vi.fn(),
@@ -19,6 +22,9 @@ const {
   bulkMock: vi.fn(),
   feedbackMock: vi.fn(),
   documentOcrMock: vi.fn(),
+  paymentCheckMock: vi.fn(),
+  checkPaymentMock: vi.fn(),
+  confirmPaymentAndCompleteMock: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
@@ -30,6 +36,9 @@ vi.mock('../lib/api', () => ({
       splitAction: splitActionMock,
       bulk: bulkMock,
       feedback: feedbackMock,
+      paymentCheck: paymentCheckMock,
+      checkPayment: checkPaymentMock,
+      confirmPaymentAndComplete: confirmPaymentAndCompleteMock,
     },
     intake: {
       documentOcr: documentOcrMock,
@@ -128,6 +137,41 @@ describe('ActionWorkspace', () => {
     splitActionMock.mockResolvedValue({ ...actions[1], id: 4 });
     bulkMock.mockResolvedValue({ affected: 2, action: 'complete' });
     feedbackMock.mockResolvedValue({});
+    paymentCheckMock.mockResolvedValue({
+      payment_check: {
+        state: 'unchecked',
+        checked_at: null,
+        stale_after: null,
+        source: 'tyrion_bill_match',
+        revision: 'v1:2:1',
+        message: 'Payment has not been checked.',
+        candidates: [],
+      },
+    });
+    checkPaymentMock.mockResolvedValue({
+      payment: {
+        state: 'posted_match',
+        checked_at: '2026-10-18T12:01:00Z',
+        stale_after: '2026-10-25T12:00:00Z',
+        source: 'tyrion_bill_match',
+        revision: 'v1:2:3',
+        message: 'A posted payment candidate requires confirmation.',
+        candidates: [{
+          id: 'evidence-1',
+          payee: 'City Utilities',
+          amount: 82.45,
+          currency: 'USD',
+          transaction_date: '2026-10-18',
+          status: 'posted',
+          account_display_name: 'Household checking',
+          account_last_four: '1234',
+          confidence: 'high',
+          score: 96,
+          match_reasons: ['amount_exact', 'date_strong'],
+        }],
+      },
+    });
+    confirmPaymentAndCompleteMock.mockResolvedValue({});
   });
 
   it('shows each document once while exposing every action on the selected document', async () => {
@@ -201,6 +245,32 @@ describe('ActionWorkspace', () => {
     await waitFor(() => expect(bulkMock).toHaveBeenCalledWith({
       action: 'complete',
       action_ids: [1, 2],
+    }));
+  });
+
+  it('requires explicit confirmation before completing a posted payment match', async () => {
+    actionsMock.mockResolvedValue({
+      actions: actions.map((action) => (
+        action.id === 1 ? { ...action, obligation_id: 'obligation-1' } : { ...action }
+      )),
+      total: actions.length,
+    });
+    renderWorkspace();
+
+    expect(await screen.findByText('Ready to check')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Check for payment' }));
+
+    expect(await screen.findByText('Posted payment found')).toBeInTheDocument();
+    expect(screen.getByText('Household checking •••• 1234')).toBeInTheDocument();
+    expect(updateActionMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm payment and complete' }));
+    const dialog = screen.getByRole('dialog', { name: 'Confirm this posted payment?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm payment and complete' }));
+
+    await waitFor(() => expect(confirmPaymentAndCompleteMock).toHaveBeenCalledWith('1', {
+      revision: 'v1:2:3',
+      idempotency_key: 'owl-confirm-payment:1:v1:2:3',
     }));
   });
 });
