@@ -342,6 +342,7 @@ describe('IntakeReview', () => {
 
   it('reloads relationships when analysis is refreshed', async () => {
     refreshMock.mockResolvedValue({
+      core: core(1),
       actions: {
         actions: [],
         ocr_quality: { quality_score: 90, quality_band: 'green', poor_quality: false },
@@ -358,7 +359,9 @@ describe('IntakeReview', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Refresh analysis' }));
 
     await waitFor(() => expect(documentRelationshipsMock).toHaveBeenCalledTimes(2));
-    expect(screen.getByText('Suggestions, actions, and relationships refreshed.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Metadata, suggestions, actions, and relationships refreshed.'),
+    ).toBeInTheDocument();
   });
 
   it('adds a suggested relationship using its recommended type', async () => {
