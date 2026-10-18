@@ -11,18 +11,18 @@ import {
   ErrorState,
   SkeletonLoader,
   Toast,
-} from '../components/ui';
-import EobMatchDetail from '../components/EobMatchDetail';
-import OrphanDetail from '../components/triage/OrphanDetail';
-import DocumentPreview from '../components/DocumentPreview';
-import { endpoints } from '../lib/api';
-import { getToastDuration } from '../lib/toast';
-import { StatementGroupingDetail } from '../components/triage/StatementGroupingDetail';
-import DuplicateDetail from './DuplicateDetail';
-import OcrFocusInspector from '../components/OcrFocusInspector';
-import { DocumentWorkspaceFrame } from '../components/DocumentWorkspace';
-import '../styles/triage-queue.css';
-import '../styles/document-workspace.css';
+} from '../../ui';
+import EobMatchDetail from '../../EobMatchDetail';
+import OrphanDetail from '../../triage/OrphanDetail';
+import DocumentPreview from '../../DocumentPreview';
+import { endpoints } from '../../../lib/api';
+import { getToastDuration } from '../../../lib/toast';
+import { StatementGroupingDetail } from '../../triage/StatementGroupingDetail';
+import DuplicateDetail from '../../../pages/DuplicateDetail';
+import OcrFocusInspector from '../../OcrFocusInspector';
+import { DocumentWorkspaceFrame } from '../../DocumentWorkspace';
+import '../../../styles/document-workspace-review.css';
+import '../../../styles/document-workspace.css';
 
 // ------------------------------------------------------------------
 // Types
@@ -372,7 +372,7 @@ function ActionCorrectionEditor({
 // Component
 // ------------------------------------------------------------------
 
-export default function TriageQueue() {
+export default function ReviewWorkflow() {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryTypeFilter = itemTypeFilterFromQuery(searchParams.get('type'));
   const queryItemId = searchParams.get('item');

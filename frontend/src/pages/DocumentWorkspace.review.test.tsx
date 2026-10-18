@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import TriageQueue from './TriageQueue';
+import DocumentWorkspace from './DocumentWorkspace';
 
 const { queueMock, statsMock, resolveMock, undoMock } = vi.hoisted(() => ({
   queueMock: vi.fn(),
@@ -84,7 +84,7 @@ describe('Needs Review actions', () => {
   it('uses decision language and keeps Dismiss under More', async () => {
     const { container } = render(
       <MemoryRouter>
-        <TriageQueue />
+        <DocumentWorkspace mode="review" />
       </MemoryRouter>,
     );
 
@@ -107,7 +107,7 @@ describe('Needs Review actions', () => {
   it('initializes the queue filter from a validated type query parameter', async () => {
     render(
       <MemoryRouter initialEntries={['/needs-review?type=eob_match_review']}>
-        <TriageQueue />
+        <DocumentWorkspace mode="review" />
       </MemoryRouter>,
     );
 
@@ -119,7 +119,7 @@ describe('Needs Review actions', () => {
   it('ignores unknown type query parameters', async () => {
     render(
       <MemoryRouter initialEntries={['/needs-review?type=not-a-real-queue']}>
-        <TriageQueue />
+        <DocumentWorkspace mode="review" />
       </MemoryRouter>,
     );
 
@@ -166,7 +166,7 @@ describe('Needs Review actions', () => {
 
     render(
       <MemoryRouter initialEntries={['/needs-review?type=ocr_quality_review&ocr_review_status=FAILED&item=ocr-review-1']}>
-        <TriageQueue />
+        <DocumentWorkspace mode="review" />
       </MemoryRouter>,
     );
 
@@ -184,7 +184,7 @@ describe('Needs Review actions', () => {
   it('sends search terms to the privacy-safe backend query', async () => {
     render(
       <MemoryRouter initialEntries={['/needs-review?type=ocr_quality_review&q=alignment']}>
-        <TriageQueue />
+        <DocumentWorkspace mode="review" />
       </MemoryRouter>,
     );
 
@@ -229,7 +229,7 @@ describe('Needs Review actions', () => {
 
     render(
       <MemoryRouter initialEntries={['/needs-review?type=action_classification&item=action-review-1']}>
-        <TriageQueue />
+        <DocumentWorkspace mode="review" />
       </MemoryRouter>,
     );
 
@@ -288,7 +288,7 @@ describe('Needs Review actions', () => {
 
     render(
       <MemoryRouter>
-        <TriageQueue />
+        <DocumentWorkspace mode="review" />
       </MemoryRouter>,
     );
 
@@ -335,7 +335,7 @@ describe('Needs Review actions', () => {
 
     render(
       <MemoryRouter>
-        <TriageQueue />
+        <DocumentWorkspace mode="review" />
       </MemoryRouter>,
     );
 
@@ -400,7 +400,7 @@ describe('Needs Review actions', () => {
 
     render(
       <MemoryRouter>
-        <TriageQueue />
+        <DocumentWorkspace mode="review" />
       </MemoryRouter>,
     );
 
@@ -441,7 +441,7 @@ describe('Needs Review actions', () => {
 
     render(
       <MemoryRouter>
-        <TriageQueue />
+        <DocumentWorkspace mode="review" />
       </MemoryRouter>,
     );
 
@@ -491,7 +491,7 @@ describe('Needs Review actions', () => {
 
     render(
       <MemoryRouter>
-        <TriageQueue />
+        <DocumentWorkspace mode="review" />
       </MemoryRouter>,
     );
 

@@ -11,5 +11,5 @@ export function canonicalActionTarget(action: CanonicalActionLocation): string {
   }
   const params = new URLSearchParams({ action: String(action.id) });
   if (action.status) params.set('status', action.status);
-  return `/action-queue?${params.toString()}`;
+  return `/actions?${params.toString()}`;
 }

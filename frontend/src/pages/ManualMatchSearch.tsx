@@ -92,7 +92,7 @@ export default function ManualMatchSearch() {
   const [searchParams] = useSearchParams();
   const docId = searchParams.get('docId') ?? '';
   const matchId = searchParams.get('matchId') ?? '';
-  // Prefilled context passed from EobUnmatched.tsx / TriageQueue.tsx links —
+  // Prefilled context passed from EobUnmatched.tsx / the review workspace —
   // see their "search manually" actions for how these are constructed.
   const providerHint = searchParams.get('provider') ?? '';
   const patientResponsibilityHint = searchParams.get('patientResponsibility') ?? '';

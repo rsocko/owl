@@ -16,8 +16,8 @@ type NavEntry = NavItem | NavGroup;
 
 const NAV_ENTRIES: NavEntry[] = [
   { to: '/', label: 'Overview' },
-  { to: '/inbox-review', label: 'Inbox' },
-  { to: '/action-queue', label: 'Actions' },
+  { to: '/inbox', label: 'Inbox' },
+  { to: '/actions', label: 'Actions' },
   { to: '/needs-review', label: 'Needs Review' },
   {
     label: 'Documents',
@@ -43,7 +43,7 @@ const NAV_ENTRIES: NavEntry[] = [
   {
     label: 'Admin',
     items: [
-      { to: '/action-queue/operations', label: 'Action Queue Operations' },
+      { to: '/actions/operations', label: 'Action Queue Operations' },
       { to: '/rules', label: 'Rules Config' },
       { to: '/settings', label: 'Settings' },
     ],

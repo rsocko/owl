@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import ActionWorkspace from './ActionWorkspace';
+import DocumentWorkspace from './DocumentWorkspace';
 
 vi.mock('../components/OcrFocusInspector', () => ({
   default: ({ documentId, onReturn }: { documentId: number; onReturn?: () => void }) => (
@@ -137,13 +137,13 @@ const actions = [
 
 function renderWorkspace() {
   return render(
-    <MemoryRouter initialEntries={['/action-queue']}>
-      <ActionWorkspace />
+    <MemoryRouter initialEntries={['/actions']}>
+      <DocumentWorkspace mode="actions" />
     </MemoryRouter>,
   );
 }
 
-describe('ActionWorkspace', () => {
+describe('DocumentWorkspace actions mode', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     statusMock.mockResolvedValue({

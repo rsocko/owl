@@ -181,7 +181,7 @@ describe('OrphansDupes relationship maintenance', () => {
     expect(await screen.findByText(/safely stored in OWL/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Repair Paperless sync' })).toHaveAttribute(
       'href',
-      '#/action-queue/operations',
+      '#/actions/operations',
     );
     expect(screen.getByText('Failures').nextSibling).toHaveTextContent('0');
   });

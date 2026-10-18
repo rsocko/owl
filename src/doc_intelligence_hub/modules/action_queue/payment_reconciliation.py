@@ -2423,7 +2423,7 @@ class PaymentReconciliationService:
                 if evidence
                 else None
             ),
-            "owl_deep_link": f"#/action-queue?obligation={obligation.id}",
+            "owl_deep_link": f"#/actions?obligation={obligation.id}",
             "source_actions": self._source_actions(case, edge),
         }
         if include_history:

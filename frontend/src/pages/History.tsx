@@ -281,7 +281,7 @@ export default function History() {
         tone: queueStatus.status === 'running' ? 'warning' : queueStatus.status === 'ok' ? 'success' : 'muted',
         summary: runSummary.summary,
         metrics: `${runSummary.metrics} · limit ${queueStatus.limit ?? '—'}${queueStatus.read_only ? ' · read-only' : ''}`,
-        href: '/action-queue',
+        href: '/actions',
       });
     }
 

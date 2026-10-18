@@ -480,7 +480,7 @@ export default function OverviewDashboard() {
                 <Badge tone="muted">Total {numberFormatter.format(dashboard.queue.database?.total ?? 0)}</Badge>
               </div>
               <div className="btn-group">
-                <Button onClick={() => navigate('/action-queue')}>Open action queue</Button>
+                <Button onClick={() => navigate('/actions')}>Open actions</Button>
               </div>
             </Card>
 

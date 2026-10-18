@@ -220,7 +220,7 @@ export default function ActionQueueOperations() {
       <PageHeader
         title="Action Queue Operations"
         desc="Pipeline health, diagnostics, dry runs, backfills, and one-off troubleshooting."
-        actions={<a href="#/action-queue">Return to Action Queue</a>}
+        actions={<a href="#/actions">Return to Actions</a>}
       />
 
       {error && <ErrorState message={error} />}

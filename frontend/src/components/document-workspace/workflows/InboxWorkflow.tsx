@@ -16,32 +16,32 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../components/ui';
+import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../../ui';
 import {
   DocumentWorkspaceBody,
   DocumentWorkspaceFrame,
   DocumentWorkspaceHeader,
   DocumentWorkspaceTabs,
-} from '../components/DocumentWorkspace';
-import DocumentActionsPanel from '../components/DocumentActionsPanel';
+} from '../../DocumentWorkspace';
+import DocumentActionsPanel from '../../DocumentActionsPanel';
 import {
   documentActionMutation,
   type DocumentAction,
   type DocumentActionDraft,
   type DocumentActionStatus,
-} from '../lib/documentActions';
-import DocumentRelationshipsPanel from '../components/DocumentRelationshipsPanel';
-import OcrSummaryPanel from '../components/OcrSummaryPanel';
-import OcrFocusInspector from '../components/OcrFocusInspector';
-import { ocrNeedsAttention, useOcrSummary } from '../hooks/useOcrSummary';
-import { endpoints } from '../lib/api';
+} from '../../../lib/documentActions';
+import DocumentRelationshipsPanel from '../../DocumentRelationshipsPanel';
+import OcrSummaryPanel from '../../OcrSummaryPanel';
+import OcrFocusInspector from '../../OcrFocusInspector';
+import { ocrNeedsAttention, useOcrSummary } from '../../../hooks/useOcrSummary';
+import { endpoints } from '../../../lib/api';
 import {
   ACCOUNT_IDENTIFIER_CLASSES,
   type AccountIdentifierClass,
-} from '../lib/accountIdentifier';
-import { getToastDuration } from '../lib/toast';
-import '../styles/intake-review.css';
-import '../styles/document-workspace.css';
+} from '../../../lib/accountIdentifier';
+import { getToastDuration } from '../../../lib/toast';
+import '../../../styles/document-workspace-inbox.css';
+import '../../../styles/document-workspace.css';
 
 type ReviewTab = 'metadata' | 'actions' | 'related' | 'ocr';
 type Disposition = 'save' | 'file_only' | 'confirm_and_file';
@@ -517,7 +517,7 @@ function TagPicker({
   );
 }
 
-export default function IntakeReview() {
+export default function InboxWorkflow() {
   const { documentId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedDocument = searchParams.get('document') || documentId;
