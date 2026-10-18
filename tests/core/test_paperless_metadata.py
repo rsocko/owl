@@ -13,8 +13,10 @@ from doc_intelligence_hub.core.paperless import (
     MetadataCreatePolicy,
     MetadataDiagnosticCode,
     MetadataFieldKey,
+    MetadataRetirementPolicy,
     MetadataSchemaError,
     MetadataValueError,
+    MetadataWritePolicy,
     PaperlessMetadataResolver,
     build_account_identifier_update,
     build_metadata_update,
@@ -84,6 +86,15 @@ def test_obligation_projection_fields_are_creatable() -> None:
     assert obligation_id.create_definition()["data_type"] == "string"
     assert role.canonical_name == "Obligation Role"
     assert role.select_options == ("invoice", "receipt", "reminder", "revision", "supporting")
+
+
+def test_action_analyzed_is_disabled_and_approved_for_retirement() -> None:
+    spec = get_metadata_field_spec(MetadataFieldKey.ACTION_ANALYZED)
+
+    assert spec.create_policy is MetadataCreatePolicy.NEVER
+    assert spec.create_type is None
+    assert spec.write_policy is MetadataWritePolicy.DISABLED
+    assert spec.retirement_policy is MetadataRetirementPolicy.RETIRE_WHEN_EMPTY
 
 
 def test_document_link_metadata_supports_multiple_values() -> None:
@@ -334,18 +345,17 @@ def test_build_update_targets_canonical_id_only() -> None:
     ) == {"field": 90, "value": "ending 9876"}
 
 
-def test_build_update_rejects_unmasked_account_identifier() -> None:
+def test_build_update_accepts_exact_account_identifier() -> None:
     schema = resolve_metadata_schema(
         [_definition(92, MetadataFieldKey.ACCOUNT_IDENTIFIER)],
         (MetadataFieldKey.ACCOUNT_IDENTIFIER,),
     )
 
-    with pytest.raises(MetadataValueError, match="masked"):
-        build_metadata_update(
-            MetadataFieldKey.ACCOUNT_IDENTIFIER,
-            "SAMPLE123456789",
-            schema,
-        )
+    assert build_metadata_update(
+        MetadataFieldKey.ACCOUNT_IDENTIFIER,
+        "SAMPLE123456789",
+        schema,
+    ) == {"field": 92, "value": "SAMPLE123456789"}
 
 
 @pytest.mark.parametrize(
@@ -363,34 +373,6 @@ def test_build_update_accepts_deterministically_masked_identifiers(value: str) -
         value,
         schema,
     ) == {"field": 92, "value": value.strip()}
-
-
-@pytest.mark.parametrize(
-    "value",
-    ["AB", "*A", "***ABCDEFGHI", "***AB!"],
-)
-def test_build_update_rejects_invalid_masked_identifier_shapes(value: str) -> None:
-    schema = resolve_metadata_schema(
-        [_definition(92, MetadataFieldKey.ACCOUNT_IDENTIFIER)],
-        (MetadataFieldKey.ACCOUNT_IDENTIFIER,),
-    )
-
-    with pytest.raises(MetadataValueError, match="masked"):
-        build_metadata_update(MetadataFieldKey.ACCOUNT_IDENTIFIER, value, schema)
-
-
-def test_build_update_rejects_adversarial_long_masked_identifier() -> None:
-    schema = resolve_metadata_schema(
-        [_definition(92, MetadataFieldKey.ACCOUNT_IDENTIFIER)],
-        (MetadataFieldKey.ACCOUNT_IDENTIFIER,),
-    )
-
-    with pytest.raises(MetadataValueError, match="masked"):
-        build_metadata_update(
-            MetadataFieldKey.ACCOUNT_IDENTIFIER,
-            "X" * 1_000_000 + "!",
-            schema,
-        )
 
 
 def test_unambiguous_canonical_fields_are_creation_enabled() -> None:
@@ -411,7 +393,7 @@ def test_unambiguous_canonical_fields_are_creation_enabled() -> None:
         assert spec.create_type.value == expected_type
 
 
-def test_governed_account_update_masks_financial_credentials() -> None:
+def test_governed_account_update_preserves_financial_identifier() -> None:
     schema = resolve_metadata_schema(
         [_definition(93, MetadataFieldKey.ACCOUNT_IDENTIFIER)],
         (MetadataFieldKey.ACCOUNT_IDENTIFIER,),
@@ -424,7 +406,7 @@ def test_governed_account_update_masks_financial_credentials() -> None:
         schema,
     )
 
-    assert update == {"field": 93, "value": "bank account ending 6789"}
+    assert update == {"field": 93, "value": "123456789"}
     assert projection.display_value == "bank account ending 6789"
 
 

@@ -12,14 +12,14 @@ describe('DocumentSummary', () => {
       document_type: 'Statement',
       document_date: '2026-10-01',
       date_label: 'Statement date',
-      account_identifier_display: 'ending 3456',
+      account_identifier_display: 'ACCT-123456',
     };
 
     render(<DocumentSummary summary={summary} density="review" />);
 
     expect(screen.getByText('October statement')).toBeInTheDocument();
     expect(screen.getByText(/Statement date/)).toBeInTheDocument();
-    expect(screen.getByText('Account ending 3456')).toBeInTheDocument();
+    expect(screen.getByText('Account ACCT-123456')).toBeInTheDocument();
     expect(screen.getByLabelText(documentSummaryLabel(summary))).toBeInTheDocument();
   });
 

@@ -55,19 +55,21 @@ async def test_update_doc_fields_uses_resolved_ids() -> None:
 
 
 @pytest.mark.asyncio
-async def test_update_doc_fields_rejects_unmasked_account_identifier() -> None:
+async def test_update_doc_fields_accepts_exact_account_identifier() -> None:
     client = AsyncMock()
     schema = resolve_metadata_schema(
         [{"id": 11, "name": "Account Identifier", "data_type": "string"}],
         (MetadataFieldKey.SERIES_NAME, MetadataFieldKey.ACCOUNT_IDENTIFIER),
     )
 
-    with pytest.raises(ValueError, match="masked"):
-        await _update_doc_fields(
-            client,
-            "100",
-            schema,
-            account_identifier="SAMPLE123456789",
-        )
+    await _update_doc_fields(
+        client,
+        "100",
+        schema,
+        account_identifier="SAMPLE123456789",
+    )
 
-    client.update_custom_fields.assert_not_awaited()
+    client.update_custom_fields.assert_awaited_once_with(
+        100,
+        [{"field": 11, "value": "SAMPLE123456789"}],
+    )

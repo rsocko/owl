@@ -39,7 +39,6 @@ _ACTION_FIELDS = (
     MetadataFieldKey.DOCUMENT_AMOUNT,
     MetadataFieldKey.DOCUMENT_DUE_DATE,
     MetadataFieldKey.ACTION_STATUS,
-    MetadataFieldKey.ACTION_ANALYZED,
 )
 _OBLIGATION_FIELDS = (
     MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS,
@@ -267,14 +266,6 @@ class PaperlessEnricher:
                 field_id = self._field_id_cache.get(key)
                 if field_id is not None:
                     updates.append({"field": field_id, "value": None})
-        updates.append(
-            build_metadata_update(
-                MetadataFieldKey.ACTION_ANALYZED,
-                date.today().isoformat(),
-                schema,
-            )
-        )
-
         await asyncio.sleep(settings.rate_limit_delay)
         logger.info(
             "Writing %d custom field(s) to Paperless document_id=%s: %s",

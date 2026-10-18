@@ -15,6 +15,10 @@ import {
 } from '../components/ui';
 import { endpoints, type DocumentSummaryModel } from '../lib/api';
 import DocumentSummary from '../components/DocumentSummary';
+import {
+  ACCOUNT_IDENTIFIER_CLASSES,
+  type AccountIdentifierClass,
+} from '../lib/accountIdentifier';
 import { getToastDuration } from '../lib/toast';
 import '../styles/metadata-correction.css';
 
@@ -131,6 +135,8 @@ export default function MetadataCorrection() {
   // Inline editing state: field_name → current edited value
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const [accountIdentifierClass, setAccountIdentifierClass] =
+    useState<AccountIdentifierClass>('service_account');
 
   // UI state
   const [toast, setToast] = useState<ToastState>(null);
@@ -179,7 +185,9 @@ export default function MetadataCorrection() {
     const vals: Record<string, string> = {};
     for (const field of data.extracted_fields) {
       const correction = data.latest_corrections[field.field_name];
-      if (correction?.corrected_value) {
+      if (field.field_name === 'account_identifier' && field.value != null) {
+        vals[field.field_name] = String(field.value);
+      } else if (correction?.corrected_value) {
         vals[field.field_name] = correction.corrected_value;
       } else if (field.value != null) {
         vals[field.field_name] = String(field.value);
@@ -196,6 +204,7 @@ export default function MetadataCorrection() {
   const pendingWritebacks = useMemo(() => {
     if (!data) return [];
     return data.extracted_fields.filter((f) => {
+      if (f.field_name === 'account_identifier') return false;
       const corr = data.latest_corrections[f.field_name];
       return corr?.correction_type === 'corrected' || corr?.correction_type === 'added';
     });
@@ -221,6 +230,7 @@ export default function MetadataCorrection() {
           corrected_value: newValue,
           original_value: originalValue ?? undefined,
           confidence: data.latest_corrections[fieldName]?.confidence ?? undefined,
+          identifier_class: fieldName === 'account_identifier' ? accountIdentifierClass : undefined,
         });
         setEditingField(null);
         setEditValues((prev) => {
@@ -228,15 +238,27 @@ export default function MetadataCorrection() {
           delete next[fieldName];
           return next;
         });
-        setToast({ message: `${fieldLabel(fieldName)} corrected`, tone: 'success' });
+        setToast({
+          message:
+            fieldName === 'account_identifier'
+              ? 'Account Identifier updated in Paperless'
+              : `${fieldLabel(fieldName)} corrected`,
+          tone: 'success',
+        });
         await loadData();
-      } catch {
-        setToast({ message: `Failed to save correction for ${fieldLabel(fieldName)}`, tone: 'error' });
+      } catch (err) {
+        setToast({
+          message:
+            err instanceof Error
+              ? err.message
+              : `Failed to save correction for ${fieldLabel(fieldName)}`,
+          tone: 'error',
+        });
       } finally {
         setBusyField(null);
       }
     },
-    [docId, data, editValues, loadData],
+    [accountIdentifierClass, docId, data, editValues, loadData],
   );
 
   const handleConfirm = useCallback(
@@ -371,8 +393,8 @@ export default function MetadataCorrection() {
       <div className="meta-reason-banner">
         <strong>✏️ Review &amp; Correct Extracted Fields</strong>
         <span>
-          Correcting these will: (1) update Paperless custom fields, (2) unblock EOB matching, and (3) improve future
-          extraction accuracy for similar documents.
+          Account Identifier edits write through immediately. Other corrections can be reviewed
+          together before writing them to Paperless.
         </span>
       </div>
 
@@ -403,33 +425,59 @@ export default function MetadataCorrection() {
 
                   <div className="meta-field-row">
                     {isEditing ? (
-                      <>
-                        <input
-                          className={`meta-input ${correction?.correction_type === 'corrected' ? 'corrected' : ''}`}
-                          value={editValues[field.field_name] ?? ''}
-                          onChange={(e) =>
-                            setEditValues((prev) => ({ ...prev, [field.field_name]: e.target.value }))
-                          }
-                          placeholder={`Enter ${fieldLabel(field.field_name).toLowerCase()}…`}
-                          autoFocus
-                          disabled={isBusy}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') void handleCorrect(field.field_name);
-                            if (e.key === 'Escape') cancelEditing(field.field_name);
-                          }}
-                        />
-                        <Button
-                          size="sm"
-                          variant="success"
-                          onClick={() => void handleCorrect(field.field_name)}
-                          disabled={isBusy || editValues[field.field_name] === undefined}
-                        >
-                          {isBusy ? '…' : '✓'}
-                        </Button>
-                        <Button size="sm" onClick={() => cancelEditing(field.field_name)} disabled={isBusy}>
-                          ✕
-                        </Button>
-                      </>
+                      <div className="meta-edit-controls">
+                        <div className="meta-edit-value-row">
+                          <input
+                            aria-label={fieldLabel(field.field_name)}
+                            className={`meta-input ${correction?.correction_type === 'corrected' ? 'corrected' : ''}`}
+                            value={editValues[field.field_name] ?? ''}
+                            onChange={(e) =>
+                              setEditValues((prev) => ({ ...prev, [field.field_name]: e.target.value }))
+                            }
+                            placeholder={`Enter ${fieldLabel(field.field_name).toLowerCase()}…`}
+                            autoFocus
+                            disabled={isBusy}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') void handleCorrect(field.field_name);
+                              if (e.key === 'Escape') cancelEditing(field.field_name);
+                            }}
+                          />
+                          <Button
+                            size="sm"
+                            variant="success"
+                            onClick={() => void handleCorrect(field.field_name)}
+                            disabled={isBusy || editValues[field.field_name] === undefined}
+                          >
+                            {isBusy ? '…' : 'Save'}
+                          </Button>
+                          <Button size="sm" onClick={() => cancelEditing(field.field_name)} disabled={isBusy}>
+                            Cancel
+                          </Button>
+                        </div>
+                        {field.field_name === 'account_identifier' && (
+                          <div className="meta-account-classification">
+                            <label htmlFor="account-identifier-class">Identifier type</label>
+                            <select
+                              id="account-identifier-class"
+                              value={accountIdentifierClass}
+                              onChange={(event) =>
+                                setAccountIdentifierClass(event.target.value as AccountIdentifierClass)
+                              }
+                              disabled={isBusy}
+                            >
+                              {ACCOUNT_IDENTIFIER_CLASSES.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                            <span>
+                              The selected type controls validation and matching. The value is
+                              stored exactly in Paperless.
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     ) : (
                       <>
                         <span
@@ -453,7 +501,9 @@ export default function MetadataCorrection() {
                           >
                             ✎
                           </button>
-                          {(field.has_value || status === 'corrected') && status !== 'confirmed' && (
+                          {field.field_name !== 'account_identifier'
+                            && (field.has_value || status === 'corrected')
+                            && status !== 'confirmed' && (
                             <button
                               className="meta-confirm-btn"
                               onClick={(e) => {
@@ -465,7 +515,7 @@ export default function MetadataCorrection() {
                             >
                               {isBusy ? '…' : '✓'}
                             </button>
-                          )}
+                            )}
                         </div>
                       </>
                     )}
@@ -565,6 +615,7 @@ export default function MetadataCorrection() {
             <ul>
               <li><strong>Edit</strong> — click any field value to correct it</li>
               <li><strong>Confirm</strong> — mark a correct extraction as verified (positive training data)</li>
+              <li><strong>Account identifiers</strong> — save directly to Paperless using the selected identifier type</li>
               <li><strong>Write to Paperless</strong> — push all corrections to Paperless custom fields</li>
               <li><strong>Training</strong> — confirmed & corrected fields improve future extraction accuracy</li>
             </ul>

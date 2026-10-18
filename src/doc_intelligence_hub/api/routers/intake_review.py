@@ -19,18 +19,21 @@ from doc_intelligence_hub.api.routers.action_queue import (
     _sync_action_queue_settings,
 )
 from doc_intelligence_hub.core.paperless import (
+    AccountIdentifierClass,
     MetadataFieldKey,
     MetadataProjectionPolicy,
+    MetadataSchemaError,
+    MetadataValueError,
+    build_account_identifier_update,
     get_metadata_field_spec,
+    resolve_metadata_schema,
 )
-from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
 from doc_intelligence_hub.modules.action_queue.database import (
     VALID_ACTION_TYPES,
     Action,
     ActionLifecycleEvent,
     IntakeSuggestionSnapshot,
     ProcessingHistory,
-    QueueConfiguration,
     get_session,
     init_db,
 )
@@ -54,9 +57,11 @@ _TAXONOMY_METHODS = {
 }
 _TAXONOMY_CACHE_TTL = timedelta(minutes=5)
 _SUGGESTION_CACHE_TTL = timedelta(hours=6)
+_INBOX_TAG_NAME = "Inbox"
 _taxonomy_cache: tuple[datetime, dict[str, list[dict[str, Any]]]] | None = None
 _taxonomy_cache_lock = asyncio.Lock()
 _EDITABLE_CUSTOM_FIELD_KEYS = {
+    MetadataFieldKey.ACCOUNT_IDENTIFIER,
     MetadataFieldKey.DOCUMENT_AMOUNT,
     MetadataFieldKey.DOCUMENT_DUE_DATE,
 }
@@ -80,6 +85,12 @@ def _utcnow_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+class IntakeCustomFieldPatch(BaseModel):
+    field: int = Field(gt=0)
+    value: Any = None
+    identifier_class: AccountIdentifierClass | None = None
+
+
 class IntakeMetadataPatch(BaseModel):
     title: str | None = None
     correspondent: int | None = Field(default=None, ge=1)
@@ -87,7 +98,7 @@ class IntakeMetadataPatch(BaseModel):
     storage_path: int | None = Field(default=None, ge=1)
     created: date | None = None
     tags: list[int] | None = None
-    custom_fields: list[dict[str, Any]] | None = None
+    custom_fields: list[IntakeCustomFieldPatch] | None = None
 
     @field_validator("title")
     @classmethod
@@ -112,17 +123,12 @@ class IntakeMetadataPatch(BaseModel):
 
     @field_validator("custom_fields")
     @classmethod
-    def valid_custom_fields(cls, value: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    def valid_custom_fields(
+        cls, value: list[IntakeCustomFieldPatch] | None
+    ) -> list[IntakeCustomFieldPatch] | None:
         if value is None:
             return None
-        field_ids: list[int] = []
-        for item in value:
-            field_id = item.get("field")
-            if isinstance(field_id, bool) or not isinstance(field_id, int) or field_id <= 0:
-                raise ValueError("custom fields require a positive integer field ID")
-            if "value" not in item:
-                raise ValueError("custom fields require a value")
-            field_ids.append(field_id)
+        field_ids = [item.field for item in value]
         if len(field_ids) != len(set(field_ids)):
             raise ValueError("custom fields cannot contain duplicate field IDs")
         return value
@@ -318,18 +324,20 @@ def _normalize_suggestions(
     return normalized
 
 
-def _queue_settings() -> QueueConfiguration | None:
-    init_db()
-    db = get_session()
-    try:
-        return db.query(QueueConfiguration).filter_by(id=1).first()
-    finally:
-        db.close()
-
-
-def _monitor_tags() -> list[str]:
-    settings = _queue_settings()
-    return list(settings.monitor_tags if settings else action_queue_settings.monitor_tags)
+async def _resolve_inbox_tag_id(client: Any) -> int:
+    tag_ids = await client.resolve_tag_ids([_INBOX_TAG_NAME])
+    if not tag_ids:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "paperless_inbox_tag_missing",
+                "message": (
+                    "Inbox Review requires a Paperless tag named 'Inbox'. "
+                    "Create the tag in Paperless before using Inbox Review."
+                ),
+            },
+        )
+    return tag_ids[0]
 
 
 async def _load_taxonomies(client: Any) -> dict[str, list[dict[str, Any]]]:
@@ -422,11 +430,12 @@ def _review_custom_fields(
         fields.append(
             {
                 "field": item.get("field"),
+                "field_key": key.value if key else None,
                 "name": name,
                 "value": item.get("value"),
                 "data_type": definition.get("data_type"),
                 "editable": key in _EDITABLE_CUSTOM_FIELD_KEYS,
-                "audit": key is MetadataFieldKey.ACCOUNT_IDENTIFIER,
+                "audit": False,
             }
         )
     return fields
@@ -693,7 +702,6 @@ async def _document_detail(request: Request, document_id: int) -> dict[str, Any]
             "download_url": f"/api/documents/{document_id}/download",
             "paperless_url": _paperless_document_url(request, document_id),
             "write_enabled": bool(request.app.state.hub_settings.write_to_paperless),
-            "monitor_tags": _monitor_tags(),
         }
     finally:
         await client.aclose()
@@ -710,9 +718,9 @@ async def list_intake_documents(
     client = make_paperless_client(request, timeout=30.0)
     try:
         try:
-            tag_ids = await client.resolve_tag_ids(_monitor_tags())
+            inbox_tag_id = await _resolve_inbox_tag_id(client)
             scope_params = {
-                "tags__id__in": ",".join(str(tag_id) for tag_id in tag_ids) if tag_ids else "0",
+                "tags__id__in": str(inbox_tag_id),
                 "ordering": "-id",
             }
             if search.strip():
@@ -751,6 +759,8 @@ async def list_intake_documents(
                 _load_taxonomies(client),
             )
             documents = list(page.results)
+        except HTTPException:
+            raise
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
@@ -833,7 +843,6 @@ async def list_intake_documents(
             ],
             "total": page.total_count,
             "next_cursor": page.next_cursor,
-            "monitor_tags": _monitor_tags(),
         }
     finally:
         await client.aclose()
@@ -862,7 +871,6 @@ async def get_intake_document_core(request: Request, document_id: int) -> dict[s
             "download_url": f"/api/documents/{document_id}/download",
             "paperless_url": _paperless_document_url(request, document_id),
             "write_enabled": bool(request.app.state.hub_settings.write_to_paperless),
-            "monitor_tags": _monitor_tags(),
         }
     finally:
         await client.aclose()
@@ -1197,16 +1205,16 @@ async def save_intake_document(
                 definitions = await client.list_custom_fields()
             except Exception as exc:
                 _raise_paperless_error(exc, "validating custom field updates")
-            editable_ids = {
-                definition["id"]
+            editable_keys_by_id = {
+                definition["id"]: matched[0]
                 for definition in definitions
                 if isinstance(definition, dict)
                 and definition.get("id")
                 and (matched := _metadata_spec_by_name(str(definition.get("name") or "")))
                 and matched[0] in _EDITABLE_CUSTOM_FIELD_KEYS
             }
-            requested_ids = {item["field"] for item in body.metadata.custom_fields}
-            disallowed = sorted(requested_ids - editable_ids)
+            requested_ids = {item.field for item in body.metadata.custom_fields}
+            disallowed = sorted(requested_ids - editable_keys_by_id.keys())
             if disallowed:
                 raise HTTPException(
                     status_code=422,
@@ -1216,7 +1224,41 @@ async def save_intake_document(
                         "field_ids": disallowed,
                     },
                 )
-            requested_by_id = {item["field"]: item["value"] for item in body.metadata.custom_fields}
+            requested_by_id: dict[int, Any] = {}
+            for item in body.metadata.custom_fields:
+                key = editable_keys_by_id[item.field]
+                if key is MetadataFieldKey.ACCOUNT_IDENTIFIER:
+                    if item.identifier_class is None:
+                        raise HTTPException(
+                            status_code=422,
+                            detail={
+                                "code": "account_identifier_class_required",
+                                "message": "Identifier type is required for Account Identifier.",
+                                "field_ids": [item.field],
+                            },
+                        )
+                    try:
+                        schema = resolve_metadata_schema(
+                            definitions, (MetadataFieldKey.ACCOUNT_IDENTIFIER,)
+                        )
+                        update, _projection = build_account_identifier_update(
+                            item.value,
+                            item.identifier_class,
+                            1.0,
+                            schema,
+                        )
+                    except (MetadataSchemaError, MetadataValueError) as exc:
+                        raise HTTPException(
+                            status_code=422,
+                            detail={
+                                "code": "invalid_account_identifier",
+                                "message": str(exc),
+                                "field_ids": [item.field],
+                            },
+                        ) from exc
+                    requested_by_id[int(update["field"])] = update["value"]
+                else:
+                    requested_by_id[item.field] = item.value
             merged_custom_fields = [
                 {
                     "field": item["field"],
@@ -1234,9 +1276,9 @@ async def save_intake_document(
             patch["custom_fields"] = merged_custom_fields
 
         if body.disposition in {"file_only", "confirm_and_file"}:
-            intake_tag_ids = set(await client.resolve_tag_ids(_monitor_tags()))
+            inbox_tag_id = await _resolve_inbox_tag_id(client)
             source_tags = patch.get("tags", current.get("tags") or [])
-            patch["tags"] = [tag_id for tag_id in source_tags if tag_id not in intake_tag_ids]
+            patch["tags"] = [tag_id for tag_id in source_tags if tag_id != inbox_tag_id]
 
         try:
             updated = await client.update_document(document_id, patch) if patch else current

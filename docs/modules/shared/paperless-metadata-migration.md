@@ -41,14 +41,16 @@ be retired. Unknown fields are user-owned and are always preserved.
 | Outcome | Fields |
 |---|---|
 | Keep — durable archive metadata | `Account Identifier`, `Patient Name`, `Provider Name`, `Date of Service`, `Patient Responsibility`, `Claim Number`, `Invoice Number`, `Series Name`, `Document Amount`, `Document Due Date` |
-| Keep — OWL projection | `Related Document IDs`, `Relationship Summary`, `Related Documents`, `Obligation ID`, `Obligation Role`, `Action Status`, `Action Analyzed` |
+| Keep — OWL projection | `Related Document IDs`, `Relationship Summary`, `Related Documents`, `Obligation ID`, `Obligation Role`, `Action Status` |
 | Migrate, then retire when empty | `di_account_id`, `di_patient_name`, `di_provider_name`, `di_date_of_service`, `di_patient_resp`, `di_claim_number`, `di_invoice_number`, `Action Amount` |
-| Retire when empty | `Action Type`, `Action Due Date`, `Action Urgency`, `Action Summary`, `Action Count`, `EOB Match Status`, `EOB Match Score`, `EOB Match Confidence`, `EOB Matched Document`, `EOB Document Type`, `EOB Patient Responsibility`, `EOB Analyzed` |
+| Retire when empty | `Action Analyzed`, `Action Type`, `Action Due Date`, `Action Urgency`, `Action Summary`, `Action Count`, `EOB Match Status`, `EOB Match Score`, `EOB Match Confidence`, `EOB Matched Document`, `EOB Document Type`, `EOB Patient Responsibility`, `EOB Analyzed` |
 | Preserve | Every unregistered/custom deployment field |
 
 The action fields are retired because OWL stores actions as first-class records and one
-Paperless document may have multiple actions. The retired EOB fields contain match analytics
-or duplicate metadata that now remains OWL-local or uses canonical durable fields.
+Paperless document may have multiple actions. `Action Analyzed` was only a calendar-date
+projection written during enrichment; `ProcessingHistory.processed_at` and action
+`created_at` remain the authoritative timestamps. The retired EOB fields contain match
+analytics or duplicate metadata that now remains OWL-local or uses canonical durable fields.
 
 ## OWL obligation projection
 

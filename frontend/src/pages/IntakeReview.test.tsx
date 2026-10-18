@@ -96,7 +96,6 @@ function core(id: number) {
     preview_url: `/preview/${id}`,
     paperless_url: `https://paperless.test/documents/${id}/details`,
     write_enabled: true,
-    monitor_tags: ['Inbox'],
   };
 }
 
@@ -120,7 +119,6 @@ describe('IntakeReview', () => {
       ],
       total: 2,
       next_cursor: null,
-      monitor_tags: ['Inbox'],
     });
     documentCoreMock.mockImplementation((id: number) => Promise.resolve(core(id)));
     documentSuggestionsMock.mockResolvedValue({
@@ -415,6 +413,46 @@ describe('IntakeReview', () => {
     expect(await screen.findByLabelText('Document Amount')).toHaveValue('1,234.50');
   });
 
+  it('shows and saves the full editable account identifier with its type', async () => {
+    documentCoreMock.mockResolvedValue({
+      ...core(1),
+      document: {
+        ...core(1).document,
+        review_fields: [{
+          field: 9,
+          field_key: 'account_identifier',
+          name: 'Account Identifier',
+          value: 'ACCT-2025-8675309',
+          data_type: 'string',
+          editable: true,
+          audit: false,
+        }],
+      },
+    });
+    renderPage();
+
+    const identifier = await screen.findByLabelText('Account Identifier');
+    expect(identifier).toHaveValue('ACCT-2025-8675309');
+    fireEvent.change(identifier, { target: { value: 'ACCT-2025-1234567' } });
+    fireEvent.change(screen.getByLabelText('Identifier type'), {
+      target: { value: 'provider_account' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(saveDocumentMock).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          custom_fields: [{
+            field: 9,
+            value: 'ACCT-2025-1234567',
+            identifier_class: 'provider_account',
+          }],
+        }),
+      }),
+    ));
+  });
+
   it('opens the document preview full screen and exposes external links', async () => {
     renderPage();
 
@@ -440,7 +478,6 @@ describe('IntakeReview', () => {
         ],
         total: 2,
         next_cursor: null,
-        monitor_tags: ['Inbox'],
       } : {
         documents: [
           { id: 1, title: 'Document 1', created: '2026-10-14', thumbnail_url: '/thumb/1', pending_action_count: 0, document_type_name: 'Bill' },
@@ -448,7 +485,6 @@ describe('IntakeReview', () => {
         ],
         total: 2,
         next_cursor: null,
-        monitor_tags: ['Inbox'],
       },
     ));
     documentCoreMock.mockImplementation((id: number) => Promise.resolve({
@@ -480,7 +516,6 @@ describe('IntakeReview', () => {
         ],
         total: 213,
         next_cursor: '2',
-        monitor_tags: ['Inbox'],
       })
       .mockResolvedValueOnce({
         documents: [
@@ -488,7 +523,6 @@ describe('IntakeReview', () => {
         ],
         total: 213,
         next_cursor: '3',
-        monitor_tags: ['Inbox'],
       });
 
     renderPage();

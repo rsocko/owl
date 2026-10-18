@@ -1,6 +1,10 @@
+.app-main:has(> .intake-review-page) {
+  max-width: none;
+}
+
 .intake-review-page {
   display: grid;
-  grid-template-columns: clamp(20rem, 25vw, 25rem) minmax(0, 1fr);
+  grid-template-columns: clamp(20rem, 24vw, 26rem) minmax(0, 1fr);
   height: calc(100dvh - var(--topnav-height));
   min-height: 36rem;
   margin: -20px;
@@ -136,7 +140,7 @@
   text-align: left;
   padding: 0.55rem;
   display: grid;
-  grid-template-columns: 4.1rem minmax(0, 1fr) auto;
+  grid-template-columns: 4.5rem minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.65rem;
   cursor: pointer;
@@ -165,8 +169,8 @@
 }
 
 .intake-queue-item > img {
-  width: 4.1rem;
-  height: 5.15rem;
+  width: 4.5rem;
+  height: 5.65rem;
   object-fit: cover;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -317,7 +321,7 @@
   min-height: 0;
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(22rem, 1.08fr) minmax(27rem, 0.92fr);
+  grid-template-columns: minmax(22rem, 1fr) minmax(27rem, clamp(27rem, 46%, 34rem));
   overflow: hidden;
 }
 
@@ -868,6 +872,7 @@
 }
 
 .intake-field input,
+.intake-field select,
 .intake-action-grid input,
 .intake-action-grid select,
 .intake-action-grid textarea,
@@ -882,12 +887,19 @@
 }
 
 .intake-field input:focus,
+.intake-field select:focus,
 .intake-action-grid input:focus,
 .intake-action-grid select:focus,
 .intake-action-grid textarea:focus,
 .intake-ocr-text textarea:focus {
   border-color: var(--accent);
   outline: 2px solid var(--accent-bg);
+}
+
+.intake-field small {
+  color: var(--text-muted);
+  font-size: 0.64rem;
+  line-height: 1.4;
 }
 
 .intake-action-grid textarea {

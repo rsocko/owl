@@ -8,8 +8,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from doc_intelligence_hub.core.paperless import mask_account_identifier
-
 
 class DocumentSummaryContext(StrEnum):
     GENERAL = "general"
@@ -55,11 +53,11 @@ def build_document_summary(
     document_date, date_label = _document_date(source)
     account_display = None
     if context in _ACCOUNT_CONTEXTS:
-        account_display = mask_account_identifier(
+        account_display = _text(
             _first(
                 source,
-                "account_identifier_display",
                 "account_identifier",
+                "account_identifier_display",
                 "account_hint",
             )
         )
