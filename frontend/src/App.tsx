@@ -23,11 +23,11 @@ import Settings from './pages/Settings';
 import NotFound from './pages/NotFound';
 import DocumentViews from './pages/DocumentViews';
 import OcrQualityDashboard from './pages/OcrQualityDashboard';
-import OcrQualityReviewQueue from './pages/OcrQualityReviewQueue';
-import OcrQualityDocumentDetail from './pages/OcrQualityDocumentDetail';
+import OcrFocusInspectorPage from './pages/OcrFocusInspectorPage';
 import IntakeReview from './pages/IntakeReview';
 import { endpoints } from './lib/api';
 import { canonicalActionTarget, type CanonicalActionLocation } from './lib/canonicalAction';
+import { legacyOcrQueueTarget } from './lib/ocrNavigation';
 
 /** Redirect legacy /eob/matches/:matchId to the unified workspace. */
 function EobMatchRedirect() {
@@ -47,6 +47,11 @@ function LegacyIntakeReviewRedirect() {
   if (documentId && !params.has('document')) params.set('document', documentId);
   const query = params.toString();
   return <Navigate to={`/inbox-review${query ? `?${query}` : ''}`} replace />;
+}
+
+function LegacyOcrQueueRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={legacyOcrQueueTarget(search)} replace />;
 }
 
 function CanonicalActionRedirect() {
@@ -112,8 +117,8 @@ function App() {
             <Route path="/rules" element={<RulesConfig />} />
             <Route path="/insights" element={<Insights />} />
             <Route path="/ocr-quality" element={<OcrQualityDashboard />} />
-            <Route path="/ocr-quality/queue" element={<OcrQualityReviewQueue />} />
-            <Route path="/ocr-quality/documents/:documentId" element={<OcrQualityDocumentDetail />} />
+            <Route path="/ocr-quality/queue" element={<LegacyOcrQueueRedirect />} />
+            <Route path="/ocr-quality/documents/:documentId" element={<OcrFocusInspectorPage />} />
             <Route path="/history" element={<History />} />
             <Route path="/orphans" element={<OrphansDupes />} />
             <Route path="/settings" element={<Settings />} />

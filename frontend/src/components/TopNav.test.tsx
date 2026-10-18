@@ -47,4 +47,18 @@ describe('TopNav', () => {
       '/document-views',
     );
   });
+
+  it('places OCR Quality with analytics rather than operational document queues', () => {
+    render(
+      <MemoryRouter initialEntries={['/ocr-quality']}>
+        <TopNav />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Analytics' }));
+    expect(screen.getByRole('menuitem', { name: 'OCR Quality' })).toHaveAttribute(
+      'href',
+      '/ocr-quality',
+    );
+  });
 });

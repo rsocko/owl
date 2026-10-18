@@ -86,10 +86,20 @@ Action Review uses the same OCR tab as Inbox Review. It summarizes OWL's
 authoritative overall assessment, overlay/readability and machine-extraction
 scores, scorer freshness, candidate or resolution state, top reasons, page
 profile, and current searchable text. **Inspect OCR** opens the full page and
-candidate comparison workflow.
+candidate comparison workflow in the same Action Review context. The action
+document rail collapses but remains recoverable, and **Return to review**
+restores the selected action, document, and OCR tab. Candidate selection opens
+synchronized current-versus-candidate Visual, Text diff, and Page findings
+views alongside persistent score, provenance, blocking-finding, freshness, and
+downstream-invalidation evidence.
 
 OCR candidate acceptance and OCR analysis are document-text operations. They
 do not complete, dismiss, or otherwise change the selected action lifecycle.
+
+The same summary and focus inspector are used for the **OCR** review type in
+**Needs Review**, which is the daily operational OCR queue. The **OCR Quality**
+page remains the analytics and administration surface for distributions,
+calibration, scoring runs, scorer versions, and freshness.
 
 ## Action Lifecycle
 

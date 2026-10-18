@@ -65,7 +65,7 @@ interface RegionOverlayViewerProps {
    * Called with a freshly drawn box when the reviewer draws a region to
    * submit as a metadata correction (issue #172) rather than an OCR-quality
    * annotation. Rendering the field/value picker for the correction is left
-   * to the caller (e.g. `OcrQualityDocumentDetail`) — this viewer only
+   * to the caller (e.g. `OcrFocusInspector`) — this viewer only
    * reports the drawn geometry and shows the "Correct field" toggle when a
    * handler is supplied.
    */
@@ -78,6 +78,8 @@ interface RegionOverlayViewerProps {
    * heatmap mode, which is otherwise mutually exclusive UI state.
    */
   diffHighlights?: Map<number, DiffHighlightKind>;
+  zoom?: number;
+  onZoomChange?: (zoom: number) => void;
 }
 
 /**
@@ -98,6 +100,8 @@ export default function RegionOverlayViewer({
   onPageChange,
   onCorrectRegion,
   diffHighlights,
+  zoom = 1,
+  onZoomChange,
 }: RegionOverlayViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [imgSize, setImgSize] = useState<{ width: number; height: number } | null>(null);
@@ -288,6 +292,13 @@ export default function RegionOverlayViewer({
             </Button>
           </div>
         )}
+        {onZoomChange && (
+          <div className="region-overlay-page-nav" aria-label="Page zoom">
+            <Button size="sm" variant="ghost" disabled={zoom <= 0.6} onClick={() => onZoomChange(Math.max(0.6, zoom - 0.2))}>−</Button>
+            <span>{Math.round(zoom * 100)}%</span>
+            <Button size="sm" variant="ghost" disabled={zoom >= 2} onClick={() => onZoomChange(Math.min(2, zoom + 0.2))}>+</Button>
+          </div>
+        )}
       </div>
 
       {(onCreateAnnotation || onCorrectRegion) && (
@@ -332,6 +343,7 @@ export default function RegionOverlayViewer({
       <div
         ref={containerRef}
         className={`region-overlay-canvas ${drawMode || correctMode ? 'draw-mode' : ''}`}
+        style={{ width: `${zoom * 100}%` }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

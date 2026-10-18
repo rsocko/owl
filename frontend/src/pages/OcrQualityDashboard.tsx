@@ -92,6 +92,7 @@ function stageLabel(stage: string) {
 }
 
 const DECILE_ORDER = ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-99', 'unavailable'];
+const OPERATIONAL_REVIEW_STATUSES = new Set(['UNCERTAIN', 'REVIEW_RECOMMENDED', 'FAILED']);
 
 function DecileHistogram({ title, distribution }: { title: string; distribution: Record<string, number> }) {
   const entries = DECILE_ORDER.filter((key) => distribution[key] != null).map((key) => [key, distribution[key]] as const);
@@ -473,10 +474,10 @@ export default function OcrQualityDashboard() {
     <div className="ocr-quality-dashboard">
       <PageHeader
         title="OCR Quality"
-        desc="Corpus-wide overlay/readability and machine-extraction quality distribution."
+        desc="Corpus analytics and administration for OCR scoring, calibration, inventory runs, scorer versions, and freshness. Daily document decisions happen in Needs Review."
         actions={
-          <button type="button" className="btn" onClick={() => navigate('/ocr-quality/queue')}>
-            Open review queue
+          <button type="button" className="btn" onClick={() => navigate('/needs-review?type=ocr_quality_review')}>
+            Open OCR in Needs Review
           </button>
         }
       />
@@ -537,14 +538,20 @@ export default function OcrQualityDashboard() {
           <Card title="Review by status">
             <div className="ocr-status-links">
               {Object.entries(distribution.review_status_distribution).map(([status, count]) => (
-                <button
-                  key={status}
-                  type="button"
-                  className="btn ghost"
-                  onClick={() => navigate(`/ocr-quality/queue?review_status=${encodeURIComponent(status)}`)}
-                >
-                  <Badge tone={statusTone(status)}>{status}</Badge> {count} documents
-                </button>
+                OPERATIONAL_REVIEW_STATUSES.has(status) ? (
+                  <button
+                    key={status}
+                    type="button"
+                    className="btn ghost"
+                    onClick={() => navigate(`/needs-review?type=ocr_quality_review&ocr_review_status=${encodeURIComponent(status)}`)}
+                  >
+                    <Badge tone={statusTone(status)}>{status}</Badge> {count} documents
+                  </button>
+                ) : (
+                  <span className="btn ghost" key={status}>
+                    <Badge tone={statusTone(status)}>{status}</Badge> {count} documents
+                  </span>
+                )
               ))}
             </div>
           </Card>

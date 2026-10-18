@@ -14,6 +14,33 @@
     var(--bg);
 }
 
+.intake-review-page.ocr-focus-mode {
+  grid-template-columns: 5.4rem minmax(0, 1fr);
+}
+
+.ocr-focus-mode .intake-queue-header,
+.ocr-focus-mode .intake-queue-tools,
+.ocr-focus-mode .intake-queue-copy,
+.ocr-focus-mode .intake-queue-item > svg,
+.ocr-focus-mode .intake-queue-more {
+  display: none;
+}
+
+.ocr-focus-mode .intake-queue-list {
+  padding: .35rem;
+}
+
+.ocr-focus-mode .intake-queue-item {
+  display: block;
+  padding: .35rem;
+}
+
+.ocr-focus-mode .intake-queue-item > img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 5;
+}
+
 .intake-queue {
   min-width: 0;
   min-height: 0;

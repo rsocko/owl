@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../components/ui';
 import OcrSummaryPanel from '../components/OcrSummaryPanel';
+import OcrFocusInspector from '../components/OcrFocusInspector';
 import { useOcrSummary } from '../hooks/useOcrSummary';
 import { endpoints, type DocumentSummaryModel } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
@@ -285,6 +286,7 @@ function nextMondayAtNine() {
 export default function ActionWorkspace() {
   const [searchParams, setSearchParams] = useSearchParams();
   const linkedActionId = Number(searchParams.get('action')) || null;
+  const ocrFocus = searchParams.get('inspect') === 'ocr';
   const [actions, setActions] = useState<ActionItem[]>([]);
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -466,6 +468,25 @@ export default function ActionWorkspace() {
     }
     setSelectedActionId(actionId);
     setTab('actions');
+  };
+
+  const openOcrFocus = () => {
+    setRailCollapsed(true);
+    setTab('ocr');
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set('inspect', 'ocr');
+      return next;
+    }, { replace: true });
+  };
+
+  const closeOcrFocus = () => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete('inspect');
+      return next;
+    }, { replace: true });
+    setTab('ocr');
   };
 
   const patchAction = async (
@@ -823,7 +844,9 @@ export default function ActionWorkspace() {
       </aside>
 
       <main className="document-workspace-main">
-        {!selectedAction || !selectedGroup ? (
+        {ocrFocus && selectedGroup ? (
+          <OcrFocusInspector documentId={selectedGroup.documentId} contextLabel="Action review" onReturn={closeOcrFocus} />
+        ) : !selectedAction || !selectedGroup ? (
           <EmptyState title="Select a document" desc="Choose a document to review its actions and source evidence." />
         ) : (
           <>
@@ -1022,7 +1045,7 @@ export default function ActionWorkspace() {
 
                   {tab === 'ocr' ? (
                     <div className="workspace-ocr">
-                      <OcrSummaryPanel documentId={selectedGroup.documentId} state={ocrSummary} />
+                      <OcrSummaryPanel documentId={selectedGroup.documentId} state={ocrSummary} onInspect={openOcrFocus} />
                     </div>
                   ) : null}
                 </div>
