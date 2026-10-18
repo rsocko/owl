@@ -710,6 +710,12 @@
   gap: .1rem;
 }
 
+.payment-candidate-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: .35rem;
+}
+
 .payment-match-reasons {
   margin: .45rem 0 0;
   padding: 0;
@@ -1113,6 +1119,11 @@
   .payment-search-context,
   .payment-candidate {
     grid-template-columns: 1fr;
+  }
+
+  .payment-candidate-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
 
   .document-workspace-lifecycle > div:first-child {
