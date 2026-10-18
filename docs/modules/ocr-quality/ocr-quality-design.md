@@ -17,7 +17,7 @@ remains the document system of record.
 The first release will:
 
 1. assess the existing corpus without changing documents;
-2. expose an OWL-native OCR Quality review queue;
+2. project review-worthy OCR assessments into the shared **Needs Review** queue;
 3. generate alternate OCR only for a user-selected document or small explicit
    batch;
 4. require review before making a candidate current; and
@@ -108,8 +108,20 @@ shows either the current Paperless document or a synchronized current-versus-
 candidate comparison. Visual, text-diff, and page-finding modes share a
 persistent evidence and decision rail. The legacy
 `/ocr-quality/documents/:documentId` route renders the same inspector shell;
-the OCR dashboard and review queue remain available until their navigation is
-consolidated separately.
+the legacy `/ocr-quality/queue` route redirects to **Needs Review** with the OCR
+review type selected.
+
+**Needs Review is the daily operational OCR queue.** Its persisted
+`ocr_quality_review` items contain document identity, assessment status, the
+weakest available score dimension, a human-readable reason, priority and age,
+and candidate/resolution state. Aggregate queue APIs never expose raw OCR text.
+Resolving one of these items records trust for that review item only: it does not
+file the document, complete an action, or accept an OCR candidate.
+
+**OCR Quality is the analytics and administration surface.** It retains corpus
+distributions, calibration evidence, inventory and scoring runs, scorer-version
+coverage, and freshness. Inbox, Action Review, and Needs Review all use the same
+OCR summary tab and expanded focus inspector for document-level work.
 
 The design does not add an OWL URL custom field to Paperless. A Paperless-side
 trigger may be reconsidered only if a clean native extension point becomes

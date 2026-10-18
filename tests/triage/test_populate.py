@@ -20,14 +20,20 @@ from doc_intelligence_hub.modules.eob_matching.database import (
 from doc_intelligence_hub.modules.eob_matching.database import (
     init_db as eob_init_db,
 )
+from doc_intelligence_hub.modules.ocr_quality.config import settings as ocr_quality_settings
+from doc_intelligence_hub.modules.ocr_quality.database import DocumentAssessment
+from doc_intelligence_hub.modules.ocr_quality.database import get_session as get_ocr_session
+from doc_intelligence_hub.modules.ocr_quality.database import init_db as ocr_quality_init_db
+from doc_intelligence_hub.modules.triage.database import (
+    TriageQueueItem,
+    list_queue_items,
+)
 from doc_intelligence_hub.modules.triage.database import (
     configure as triage_configure,
 )
+from doc_intelligence_hub.modules.triage.database import get_session as get_triage_session
 from doc_intelligence_hub.modules.triage.database import (
     init_db as triage_init_db,
-)
-from doc_intelligence_hub.modules.triage.database import (
-    list_queue_items,
 )
 from doc_intelligence_hub.modules.triage.populate import populate_queue
 
@@ -35,6 +41,7 @@ from doc_intelligence_hub.modules.triage.populate import populate_queue
 @pytest.fixture(autouse=True)
 def setup_dbs(tmp_path):
     """Set up fresh in-memory databases for each test."""
+    original_ocr_db_url = ocr_quality_settings.database_url
     eob_db = tmp_path / "eob.db"
     eob_configure(f"sqlite:///{eob_db}")
     eob_init_db()
@@ -42,6 +49,11 @@ def setup_dbs(tmp_path):
     triage_db = tmp_path / "triage.db"
     triage_configure(f"sqlite:///{triage_db}")
     triage_init_db()
+
+    ocr_quality_settings.database_url = f"sqlite:///{tmp_path / 'ocr-quality.db'}"
+    ocr_quality_init_db()
+    yield
+    ocr_quality_settings.database_url = original_ocr_db_url
 
 
 def _seed_eob_data(
@@ -210,3 +222,84 @@ class TestPopulateQueue:
         items = list_queue_items(sort="priority")
         # Lower scores should get higher priority
         assert items[0]["priority"] >= items[1]["priority"]
+
+    def test_projects_review_worthy_ocr_assessments_without_raw_text(self):
+        session = get_ocr_session()
+        try:
+            session.add_all(
+                [
+                    DocumentAssessment(
+                        run_id="run-1",
+                        first_seen_run_id="run-1",
+                        document_id=501,
+                        document_version_key="checksum:failed",
+                        scorer_version="inventory-v1",
+                        content_length=5000,
+                        word_count=900,
+                        preliminary_score=15,
+                        document_type="2",
+                        correspondent="9",
+                        document_created="2026-09-01",
+                        overlay_score=12,
+                        machine_score=44,
+                        review_status="FAILED",
+                        reasons=[
+                            {
+                                "code": "overlay.alignment",
+                                "message": "Overlay alignment is unreliable.",
+                                "severity": "blocking",
+                            }
+                        ],
+                        quality_scorer_version="quality-v2",
+                    ),
+                    DocumentAssessment(
+                        run_id="run-1",
+                        first_seen_run_id="run-1",
+                        document_id=502,
+                        document_version_key="checksum:good",
+                        scorer_version="inventory-v1",
+                        content_length=100,
+                        word_count=20,
+                        preliminary_score=95,
+                        overlay_score=95,
+                        machine_score=96,
+                        review_status="GOOD",
+                    ),
+                ]
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        first = populate_queue()
+        second = populate_queue()
+
+        assert first["details"]["ocr_quality_reviews"] == 1
+        assert second["details"]["ocr_quality_reviews"] == 0
+        reviews = list_queue_items(item_type="ocr_quality_review")
+        assert len(reviews) == 1
+        review = reviews[0]
+        assert review["target_id"] == "501"
+        assert review["priority"] >= 88
+        assert review["reason"] == "Overlay alignment is unreliable."
+        assert review["metadata"]["review_status"] == "FAILED"
+        assert review["metadata"]["weakest_dimension"] == "overlay"
+        assert review["metadata"]["weakest_score"] == 12.0
+        assert review["metadata"]["candidate_state"] == "none"
+        assert "content" not in review["metadata"]
+        assert "word_count" not in review["metadata"]
+
+        triage_session = get_triage_session()
+        try:
+            stored = (
+                triage_session.query(TriageQueueItem)
+                .filter(TriageQueueItem.item_type == "ocr_quality_review")
+                .one()
+            )
+            stored.status = "resolved"
+            triage_session.commit()
+        finally:
+            triage_session.close()
+
+        assert populate_queue()["details"]["ocr_quality_reviews"] == 0
+        assert len(list_queue_items(item_type="ocr_quality_review", status="resolved")) == 1

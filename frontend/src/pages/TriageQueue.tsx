@@ -19,6 +19,7 @@ import { endpoints } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import { StatementGroupingDetail } from '../components/triage/StatementGroupingDetail';
 import DuplicateDetail from './DuplicateDetail';
+import OcrFocusInspector from '../components/OcrFocusInspector';
 import '../styles/triage-queue.css';
 import '../styles/document-workspace.css';
 
@@ -45,6 +46,7 @@ interface TriageItem {
 interface QueueResponse {
   items: TriageItem[];
   count: number;
+  total: number;
   offset: number;
   limit: number;
 }
@@ -53,11 +55,13 @@ interface StatsResponse {
   total: number;
   by_type: Record<string, number>;
   by_status: Record<string, number>;
+  by_type_status: Record<string, Record<string, number>>;
   pending: number;
 }
 
-type ItemTypeFilter = 'all' | 'action_classification' | 'eob_match_review' | 'grouping_anomaly' | 'orphan_document' | 'duplicate_document';
+type ItemTypeFilter = 'all' | 'action_classification' | 'eob_match_review' | 'grouping_anomaly' | 'orphan_document' | 'duplicate_document' | 'ocr_quality_review';
 type StatusFilter = 'pending' | 'deferred' | 'resolved';
+type OcrReviewStatusFilter = '' | 'UNCERTAIN' | 'REVIEW_RECOMMENDED' | 'FAILED';
 type ToastState = { message: string; tone?: 'success' | 'error'; undoId?: string } | null;
 type ActionCorrectionDraft = {
   action_type: string;
@@ -87,6 +91,7 @@ const ITEM_TYPE_FILTERS: ReadonlySet<ItemTypeFilter> = new Set([
   'grouping_anomaly',
   'orphan_document',
   'duplicate_document',
+  'ocr_quality_review',
 ]);
 
 function itemTypeFilterFromQuery(value: string | null): ItemTypeFilter {
@@ -161,6 +166,7 @@ function typeLabel(itemType: string): string {
     case 'grouping_anomaly': return 'GROUPING';
     case 'orphan_document': return 'ORPHAN';
     case 'duplicate_document': return 'DUPLICATE';
+    case 'ocr_quality_review': return 'OCR';
     default: return itemType.toUpperCase();
   }
 }
@@ -172,6 +178,7 @@ function typeBadgeTone(itemType: string) {
     case 'grouping_anomaly': return 'warning' as const;
     case 'orphan_document': return 'danger' as const;
     case 'duplicate_document': return 'warning' as const;
+    case 'ocr_quality_review': return 'info' as const;
     default: return 'muted' as const;
   }
 }
@@ -212,6 +219,9 @@ function itemTitle(item: TriageItem): string {
     const scorePct = typeof meta.score_pct === 'number' ? `${meta.score_pct}%` : '';
     return `Duplicate: #${docA} ↔ #${docB}${scorePct ? ` (${scorePct})` : ''}`;
   }
+  if (item.item_type === 'ocr_quality_review') {
+    return String(meta.document_title || `Document #${meta.document_id ?? item.target_id}`);
+  }
   return `${typeLabel(item.item_type)}: ${item.target_id}`;
 }
 
@@ -235,6 +245,7 @@ function TriageDetailBreadcrumb({ item }: { item: TriageItem }) {
     orphan_document: '📎',
     duplicate_document: '📋',
     action_classification: '⚡',
+    ocr_quality_review: '🔎',
   };
   const icon = typeIcons[item.item_type] ?? '📄';
 
@@ -364,6 +375,9 @@ export default function TriageQueue() {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryTypeFilter = itemTypeFilterFromQuery(searchParams.get('type'));
   const queryItemId = searchParams.get('item');
+  const query = searchParams.get('q') ?? '';
+  const queryStatus = searchParams.get('status');
+  const queryOcrReviewStatus = searchParams.get('ocr_review_status');
 
   // Data state
   const [items, setItems] = useState<TriageItem[]>([]);
@@ -373,8 +387,14 @@ export default function TriageQueue() {
 
   // Filters
   const typeFilter = queryTypeFilter;
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
-  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(
+    queryStatus === 'deferred' || queryStatus === 'resolved' ? queryStatus : 'pending',
+  );
+  const ocrReviewStatus: OcrReviewStatusFilter = (
+    queryOcrReviewStatus === 'UNCERTAIN'
+    || queryOcrReviewStatus === 'REVIEW_RECOMMENDED'
+    || queryOcrReviewStatus === 'FAILED'
+  ) ? queryOcrReviewStatus : '';
 
   // Selection
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -404,8 +424,42 @@ export default function TriageQueue() {
     } else {
       nextParams.set('type', nextType);
     }
+    if (nextType !== 'ocr_quality_review') nextParams.delete('ocr_review_status');
+    nextParams.delete('item');
     setSearchParams(nextParams, { replace: true });
   };
+
+  const handleStatusFilterChange = (value: StatusFilter) => {
+    setStatusFilter(value);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('status', value);
+    nextParams.delete('item');
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const handleSearchChange = (value: string) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (value.trim()) nextParams.set('q', value);
+    else nextParams.delete('q');
+    nextParams.delete('item');
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const handleOcrReviewStatusChange = (value: OcrReviewStatusFilter) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (value) nextParams.set('ocr_review_status', value);
+    else nextParams.delete('ocr_review_status');
+    nextParams.delete('item');
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const selectItem = useCallback((itemId: string | null) => {
+    setSelectedId(itemId);
+    const nextParams = new URLSearchParams(searchParams);
+    if (itemId) nextParams.set('item', itemId);
+    else nextParams.delete('item');
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   // ------------------------------------------------------------------
   // Data loading
@@ -418,6 +472,10 @@ export default function TriageQueue() {
       const params = new URLSearchParams();
       if (typeFilter !== 'all') params.set('type', typeFilter);
       params.set('status', statusFilter);
+      if (query.trim()) params.set('search', query.trim());
+      if (typeFilter === 'ocr_quality_review' && ocrReviewStatus) {
+        params.set('ocr_review_status', ocrReviewStatus);
+      }
       params.set('limit', '200');
 
       const dismissedParams = new URLSearchParams(params);
@@ -440,7 +498,7 @@ export default function TriageQueue() {
     } finally {
       setLoading(false);
     }
-  }, [typeFilter, statusFilter]);
+  }, [ocrReviewStatus, query, statusFilter, typeFilter]);
 
   useEffect(() => {
     void loadData();
@@ -463,19 +521,11 @@ export default function TriageQueue() {
     () => items.find((item) => item.id === selectedId) ?? null,
     [items, selectedId],
   );
-  const visibleItems = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return items;
-    return items.filter((item) => [
-      itemTitle(item),
-      item.reason,
-      item.source,
-      item.target_id,
-      JSON.stringify(item.metadata ?? {}),
-    ].filter(Boolean).join(' ').toLowerCase().includes(needle));
-  }, [items, query]);
+  const visibleItems = items;
   const bulkEligibleItems = useMemo(
-    () => visibleItems.filter((item) => item.item_type !== 'action_classification'),
+    () => visibleItems.filter(
+      (item) => !['action_classification', 'ocr_quality_review'].includes(item.item_type),
+    ),
     [visibleItems],
   );
   const selectedReviewCanResolve = selectedItem?.item_type !== 'action_classification'
@@ -522,7 +572,9 @@ export default function TriageQueue() {
         if (startIdx >= 0 && endIdx >= 0) {
           const [lo, hi] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
           for (let i = lo; i <= hi; i++) {
-            if (visibleItems[i].item_type !== 'action_classification') next.add(visibleItems[i].id);
+            if (!['action_classification', 'ocr_quality_review'].includes(visibleItems[i].item_type)) {
+              next.add(visibleItems[i].id);
+            }
           }
           lastCheckedRef.current = itemId;
           return next;
@@ -553,8 +605,8 @@ export default function TriageQueue() {
     if (visibleItems.length === 0) return;
     const idx = visibleItems.findIndex((i) => i.id === selectedId);
     const next = idx < 0 ? 0 : Math.max(0, Math.min(visibleItems.length - 1, idx + direction));
-    setSelectedId(visibleItems[next]?.id ?? null);
-  }, [selectedId, visibleItems]);
+    selectItem(visibleItems[next]?.id ?? null);
+  }, [selectItem, selectedId, visibleItems]);
 
   // ------------------------------------------------------------------
   // Actions
@@ -573,6 +625,8 @@ export default function TriageQueue() {
       setToast({
         message: remainsInReview
           ? result.reason || 'This action still needs review.'
+          : action === 'mark_reviewed'
+            ? 'OCR review marked complete.'
           : action === 'confirm'
             ? 'Suggestion accepted.'
             : action === 'no_action'
@@ -750,7 +804,9 @@ export default function TriageQueue() {
       if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
 
       // When an EOB match review item is selected, EobMatchDetail owns Y/N/S/R
-      const eobDetailActive = selectedItem?.item_type === 'eob_match_review';
+      const itemOwnsDecisionShortcuts = ['eob_match_review', 'ocr_quality_review'].includes(
+        selectedItem?.item_type ?? '',
+      );
 
       // Escape closes modals first, then deselects
       if (e.key === 'Escape') {
@@ -758,7 +814,7 @@ export default function TriageQueue() {
         if (showShortcuts) { setShowShortcuts(false); return; }
         if (pendingBulkAction) { setPendingBulkAction(null); return; }
         if (pendingThreshold) { setPendingThreshold(false); return; }
-        setSelectedId(null);
+        selectItem(null);
         return;
       }
 
@@ -778,13 +834,13 @@ export default function TriageQueue() {
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         moveSelection(-1);
-      } else if (e.key.toLowerCase() === 'y' && selectedId && !eobDetailActive) {
+      } else if (e.key.toLowerCase() === 'y' && selectedId && !itemOwnsDecisionShortcuts) {
         e.preventDefault();
         void handleResolve(selectedId, 'confirm');
-      } else if (e.key.toLowerCase() === 'n' && selectedId && !eobDetailActive) {
+      } else if (e.key.toLowerCase() === 'n' && selectedId && !itemOwnsDecisionShortcuts) {
         e.preventDefault();
         void handleResolve(selectedId, 'reject');
-      } else if (e.key.toLowerCase() === 's' && selectedId && !eobDetailActive) {
+      } else if (e.key.toLowerCase() === 's' && selectedId && !itemOwnsDecisionShortcuts) {
         e.preventDefault();
         // Skip — move to next
         moveSelection(1);
@@ -807,6 +863,7 @@ export default function TriageQueue() {
     pendingThreshold,
     selectedId,
     selectedItem,
+    selectItem,
     showShortcuts,
   ]);
 
@@ -815,8 +872,16 @@ export default function TriageQueue() {
   // ------------------------------------------------------------------
 
   const pendingCount = stats?.pending ?? 0;
-  const typeCounts = stats?.by_type ?? {};
   const statusCounts = stats?.by_status ?? {};
+  const currentTypeCounts = Object.fromEntries(
+    Object.entries(stats?.by_type_status ?? {}).map(([itemType, counts]) => [
+      itemType,
+      statusFilter === 'resolved'
+        ? (counts.resolved ?? 0) + (counts.dismissed ?? 0)
+        : counts[statusFilter] ?? 0,
+    ]),
+  );
+  const currentTotal = Object.values(currentTypeCounts).reduce((sum, count) => sum + count, 0);
 
   // ------------------------------------------------------------------
   // Render
@@ -855,7 +920,7 @@ export default function TriageQueue() {
                         aria-label="Search review items"
                         placeholder="Find document, reason, or review"
                         value={query}
-                        onChange={(event) => setQuery(event.target.value)}
+                        onChange={(event) => handleSearchChange(event.target.value)}
                       />
                     </label>
                     <div className="workspace-filter-group">
@@ -870,7 +935,7 @@ export default function TriageQueue() {
                             type="button"
                             key={value}
                             className={statusFilter === value ? 'active' : ''}
-                            onClick={() => setStatusFilter(value)}
+                            onClick={() => handleStatusFilterChange(value)}
                           >
                             {label} <b>{count}</b>
                           </button>
@@ -881,12 +946,13 @@ export default function TriageQueue() {
                       <span>Review type</span>
                       <div className="workspace-chips">
                         {([
-                          ['all', 'All', stats?.total ?? 0],
-                          ['action_classification', 'Actions', typeCounts.action_classification ?? 0],
-                          ['eob_match_review', 'EOB', typeCounts.eob_match_review ?? 0],
-                          ['grouping_anomaly', 'Groups', typeCounts.grouping_anomaly ?? 0],
-                          ['orphan_document', 'Orphans', typeCounts.orphan_document ?? 0],
-                          ['duplicate_document', 'Duplicates', typeCounts.duplicate_document ?? 0],
+                          ['all', 'All', currentTotal],
+                          ['action_classification', 'Actions', currentTypeCounts.action_classification ?? 0],
+                          ['eob_match_review', 'EOB', currentTypeCounts.eob_match_review ?? 0],
+                          ['ocr_quality_review', 'OCR', currentTypeCounts.ocr_quality_review ?? 0],
+                          ['grouping_anomaly', 'Groups', currentTypeCounts.grouping_anomaly ?? 0],
+                          ['orphan_document', 'Orphans', currentTypeCounts.orphan_document ?? 0],
+                          ['duplicate_document', 'Duplicates', currentTypeCounts.duplicate_document ?? 0],
                         ] as const).map(([value, label, count]) => (
                           <button
                             type="button"
@@ -899,11 +965,33 @@ export default function TriageQueue() {
                         ))}
                       </div>
                     </div>
+                    {typeFilter === 'ocr_quality_review' ? (
+                      <div className="workspace-filter-group">
+                        <span>OCR assessment</span>
+                        <div className="workspace-chips">
+                          {([
+                            ['', 'All OCR'],
+                            ['FAILED', 'Failed'],
+                            ['REVIEW_RECOMMENDED', 'Review recommended'],
+                            ['UNCERTAIN', 'Uncertain'],
+                          ] as const).map(([value, label]) => (
+                            <button
+                              type="button"
+                              key={value || 'all'}
+                              className={ocrReviewStatus === value ? 'active' : ''}
+                              onClick={() => handleOcrReviewStatusChange(value)}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                   </>
                 ) : null}
 
                 {/* Auto-accept threshold */}
-                {!collapsed && statusFilter === 'pending' && typeFilter !== 'action_classification' && (
+                {!collapsed && statusFilter === 'pending' && typeFilter === 'eob_match_review' && (
                   <div className="triage-threshold-bar">
                     <button
                       className="triage-auto-confirm-btn"
@@ -1009,7 +1097,7 @@ export default function TriageQueue() {
                           selectedId === item.id ? 'selected' : '',
                           checkedIds.has(item.id) ? 'checked' : '',
                         ].filter(Boolean).join(' ')}
-                        onClick={() => setSelectedId(item.id)}
+                        onClick={() => selectItem(item.id)}
                       >
                         {documentId ? (
                           <img
@@ -1021,7 +1109,7 @@ export default function TriageQueue() {
                         ) : <div className="triage-item-thumbnail-placeholder">{typeLabel(item.item_type).slice(0, 1)}</div>}
                         <div className="triage-item-content">
                           <div className="triage-item-top">
-                            {statusFilter === 'pending' && item.item_type !== 'action_classification' && (
+                            {statusFilter === 'pending' && !['action_classification', 'ocr_quality_review'].includes(item.item_type) && (
                               <input
                                 type="checkbox"
                                 checked={checkedIds.has(item.id)}
@@ -1033,11 +1121,24 @@ export default function TriageQueue() {
                             {item.metadata && typeof item.metadata.score_pct === 'number' && (
                               <ConfidenceBadge pct={item.metadata.score_pct as number} />
                             )}
+                            {item.item_type === 'ocr_quality_review' && item.metadata?.review_status ? (
+                              <Badge tone={String(item.metadata.review_status) === 'FAILED' ? 'danger' : 'warning'}>
+                                {String(item.metadata.review_status).replaceAll('_', ' ')}
+                              </Badge>
+                            ) : null}
+                            {item.item_type === 'ocr_quality_review' && item.metadata?.weakest_dimension ? (
+                              <Badge tone="muted">
+                                {String(item.metadata.weakest_dimension)} {String(item.metadata.weakest_score ?? '—')}
+                              </Badge>
+                            ) : null}
                           </div>
                           <div className="triage-item-title">{itemTitle(item)}</div>
                           <div className="triage-item-reason">{item.reason || 'Flagged for review'}</div>
                           <div className="triage-item-meta">
                             <Badge tone={priorityBadgeTone(item.priority)}>{priorityLabel(item.priority)}</Badge>
+                            {item.item_type === 'ocr_quality_review' ? (
+                              <span>Candidate: {String(item.metadata?.candidate_state ?? 'none')}</span>
+                            ) : null}
                             <span>{timeAgo(item.created_at)}</span>
                           </div>
                         </div>
@@ -1240,10 +1341,63 @@ export default function TriageQueue() {
                       const currentIndex = items.findIndex((i) => i.id === selectedItem.id);
                       const nextItem = items[currentIndex + 1] ?? items[0];
                       if (nextItem && nextItem.id !== selectedItem.id) {
-                        setSelectedId(nextItem.id);
+                        selectItem(nextItem.id);
                       }
                     }}
                   />
+                </>
+              ) : selectedItem.item_type === 'ocr_quality_review' ? (
+                <>
+                  <TriageDetailBreadcrumb item={selectedItem} />
+                  <div className="triage-detail-header">
+                    <div>
+                      <div className="triage-detail-title">{itemTitle(selectedItem)}</div>
+                      <div className="text-muted">
+                        {selectedItem.metadata?.weakest_dimension
+                          ? `Weakest signal: ${String(selectedItem.metadata.weakest_dimension)} ${String(selectedItem.metadata.weakest_score ?? '—')}`
+                          : 'Review the OCR evidence and candidate state.'}
+                        {' · '}
+                        Candidate: {String(selectedItem.metadata?.candidate_state ?? 'none')}
+                      </div>
+                    </div>
+                    <div className="btn-group">
+                      {['pending', 'deferred'].includes(selectedItem.status) ? (
+                        <>
+                          <Button
+                            variant="success"
+                            disabled={busyAction !== null}
+                            onClick={() => void handleResolve(selectedItem.id, 'mark_reviewed')}
+                          >
+                            Mark OCR review complete
+                          </Button>
+                          <Button
+                            disabled={busyAction !== null}
+                            onClick={() => void handleDefer(selectedItem.id)}
+                          >
+                            Review later
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          disabled={busyAction !== null}
+                          onClick={() => setConfirmReviseId(selectedItem.id)}
+                        >
+                          Revise decision
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="triage-reason-banner">
+                    <strong>OCR review reason:</strong> {selectedItem.reason || 'OCR quality needs review.'}
+                  </div>
+                  <div className="triage-ocr-inspector">
+                    <OcrFocusInspector
+                      documentId={Number(selectedItem.metadata?.document_id ?? selectedItem.target_id)}
+                      contextLabel="Needs Review"
+                      onReturn={() => selectItem(null)}
+                    />
+                  </div>
                 </>
               ) : selectedItem.item_type === 'orphan_document' ? (
                 /* Orphan Document — rich detail component (#831) */
@@ -1258,7 +1412,7 @@ export default function TriageQueue() {
                       const currentIndex = items.findIndex((i) => i.id === selectedItem.id);
                       const nextItem = items[currentIndex + 1] ?? items[0];
                       if (nextItem && nextItem.id !== selectedItem.id) {
-                        setSelectedId(nextItem.id);
+                        selectItem(nextItem.id);
                       }
                     }}
                   />
@@ -1385,7 +1539,7 @@ export default function TriageQueue() {
                       // Auto-advance to next item
                       const currentIdx = items.findIndex(i => i.id === selectedItem.id);
                       const next = items[currentIdx + 1] || items[currentIdx - 1];
-                      setSelectedId(next?.id ?? null);
+                      selectItem(next?.id ?? null);
                     }}
                   />
                 ) : selectedItem.item_type === 'duplicate_document' && selectedItem.metadata?.duplicate_pair_id ? (

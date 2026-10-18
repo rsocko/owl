@@ -29,13 +29,13 @@ const NAV_ENTRIES: NavEntry[] = [
       { to: '/eob', label: 'EOB Matching' },
       { to: '/eob/benchmarks', label: 'Benchmarks' },
       { to: '/orphans', label: 'Orphans & Dupes' },
-      { to: '/ocr-quality', label: 'OCR Quality' },
     ],
   },
   {
     label: 'Analytics',
     items: [
       { to: '/dashboard-view', label: 'Dashboard' },
+      { to: '/ocr-quality', label: 'OCR Quality' },
       { to: '/insights', label: 'Insights' },
       { to: '/history', label: 'History' },
     ],

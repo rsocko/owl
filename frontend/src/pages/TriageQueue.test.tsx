@@ -31,6 +31,12 @@ vi.mock('../lib/api', () => ({
   },
 }));
 
+vi.mock('../components/OcrFocusInspector', () => ({
+  default: ({ documentId }: { documentId: number }) => (
+    <div aria-label="OCR focus inspector">OCR inspector for {documentId}</div>
+  ),
+}));
+
 class ResizeObserverStub {
   observe() {}
   unobserve() {}
@@ -67,6 +73,7 @@ beforeEach(() => {
     total: 1,
     by_type: { other: 1 },
     by_status: { pending: 1 },
+    by_type_status: { other: { pending: 1 } },
     pending: 1,
   });
   resolveMock.mockResolvedValue({ action_ready: true, review_state: 'ready' });
@@ -118,6 +125,71 @@ describe('Needs Review actions', () => {
     await waitFor(() => {
       expect(queueMock).toHaveBeenCalledWith('status=pending&limit=200');
     });
+  });
+
+  it('loads OCR reviews with assessment filters and opens the shared focus inspector', async () => {
+    queueMock.mockResolvedValue({
+      items: [{
+        id: 'ocr-review-1',
+        item_type: 'ocr_quality_review',
+        priority: 90,
+        status: 'pending',
+        source: 'ocr_quality_assessment',
+        target_type: 'document',
+        target_id: '777',
+        reason: 'Overlay alignment is unreliable.',
+        metadata: {
+          document_id: 777,
+          review_status: 'FAILED',
+          weakest_dimension: 'overlay',
+          weakest_score: 12,
+          candidate_state: 'ready',
+        },
+        deferred_until: null,
+        resolved_at: null,
+        resolved_action: null,
+        created_at: '2026-08-10T12:00:00Z',
+      }],
+      count: 1,
+      total: 1,
+      offset: 0,
+      limit: 200,
+    });
+    statsMock.mockResolvedValue({
+      total: 1,
+      by_type: { ocr_quality_review: 1 },
+      by_status: { pending: 1 },
+      by_type_status: { ocr_quality_review: { pending: 1 } },
+      pending: 1,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/needs-review?type=ocr_quality_review&ocr_review_status=FAILED&item=ocr-review-1']}>
+        <TriageQueue />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(queueMock).toHaveBeenCalledWith(
+      'type=ocr_quality_review&status=pending&ocr_review_status=FAILED&limit=200',
+    ));
+    expect(await screen.findByLabelText('OCR focus inspector')).toHaveTextContent('777');
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark OCR review complete' }));
+    await waitFor(() => expect(resolveMock).toHaveBeenCalledWith('ocr-review-1', {
+      action: 'mark_reviewed',
+    }));
+  });
+
+  it('sends search terms to the privacy-safe backend query', async () => {
+    render(
+      <MemoryRouter initialEntries={['/needs-review?type=ocr_quality_review&q=alignment']}>
+        <TriageQueue />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(queueMock).toHaveBeenCalledWith(
+      'type=ocr_quality_review&status=pending&search=alignment&limit=200',
+    ));
   });
 
   it('deep-links to an action review and submits edited correction details', async () => {

@@ -94,6 +94,11 @@ downstream-invalidation evidence.
 OCR candidate acceptance and OCR analysis are document-text operations. They
 do not complete, dismiss, or otherwise change the selected action lifecycle.
 
+The same summary and focus inspector are used for the **OCR** review type in
+**Needs Review**, which is the daily operational OCR queue. The **OCR Quality**
+page remains the analytics and administration surface for distributions,
+calibration, scoring runs, scorer versions, and freshness.
+
 ## Action Lifecycle
 
 Actions follow a clear lifecycle from detection to resolution:

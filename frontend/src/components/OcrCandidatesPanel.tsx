@@ -13,8 +13,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Badge, Button, Card, EmptyState, type Tone } from './ui';
 import { endpoints } from '../lib/api';
-import { formatScore } from '../pages/OcrQualityReviewQueue';
 import { OCR_ENGINE_LABELS, type CandidateDetail, type CandidateSummary } from './ocrCandidateTypes';
+
+function formatScore(value?: number | null) {
+  return value == null ? '—' : value.toFixed(1);
+}
 
 const ACTIVE_STATES = new Set(['requested', 'running']);
 const ACCEPTED_STATES = new Set(['accepted', 'accepted_pending_invalidation']);
