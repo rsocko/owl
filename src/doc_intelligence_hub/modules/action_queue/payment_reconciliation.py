@@ -695,10 +695,19 @@ class TyrionBillMatchCandidateV2(BaseModel):
     amount_minor: int = Field(alias="amountMinor", ge=0, le=100_000_000_000)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     account_display_name: str = Field(alias="accountDisplayName", min_length=1, max_length=120)
-    account_last_four: str = Field(alias="accountLastFour", pattern=r"^[0-9]{4}$")
+    account_last_four: str | None = Field(
+        default=None,
+        alias="accountLastFour",
+        pattern=r"^[0-9]{4}$",
+    )
     score_basis_points: int = Field(alias="scoreBasisPoints", ge=0, le=10_000)
     confidence: Literal["high", "medium", "low"]
-    score_gap_basis_points: int = Field(alias="scoreGapBasisPoints", ge=0, le=10_000)
+    score_gap_basis_points: int | None = Field(
+        default=None,
+        alias="scoreGapBasisPoints",
+        ge=0,
+        le=10_000,
+    )
     signals: list[TyrionBillMatchSignalV1] = Field(min_length=4, max_length=4)
     receipt_association: TyrionReceiptAssociationV2 | None = Field(
         default=None,
@@ -719,7 +728,7 @@ class TyrionBillMatchSearchContextV2(BaseModel):
     anchor_date: date = Field(alias="anchorDate")
     window_start: date = Field(alias="windowStart")
     window_end: date = Field(alias="windowEnd")
-    date_window_days: int = Field(alias="dateWindowDays", ge=1, le=365)
+    date_window_days: int = Field(alias="dateWindowDays", ge=0, le=365)
     amount_tolerance_minor: int = Field(alias="amountToleranceMinor", ge=0)
     source_as_of: datetime = Field(alias="sourceAsOf")
     searched_at: datetime = Field(alias="searchedAt")

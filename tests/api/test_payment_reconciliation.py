@@ -281,10 +281,10 @@ def test_active_check_and_confirmation_complete_action_atomically(client, app) -
                     "amountMinor": 8245,
                     "currency": "USD",
                     "accountDisplayName": "Household checking",
-                    "accountLastFour": "1234",
+                    "accountLastFour": None,
                     "scoreBasisPoints": 9600,
                     "confidence": "high",
-                    "scoreGapBasisPoints": 2100,
+                    "scoreGapBasisPoints": None,
                     "signals": [
                         {
                             "kind": "amount",
@@ -357,11 +357,11 @@ def test_active_check_and_confirmation_complete_action_atomically(client, app) -
         "transaction_date": "2026-10-18",
         "status": "posted",
         "account_display_name": "Household checking",
-        "account_last_four": "1234",
+        "account_last_four": None,
         "confidence": "high",
         "score": 96.0,
         "rank": 1,
-        "score_gap_basis_points": 2100,
+        "score_gap_basis_points": None,
         "match_reasons": [
             "amount_exact",
             "date_strong",

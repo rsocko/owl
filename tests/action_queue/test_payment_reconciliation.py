@@ -142,6 +142,72 @@ def _no_match_response(run_id: str, document_id: int) -> TyrionBillMatchResponse
     )
 
 
+def test_tyrion_v2_response_accepts_nullable_candidate_metadata() -> None:
+    response = TyrionBillMatchResponseV2.model_validate(
+        {
+            "contractVersion": "2.0",
+            "requestRef": "payment-check-response-contract",
+            "billRef": "paperless:101",
+            "matchStatus": "matched",
+            "paymentStatus": "paid",
+            "selectedTransactionRef": "transaction-posted-1",
+            "candidates": [
+                {
+                    "rank": 1,
+                    "transactionRef": "transaction-posted-1",
+                    "transactionDate": "2026-10-18",
+                    "transactionState": "posted",
+                    "payee": "City Utilities",
+                    "amountMinor": 10_000,
+                    "currency": "USD",
+                    "accountDisplayName": "Household checking",
+                    "accountLastFour": None,
+                    "scoreBasisPoints": 9600,
+                    "confidence": "high",
+                    "scoreGapBasisPoints": None,
+                    "signals": [
+                        {
+                            "kind": "amount",
+                            "strength": "exact",
+                            "contributionBasisPoints": 5500,
+                        },
+                        {
+                            "kind": "date",
+                            "strength": "strong",
+                            "contributionBasisPoints": 2200,
+                        },
+                        {
+                            "kind": "payee",
+                            "strength": "strong",
+                            "contributionBasisPoints": 1400,
+                        },
+                        {
+                            "kind": "account",
+                            "strength": "partial",
+                            "contributionBasisPoints": 500,
+                        },
+                    ],
+                }
+            ],
+            "searchContext": {
+                "anchorDate": "2026-10-20",
+                "windowStart": "2026-10-20",
+                "windowEnd": "2026-10-20",
+                "dateWindowDays": 0,
+                "amountToleranceMinor": 100,
+                "sourceAsOf": "2026-10-18T12:00:00Z",
+                "searchedAt": "2026-10-18T12:01:00Z",
+                "eligibleAccountCount": 3,
+                "candidatePoolSize": 1,
+            },
+        }
+    )
+
+    assert response.candidates[0].account_last_four is None
+    assert response.candidates[0].score_gap_basis_points is None
+    assert response.search_context.date_window_days == 0
+
+
 def test_tyrion_receipt_contract_is_exact_and_never_claims_payment_status() -> None:
     payload = {
         "obligation_id": "obligation-1",
