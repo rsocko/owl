@@ -159,9 +159,9 @@ describe('Needs Review actions', () => {
 
     const type = await screen.findByLabelText('Corrected action type');
     expect(screen.queryByRole('checkbox')).toBeNull();
-    fireEvent.change(type, { target: { value: 'FILE' } });
+    fireEvent.change(type, { target: { value: 'TASK' } });
     fireEvent.change(screen.getByLabelText('Corrected task name'), {
-      target: { value: 'File annual statement' },
+      target: { value: 'Send annual statement to accountant' },
     });
     fireEvent.change(screen.getByLabelText('Corrected amount'), { target: { value: '' } });
     expect(screen.getByRole('button', { name: 'Save corrections' })).toBeEnabled();
@@ -172,8 +172,8 @@ describe('Needs Review actions', () => {
       expect(resolveMock).toHaveBeenCalledWith('action-review-1', {
         action: 'correct',
         payload: {
-          action_type: 'FILE',
-          title: 'File annual statement',
+          action_type: 'TASK',
+          title: 'Send annual statement to accountant',
           summary: 'Original guess',
           due_date: null,
           amount: null,

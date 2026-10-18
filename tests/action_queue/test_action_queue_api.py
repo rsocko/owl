@@ -11,7 +11,6 @@ from doc_intelligence_hub.api.app import HubSettings, create_app
 from doc_intelligence_hub.modules.action_queue.config import settings as aq_settings
 from doc_intelligence_hub.modules.action_queue.database import (
     Action,
-    ActionFeedback,
     get_session,
     init_db,
 )
@@ -108,11 +107,11 @@ def seeded_client(client):
 
 
 class TestListActions:
-    def test_relationship_metadata_readiness_reports_safe_missing_fields(self, client):
+    def test_metadata_schema_readiness_reports_all_missing_active_fields(self, client):
         from unittest.mock import AsyncMock, MagicMock, patch
 
         from doc_intelligence_hub.core.paperless import (
-            MetadataFieldKey,
+            provisioned_metadata_field_keys,
             resolve_metadata_schema,
         )
 
@@ -122,13 +121,7 @@ class TestListActions:
         resolver.resolve = AsyncMock(
             return_value=resolve_metadata_schema(
                 [],
-                (
-                    MetadataFieldKey.RELATED_DOCUMENTS,
-                    MetadataFieldKey.RELATIONSHIP_SUMMARY,
-                    MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS,
-                    MetadataFieldKey.OBLIGATION_ID,
-                    MetadataFieldKey.OBLIGATION_ROLE,
-                ),
+                provisioned_metadata_field_keys(),
             )
         )
         with (
@@ -141,23 +134,28 @@ class TestListActions:
                 return_value=resolver,
             ),
         ):
-            response = client.get("/api/queue/check/relationship-metadata")
+            response = client.get("/api/queue/metadata/schema")
 
         assert response.status_code == 200
         assert response.json()["status"] == "missing"
         assert response.json()["category"] == "paperless_schema_setup_required"
         assert response.json()["can_setup"] is True
-        assert {field["name"] for field in response.json()["fields"]} == {
-            "Related Document IDs",
-            "Relationship Summary",
+        assert response.json()["ready_count"] == 0
+        assert response.json()["total_count"] == len(provisioned_metadata_field_keys())
+        assert {field["name"] for field in response.json()["fields"]} >= {
+            "Patient Name",
+            "Action Status",
             "Related Documents",
-            "Obligation ID",
-            "Obligation Role",
         }
         paperless.aclose.assert_awaited_once()
 
-    def test_relationship_metadata_setup_provisions_all_five_fields(self, client):
+    def test_metadata_schema_setup_provisions_every_active_field(self, client):
         from unittest.mock import AsyncMock, MagicMock, patch
+
+        from doc_intelligence_hub.core.paperless import (
+            MetadataDiagnosticCode,
+            provisioned_metadata_field_keys,
+        )
 
         paperless = MagicMock()
         paperless.aclose = AsyncMock()
@@ -165,7 +163,7 @@ class TestListActions:
         missing_schema.diagnostics = []
         missing_schema.field.return_value = MagicMock(
             is_compatible=False,
-            diagnostics=[MagicMock(code="missing_field")],
+            diagnostics=[MagicMock(code=MetadataDiagnosticCode.MISSING_FIELD)],
         )
         ready_schema = MagicMock()
         ready_schema.diagnostics = []
@@ -183,50 +181,18 @@ class TestListActions:
                 return_value=resolver,
             ),
         ):
-            response = client.post("/api/queue/setup/relationship-metadata")
+            response = client.post("/api/queue/metadata/schema/setup")
 
         assert response.status_code == 200
         assert response.json()["status"] == "ready"
-        assert len(response.json()["fields"]) == 5
-        assert len(resolver.ensure.await_args.args[0]) == 5
-
-    def test_sets_up_action_and_obligation_metadata_fields(self, client):
-        from unittest.mock import AsyncMock, MagicMock, patch
-
-        from doc_intelligence_hub.core.paperless import MetadataFieldKey
-
-        enricher = MagicMock()
-        enricher.ensure_custom_fields_exist = AsyncMock(
-            return_value={
-                MetadataFieldKey.ACTION_STATUS: 10,
-                MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS: 11,
-                MetadataFieldKey.OBLIGATION_ID: 12,
-                MetadataFieldKey.OBLIGATION_ROLE: 13,
-            }
-        )
-        enricher.client.aclose = AsyncMock()
-
-        with patch(
-            "doc_intelligence_hub.modules.action_queue.enricher.PaperlessEnricher",
-            return_value=enricher,
-        ):
-            response = client.post("/api/queue/setup/custom-fields")
-
-        assert response.status_code == 200
-        assert {field["name"] for field in response.json()["fields"]} == {
-            "Action Status",
-            "Related Documents",
-            "Obligation ID",
-            "Obligation Role",
-        }
-        enricher.ensure_custom_fields_exist.assert_awaited_once()
-        enricher.client.aclose.assert_awaited_once()
+        assert len(response.json()["fields"]) == len(provisioned_metadata_field_keys())
+        assert tuple(resolver.ensure.await_args.args[0]) == provisioned_metadata_field_keys()
 
     def test_list_actions_returns_preview_url(self, seeded_client):
         resp = seeded_client.get("/api/queue/actions")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["total"] == 2
+        assert data["total"] == 1
 
         action = data["actions"][0]
         assert "preview_url" in action
@@ -249,8 +215,8 @@ class TestListActions:
 
     def test_list_actions_filters_search_and_action_type_before_pagination(self, seeded_client):
         search = seeded_client.get("/api/queue/actions?search=blue%20shield&limit=1").json()
-        assert search["total"] == 1
-        assert search["actions"][0]["title"] == "File insurance EOB"
+        assert search["total"] == 0
+        assert search["actions"] == []
 
         action_type = seeded_client.get(
             "/api/queue/actions?action_type=file_archive&limit=1"
@@ -290,7 +256,7 @@ class TestListActions:
 
         data = seeded_client.get("/api/queue/actions?status=completed&limit=1").json()
 
-        assert data["total"] == 2
+        assert data["total"] == 1
         assert data["actions"][0]["id"] == 3
 
     def test_list_actions_empty(self, client):
@@ -747,8 +713,8 @@ class TestListActions:
 
         data = seeded_client.get("/api/queue/actions?include_resolved_no_action=true").json()
 
-        assert data["total"] == 2
-        assert {action["id"] for action in data["actions"]} == {1, 2}
+        assert data["total"] == 1
+        assert {action["id"] for action in data["actions"]} == {1}
 
 
 class TestCanonicalCorrectionOverlay:
@@ -1001,23 +967,12 @@ class TestUpdateAction:
         data = resp.json()
         assert data["version"] == current_version + 1
 
-    def test_type_correction_records_feedback_and_refreshes_cta(self, seeded_client):
+    def test_type_correction_rejects_legacy_filing_types(self, seeded_client):
         resp = seeded_client.patch(
             "/api/queue/actions/1",
             json={"action_type": "FILE", "version": 1},
         )
-        assert resp.status_code == 200
-        assert resp.json()["action_type"] == "FILE"
-        assert resp.json()["recommended_cta"]["id"] == "archive"
-
-        db = get_session()
-        try:
-            feedback = db.query(ActionFeedback).one()
-            assert feedback.feedback_type == "misclassified"
-            assert feedback.original_action_type == "PAY"
-            assert feedback.corrected_action_type == "FILE"
-        finally:
-            db.close()
+        assert resp.status_code == 422
 
     def test_correspondent_correction_writes_through_to_paperless(self, seeded_client):
         from unittest.mock import AsyncMock, patch
@@ -1506,14 +1461,12 @@ class TestFeedback:
         assert data["feedback_type"] == "not_an_action"
         assert data["action_status"] == "not_an_action"
 
-    def test_submit_misclassified_feedback_corrects_type(self, seeded_client):
+    def test_submit_misclassified_feedback_rejects_legacy_type(self, seeded_client):
         resp = seeded_client.post(
             "/api/queue/actions/1/feedback",
             json={"feedback_type": "misclassified", "corrected_action_type": "FILE"},
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["action_type"] == "FILE"
+        assert resp.status_code == 422
 
     def test_get_feedback_history(self, seeded_client):
         # Submit feedback
@@ -1602,7 +1555,9 @@ class TestSeverityField:
         assert action["severity"] == "focus"
 
     def test_severity_low_urgency(self, seeded_client):
-        resp = seeded_client.get("/api/queue/actions?status=completed")
+        resp = seeded_client.get(
+            "/api/queue/actions?status=completed&action_type=file_archive"
+        )
         action = resp.json()["actions"][0]
         # Action 2 has urgency=LOW → severity should be "safe"
         assert action["severity"] == "safe"

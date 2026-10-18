@@ -35,18 +35,21 @@ VALID_STATUSES = {
 # 3-tier severity model (derived from urgency for display)
 VALID_SEVERITIES = {"critical", "focus", "safe"}
 
-# Valid action types
-VALID_ACTION_TYPES = {
+# Action types that may be newly inferred or selected by a user.
+ACTIONABLE_ACTION_TYPES = {
     "PAY",
     "RESPOND",
-    "FILE",
     "REVIEW",
     "SHARE",
     "SCHEDULE",
     "SIGN",
-    "ARCHIVE",
+    "CANCEL",
+    "RENEW",
+    "DISPUTE",
     "TASK",
 }
+LEGACY_FILING_ACTION_TYPES = {"FILE", "ARCHIVE"}
+VALID_ACTION_TYPES = ACTIONABLE_ACTION_TYPES | LEGACY_FILING_ACTION_TYPES
 
 
 class Base(DeclarativeBase):
@@ -82,7 +85,7 @@ class Action(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     document_id = Column(Integer, nullable=False, index=True)
     document_title = Column(String, nullable=False)
-    action_type = Column(String, nullable=False)  # PAY, RESPOND, FILE, REVIEW, etc.
+    action_type = Column(String, nullable=False)
     title = Column(String, nullable=False)
     summary = Column(Text)
     due_date = Column(Date, nullable=True)

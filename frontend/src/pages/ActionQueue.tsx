@@ -199,7 +199,18 @@ type QuickTypeFilter = 'all' | 'pay' | 'respond' | 'sign' | 'schedule' | 'file_a
 type QueueView = 'grouped' | 'table';
 export type DeadlineBucket = 'overdue' | 'today' | 'next7' | 'later' | 'no_due_date';
 
-const ACTION_TYPE_OPTIONS = ['ARCHIVE', 'FILE', 'PAY', 'RESPOND', 'REVIEW', 'SCHEDULE', 'SHARE', 'SIGN', 'TASK'] as const;
+const ACTION_TYPE_OPTIONS = [
+  'PAY',
+  'RESPOND',
+  'REVIEW',
+  'SCHEDULE',
+  'SHARE',
+  'SIGN',
+  'CANCEL',
+  'RENEW',
+  'DISPUTE',
+  'TASK',
+] as const;
 const URGENCY_OPTIONS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
 export const ACTION_GROUP_BATCH_SIZE = 15;
 const ACTION_PAGE_SIZE = 50;
@@ -209,10 +220,13 @@ const ACTION_TYPE_PRIORITY: Record<string, number> = {
   SIGN: 2,
   SCHEDULE: 3,
   TASK: 4,
-  REVIEW: 5,
-  SHARE: 6,
-  FILE: 7,
-  ARCHIVE: 8,
+  CANCEL: 5,
+  RENEW: 6,
+  DISPUTE: 7,
+  REVIEW: 8,
+  SHARE: 9,
+  FILE: 10,
+  ARCHIVE: 11,
 };
 const DEADLINE_BUCKETS: Array<{ key: DeadlineBucket; label: string }> = [
   { key: 'overdue', label: 'Overdue' },
@@ -2183,6 +2197,11 @@ export default function ActionQueue() {
                         value={editDraft.action_type}
                         onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, action_type: e.target.value } : prev))}
                       >
+                        {['FILE', 'ARCHIVE'].includes(editDraft.action_type) && (
+                          <option value={editDraft.action_type} disabled>
+                            {editDraft.action_type} (legacy)
+                          </option>
+                        )}
                         {ACTION_TYPE_OPTIONS.map((option) => (
                           <option key={option} value={option}>
                             {option}

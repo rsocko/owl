@@ -35,13 +35,22 @@ type ProjectionRepairResult = {
   errors: Array<{ relationship_id: string; code: string; message: string }>;
 };
 
-type RelationshipMetadataReadiness = {
+type MetadataSchemaReadiness = {
   status: 'ready' | 'missing' | 'incompatible' | 'write_disabled'
     | 'not_configured' | 'permission_denied' | 'endpoint_unavailable';
   category: string | null;
   write_enabled: boolean;
   can_setup: boolean;
-  fields: Array<{ key: string; name: string; status: string }>;
+  ready_count: number;
+  total_count: number;
+  fields: Array<{
+    key: string;
+    name: string;
+    type: string;
+    options: string[];
+    status: 'ready' | 'missing' | 'incompatible';
+    diagnostics: string[];
+  }>;
 };
 
 export default function ActionQueueOperations() {
@@ -53,7 +62,7 @@ export default function ActionQueueOperations() {
   const [projectionHealthError, setProjectionHealthError] = useState<string | null>(null);
   const [projectionRepair, setProjectionRepair] = useState<ProjectionRepairResult | null>(null);
   const [rescanScope, setRescanScope] = useState<RescanScope>('configured');
-  const [metadataReadiness, setMetadataReadiness] = useState<RelationshipMetadataReadiness | null>(
+  const [metadataReadiness, setMetadataReadiness] = useState<MetadataSchemaReadiness | null>(
     null,
   );
   const [filters, setFilters] = useState({
@@ -94,7 +103,7 @@ export default function ActionQueueOperations() {
   const loadMetadataReadiness = async () => {
     try {
       setMetadataReadiness(
-        await endpoints.actionQueue.checkRelationshipMetadata() as RelationshipMetadataReadiness,
+        await endpoints.actionQueue.checkMetadataSchema() as MetadataSchemaReadiness,
       );
     } catch {
       setMetadataReadiness({
@@ -102,6 +111,8 @@ export default function ActionQueueOperations() {
         category: 'paperless_custom_fields_unavailable',
         write_enabled: false,
         can_setup: false,
+        ready_count: 0,
+        total_count: 0,
         fields: [],
       });
     }
@@ -243,33 +254,109 @@ export default function ActionQueueOperations() {
             >
               Check services
             </Button>
-            <Button
-              onClick={() => void execute(
-                'fields',
-                () => endpoints.actionQueue.checkCustomFields(),
-                'Custom-field check completed.',
-              )}
-              disabled={busy !== null}
-            >
-              Check custom fields
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => void execute(
-                'setup-fields',
-                () => endpoints.actionQueue.setupCustomFields(),
-                'Paperless metadata fields are ready.',
-              )}
-              disabled={busy !== null || health?.read_only === true}
-            >
-              {busy === 'setup-fields' ? 'Setting up metadata…' : 'Set up metadata fields'}
-            </Button>
           </div>
-          {health?.read_only === true && (
+        </Card>
+
+        <Card title="Paperless metadata schema">
+          <p className="text-muted">
+            Validate every active OWL field, including durable document metadata, action status,
+            and relationship projections. Setup creates missing fields, renames approved aliases,
+            and adds required select choices.
+          </p>
+          <div className="aq-meta-list" aria-live="polite">
+            <div className="aq-meta-row">
+              <span>Schema</span>
+              <Badge
+                tone={
+                  metadataReadiness?.status === 'ready'
+                    ? 'success'
+                    : metadataReadiness?.status === 'incompatible'
+                      ? 'danger'
+                      : 'warning'
+                }
+              >
+                {metadataReadiness?.status.replaceAll('_', ' ') ?? 'Checking…'}
+              </Badge>
+            </div>
+            <div className="aq-meta-row">
+              <span>Ready fields</span>
+              <span>
+                {metadataReadiness
+                  ? `${metadataReadiness.ready_count} of ${metadataReadiness.total_count}`
+                  : '—'}
+              </span>
+            </div>
+          </div>
+          {metadataReadiness?.fields.length ? (
+            <details>
+              <summary>Review field status</summary>
+              <div className="aq-meta-list">
+                {metadataReadiness.fields.map((field) => (
+                  <div className="aq-meta-row" key={field.key}>
+                    <span>
+                      {field.name}
+                      <span className="text-muted">
+                        {' · '}{field.type}
+                        {field.options.length ? ` · ${field.options.join(', ')}` : ''}
+                      </span>
+                    </span>
+                    <Badge
+                      tone={
+                        field.status === 'ready'
+                          ? 'success'
+                          : field.status === 'incompatible'
+                            ? 'danger'
+                            : 'warning'
+                      }
+                    >
+                      {field.status}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </details>
+          ) : null}
+          {metadataReadiness?.status === 'incompatible' && (
+            <p className="relationship-maintenance__warning" role="alert">
+              Resolve duplicate or incorrectly typed fields in Paperless before setup. OWL did not
+              change the schema.
+            </p>
+          )}
+          {metadataReadiness?.status === 'write_disabled' && (
             <p className="text-muted">
               Enable Paperless writeback before setting up metadata fields.
             </p>
           )}
+          <div className="btn-group">
+            <Button
+              onClick={() => void execute(
+                'metadata-schema-check',
+                loadMetadataReadiness,
+                'Paperless metadata schema checked.',
+              )}
+              disabled={busy !== null}
+            >
+              {busy === 'metadata-schema-check' ? 'Checking schema…' : 'Check metadata schema'}
+            </Button>
+            {metadataReadiness?.can_setup && (
+              <Button
+                variant="primary"
+                onClick={() => void execute(
+                  'metadata-schema-setup',
+                  async () => {
+                    const readiness = await endpoints.actionQueue.setupMetadataSchema();
+                    setMetadataReadiness(readiness as MetadataSchemaReadiness);
+                  },
+                  'Complete Paperless metadata schema is ready.',
+                )}
+                disabled={busy !== null}
+              >
+                {busy === 'metadata-schema-setup'
+                  ? 'Setting up schema…'
+                  : 'Set up complete metadata schema'}
+              </Button>
+            )}
+          </div>
         </Card>
 
         <Card title="Scoped run and rescan">
@@ -527,44 +614,6 @@ export default function ActionQueueOperations() {
                 {' '}{projectionHealth.last_error.message}
               </p>
             )}
-            {metadataReadiness && (
-              <div className="relationship-maintenance__status" aria-live="polite">
-                Metadata readiness: {metadataReadiness.status.replaceAll('_', ' ')}
-                {metadataReadiness.category
-                  ? ` (${metadataReadiness.category.replaceAll('_', ' ')})`
-                  : ''}
-              </div>
-            )}
-            <div className="btn-group">
-              <Button
-                onClick={() => void execute(
-                  'relationship-metadata-check',
-                  loadMetadataReadiness,
-                  'Relationship metadata readiness checked.',
-                )}
-                disabled={busy !== null}
-              >
-                Check relationship metadata
-              </Button>
-              {metadataReadiness?.can_setup && (
-                <Button
-                  variant="primary"
-                  onClick={() => void execute(
-                    'relationship-metadata-setup',
-                    async () => {
-                      const readiness = await endpoints.actionQueue.setupRelationshipMetadata();
-                      setMetadataReadiness(readiness as RelationshipMetadataReadiness);
-                    },
-                    'Relationship metadata fields are ready.',
-                  )}
-                  disabled={busy !== null}
-                >
-                  {busy === 'relationship-metadata-setup'
-                    ? 'Setting up relationship metadata…'
-                    : 'Set up relationship metadata'}
-                </Button>
-              )}
-            </div>
             <Button
               onClick={() => void repairRelationshipProjections()}
               disabled={

@@ -14,7 +14,7 @@ from doc_intelligence_hub.core.datetime_utils import (
 )
 
 from .config import settings
-from .database import VALID_ACTION_TYPES, VALID_STATUSES, Action, ActionFeedback
+from .database import ACTIONABLE_ACTION_TYPES, VALID_STATUSES, Action, ActionFeedback
 from .risk_scoring import compute_risk_score
 
 __all__ = ["normalize_utc_datetime", "serialize_utc_datetime"]
@@ -337,7 +337,7 @@ def record_action_feedback(
 
     normalized_action_type = corrected_action_type.upper() if corrected_action_type else None
     normalized_urgency = corrected_urgency.upper() if corrected_urgency else None
-    if normalized_action_type and normalized_action_type not in VALID_ACTION_TYPES:
+    if normalized_action_type and normalized_action_type not in ACTIONABLE_ACTION_TYPES:
         raise ValueError("corrected_action_type is not a supported action type")
     if normalized_urgency and normalized_urgency not in VALID_URGENCIES:
         raise ValueError("corrected_urgency is not a supported urgency")

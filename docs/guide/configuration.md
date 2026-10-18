@@ -141,7 +141,7 @@ rules:
 
   - match:
       tags_include: ["insurance", "policy"]
-    action: FILE
+    action: REVIEW
     urgency: 2
 ```
 

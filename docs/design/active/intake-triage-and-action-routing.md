@@ -215,23 +215,22 @@ re-evaluation.
 
 ## FILE and ARCHIVE semantics
 
-`FILE` and `ARCHIVE` currently appear as Action Queue action types. Their future
-semantics are:
+`FILE` and `ARCHIVE` are legacy Action Queue action types:
 
 - **FILE** is deprecated as a newly inferred real-world action. Filing is an
   intake operation owned by metadata readiness. Existing FILE records remain
   supported for compatibility and explicit legacy cleanup.
-- **ARCHIVE** remains a useful informational disposition for a document that
-  should be retained as reference but creates no current real-world task. It is
-  visible in no-action history and review views, not the default Action Queue
-  or Mission Control.
+- **ARCHIVE** is interpreted as an informational no-action outcome for new
+  analysis. Existing ARCHIVE records remain available through the explicit
+  legacy File / Archive filter, not the default Action Queue or Mission Control.
 - If a real physical or procedural archival task exists, such as retaining an
   original or sending records to another system, OWL creates a specific `TASK`
   or `SHARE` action rather than an ambiguous ARCHIVE action.
 
-The analyzer may preserve ARCHIVE as a classification label during migration,
-but routing treats it as no-action unless the result contains an explicit
-real-world task.
+The analyzer does not emit either legacy type. If an older or non-conforming
+model response returns FILE or ARCHIVE, OWL removes that classification before
+persistence and records no action unless another explicit real-world action is
+present.
 
 ## No-action review and learning
 

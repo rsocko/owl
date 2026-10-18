@@ -24,13 +24,15 @@ from doc_intelligence_hub.core.paperless import (
     PaperlessMetadataResolver,
     ResolvedMetadataSchema,
     get_metadata_field_spec,
+    provisioned_metadata_field_keys,
     resolve_metadata_schema,
     resolve_metadata_value,
 )
 from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer
 from doc_intelligence_hub.modules.action_queue.config import settings as action_queue_settings
 from doc_intelligence_hub.modules.action_queue.database import (
-    VALID_ACTION_TYPES,
+    ACTIONABLE_ACTION_TYPES,
+    LEGACY_FILING_ACTION_TYPES,
     Action,
     ActionFeedback,
     ActionLifecycleEvent,
@@ -73,14 +75,6 @@ from doc_intelligence_hub.modules.statements.config import resolve_api_token
 
 router = APIRouter(prefix="/api/queue", tags=["action-queue"])
 logger = logging.getLogger(__name__)
-
-_RELATIONSHIP_PROJECTION_FIELDS = (
-    MetadataFieldKey.RELATED_DOCUMENTS,
-    MetadataFieldKey.RELATIONSHIP_SUMMARY,
-    MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS,
-    MetadataFieldKey.OBLIGATION_ID,
-    MetadataFieldKey.OBLIGATION_ROLE,
-)
 
 _INITIAL_QUEUE_SETTINGS = {
     "scan_mode": "tags",
@@ -243,11 +237,11 @@ class ActionUpdateRequest(BaseModel):
         if value is None:
             return None
         normalized = value.strip().upper()
-        if normalized not in VALID_ACTION_TYPES:
+        if normalized not in ACTIONABLE_ACTION_TYPES:
             raise PydanticCustomError(
                 "invalid_action_type",
                 "action_type must be one of: {valid_types}",
-                {"valid_types": ", ".join(sorted(VALID_ACTION_TYPES))},
+                {"valid_types": ", ".join(sorted(ACTIONABLE_ACTION_TYPES))},
             )
         return normalized
 
@@ -339,8 +333,10 @@ class ActionCreateRequest(BaseModel):
     @classmethod
     def _normalize_action_type(cls, value: str) -> str:
         normalized = value.strip().upper()
-        if normalized not in VALID_ACTION_TYPES:
-            raise ValueError(f"action_type must be one of: {', '.join(sorted(VALID_ACTION_TYPES))}")
+        if normalized not in ACTIONABLE_ACTION_TYPES:
+            raise ValueError(
+                f"action_type must be one of: {', '.join(sorted(ACTIONABLE_ACTION_TYPES))}"
+            )
         return normalized
 
 
@@ -359,8 +355,10 @@ class ActionMergeRequest(BaseModel):
         if value is None:
             return None
         normalized = value.strip().upper()
-        if normalized not in VALID_ACTION_TYPES:
-            raise ValueError(f"action_type must be one of: {', '.join(sorted(VALID_ACTION_TYPES))}")
+        if normalized not in ACTIONABLE_ACTION_TYPES:
+            raise ValueError(
+                f"action_type must be one of: {', '.join(sorted(ACTIONABLE_ACTION_TYPES))}"
+            )
         return normalized
 
 
@@ -704,15 +702,7 @@ async def queue_check(request: Request) -> dict[str, Any]:
     }
 
 
-@router.get("/check/custom-fields")
-async def queue_check_custom_fields(request: Request) -> dict[str, Any]:
-    """Diagnostic: test Paperless custom_fields endpoint directly."""
-    _sync_action_queue_settings(request)
-    client = make_paperless_client(request, timeout=15.0)
-    return await client.check_custom_fields()
-
-
-def _relationship_metadata_readiness(
+def _metadata_schema_readiness(
     schema: ResolvedMetadataSchema,
     *,
     write_enabled: bool,
@@ -751,10 +741,16 @@ def _relationship_metadata_readiness(
         "category": category,
         "write_enabled": write_enabled,
         "can_setup": bool(setup_diagnostics) and not hard_diagnostics and write_enabled,
+        "ready_count": sum(
+            schema.field(key).is_compatible for key in provisioned_metadata_field_keys()
+        ),
+        "total_count": len(provisioned_metadata_field_keys()),
         "fields": [
             {
                 "key": key.value,
                 "name": get_metadata_field_spec(key).canonical_name,
+                "type": get_metadata_field_spec(key).create_type.value,
+                "options": list(get_metadata_field_spec(key).select_options),
                 "status": (
                     "ready"
                     if schema.field(key).is_compatible
@@ -771,21 +767,27 @@ def _relationship_metadata_readiness(
                         else "incompatible"
                     )
                 ),
+                "diagnostics": [
+                    diagnostic.code.value
+                    for diagnostic in schema.field(key).diagnostics
+                ],
             }
-            for key in _RELATIONSHIP_PROJECTION_FIELDS
+            for key in provisioned_metadata_field_keys()
         ],
     }
 
 
-@router.get("/check/relationship-metadata")
-async def queue_check_relationship_metadata(request: Request) -> dict[str, Any]:
-    """Validate the five canonical relationship and obligation projection fields."""
+@router.get("/metadata/schema")
+async def queue_check_metadata_schema(request: Request) -> dict[str, Any]:
+    """Validate every active OWL-owned Paperless metadata field."""
     _sync_action_queue_settings(request)
     client = None
     try:
         client = make_paperless_client(request, timeout=15.0)
-        schema = await PaperlessMetadataResolver(client).resolve(_RELATIONSHIP_PROJECTION_FIELDS)
-        return _relationship_metadata_readiness(
+        schema = await PaperlessMetadataResolver(client).resolve(
+            provisioned_metadata_field_keys()
+        )
+        return _metadata_schema_readiness(
             schema,
             write_enabled=action_queue_settings.write_to_paperless,
         )
@@ -796,10 +798,12 @@ async def queue_check_relationship_metadata(request: Request) -> dict[str, Any]:
             "category": detail.get("code", "paperless_not_configured"),
             "write_enabled": action_queue_settings.write_to_paperless,
             "can_setup": False,
+            "ready_count": 0,
+            "total_count": len(provisioned_metadata_field_keys()),
             "fields": [],
         }
     except httpx.HTTPStatusError as exc:
-        logger.exception("Paperless relationship metadata readiness check failed")
+        logger.exception("Paperless metadata schema check failed")
         permission_denied = exc.response.status_code in {401, 403}
         return {
             "status": "permission_denied" if permission_denied else "endpoint_unavailable",
@@ -810,15 +814,19 @@ async def queue_check_relationship_metadata(request: Request) -> dict[str, Any]:
             ),
             "write_enabled": action_queue_settings.write_to_paperless,
             "can_setup": False,
+            "ready_count": 0,
+            "total_count": len(provisioned_metadata_field_keys()),
             "fields": [],
         }
     except Exception:
-        logger.exception("Paperless relationship metadata readiness check failed")
+        logger.exception("Paperless metadata schema check failed")
         return {
             "status": "endpoint_unavailable",
             "category": "paperless_custom_fields_unavailable",
             "write_enabled": action_queue_settings.write_to_paperless,
             "can_setup": False,
+            "ready_count": 0,
+            "total_count": len(provisioned_metadata_field_keys()),
             "fields": [],
         }
     finally:
@@ -826,9 +834,9 @@ async def queue_check_relationship_metadata(request: Request) -> dict[str, Any]:
             await client.aclose()
 
 
-@router.post("/setup/relationship-metadata")
-async def queue_setup_relationship_metadata(request: Request) -> dict[str, Any]:
-    """Safely provision missing relationship and obligation projection fields."""
+@router.post("/metadata/schema/setup")
+async def queue_setup_metadata_schema(request: Request) -> dict[str, Any]:
+    """Safely provision the complete active Paperless metadata schema."""
     _sync_action_queue_settings(request)
     if not action_queue_settings.write_to_paperless:
         raise HTTPException(
@@ -842,8 +850,9 @@ async def queue_setup_relationship_metadata(request: Request) -> dict[str, Any]:
     client = make_paperless_client(request, timeout=30.0)
     try:
         resolver = PaperlessMetadataResolver(client)
-        current = await resolver.resolve(_RELATIONSHIP_PROJECTION_FIELDS)
-        readiness = _relationship_metadata_readiness(current, write_enabled=True)
+        keys = provisioned_metadata_field_keys()
+        current = await resolver.resolve(keys)
+        readiness = _metadata_schema_readiness(current, write_enabled=True)
         if readiness["status"] == "incompatible":
             raise HTTPException(
                 status_code=409,
@@ -855,12 +864,12 @@ async def queue_setup_relationship_metadata(request: Request) -> dict[str, Any]:
                     ),
                 },
             )
-        schema = await resolver.ensure(_RELATIONSHIP_PROJECTION_FIELDS)
-        return _relationship_metadata_readiness(schema, write_enabled=True)
+        schema = await resolver.ensure(keys)
+        return _metadata_schema_readiness(schema, write_enabled=True)
     except HTTPException:
         raise
     except httpx.HTTPStatusError as exc:
-        logger.exception("Paperless relationship metadata setup failed")
+        logger.exception("Paperless metadata schema setup failed")
         permission_denied = exc.response.status_code in {401, 403}
         raise HTTPException(
             status_code=exc.response.status_code if permission_denied else 502,
@@ -878,7 +887,7 @@ async def queue_setup_relationship_metadata(request: Request) -> dict[str, Any]:
             },
         ) from exc
     except Exception as exc:
-        logger.exception("Paperless relationship metadata setup failed")
+        logger.exception("Paperless metadata schema setup failed")
         raise HTTPException(
             status_code=502,
             detail={
@@ -888,39 +897,6 @@ async def queue_setup_relationship_metadata(request: Request) -> dict[str, Any]:
         ) from exc
     finally:
         await client.aclose()
-
-
-@router.post("/setup/custom-fields")
-async def queue_setup_custom_fields(request: Request) -> dict[str, Any]:
-    """Provision every Paperless custom field owned by the Action Queue."""
-    from fastapi import HTTPException
-
-    from doc_intelligence_hub.core.paperless import get_metadata_field_spec
-    from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
-
-    _sync_action_queue_settings(request)
-    if not action_queue_settings.write_to_paperless:
-        raise HTTPException(
-            status_code=409,
-            detail="Paperless writes are disabled; custom fields were not changed.",
-        )
-
-    enricher = PaperlessEnricher()
-    try:
-        field_map = await enricher.ensure_custom_fields_exist()
-    finally:
-        await enricher.client.aclose()
-    return {
-        "ready": len(field_map),
-        "fields": [
-            {
-                "key": key.value,
-                "name": get_metadata_field_spec(key).canonical_name,
-                "id": field_id,
-            }
-            for key, field_id in field_map.items()
-        ],
-    }
 
 
 @router.post("/run")
@@ -1205,6 +1181,10 @@ async def list_actions(
         if backfill_obligations(db):
             db.commit()
         query = db.query(Action)
+        if action_type != "file_archive":
+            query = query.filter(
+                func.upper(Action.action_type).not_in(LEGACY_FILING_ACTION_TYPES)
+            )
         if include_resolved_no_action and not include_not_ready:
             query = query.filter(
                 or_(Action.action_ready.is_(True), Action.status == "not_an_action")
@@ -2854,7 +2834,7 @@ async def submit_feedback(
 
     Feedback types:
     - not_an_action: This document doesn't require any action (false positive)
-    - misclassified: The action type is wrong (e.g., classified as PAY but should be FILE)
+    - misclassified: The action type is wrong (for example, PAY should be REVIEW)
     - wrong_urgency: Urgency level is incorrect
     - wrong_amount: Extracted amount is wrong
 
