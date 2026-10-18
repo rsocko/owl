@@ -327,6 +327,9 @@ class ActionCreateRequest(BaseModel):
     title: str = Field(min_length=1)
     summary: str | None = None
     due_date: date | None = None
+    amount: float | None = None
+    payee_or_owner: str | None = None
+    reference: str | None = None
     urgency: str = Field(default="LOW", pattern=r"^(CRITICAL|HIGH|MEDIUM|LOW)$")
 
     @field_validator("action_type")
@@ -338,6 +341,14 @@ class ActionCreateRequest(BaseModel):
                 f"action_type must be one of: {', '.join(sorted(ACTIONABLE_ACTION_TYPES))}"
             )
         return normalized
+
+    @field_validator("summary", "payee_or_owner", "reference")
+    @classmethod
+    def _normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
 
 class ActionMergeRequest(BaseModel):
@@ -2042,7 +2053,9 @@ async def split_action(
             title=body.title.strip(),
             summary=body.summary,
             due_date=body.due_date,
-            amount=source.amount,
+            amount=body.amount if "amount" in body.model_fields_set else source.amount,
+            payee_or_owner=body.payee_or_owner,
+            reference=body.reference,
             document_amount=source.document_amount,
             document_due_date=source.document_due_date,
             document_amount_overridden=source.document_amount_overridden,

@@ -30,7 +30,7 @@ import { getToastDuration } from '../lib/toast';
 import '../styles/intake-review.css';
 
 type ReviewTab = 'metadata' | 'actions' | 'related' | 'ocr';
-type Disposition = 'save' | 'defer' | 'file_only' | 'confirm_and_file';
+type Disposition = 'save' | 'file_only' | 'confirm_and_file';
 type TaxonomyKind = 'tag' | 'correspondent' | 'document_type' | 'storage_path';
 type QueueFilter = 'all' | 'actions' | 'missing_type';
 
@@ -289,6 +289,17 @@ function formatDate(value?: string | null): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'The operation failed.';
+}
+
+function errorCode(error: unknown): string | null {
+  if (!(error instanceof Error) || !('details' in error)) return null;
+  const details = (error as {
+    details?: {
+      detail?: { code?: string };
+      error?: { code?: string };
+    };
+  }).details;
+  return details?.detail?.code || details?.error?.code || null;
 }
 
 function tagHierarchy(name: string): { parents: string[]; leaf: string } {
@@ -795,7 +806,12 @@ export default function IntakeReview() {
   const [actionError, setActionError] = useState('');
   const [ocrError, setOcrError] = useState('');
   const [busyKey, setBusyKey] = useState('');
-  const [toast, setToast] = useState<{ message: string; tone?: 'success' | 'error' } | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    tone?: 'success' | 'error';
+    actionLabel?: string;
+    onAction?: () => void;
+  } | null>(null);
   const [newActionOpen, setNewActionOpen] = useState(false);
   const [newAction, setNewAction] = useState<ActionDraft>(EMPTY_ACTION);
   const [previewExpanded, setPreviewExpanded] = useState(false);
@@ -900,7 +916,7 @@ export default function IntakeReview() {
     setLoadingActions(true);
     setLoadingOcr(true);
 
-    void endpoints.intake.documentCore(id)
+    const coreRequest = endpoints.intake.documentCore(id)
       .then((response) => {
         if (requestId.current !== currentRequest) return;
         const nextCore = response as IntakeCore;
@@ -915,7 +931,7 @@ export default function IntakeReview() {
       .finally(() => {
         if (requestId.current === currentRequest) setLoadingCore(false);
       });
-    void endpoints.intake.documentSuggestions(id)
+    const suggestionsRequest = endpoints.intake.documentSuggestions(id)
       .then((response) => {
         if (requestId.current !== currentRequest) return;
         const result = response as {
@@ -933,7 +949,7 @@ export default function IntakeReview() {
       .finally(() => {
         if (requestId.current === currentRequest) setLoadingSuggestions(false);
       });
-    void endpoints.intake.documentActions(id)
+    const actionsRequest = endpoints.intake.documentActions(id)
       .then((response) => {
         if (requestId.current !== currentRequest) return;
         const result = response as { actions: IntakeAction[]; ocr_quality: Omit<OcrState, 'text'> };
@@ -946,7 +962,7 @@ export default function IntakeReview() {
       .finally(() => {
         if (requestId.current === currentRequest) setLoadingActions(false);
       });
-    void endpoints.intake.documentOcr(id)
+    const ocrRequest = endpoints.intake.documentOcr(id)
       .then((response) => {
         if (requestId.current === currentRequest) setOcr(response as OcrState);
       })
@@ -956,6 +972,8 @@ export default function IntakeReview() {
       .finally(() => {
         if (requestId.current === currentRequest) setLoadingOcr(false);
       });
+
+    await Promise.all([coreRequest, suggestionsRequest, actionsRequest, ocrRequest]);
   }, []);
 
   useEffect(() => {
@@ -1006,6 +1024,36 @@ export default function IntakeReview() {
   const selectDocument = (id: number) => {
     if (dirty && !window.confirm('Discard unsaved metadata changes and open another document?')) return;
     activateDocument(id);
+  };
+
+  const reloadCurrentDocument = async () => {
+    if (!core) return;
+    if (dirty && !window.confirm('Reload this document and discard your unsaved changes?')) return;
+    const documentId = core.document.id;
+    setToast(null);
+    setBusyKey('reload-document');
+    try {
+      await loadDocument(documentId);
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const deferDocument = async () => {
+    if (!core) return;
+    const currentIndex = filteredQueue.findIndex((item) => item.id === core.document.id);
+    const nextDocument = filteredQueue[currentIndex + 1] || filteredQueue[currentIndex - 1];
+    setPinnedFilteredId(null);
+    if (nextDocument) activateDocument(nextDocument.id);
+    else {
+      setBusyKey('defer');
+      try {
+        await loadDocument(core.document.id);
+      } finally {
+        setBusyKey('');
+      }
+    }
+    showToast('Changes discarded; document kept in Inbox.');
   };
 
   const moveQueueFocus = (direction: -1 | 1) => {
@@ -1095,24 +1143,22 @@ export default function IntakeReview() {
           ? Object.fromEntries(pendingActions.map((action) => [action.id, action.version]))
           : {},
       }) as { filed: boolean };
-      showToast(disposition === 'defer' ? 'Changes saved; document kept in the Inbox.' : response.filed ? 'Document filed.' : 'Changes saved.');
+      showToast(response.filed ? 'Document filed.' : 'Changes saved.');
       const refreshedQueue = await loadQueue(
         Math.max(1, Math.ceil(queue.length / QUEUE_PAGE_SIZE)),
         queueQuery,
         queueFilter,
       );
       const matchingQueue = refreshedQueue;
-      if (response.filed || disposition === 'defer') {
+      if (response.filed) {
         setPinnedFilteredId(null);
         const nextMatching = matchingQueue.find((item) => item.id !== core.document.id)
           || (nextDocument && refreshedQueue.find((item) => item.id === nextDocument.id));
         if (nextMatching) activateDocument(nextMatching.id);
-        else if (response.filed) {
+        else {
           setSelectedId(null);
           updateUrl(null);
           setCore(null);
-        } else {
-          await loadDocument(core.document.id);
         }
       } else {
         const refreshedCurrent = refreshedQueue.find((item) => item.id === core.document.id);
@@ -1125,7 +1171,16 @@ export default function IntakeReview() {
         await loadDocument(core.document.id);
       }
     } catch (error) {
-      showToast(errorMessage(error), 'error');
+      if (errorCode(error) === 'source_revision_conflict') {
+        setToast({
+          message: 'This document changed after it was opened. Reload it to review the latest version before saving.',
+          tone: 'error',
+          actionLabel: 'Reload',
+          onAction: () => void reloadCurrentDocument(),
+        });
+      } else {
+        showToast(errorMessage(error), 'error');
+      }
     } finally {
       setBusyKey('');
     }
@@ -1546,7 +1601,7 @@ export default function IntakeReview() {
 
             <footer className="intake-footer">
               <div className="intake-footer-left">
-                <Button disabled={!core?.write_enabled || Boolean(busyKey)} onClick={() => void save('defer')}><FileClock size={16} /> Defer & next</Button>
+                <Button disabled={!core || Boolean(busyKey)} onClick={() => void deferDocument()}><FileClock size={16} /> Defer & next</Button>
                 <span className={dirty ? 'intake-dirty' : ''}>{dirty ? 'Unsaved changes' : 'All changes saved'}</span>
                 {core && !core.write_enabled ? <span className="intake-write-warning">Paperless writes are disabled.</span> : null}
               </div>
@@ -1580,7 +1635,28 @@ export default function IntakeReview() {
           <iframe title={`Expanded preview of ${title}`} src={previewUrl} />
         </div>
       ) : null}
-      {toast ? <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} /> : null}
+      {toast?.actionLabel && toast.onAction ? (
+        <div className={`toast ${toast.tone || 'success'}`} role="alert" aria-live="assertive">
+          <span className="toast-message">{toast.message}</span>
+          <button className="toast-dismiss" onClick={toast.onAction} type="button">
+            {toast.actionLabel}
+          </button>
+          <button
+            className="toast-dismiss"
+            onClick={() => setToast(null)}
+            type="button"
+            aria-label="Dismiss notification"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : toast ? (
+        <Toast
+          message={toast.message}
+          tone={toast.tone}
+          onDismiss={() => setToast(null)}
+        />
+      ) : null}
     </div>
   );
 }

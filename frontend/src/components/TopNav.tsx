@@ -16,25 +16,20 @@ type NavEntry = NavItem | NavGroup;
 
 const NAV_ENTRIES: NavEntry[] = [
   { to: '/', label: 'Overview' },
+  { to: '/inbox-review', label: 'Inbox' },
+  { to: '/action-queue', label: 'Actions' },
+  { to: '/needs-review', label: 'Needs Review' },
   {
     label: 'Documents',
     items: [
       { to: '/document-views', label: 'Document Views' },
       { to: '/statements', label: 'Statements' },
       { to: '/correspondents', label: 'Correspondent Review' },
+      { to: '/corrections', label: 'Corrections' },
       { to: '/eob', label: 'EOB Matching' },
       { to: '/eob/benchmarks', label: 'Benchmarks' },
       { to: '/orphans', label: 'Orphans & Dupes' },
       { to: '/ocr-quality', label: 'OCR Quality' },
-    ],
-  },
-  {
-    label: 'Workflow',
-    items: [
-      { to: '/inbox-review', label: 'Inbox Review' },
-      { to: '/action-queue', label: 'Action Queue' },
-      { to: '/needs-review', label: 'Needs Review' },
-      { to: '/corrections', label: 'Corrections' },
     ],
   },
   {

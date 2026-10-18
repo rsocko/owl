@@ -204,9 +204,9 @@ The workspace also supports these independent outcomes:
 - **Confirm action & file** confirms the selected action assessment, saves
   metadata, removes configured intake tags, and advances. Each confirmed action
   retains its own lifecycle.
-- **Keep in Inbox** saves permitted metadata edits, retains the Inbox tag, and
-  records that the document still needs human review. It creates no trusted
-  action or Mission Control work by itself.
+- **Defer & next** discards pending metadata edits, retains the Inbox tag, and
+  advances to the next document. It creates no trusted action or Mission
+  Control work by itself.
 
 When OWL is confident that no action exists, it may record the same disposition
 automatically. Lower-confidence no-action predictions go to Needs Review, where

@@ -16,29 +16,21 @@ describe('TopNav', () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Workflow' }));
-
-    expect(screen.getByRole('menuitem', { name: 'Needs Review' })).toHaveAttribute(
-      'href',
-      '/needs-review',
-    );
+    expect(screen.getByRole('link', { name: 'Needs Review' })).toHaveAttribute('href', '/needs-review');
     expect(screen.queryByText('Triage')).not.toBeInTheDocument();
   });
 
-  it('uses the Paperless-aligned Inbox Review label and route', () => {
+  it('promotes Inbox and Actions to top-level workflow destinations', () => {
     render(
       <MemoryRouter initialEntries={['/inbox-review']}>
         <TopNav />
       </MemoryRouter>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Workflow' }));
-
-    expect(screen.getByRole('menuitem', { name: 'Inbox Review' })).toHaveAttribute(
-      'href',
-      '/inbox-review',
-    );
+    expect(screen.getByRole('link', { name: 'Inbox' })).toHaveAttribute('href', '/inbox-review');
+    expect(screen.getByRole('link', { name: 'Actions' })).toHaveAttribute('href', '/action-queue');
     expect(screen.queryByText('Intake Review')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Workflow' })).not.toBeInTheDocument();
   });
 
   it('links to the grouped Document Views launcher', () => {
