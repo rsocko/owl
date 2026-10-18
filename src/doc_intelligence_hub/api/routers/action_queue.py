@@ -779,8 +779,7 @@ def _metadata_schema_readiness(
                     )
                 ),
                 "diagnostics": [
-                    diagnostic.code.value
-                    for diagnostic in schema.field(key).diagnostics
+                    diagnostic.code.value for diagnostic in schema.field(key).diagnostics
                 ],
             }
             for key in provisioned_metadata_field_keys()
@@ -795,9 +794,7 @@ async def queue_check_metadata_schema(request: Request) -> dict[str, Any]:
     client = None
     try:
         client = make_paperless_client(request, timeout=15.0)
-        schema = await PaperlessMetadataResolver(client).resolve(
-            provisioned_metadata_field_keys()
-        )
+        schema = await PaperlessMetadataResolver(client).resolve(provisioned_metadata_field_keys())
         return _metadata_schema_readiness(
             schema,
             write_enabled=action_queue_settings.write_to_paperless,
@@ -1193,9 +1190,7 @@ async def list_actions(
             db.commit()
         query = db.query(Action)
         if action_type != "file_archive":
-            query = query.filter(
-                func.upper(Action.action_type).not_in(LEGACY_FILING_ACTION_TYPES)
-            )
+            query = query.filter(func.upper(Action.action_type).not_in(LEGACY_FILING_ACTION_TYPES))
         if include_resolved_no_action and not include_not_ready:
             query = query.filter(
                 or_(Action.action_ready.is_(True), Action.status == "not_an_action")

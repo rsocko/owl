@@ -1563,9 +1563,7 @@ class TestSeverityField:
         assert action["severity"] == "focus"
 
     def test_severity_low_urgency(self, seeded_client):
-        resp = seeded_client.get(
-            "/api/queue/actions?status=completed&action_type=file_archive"
-        )
+        resp = seeded_client.get("/api/queue/actions?status=completed&action_type=file_archive")
         action = resp.json()["actions"][0]
         # Action 2 has urgency=LOW → severity should be "safe"
         assert action["severity"] == "safe"
