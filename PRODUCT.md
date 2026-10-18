@@ -83,6 +83,11 @@ Paperless web, mobile, workflow, API, or third-party clients. OWL observes those
 changes, detects when prior analysis is stale, and re-evaluates relevant
 results instead of requiring exclusive control.
 
+For financial reconciliation, Monarch is the transaction authority and Tyrion
+mediates bounded matching and receipt evidence into OWL. OWL uses that evidence
+to update its own obligation and action lifecycle; it does not become a
+transaction ledger.
+
 Typical work includes:
 
 - reviewing Paperless Inbox metadata and suggestions;
@@ -177,10 +182,27 @@ history.
 
 - cross-system presentation and prioritization of trusted actionable work;
 - aggregation of OWL actions with work from other services; and
-- downstream task-oriented views and coordination.
+- downstream task-oriented views and coordination; and
+- invocation of lifecycle operations that OWL explicitly exposes as
+  source-owned actions.
 
 Mission Control must not become the authority for OWL classification,
 document readiness, evidence, correction history, or relationship state.
+For payment checks in the trusted personal deployment, Mission Control may
+receive the decision-grade context required to act in place: payee, amount,
+transaction date and state, account display name and masked last four,
+confidence, and match reasons. Raw upstream identifiers and unrestricted
+provider payloads remain outside that projection.
+
+### Monarch and Tyrion own
+
+- Monarch owns transaction truth, including posted versus pending state;
+- Tyrion owns the bounded Monarch integration and candidate-ranking contract;
+  and
+- Tyrion receipt links provide supporting relationship evidence rather than
+  independent proof that an obligation was paid.
+
+OWL must not infer payment settlement from a receipt link alone.
 
 ### Optional surrounding tools
 
@@ -236,6 +258,16 @@ The durable boundary is:
   outcomes include completion, snooze, dismissal, false-positive correction,
   reopening, confirmation, rejection, re-evaluation, matching, and deferral
   where appropriate to the record type.
+- A payment candidate is evidence, not completion. The initial payment-check
+  workflow requires explicit confirmation before settling an obligation, even
+  when Tyrion returns a strong posted transaction match.
+- Tyrion Bill Matching is the primary payment-search contract. Receipt matching
+  may strengthen the explanation but is not required for a valid candidate.
+- Payment checks are available from both OWL and Mission Control while OWL
+  remains the authoritative lifecycle and audit owner.
+- Only explicitly configured financial accounts are eligible for payment
+  matching. Pending, ambiguous, partial, conflicting, stale, and possible
+  double-payment results remain distinct reviewable states.
 
 ## Brand Commitments
 
@@ -277,6 +309,10 @@ Key evidence includes:
   projection behavior;
 - [Mission Control Integration](docs/guide/mission-control-integration.md) for
   connector trust gates and lifecycle ownership;
+- [Canonical Receipt Intake](docs/modules/receipt-intake/design.md) and the
+  payment reconciliation aggregate in
+  `src/doc_intelligence_hub/modules/action_queue/payment_reconciliation.py`
+  for payment-evidence ownership and reconciliation behavior;
 - [Feature Roadmap](docs/feature-roadmap.md) for the distinction between built
   and planned capabilities;
 - [Shared Scenarios](docs/modules/shared/overview-scenarios.md) for the current
