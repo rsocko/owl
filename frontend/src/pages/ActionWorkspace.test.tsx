@@ -308,4 +308,54 @@ describe('ActionWorkspace', () => {
       idempotency_key: 'owl-confirm-payment:1:v1:2:3',
     }));
   });
+
+  it('animates a restored in-progress payment check', async () => {
+    actionsMock.mockResolvedValue({
+      actions: actions.map((action) => (
+        action.id === 1 ? { ...action, obligation_id: 'obligation-1' } : { ...action }
+      )),
+      total: actions.length,
+    });
+    paymentCheckMock.mockResolvedValue({
+      payment_check: {
+        state: 'checking',
+        checked_at: '2026-10-18T16:14:08.398188',
+        stale_after: null,
+        source: 'tyrion_bill_match',
+        revision: 'v1:2:2',
+        message: 'Checking all financial accounts except any configured exclusions.',
+        candidates: [],
+      },
+    });
+    renderWorkspace();
+
+    const button = await screen.findByRole('button', { name: 'Checking…' });
+    expect(button).toBeDisabled();
+    expect(button.querySelector('svg')).toHaveClass('spin');
+    expect(screen.getByText('Checking all financial accounts except any configured exclusions.')).toBeInTheDocument();
+  });
+
+  it('allows another check after stale recovery', async () => {
+    actionsMock.mockResolvedValue({
+      actions: actions.map((action) => (
+        action.id === 1 ? { ...action, obligation_id: 'obligation-1' } : { ...action }
+      )),
+      total: actions.length,
+    });
+    paymentCheckMock.mockResolvedValue({
+      payment_check: {
+        state: 'source_unavailable',
+        checked_at: '2026-10-18T16:14:53.398188',
+        stale_after: null,
+        source: 'tyrion_bill_match',
+        revision: 'v1:2:2',
+        message: 'The payment source could not complete the check.',
+        candidates: [],
+      },
+    });
+    renderWorkspace();
+
+    expect(await screen.findByText('Payment source unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeEnabled();
+  });
 });

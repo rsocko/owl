@@ -408,6 +408,18 @@ export default function ActionWorkspace() {
   }, [selectedAction]);
 
   useEffect(() => {
+    if (!selectedAction || paymentCheck?.state !== 'checking') return;
+    const poll = window.setInterval(() => {
+      void endpoints.actionQueue.paymentCheck(String(selectedAction.id))
+        .then((response) => {
+          setPaymentCheck((response as { payment_check: PaymentCheck }).payment_check);
+        })
+        .catch(() => undefined);
+    }, 5_000);
+    return () => window.clearInterval(poll);
+  }, [selectedAction, paymentCheck?.state]);
+
+  useEffect(() => {
     if (!selectedAction || normalizedType(selectedAction.action_type) !== 'PAY' || !selectedAction.obligation_id) {
       setPaymentCheck(null);
       setPaymentLoading(false);
@@ -1132,6 +1144,7 @@ function PaymentCheckPanel({
   onConfirm: () => void;
 }) {
   const candidate = paymentCheck?.candidates[0];
+  const checking = busy || paymentCheck?.state === 'checking';
   const stateLabel: Record<PaymentCheckState, string> = {
     unchecked: 'Ready to check',
     checking: 'Checking accounts',
@@ -1151,21 +1164,25 @@ function PaymentCheckPanel({
       <div className="payment-check-heading">
         <div>
           <span>Payment reconciliation</span>
-          <strong>{loading ? 'Loading payment status…' : stateLabel[paymentCheck?.state || 'unchecked']}</strong>
+          <strong aria-live="polite">{loading ? 'Loading payment status…' : stateLabel[paymentCheck?.state || 'unchecked']}</strong>
         </div>
         <Button
           size="sm"
-          disabled={!eligible || loading || busy || paymentCheck?.state === 'checking'}
+          disabled={!eligible || loading || checking}
           onClick={onCheck}
         >
-          <RefreshCw size={15} className={busy ? 'spin' : ''} />
-          {paymentCheck?.state === 'unchecked' ? 'Check for payment' : 'Check again'}
+          <RefreshCw size={15} className={checking ? 'spin' : ''} />
+          {paymentCheck?.state === 'checking'
+            ? 'Checking…'
+            : paymentCheck?.state === 'unchecked'
+              ? 'Check for payment'
+              : 'Check again'}
         </Button>
       </div>
       <p>
         {!eligible
           ? 'Add a payee, amount, and due or bill date before checking for payment.'
-          : paymentCheck?.message || 'Search configured eligible financial accounts for a matching transaction.'}
+          : paymentCheck?.message || 'Search all financial accounts except any configured exclusions for a matching transaction.'}
       </p>
       {candidate ? (
         <dl className="payment-candidate">

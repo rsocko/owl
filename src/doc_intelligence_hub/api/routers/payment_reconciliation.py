@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import httpx
@@ -16,6 +17,7 @@ from doc_intelligence_hub.modules.action_queue.database import get_session, init
 from doc_intelligence_hub.modules.action_queue.payment_reconciliation import (
     IdempotencyConflictError,
     PaymentActionResult,
+    PaymentCheckInProgressError,
     PaymentCheckRequest,
     PaymentCheckResult,
     PaymentConfirmRequest,
@@ -38,6 +40,26 @@ def _public_payment_projection(projection: dict) -> dict:
     return {key: value for key, value in projection.items() if not key.startswith("_")}
 
 
+def _finalize_interrupted_check(
+    service: PaymentReconciliationService,
+    db,
+    run_id: str,
+    *,
+    action_id: int,
+    connector_ref: str,
+    error_code: str,
+) -> None:
+    db.rollback()
+    try:
+        service.fail_check(
+            run_id,
+            connector_ref=connector_ref,
+            error_code=error_code,
+        )
+    except Exception:
+        logger.exception("Could not finalize interrupted payment check for action %s", action_id)
+
+
 def _raise_service_error(exc: Exception) -> None:
     if isinstance(exc, KeyError):
         raise HTTPException(
@@ -58,6 +80,14 @@ def _raise_service_error(exc: Exception) -> None:
             detail={
                 "code": str(exc),
                 "message": "The idempotency key was already used for another action.",
+            },
+        ) from exc
+    if isinstance(exc, PaymentCheckInProgressError):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": str(exc),
+                "message": "A payment check is already in progress.",
             },
         ) from exc
     raise HTTPException(
@@ -271,6 +301,17 @@ async def _check_payment(request: Request, action_id: int, body: PaymentCheckReq
                     url=settings.tyrion_bill_matching_url,
                     api_token=token,
                 ).check(tyrion_request)
+            except asyncio.CancelledError:
+                logger.warning("Tyrion payment check was cancelled for action %s", action_id)
+                _finalize_interrupted_check(
+                    service,
+                    db,
+                    run.id,
+                    action_id=action_id,
+                    connector_ref=connector_ref,
+                    error_code="tyrion_check_cancelled",
+                )
+                raise
             except (httpx.HTTPError, ValidationError) as exc:
                 logger.warning("Tyrion payment check failed for action %s: %s", action_id, exc)
                 projection = service.fail_check(
@@ -284,6 +325,17 @@ async def _check_payment(request: Request, action_id: int, body: PaymentCheckReq
                     idempotent=False,
                     payment=_public_payment_projection(projection),
                 ).model_dump(mode="json")
+            except Exception:
+                logger.exception("Unexpected Tyrion payment check failure for action %s", action_id)
+                _finalize_interrupted_check(
+                    service,
+                    db,
+                    run.id,
+                    action_id=action_id,
+                    connector_ref=connector_ref,
+                    error_code="tyrion_check_failed",
+                )
+                raise
             try:
                 projection = service.finish_check(
                     run.id,
@@ -295,6 +347,18 @@ async def _check_payment(request: Request, action_id: int, body: PaymentCheckReq
                     "tyrion_request_ref_mismatch",
                     "tyrion_bill_ref_mismatch",
                 }:
+                    logger.exception(
+                        "Could not apply Tyrion payment check result for action %s",
+                        action_id,
+                    )
+                    _finalize_interrupted_check(
+                        service,
+                        db,
+                        run.id,
+                        action_id=action_id,
+                        connector_ref=connector_ref,
+                        error_code="tyrion_check_failed",
+                    )
                     raise
                 logger.warning(
                     "Tyrion payment check returned mismatched identifiers for action %s: %s",
@@ -312,6 +376,20 @@ async def _check_payment(request: Request, action_id: int, body: PaymentCheckReq
                     idempotent=False,
                     payment=_public_payment_projection(projection),
                 ).model_dump(mode="json")
+            except Exception:
+                logger.exception(
+                    "Could not apply Tyrion payment check result for action %s",
+                    action_id,
+                )
+                _finalize_interrupted_check(
+                    service,
+                    db,
+                    run.id,
+                    action_id=action_id,
+                    connector_ref=connector_ref,
+                    error_code="tyrion_check_failed",
+                )
+                raise
             return PaymentCheckResult(
                 run_id=run.id,
                 status="completed",

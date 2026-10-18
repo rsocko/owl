@@ -1,12 +1,24 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 from unittest.mock import AsyncMock, patch
 
+import pytest
+from fastapi import Request
 from pydantic import SecretStr
 
-from doc_intelligence_hub.modules.action_queue.database import Action, Obligation, get_session
+from doc_intelligence_hub.api.routers.payment_reconciliation import _check_payment
+from doc_intelligence_hub.modules.action_queue.database import (
+    Action,
+    Obligation,
+    get_session,
+    init_db,
+)
 from doc_intelligence_hub.modules.action_queue.payment_reconciliation import (
+    PaymentCheckRequest,
+    PaymentCheckRun,
+    PaymentRelationshipEvent,
     TyrionBillMatchResponseV2,
 )
 
@@ -52,6 +64,48 @@ def _ambiguous_snapshot() -> dict:
             }
         ],
     }
+
+
+def _seed_check_action(action_id: int, obligation_id: str) -> None:
+    init_db()
+    db = get_session()
+    try:
+        obligation = Obligation(
+            id=obligation_id,
+            status="open",
+            expected_amount_minor=8_245,
+            currency="USD",
+        )
+        action = Action(
+            id=action_id,
+            document_id=action_id + 1000,
+            document_title="Utility bill",
+            action_type="PAY",
+            title="Pay utility bill",
+            amount=82.45,
+            due_date=date(2026, 10, 20),
+            document_date=date(2026, 10, 10),
+            payee_or_owner="City Utilities",
+            status="pending",
+            action_ready=True,
+            obligation_id=obligation.id,
+        )
+        db.add_all([obligation, action])
+        db.commit()
+    finally:
+        db.close()
+
+
+def _request_for(app, action_id: int) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "app": app,
+            "method": "POST",
+            "path": f"/api/payment-reconciliation/v2/actions/{action_id}/check-payment",
+            "headers": [],
+        }
+    )
 
 
 def test_strict_aggregate_auth_actions_attention_and_privacy(client, app) -> None:
@@ -341,5 +395,80 @@ def test_active_check_and_confirmation_complete_action_atomically(client, app) -
         stored_obligation = db.query(Obligation).filter_by(id="active-check-obligation").one()
         assert stored_action.status == "completed"
         assert stored_obligation.status == "settled"
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_check_is_finalized_and_cancellation_is_preserved(app) -> None:
+    action_id = 702
+    _seed_check_action(action_id, "cancelled-check-obligation")
+    app.state.hub_settings.tyrion_bill_matching_url = (
+        "http://tyrion.test/api/connector/v1/bill-matches"
+    )
+
+    with (
+        patch(
+            "doc_intelligence_hub.modules.action_queue.payment_reconciliation."
+            "TyrionBillMatchingClient.check",
+            new=AsyncMock(side_effect=asyncio.CancelledError()),
+        ),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await _check_payment(
+            _request_for(app, action_id),
+            action_id,
+            PaymentCheckRequest(
+                revision="v1:1:1",
+                idempotency_key="cancelled-payment-check",
+            ),
+        )
+
+    db = get_session()
+    try:
+        run = db.query(PaymentCheckRun).filter_by(action_id=action_id).one()
+        assert run.status == "source_unavailable"
+        assert run.error_code == "tyrion_check_cancelled"
+        assert (
+            db.query(PaymentRelationshipEvent)
+            .filter_by(action_scope=f"payment_check:{run.id}", action="check_failed")
+            .one()
+            .new_state["error_code"]
+            == "tyrion_check_cancelled"
+        )
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_unexpected_check_failure_is_finalized_before_reraising(app) -> None:
+    action_id = 703
+    _seed_check_action(action_id, "failed-check-obligation")
+    app.state.hub_settings.tyrion_bill_matching_url = (
+        "http://tyrion.test/api/connector/v1/bill-matches"
+    )
+
+    with (
+        patch(
+            "doc_intelligence_hub.modules.action_queue.payment_reconciliation."
+            "TyrionBillMatchingClient.check",
+            new=AsyncMock(side_effect=RuntimeError("worker interrupted")),
+        ),
+        pytest.raises(RuntimeError, match="worker interrupted"),
+    ):
+        await _check_payment(
+            _request_for(app, action_id),
+            action_id,
+            PaymentCheckRequest(
+                revision="v1:1:1",
+                idempotency_key="failed-payment-check",
+            ),
+        )
+
+    db = get_session()
+    try:
+        run = db.query(PaymentCheckRun).filter_by(action_id=action_id).one()
+        assert run.status == "source_unavailable"
+        assert run.error_code == "tyrion_check_failed"
     finally:
         db.close()
