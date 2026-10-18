@@ -78,6 +78,17 @@ posted candidate does not complete the action automatically. The operator must c
 action and obligation atomically. Pending transactions and receipt links remain
 supporting evidence and cannot be confirmed as settlement.
 
+### OCR summary
+
+Action Review uses the same OCR tab as Inbox Review. It summarizes OWL's
+authoritative overall assessment, overlay/readability and machine-extraction
+scores, scorer freshness, candidate or resolution state, top reasons, page
+profile, and current searchable text. **Inspect OCR** opens the full page and
+candidate comparison workflow.
+
+OCR candidate acceptance and OCR analysis are document-text operations. They
+do not complete, dismiss, or otherwise change the selected action lifecycle.
+
 ## Action Lifecycle
 
 Actions follow a clear lifecycle from detection to resolution:

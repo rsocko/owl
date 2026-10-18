@@ -9,6 +9,8 @@ const {
   documentSuggestionsMock,
   documentActionsMock,
   documentOcrMock,
+  ocrDocumentDetailMock,
+  ocrCandidatesMock,
   documentRelationshipsMock,
   relationshipCandidatesMock,
   createRelationshipMock,
@@ -26,6 +28,8 @@ const {
   documentSuggestionsMock: vi.fn(),
   documentActionsMock: vi.fn(),
   documentOcrMock: vi.fn(),
+  ocrDocumentDetailMock: vi.fn(),
+  ocrCandidatesMock: vi.fn(),
   documentRelationshipsMock: vi.fn(),
   relationshipCandidatesMock: vi.fn(),
   createRelationshipMock: vi.fn(),
@@ -54,6 +58,12 @@ vi.mock('../lib/api', () => ({
       createTaxonomy: createTaxonomyMock,
       createAction: createActionMock,
       deleteAction: deleteActionMock,
+    },
+    ocrQuality: {
+      documentDetail: ocrDocumentDetailMock,
+      candidates: {
+        list: ocrCandidatesMock,
+      },
     },
     actionQueue: {
       updateAction: updateActionMock,
@@ -143,6 +153,17 @@ describe('IntakeReview', () => {
       poor_quality: true,
       text: 'Searchable text',
     });
+    ocrDocumentDetailMock.mockResolvedValue({
+      document_id: 1,
+      overlay_score: 72,
+      machine_score: 68,
+      review_status: 'REVIEW_RECOMMENDED',
+      quality_scorer_version: '2.0.0',
+      assessed_at: '2026-10-14T10:00:00Z',
+      reasons: [],
+      document_profile: { page_count: 1 },
+    });
+    ocrCandidatesMock.mockResolvedValue({ candidates: [] });
     documentRelationshipsMock.mockResolvedValue({
       relationships: [],
       count: 0,
@@ -175,6 +196,17 @@ describe('IntakeReview', () => {
 
     expect(await screen.findByRole('tab', { name: 'OCR, needs review' })).toBeInTheDocument();
     expect(screen.queryByText('Poor OCR can make metadata and action analysis stale or incomplete.')).not.toBeInTheDocument();
+  });
+
+  it('renders the authoritative shared OCR summary', async () => {
+    renderPage('/inbox-review?document=1&tab=ocr');
+
+    expect(await screen.findByRole('heading', { name: 'OCR assessment' })).toBeInTheDocument();
+    expect(screen.getByText('Review Recommended')).toBeInTheDocument();
+    expect(screen.getByText('Overlay / readability')).toBeInTheDocument();
+    expect(screen.getByText('Machine extraction')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Searchable text')).toBeInTheDocument();
+    expect(screen.queryByText('OCR quality')).not.toBeInTheDocument();
   });
 
   it('selects a document and tab from the query string', async () => {
