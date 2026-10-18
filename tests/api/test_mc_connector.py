@@ -34,13 +34,13 @@ class TestMCListActions:
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, list)
-        assert len(data) == 3
+        assert len(data) == 2
 
     def test_actions_filter_by_status(self, client, seed_actions):
         resp = client.get("/api/action-queue/actions?status=pending")
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data) == 2
+        assert len(data) == 1
 
     def test_action_structure(self, client, seed_actions):
         resp = client.get("/api/action-queue/actions?limit=1")
@@ -62,15 +62,15 @@ class TestMCListActions:
 
     def test_all_status_alias_and_deterministic_pagination(self, client, seed_actions):
         all_actions = client.get("/api/action-queue/actions?status=all").json()
-        first_response = client.get("/api/action-queue/actions?status=all&limit=2&offset=0")
-        second_response = client.get("/api/action-queue/actions?status=all&limit=2&offset=2")
+        first_response = client.get("/api/action-queue/actions?status=all&limit=1&offset=0")
+        second_response = client.get("/api/action-queue/actions?status=all&limit=1&offset=1")
         first_page = first_response.json()
         second_page = second_response.json()
 
         assert first_page + second_page == all_actions
-        assert len({action["id"] for action in all_actions}) == 3
-        assert first_response.headers["x-total-count"] == "3"
-        assert first_response.headers["x-page-limit"] == "2"
+        assert len({action["id"] for action in all_actions}) == 2
+        assert first_response.headers["x-total-count"] == "2"
+        assert first_response.headers["x-page-limit"] == "1"
         assert first_response.headers["x-page-offset"] == "0"
         assert first_response.headers["x-has-more"] == "true"
         assert second_response.headers["x-has-more"] == "false"
@@ -82,7 +82,7 @@ class TestMCListActions:
         )
         assert (
             len(client.get("/api/action-queue/actions?updated_since=2000-01-01T00:00:00").json())
-            == 3
+            == 2
         )
 
     def test_legacy_stored_status_is_normalized(self, client, seed_actions):
@@ -312,7 +312,7 @@ class TestMCSourceActions:
 
         type_resp = client.post(
             f"/api/action-queue/actions/{action_id}/feedback",
-            json={"feedback_type": "misclassified", "corrected_action_type": "file"},
+            json={"feedback_type": "misclassified", "corrected_action_type": "review"},
         )
         urgency_resp = client.post(
             f"/api/action-queue/actions/{action_id}/feedback",
@@ -324,7 +324,7 @@ class TestMCSourceActions:
                 json={"feedback_type": "wrong_amount", "corrected_amount": 42.25},
             )
 
-        assert type_resp.json()["action_type"] == "FILE"
+        assert type_resp.json()["action_type"] == "REVIEW"
         assert urgency_resp.json()["urgency"] == "LOW"
         assert amount_resp.json()["amount"] == 42.25
         enricher.sync_document_amount.assert_awaited_once_with(

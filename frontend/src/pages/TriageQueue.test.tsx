@@ -164,7 +164,7 @@ describe('Needs Review actions', () => {
     expect(screen.queryByRole('checkbox')).toBeNull();
     fireEvent.change(type, { target: { value: 'TASK' } });
     fireEvent.change(screen.getByLabelText('Corrected task name'), {
-      target: { value: 'Review annual statement' },
+      target: { value: 'Send annual statement to accountant' },
     });
     fireEvent.change(screen.getByLabelText('Corrected amount'), { target: { value: '' } });
     expect(screen.getByRole('button', { name: 'Save corrections' })).toBeEnabled();
@@ -176,7 +176,7 @@ describe('Needs Review actions', () => {
         action: 'correct',
         payload: {
           action_type: 'TASK',
-          title: 'Review annual statement',
+          title: 'Send annual statement to accountant',
           summary: 'Original guess',
           due_date: null,
           amount: null,

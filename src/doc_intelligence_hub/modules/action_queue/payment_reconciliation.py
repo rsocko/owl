@@ -5,22 +5,28 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .database import (
+    Action,
+    ActionLifecycleEvent,
     Obligation,
     ObligationPaymentEdge,
     PaymentActionReceipt,
+    PaymentCheckRun,
     PaymentEvidence,
     PaymentEvidenceGeneration,
     PaymentEvidenceSource,
     PaymentReconciliationCase,
     PaymentRelationshipEvent,
 )
+from .lifecycle import transition_action_status
 
 EvidenceSource = Literal["tyrion_receipt", "tyrion_bill_match", "legacy_receipt"]
 MatchState = Literal[
@@ -94,6 +100,12 @@ class NormalizedPaymentEvidence(BaseModel):
     receipt_ref: str | None = Field(default=None, min_length=8, max_length=200)
     kind: Literal["invoice", "bill", "receipt", "posted_transaction", "pending_transaction"]
     payee_hint: str | None = Field(default=None, max_length=120)
+    account_display_name: str | None = Field(default=None, max_length=120)
+    account_last_four: str | None = Field(default=None, pattern=r"^[0-9]{4}$")
+    score_basis_points: int | None = Field(default=None, ge=0, le=10_000)
+    rank: int | None = Field(default=None, ge=1, le=100)
+    score_gap_basis_points: int | None = Field(default=None, ge=0, le=10_000)
+    receipt_association: dict | None = None
     amount_minor: int | None = Field(default=None, ge=0, le=100_000_000_000)
     currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     evidence_date: date | None = None
@@ -465,6 +477,7 @@ class TyrionBillMatchIngestRequest(BaseModel):
                         if selected
                         else "bill"
                     ),
+                    score_basis_points=selected.score_basis_points if selected else None,
                     amount_minor=self.expected_amount_minor,
                     currency=self.currency,
                     evidence_date=selected.transaction_date if selected else None,
@@ -595,6 +608,197 @@ class PaymentReviewAction(BaseModel):
         return self
 
 
+class PaymentCheckRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    contract_version: Literal["1.0"] = "1.0"
+    revision: str = Field(min_length=3, max_length=100, pattern=r"^[A-Za-z0-9._:-]+$")
+    idempotency_key: str = Field(min_length=8, max_length=200, pattern=r"^[A-Za-z0-9._:-]+$")
+
+
+class TyrionBillCheckRequestV2(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        populate_by_name=True,
+    )
+
+    contract_version: Literal["2.0"] = Field(default="2.0", alias="contractVersion")
+    request_ref: str = Field(alias="requestRef", min_length=8, max_length=200)
+    bill_ref: str = Field(alias="billRef", min_length=1, max_length=160)
+    payee: str = Field(min_length=1, max_length=120)
+    expected_amount_minor: int = Field(
+        alias="expectedAmountMinor",
+        ge=1,
+        le=100_000_000_000,
+    )
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    due_date: date | None = Field(default=None, alias="dueDate")
+    bill_date: date | None = Field(default=None, alias="billDate")
+    reference: str | None = Field(default=None, max_length=160)
+    account_scope: Literal["configuredEligible"] = Field(
+        default="configuredEligible",
+        alias="accountScope",
+    )
+    date_window_days: int | None = Field(default=None, alias="dateWindowDays", ge=1, le=365)
+    amount_tolerance_minor: int | None = Field(
+        default=None,
+        alias="amountToleranceMinor",
+        ge=0,
+        le=100_000_000,
+    )
+    candidate_limit: int | None = Field(default=10, alias="candidateLimit", ge=1, le=25)
+
+    @model_validator(mode="after")
+    def validate_anchor_date(self) -> TyrionBillCheckRequestV2:
+        if self.due_date is None and self.bill_date is None:
+            raise ValueError("dueDate or billDate is required")
+        return self
+
+
+class TyrionReceiptAssociationV2(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        validate_by_alias=True,
+        validate_by_name=False,
+    )
+
+    status: Literal["linked", "differentTransaction"]
+    observed_at: datetime = Field(alias="observedAt")
+
+
+class TyrionBillMatchCandidateV2(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        validate_by_alias=True,
+        validate_by_name=False,
+    )
+
+    rank: int = Field(ge=1, le=25)
+    transaction_ref: str = Field(
+        alias="transactionRef",
+        min_length=1,
+        max_length=160,
+        pattern=_SOURCE_REFERENCE_PATTERN,
+    )
+    transaction_date: date = Field(alias="transactionDate")
+    transaction_state: Literal["posted", "pending"] = Field(alias="transactionState")
+    payee: str = Field(min_length=1, max_length=120)
+    amount_minor: int = Field(alias="amountMinor", ge=0, le=100_000_000_000)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    account_display_name: str = Field(alias="accountDisplayName", min_length=1, max_length=120)
+    account_last_four: str = Field(alias="accountLastFour", pattern=r"^[0-9]{4}$")
+    score_basis_points: int = Field(alias="scoreBasisPoints", ge=0, le=10_000)
+    confidence: Literal["high", "medium", "low"]
+    score_gap_basis_points: int = Field(alias="scoreGapBasisPoints", ge=0, le=10_000)
+    signals: list[TyrionBillMatchSignalV1] = Field(min_length=4, max_length=4)
+    receipt_association: TyrionReceiptAssociationV2 | None = Field(
+        default=None,
+        alias="receiptAssociation",
+    )
+
+    _validate_transaction_ref = field_validator("transaction_ref")(_validate_source_reference)
+
+
+class TyrionBillMatchSearchContextV2(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        validate_by_alias=True,
+        validate_by_name=False,
+    )
+
+    anchor_date: date = Field(alias="anchorDate")
+    window_start: date = Field(alias="windowStart")
+    window_end: date = Field(alias="windowEnd")
+    date_window_days: int = Field(alias="dateWindowDays", ge=1, le=365)
+    amount_tolerance_minor: int = Field(alias="amountToleranceMinor", ge=0)
+    source_as_of: datetime = Field(alias="sourceAsOf")
+    searched_at: datetime = Field(alias="searchedAt")
+    eligible_account_count: int = Field(alias="eligibleAccountCount", ge=0)
+    candidate_pool_size: int = Field(alias="candidatePoolSize", ge=0)
+
+
+class TyrionBillMatchResponseV2(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        validate_by_alias=True,
+        validate_by_name=False,
+    )
+
+    contract_version: Literal["2.0"] = Field(alias="contractVersion")
+    request_ref: str = Field(alias="requestRef", min_length=8, max_length=200)
+    bill_ref: str = Field(
+        alias="billRef",
+        min_length=1,
+        max_length=160,
+        pattern=_SOURCE_REFERENCE_PATTERN,
+    )
+    match_status: Literal["matched", "noMatch", "ambiguous"] = Field(alias="matchStatus")
+    payment_status: Literal["paid", "pending", "unmatched", "ambiguous"] = Field(
+        alias="paymentStatus"
+    )
+    selected_transaction_ref: str | None = Field(
+        alias="selectedTransactionRef",
+        default=None,
+        min_length=1,
+        max_length=160,
+        pattern=_SOURCE_REFERENCE_PATTERN,
+    )
+    candidates: list[TyrionBillMatchCandidateV2] = Field(max_length=25)
+    search_context: TyrionBillMatchSearchContextV2 = Field(alias="searchContext")
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> TyrionBillMatchResponseV2:
+        refs = [candidate.transaction_ref for candidate in self.candidates]
+        if len(refs) != len(set(refs)):
+            raise ValueError("candidates must contain unique transactionRef values")
+        if [candidate.rank for candidate in self.candidates] != list(
+            range(1, len(self.candidates) + 1)
+        ):
+            raise ValueError("candidate ranks must be contiguous and ordered")
+        if self.match_status == "matched":
+            if (
+                self.selected_transaction_ref is None
+                or not self.candidates
+                or self.candidates[0].transaction_ref != self.selected_transaction_ref
+            ):
+                raise ValueError("matched response must select the first candidate")
+            expected_payment = (
+                "paid" if self.candidates[0].transaction_state == "posted" else "pending"
+            )
+            if self.payment_status != expected_payment:
+                raise ValueError("paymentStatus must agree with selected transaction state")
+        elif self.selected_transaction_ref is not None:
+            raise ValueError("selectedTransactionRef is only valid for matched responses")
+        elif self.match_status == "noMatch" and self.payment_status != "unmatched":
+            raise ValueError("noMatch requires paymentStatus unmatched")
+        elif self.match_status == "ambiguous" and self.payment_status != "ambiguous":
+            raise ValueError("ambiguous match requires paymentStatus ambiguous")
+        return self
+
+
+class PaymentCheckResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["2.0"] = "2.0"
+    run_id: str
+    status: Literal["checking", "completed", "source_unavailable"]
+    idempotent: bool
+    payment: dict
+
+
+class PaymentConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    contract_version: Literal["1.0"] = "1.0"
+    revision: str = Field(min_length=3, max_length=100, pattern=r"^[A-Za-z0-9._:-]+$")
+    idempotency_key: str = Field(min_length=8, max_length=200, pattern=r"^[A-Za-z0-9._:-]+$")
+
+
 class RevisionConflictError(ValueError):
     pass
 
@@ -603,9 +807,456 @@ class IdempotencyConflictError(ValueError):
     pass
 
 
+class TyrionBillMatchingClient:
+    def __init__(self, *, url: str, api_token: str | None = None):
+        self.url = url
+        self.api_token = api_token
+
+    async def check(self, request: TyrionBillCheckRequestV2) -> TyrionBillMatchResponseV2:
+        headers = {"Accept": "application/json"}
+        if self.api_token:
+            headers["Authorization"] = f"Bearer {self.api_token}"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                self.url,
+                headers=headers,
+                json=request.model_dump(by_alias=True, mode="json"),
+            )
+            response.raise_for_status()
+        return TyrionBillMatchResponseV2.model_validate(response.json())
+
+
 class PaymentReconciliationService:
     def __init__(self, db: Session):
         self.db = db
+
+    @staticmethod
+    def _action_revision(action: Action, obligation: Obligation) -> str:
+        return f"v1:{action.version or 1}:{obligation.revision or 1}"
+
+    def payment_projection(self, action_id: int) -> dict:
+        action = self.db.query(Action).filter_by(id=action_id).first()
+        if action is None:
+            raise KeyError("action_not_found")
+        if (action.action_type or "").upper() != "PAY" or not action.obligation_id:
+            raise ValueError("payment_check_not_eligible")
+        obligation = self.db.query(Obligation).filter_by(id=action.obligation_id).one()
+        revision = self._action_revision(action, obligation)
+        latest_run = (
+            self.db.query(PaymentCheckRun)
+            .filter_by(obligation_id=obligation.id)
+            .order_by(PaymentCheckRun.updated_at.desc(), PaymentCheckRun.created_at.desc())
+            .first()
+        )
+        cases = (
+            self.db.query(PaymentReconciliationCase)
+            .filter_by(obligation_id=obligation.id, active=True)
+            .order_by(
+                PaymentReconciliationCase.updated_at.desc(),
+                PaymentReconciliationCase.created_at.desc(),
+            )
+            .all()
+        )
+        evidence_rows = (
+            self.db.query(PaymentEvidence, ObligationPaymentEdge)
+            .join(
+                ObligationPaymentEdge,
+                ObligationPaymentEdge.evidence_id == PaymentEvidence.id,
+            )
+            .filter(
+                ObligationPaymentEdge.obligation_id == obligation.id,
+                ObligationPaymentEdge.state.in_(("active", "proposed")),
+                PaymentEvidence.active.is_(True),
+                PaymentEvidence.source_system == "tyrion_bill_match",
+            )
+            .order_by(PaymentEvidence.source_as_of.desc(), PaymentEvidence.id)
+            .limit(10)
+            .all()
+        )
+        latest_evidence = evidence_rows[0][0] if evidence_rows else None
+        state = "unchecked"
+        if latest_run and latest_run.status == "checking":
+            state = "checking"
+        else:
+            case_states = {
+                "ambiguous": "multiple_matches",
+                "unmatched": "no_match",
+                "partial_payment": "partial_payment",
+                "source_unavailable": "source_unavailable",
+                "projection_failed": "source_unavailable",
+                "stale": "stale",
+                "conflict": "conflict",
+                "double_payment": "possible_double_payment",
+            }
+            exceptional = next(
+                (case_states[case.case_kind] for case in cases if case.case_kind in case_states),
+                None,
+            )
+            if exceptional:
+                state = exceptional
+            elif latest_evidence and latest_evidence.match_state == "matched":
+                state = (
+                    "posted_match"
+                    if latest_evidence.payment_status == "paid"
+                    else "pending_match"
+                    if latest_evidence.payment_status == "pending"
+                    else "no_match"
+                )
+            elif latest_evidence and latest_evidence.match_state == "no_match":
+                state = "no_match"
+        if (
+            action.status == "completed"
+            and obligation.status == "settled"
+            and any(
+                edge.manual_precedence and evidence.payment_status == "paid"
+                for evidence, edge in evidence_rows
+            )
+        ):
+            state = "confirmed"
+
+        checked_at = None
+        raw_search_context = (
+            (latest_run.response_payload or {}).get("searchContext")
+            if latest_run and latest_run.response_payload
+            else None
+        )
+        if raw_search_context and raw_search_context.get("searchedAt"):
+            checked_at = raw_search_context["searchedAt"]
+        elif latest_run and latest_run.updated_at:
+            checked_at = latest_run.updated_at.isoformat()
+        elif latest_evidence:
+            checked_at = latest_evidence.source_as_of.isoformat()
+        stale_after = (
+            (latest_evidence.source_as_of + timedelta(days=7)).isoformat()
+            if latest_evidence
+            else None
+        )
+        messages = {
+            "unchecked": "Payment has not been checked.",
+            "checking": "Checking configured eligible financial accounts.",
+            "posted_match": "A posted payment candidate requires confirmation.",
+            "pending_match": "A matching transaction is still pending.",
+            "multiple_matches": "Multiple plausible payment candidates require review.",
+            "no_match": "No matching transaction was found.",
+            "partial_payment": "Posted evidence covers only part of the obligation.",
+            "source_unavailable": "The payment source could not complete the check.",
+            "stale": "The latest payment result is stale.",
+            "conflict": "Payment evidence conflicts with another obligation.",
+            "possible_double_payment": "Evidence indicates a possible additional payment.",
+            "confirmed": "Payment was confirmed and the obligation was completed.",
+        }
+        candidates = [
+            {
+                "id": evidence.id,
+                "payee": evidence.payee_hint,
+                "amount": (
+                    evidence.amount_minor / 100 if evidence.amount_minor is not None else None
+                ),
+                "currency": evidence.currency,
+                "transaction_date": (
+                    evidence.evidence_date.isoformat() if evidence.evidence_date else None
+                ),
+                "status": (
+                    evidence.source_state
+                    if evidence.source_state in {"posted", "pending"}
+                    else (
+                        "posted"
+                        if evidence.payment_status == "paid"
+                        else "pending"
+                        if evidence.payment_status == "pending"
+                        else None
+                    )
+                ),
+                "account_display_name": evidence.account_display_name,
+                "account_last_four": evidence.account_last_four,
+                "confidence": evidence.confidence,
+                "score": (
+                    evidence.score_basis_points / 100
+                    if evidence.score_basis_points is not None
+                    else None
+                ),
+                "rank": evidence.rank,
+                "score_gap_basis_points": evidence.score_gap_basis_points,
+                "match_reasons": evidence.reason_codes,
+                "receipt_association": evidence.receipt_association,
+            }
+            for evidence, _edge in evidence_rows
+        ]
+        confirmation_case = next(
+            (
+                case
+                for case in cases
+                if case.case_kind == "confirmation_required"
+                and case.evidence_id
+                and any(evidence.id == case.evidence_id for evidence, _edge in evidence_rows)
+            ),
+            None,
+        )
+        confirmable = state == "posted_match" and confirmation_case is not None
+        search_context = None
+        if raw_search_context:
+            search_context = {
+                "anchor_date": raw_search_context.get("anchorDate"),
+                "window_start": raw_search_context.get("windowStart"),
+                "window_end": raw_search_context.get("windowEnd"),
+                "amount_tolerance": (
+                    raw_search_context["amountToleranceMinor"] / 100
+                    if raw_search_context.get("amountToleranceMinor") is not None
+                    else None
+                ),
+                "date_tolerance_days": raw_search_context.get("dateWindowDays"),
+                "source_as_of": raw_search_context.get("sourceAsOf"),
+                "searched_at": raw_search_context.get("searchedAt"),
+                "eligible_account_count": raw_search_context.get("eligibleAccountCount"),
+                "candidate_pool_size": raw_search_context.get("candidatePoolSize"),
+            }
+        return {
+            "state": state,
+            "checked_at": checked_at,
+            "stale_after": stale_after,
+            "confirmed_at": (
+                action.completed_at.isoformat()
+                if state == "confirmed" and action.completed_at
+                else None
+            ),
+            "source": "tyrion_bill_match",
+            "revision": revision,
+            "message": messages[state],
+            "candidates": candidates,
+            "search_context": search_context,
+            "_confirmation_case_id": confirmation_case.id if confirmable else None,
+            "_confirmation_case_revision": (confirmation_case.revision if confirmable else None),
+        }
+
+    def start_check(
+        self,
+        action_id: int,
+        request: PaymentCheckRequest,
+    ) -> tuple[PaymentCheckRun, TyrionBillCheckRequestV2, bool]:
+        action = self.db.query(Action).filter_by(id=action_id).first()
+        if action is None:
+            raise KeyError("action_not_found")
+        if (action.action_type or "").upper() != "PAY" or not action.obligation_id:
+            raise ValueError("payment_check_not_eligible")
+        obligation = self.db.query(Obligation).filter_by(id=action.obligation_id).one()
+        if action.amount is None or action.amount <= 0:
+            raise ValueError("payment_check_amount_required")
+        payee = action.payee_or_owner or action.correspondent
+        if not payee:
+            raise ValueError("payment_check_payee_required")
+        expected_amount_minor = round(action.amount * 100)
+        run_id = _stable_id("payment_check", obligation.id, request.idempotency_key)
+        tyrion_request = TyrionBillCheckRequestV2(
+            requestRef=run_id,
+            billRef=f"paperless:{action.document_id}",
+            payee=payee,
+            expectedAmountMinor=expected_amount_minor,
+            currency=obligation.currency or "USD",
+            dueDate=action.due_date,
+            billDate=action.document_date,
+            reference=action.reference,
+        )
+        request_payload = tyrion_request.model_dump(by_alias=True, mode="json")
+        request_digest = _digest(request_payload)
+        existing = (
+            self.db.query(PaymentCheckRun)
+            .filter_by(
+                obligation_id=obligation.id,
+                idempotency_key=request.idempotency_key,
+            )
+            .first()
+        )
+        if existing:
+            if existing.request_digest != request_digest:
+                raise IdempotencyConflictError("idempotency_key_payload_conflict")
+            return existing, tyrion_request, True
+        if request.revision != self._action_revision(action, obligation):
+            raise RevisionConflictError("payment_check_revision_conflict")
+        expected_obligation_revision = obligation.revision or 1
+        claimed = (
+            self.db.query(Obligation)
+            .filter(
+                Obligation.id == obligation.id,
+                Obligation.revision == expected_obligation_revision,
+            )
+            .update(
+                {Obligation.revision: expected_obligation_revision + 1},
+                synchronize_session=False,
+            )
+        )
+        if claimed != 1:
+            self.db.rollback()
+            raise RevisionConflictError("payment_check_revision_conflict")
+        run = PaymentCheckRun(
+            id=run_id,
+            obligation_id=obligation.id,
+            action_id=action.id,
+            idempotency_key=request.idempotency_key,
+            request_digest=request_digest,
+            expected_revision=expected_obligation_revision,
+            status="checking",
+            request_payload=request_payload,
+        )
+        self.db.add(run)
+        self.db.add(
+            PaymentRelationshipEvent(
+                id=_stable_id("event", run.id, "checking"),
+                action_scope=f"payment_check:{obligation.id}",
+                idempotency_key=request.idempotency_key,
+                obligation_id=obligation.id,
+                action="check_started",
+                actor="user",
+                provenance="user",
+                previous_state={},
+                new_state={"state": "checking", "run_id": run.id},
+                expected_revision=expected_obligation_revision,
+            )
+        )
+        self.db.commit()
+        return run, tyrion_request, False
+
+    def finish_check(
+        self,
+        run_id: str,
+        response: TyrionBillMatchResponseV2,
+        *,
+        connector_ref: str,
+    ) -> dict:
+        run = self.db.query(PaymentCheckRun).filter_by(id=run_id).one()
+        action = self.db.query(Action).filter_by(id=run.action_id).one()
+        if response.request_ref != run.id:
+            raise ValueError("tyrion_request_ref_mismatch")
+        if response.bill_ref != f"paperless:{action.document_id}":
+            raise ValueError("tyrion_bill_ref_mismatch")
+        match_state: MatchState = {
+            "matched": "matched",
+            "noMatch": "no_match",
+            "ambiguous": "ambiguous",
+        }[response.match_status]
+        candidates = (
+            response.candidates[:1]
+            if response.match_status == "matched"
+            else response.candidates
+            if response.candidates
+            else [None]
+        )
+        evidence: list[NormalizedPaymentEvidence] = []
+        for candidate in candidates:
+            reason_codes = (
+                [f"{signal.kind}_{signal.strength}".lower() for signal in candidate.signals]
+                if candidate
+                else [f"bill_match_{match_state}"]
+            )
+            evidence.append(
+                NormalizedPaymentEvidence(
+                    evidence_ref=(
+                        candidate.transaction_ref if candidate else f"{response.bill_ref}:{run.id}"
+                    ),
+                    canonical_document_ref=f"paperless:{action.document_id}",
+                    transaction_ref=candidate.transaction_ref if candidate else None,
+                    kind=(
+                        "posted_transaction"
+                        if candidate and candidate.transaction_state == "posted"
+                        else "pending_transaction"
+                        if candidate
+                        else "bill"
+                    ),
+                    payee_hint=candidate.payee if candidate else action.payee_or_owner,
+                    account_display_name=(candidate.account_display_name if candidate else None),
+                    account_last_four=candidate.account_last_four if candidate else None,
+                    score_basis_points=candidate.score_basis_points if candidate else None,
+                    rank=candidate.rank if candidate else None,
+                    score_gap_basis_points=(
+                        candidate.score_gap_basis_points if candidate else None
+                    ),
+                    receipt_association=(
+                        candidate.receipt_association.model_dump(
+                            by_alias=True,
+                            mode="json",
+                        )
+                        if candidate and candidate.receipt_association
+                        else None
+                    ),
+                    amount_minor=(
+                        candidate.amount_minor if candidate else round((action.amount or 0) * 100)
+                    ),
+                    currency=(
+                        candidate.currency
+                        if candidate
+                        else self.db.query(Obligation)
+                        .filter_by(id=run.obligation_id)
+                        .one()
+                        .currency
+                        or "USD"
+                    ),
+                    evidence_date=candidate.transaction_date if candidate else None,
+                    source_state=(candidate.transaction_state if candidate else match_state),
+                    match_state=match_state,
+                    payment_status=response.payment_status,
+                    confidence=candidate.confidence if candidate else None,
+                    reason_codes=reason_codes,
+                )
+            )
+        snapshot = PaymentEvidenceSnapshot(
+            source_system="tyrion_bill_match",
+            connector_ref=connector_ref,
+            source_generation=run.id,
+            source_as_of=response.search_context.source_as_of,
+            completeness="complete",
+            obligation_id=run.obligation_id,
+            evidence=evidence,
+        )
+        self._retire_prior_check_cases(run.obligation_id)
+        self.ingest_snapshot(snapshot)
+        run = self.db.query(PaymentCheckRun).filter_by(id=run_id).one()
+        run.status = "completed"
+        run.response_payload = response.model_dump(by_alias=True, mode="json")
+        projection = self.payment_projection(action.id)
+        run.result = {key: value for key, value in projection.items() if not key.startswith("_")}
+        self.db.commit()
+        return projection
+
+    def fail_check(
+        self,
+        run_id: str,
+        *,
+        connector_ref: str,
+        error_code: str,
+    ) -> dict:
+        run = self.db.query(PaymentCheckRun).filter_by(id=run_id).one()
+        action = self.db.query(Action).filter_by(id=run.action_id).one()
+        obligation = self.db.query(Obligation).filter_by(id=run.obligation_id).one()
+        snapshot = PaymentEvidenceSnapshot(
+            source_system="tyrion_bill_match",
+            connector_ref=connector_ref,
+            source_generation=run.id,
+            source_as_of=datetime.now(UTC),
+            completeness="partial",
+            obligation_id=obligation.id,
+            evidence=[
+                NormalizedPaymentEvidence(
+                    evidence_ref=f"{run.id}:source-unavailable",
+                    canonical_document_ref=f"paperless:{action.document_id}",
+                    kind="bill",
+                    payee_hint=action.payee_or_owner or action.correspondent,
+                    amount_minor=round((action.amount or 0) * 100) or None,
+                    currency=obligation.currency if action.amount else None,
+                    source_state="source_unavailable",
+                    match_state="source_unavailable",
+                    payment_status="unknown",
+                    reason_codes=[error_code],
+                )
+            ],
+        )
+        self._retire_prior_check_cases(run.obligation_id)
+        self.ingest_snapshot(snapshot)
+        run = self.db.query(PaymentCheckRun).filter_by(id=run_id).one()
+        run.status = "source_unavailable"
+        run.error_code = error_code
+        projection = self.payment_projection(action.id)
+        run.result = {key: value for key, value in projection.items() if not key.startswith("_")}
+        self.db.commit()
+        return projection
 
     def ingest_snapshot(self, snapshot: PaymentEvidenceSnapshot) -> PaymentSnapshotResult:
         obligation = self.db.query(Obligation).filter_by(id=snapshot.obligation_id).first()
@@ -744,10 +1395,30 @@ class PaymentReconciliationService:
             raise KeyError("payment_reconciliation_case_not_found")
         return self._case_dict(case, include_history=True)
 
-    def act(self, case_id: str, request: PaymentReviewAction, *, actor: str) -> dict:
+    def act(
+        self,
+        case_id: str,
+        request: PaymentReviewAction,
+        *,
+        actor: str,
+        complete_action_id: int | None = None,
+        expected_action_version: int | None = None,
+    ) -> dict:
         case = self.db.query(PaymentReconciliationCase).filter_by(id=case_id).first()
         if case is None:
             raise KeyError("payment_reconciliation_case_not_found")
+        action_to_complete = None
+        if complete_action_id is not None:
+            action_to_complete = self.db.query(Action).filter_by(id=complete_action_id).first()
+            if action_to_complete is None:
+                raise KeyError("action_not_found")
+            if action_to_complete.obligation_id != case.obligation_id:
+                raise ValueError("payment_action_obligation_mismatch")
+            if (
+                expected_action_version is not None
+                and (action_to_complete.version or 1) != expected_action_version
+            ):
+                raise RevisionConflictError("payment_check_revision_conflict")
         payload = request.model_dump(mode="json", exclude_none=True)
         payload_digest = _digest(payload)
         prior = (
@@ -896,6 +1567,27 @@ class PaymentReconciliationService:
             self._append_case_event(case, request, actor)
 
         self._recompute_obligation(obligation)
+        if action_to_complete is not None:
+            previous_status = action_to_complete.status
+            transition_action_status(action_to_complete, "completed")
+            action_to_complete.version = (action_to_complete.version or 1) + 1
+            self.db.add(
+                ActionLifecycleEvent(
+                    action_id=action_to_complete.id,
+                    event_type="payment_confirmed_and_completed",
+                    previous_status=previous_status,
+                    new_status="completed",
+                    action_version=action_to_complete.version,
+                    actor=actor,
+                    details={
+                        "payment_case_id": case.id,
+                        "payment_evidence_id": request.evidence_id,
+                    },
+                )
+            )
+            obligation.status = "settled"
+            obligation.completion_suggested = False
+            obligation.suggestion_reason = None
         self.db.flush()
         authoritative = self._case_dict(case, include_history=True)
         result = {
@@ -916,6 +1608,93 @@ class PaymentReconciliationService:
         )
         self.db.commit()
         return result
+
+    def confirm_and_complete(
+        self,
+        action_id: int,
+        request: PaymentConfirmRequest,
+        *,
+        actor: str,
+    ) -> dict:
+        action = self.db.query(Action).filter_by(id=action_id).first()
+        if action is None:
+            raise KeyError("action_not_found")
+        if not action.obligation_id:
+            raise ValueError("payment_check_not_eligible")
+        obligation = self.db.query(Obligation).filter_by(id=action.obligation_id).one()
+        obligation_case_ids = select(PaymentReconciliationCase.id).where(
+            PaymentReconciliationCase.obligation_id == obligation.id
+        )
+        prior = (
+            self.db.query(PaymentActionReceipt)
+            .filter(
+                PaymentActionReceipt.idempotency_key == request.idempotency_key,
+                PaymentActionReceipt.case_id.in_(obligation_case_ids),
+            )
+            .first()
+        )
+        if prior:
+            return {**prior.result, "idempotent": True}
+        if request.revision != self._action_revision(action, obligation):
+            raise RevisionConflictError("payment_check_revision_conflict")
+        projection = self.payment_projection(action.id)
+        case_id = projection.get("_confirmation_case_id")
+        case_revision = projection.get("_confirmation_case_revision")
+        posted = next(
+            (
+                candidate
+                for candidate in projection["candidates"]
+                if candidate["status"] == "posted"
+            ),
+            None,
+        )
+        if (
+            projection["state"] != "posted_match"
+            or not case_id
+            or case_revision is None
+            or posted is None
+        ):
+            raise ValueError("payment_match_not_confirmable")
+        result = self.act(
+            case_id,
+            PaymentReviewAction(
+                action="confirm",
+                expected_revision=case_revision,
+                idempotency_key=request.idempotency_key,
+                evidence_id=posted["id"],
+                allocated_amount_minor=(
+                    round(posted["amount"] * 100) if posted["amount"] is not None else None
+                ),
+            ),
+            actor=actor,
+            complete_action_id=action.id,
+            expected_action_version=action.version or 1,
+        )
+        return result
+
+    def _retire_prior_check_cases(self, obligation_id: str) -> None:
+        for case in (
+            self.db.query(PaymentReconciliationCase)
+            .filter(
+                PaymentReconciliationCase.obligation_id == obligation_id,
+                PaymentReconciliationCase.active.is_(True),
+                PaymentReconciliationCase.case_kind.in_(
+                    (
+                        "confirmation_required",
+                        "unmatched",
+                        "ambiguous",
+                        "source_unavailable",
+                        "projection_failed",
+                        "stale",
+                    )
+                ),
+            )
+            .all()
+        ):
+            case.active = False
+            case.state = "resolved"
+            case.attention_state = "settled"
+            case.revision += 1
 
     def record_legacy_receipt(
         self,
@@ -1045,6 +1824,12 @@ class PaymentReconciliationService:
             "receipt_ref": item.receipt_ref,
             "kind": item.kind,
             "payee_hint": item.payee_hint,
+            "account_display_name": item.account_display_name,
+            "account_last_four": item.account_last_four,
+            "score_basis_points": item.score_basis_points,
+            "rank": item.rank,
+            "score_gap_basis_points": item.score_gap_basis_points,
+            "receipt_association": item.receipt_association,
             "amount_minor": item.amount_minor,
             "currency": item.currency,
             "evidence_date": item.evidence_date,
@@ -1154,6 +1939,8 @@ class PaymentReconciliationService:
             )
 
     def _case_kind(self, evidence: PaymentEvidence) -> str | None:
+        if evidence.match_state == "matched" and evidence.payment_status in {"paid", "pending"}:
+            return "confirmation_required"
         mapping = {
             "no_match": "unmatched",
             "ambiguous": "ambiguous",

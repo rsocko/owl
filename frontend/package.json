@@ -17,6 +17,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:ci": "vite build",
     "typecheck": "tsc -b --pretty false",
     "lint": "oxlint",
     "normalize:lockfile-sources": "node scripts/normalize-lockfile-sources.mjs",

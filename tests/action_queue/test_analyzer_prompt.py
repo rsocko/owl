@@ -212,6 +212,50 @@ class TestPromptBuildingWithIntegerTags:
         prompt_sent = mock_chat.call_args[0][0]
         assert "PAY requires clear evidence of an unresolved obligation" in prompt_sent
         assert "treat the receipt as reconciliation evidence" in prompt_sent
+        assert "PAY|RESPOND|FILE" not in prompt_sent
+        assert "- FILE:" not in prompt_sent
+        assert "- ARCHIVE:" not in prompt_sent
+
+    def test_legacy_filing_result_becomes_no_action(self, analyzer):
+        result = analyzer._validate_response(
+            {
+                "actions": [
+                    {
+                        "action_type": "ARCHIVE",
+                        "title": "Archive statement",
+                        "urgency": "LOW",
+                    }
+                ],
+                "document_assessment": {
+                    "requires_action": True,
+                    "overall_confidence": 90,
+                    "text_quality": "good",
+                },
+            }
+        )
+
+        assert result["actions"] == []
+        assert result["document_assessment"]["requires_action"] is False
+
+    def test_mixed_result_drops_filing_but_keeps_real_action(self, analyzer):
+        result = analyzer._validate_response(
+            {
+                "actions": [
+                    {"action_type": "FILE", "title": "File notice", "urgency": "LOW"},
+                    {"action_type": "RESPOND", "title": "Reply to notice", "urgency": "HIGH"},
+                ],
+                "document_assessment": {
+                    "requires_action": True,
+                    "overall_confidence": 88,
+                    "primary_action_index": 1,
+                    "text_quality": "good",
+                },
+            }
+        )
+
+        assert [action["action_type"] for action in result["actions"]] == ["RESPOND"]
+        assert result["document_assessment"]["requires_action"] is True
+        assert result["document_assessment"]["primary_action_index"] == 0
 
 
 def test_normalize_extracted_data_keeps_safe_links_and_rejects_unsafe_urls():

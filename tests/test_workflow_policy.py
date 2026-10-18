@@ -122,3 +122,36 @@ def test_public_main_manual_dispatch_can_reach_exact_ancestor_verification() -> 
 def test_codeql_waits_for_public_cutover() -> None:
     workflow = load_workflow(WORKFLOWS / "codeql.yml")
     assert workflow["jobs"]["analyze"]["if"] == "github.event.repository.visibility == 'public'"
+
+
+def test_ci_classifies_paths_and_parallelizes_python_tests() -> None:
+    path = WORKFLOWS / "ci.yml"
+    source = path.read_text(encoding="utf-8")
+    workflow = load_workflow(path)
+
+    assert workflow["jobs"]["python"]["needs"] == ["changes"]
+    assert workflow["jobs"]["frontend"]["needs"] == ["changes"]
+    assert workflow["jobs"]["python"]["if"] == "needs.changes.outputs.python == 'true'"
+    assert workflow["jobs"]["frontend"]["if"] == "needs.changes.outputs.frontend == 'true'"
+    assert "pytest --tb=short -q -n 4 --dist loadscope" in source
+    assert "npm run build:ci" in source
+
+
+def test_automatic_publication_skips_non_container_changes() -> None:
+    path = WORKFLOWS / "publish-container.yml"
+    source = path.read_text(encoding="utf-8")
+    workflow = load_workflow(path)
+
+    assert workflow["jobs"]["prepare"]["outputs"]["should_publish"] == (
+        "${{ steps.source.outputs.should_publish }}"
+    )
+    assert workflow["jobs"]["publish"]["if"] == ("needs.prepare.outputs.should_publish == 'true'")
+    for path_pattern in (
+        "Dockerfile",
+        "config/*",
+        "docker-entrypoint.sh",
+        "frontend/*",
+        "pyproject.toml",
+        "src/*",
+    ):
+        assert path_pattern in source

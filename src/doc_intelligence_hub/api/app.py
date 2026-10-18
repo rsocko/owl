@@ -106,6 +106,27 @@ class HubSettings(BaseSettings):
             "OWL_TYRION_PAYEE_CONNECTOR_REF",
         ),
     )
+    tyrion_bill_matching_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "tyrion_bill_matching_url",
+            "OWL_TYRION_BILL_MATCHING_URL",
+        ),
+    )
+    tyrion_bill_matching_api_token: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "tyrion_bill_matching_api_token",
+            "OWL_TYRION_BILL_MATCHING_API_TOKEN",
+        ),
+    )
+    tyrion_bill_matching_connector_ref: str = Field(
+        default="tyrion-bill-matching-v2",
+        validation_alias=AliasChoices(
+            "tyrion_bill_matching_connector_ref",
+            "OWL_TYRION_BILL_MATCHING_CONNECTOR_REF",
+        ),
+    )
     host: str = "0.0.0.0"
     port: int = 8001
 

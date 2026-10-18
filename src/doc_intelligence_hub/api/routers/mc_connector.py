@@ -49,6 +49,9 @@ from doc_intelligence_hub.modules.action_queue.lifecycle import (
     sync_action_status,
     transition_action_status,
 )
+from doc_intelligence_hub.modules.action_queue.payment_reconciliation import (
+    PaymentReconciliationService,
+)
 from doc_intelligence_hub.modules.eob_matching.database import (
     EOBRecord,
     MatchRecord,
@@ -255,6 +258,128 @@ async def mc_mark_no_documents_expected(
         service.close()
 
 
+def _serialize_mc_action(request: Request, db, action: Action) -> dict[str, Any]:
+    try:
+        normalized_status = normalize_action_status(action.status)
+    except ValueError:
+        logger.warning(
+            "Action %d has unsupported stored status %r; exposing it as pending",
+            action.id,
+            action.status,
+        )
+        normalized_status = "pending"
+    serialized = _serialize_action_with_siblings(db, action)
+    source_actions = []
+    payment_check = None
+    if (action.action_type or "").upper() == "PAY" and action.obligation_id:
+        try:
+            raw_payment_check = PaymentReconciliationService(db).payment_projection(action.id)
+            payment_check = {
+                key: value for key, value in raw_payment_check.items() if not key.startswith("_")
+            }
+        except (KeyError, ValueError):
+            payment_check = None
+    if action.action_ready:
+        source_actions.append(
+            {
+                "id": "send_to_review",
+                "label": "Send to Needs Review",
+                "method": "POST",
+                "url": f"/api/action-queue/actions/{action.id}/review",
+            }
+        )
+        if (
+            (action.action_type or "").upper() == "PAY"
+            and action.obligation_id
+            and action.amount is not None
+            and action.amount > 0
+            and (action.payee_or_owner or action.correspondent)
+            and (action.due_date or action.document_date)
+            and action.status not in {"completed", "dismissed", "not_an_action"}
+            and payment_check is not None
+        ):
+            revision = payment_check["revision"]
+            source_actions.append(
+                {
+                    "id": "check_payment",
+                    "label": "Check for payment",
+                    "method": "POST",
+                    "url": f"/api/action-queue/actions/{action.id}/check-payment",
+                    "revision": revision,
+                    "idempotency_key": f"check-payment:{action.id}:{revision}",
+                }
+            )
+            if payment_check["state"] == "posted_match":
+                source_actions.append(
+                    {
+                        "id": "confirm_payment_and_complete",
+                        "label": "Confirm payment and complete",
+                        "method": "POST",
+                        "url": (
+                            f"/api/action-queue/actions/{action.id}/confirm-payment-and-complete"
+                        ),
+                        "revision": revision,
+                        "idempotency_key": f"confirm-payment:{action.id}:{revision}",
+                    }
+                )
+        if action_queue_settings.write_to_paperless and (action.action_type or "").upper() in {
+            "FILE",
+            "ARCHIVE",
+        }:
+            source_actions.append(
+                {
+                    "id": "file_document",
+                    "label": "File in Paperless",
+                    "method": "POST",
+                    "url": f"/api/action-queue/actions/{action.id}/file",
+                }
+            )
+    paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
+    base_url = paperless_url.rstrip("/") if paperless_url else ""
+    return {
+        "id": str(action.id),
+        "document_id": action.document_id,
+        "document_group_id": f"paperless:{action.document_id}",
+        "sibling_action_ids": [str(sibling_id) for sibling_id in serialized["sibling_action_ids"]],
+        "sibling_count": serialized["sibling_count"],
+        "action_position": serialized["action_position"],
+        "is_primary": serialized["is_primary"],
+        "parent_action_id": str(action.parent_action_id) if action.parent_action_id else None,
+        "superseded_by_action_id": (
+            str(action.superseded_by_action_id) if action.superseded_by_action_id else None
+        ),
+        "document_title": action.document_title or "",
+        "title": action.title or "",
+        "action_type": (action.action_type or "review").lower(),
+        "category": (action.action_type or "review").lower(),
+        "urgency": (action.urgency or "medium").lower(),
+        "confidence": action.confidence,
+        "due_date": action.due_date.isoformat() if action.due_date else None,
+        "amount": action.amount,
+        "correspondent": action.correspondent,
+        "summary": action.summary or "",
+        "document_created_at": serialized["document_created_at"],
+        "recommended_cta": _deserialize_recommended_cta(action.recommended_cta),
+        "action_ready": serialized["action_ready"],
+        "review_state": serialized["review_state"],
+        "needs_review_url": serialized["needs_review_url"],
+        "action_url": serialized["action_url"],
+        "source_actions": source_actions,
+        "payment_check": payment_check,
+        "extracted_data": serialized["extracted_data"],
+        "status": normalized_status,
+        "created_at": serialize_utc_datetime(action.created_at),
+        "updated_at": serialize_utc_datetime(action.updated_at),
+        "completed_at": serialize_utc_datetime(action.completed_at),
+        "snoozed_until": serialize_utc_datetime(action.snoozed_until),
+        "document_url": (
+            f"{base_url}/documents/{action.document_id}/details"
+            if base_url and action.document_id
+            else None
+        ),
+    }
+
+
 @router.get("/api/action-queue/actions")
 async def mc_list_actions(
     request: Request,
@@ -281,6 +406,7 @@ async def mc_list_actions(
                     Action.superseded_by_action_id.isnot(None),
                 )
             )
+            query = query.filter(func.upper(Action.action_type).not_in(("FILE", "ARCHIVE")))
         if status and status != "all":
             try:
                 normalized_filter = normalize_action_status(status)
@@ -306,94 +432,7 @@ async def mc_list_actions(
         response.headers["Access-Control-Expose-Headers"] = (
             "X-Total-Count, X-Page-Limit, X-Page-Offset, X-Has-More"
         )
-
-        paperless_url = getattr(request.app.state.hub_settings, "paperless_url", "") or ""
-        base_url = paperless_url.rstrip("/") if paperless_url else ""
-
-        results: list[dict[str, Any]] = []
-        for action in actions:
-            try:
-                normalized_status = normalize_action_status(action.status)
-            except ValueError:
-                logger.warning(
-                    "Action %d has unsupported stored status %r; exposing it as pending",
-                    action.id,
-                    action.status,
-                )
-                normalized_status = "pending"
-            serialized = _serialize_action_with_siblings(db, action)
-            source_actions = []
-            if action.action_ready:
-                source_actions.append(
-                    {
-                        "id": "send_to_review",
-                        "label": "Send to Needs Review",
-                        "method": "POST",
-                        "url": f"/api/action-queue/actions/{action.id}/review",
-                    }
-                )
-                if action_queue_settings.write_to_paperless and (
-                    action.action_type or ""
-                ).upper() in {"FILE", "ARCHIVE"}:
-                    source_actions.append(
-                        {
-                            "id": "file_document",
-                            "label": "File in Paperless",
-                            "method": "POST",
-                            "url": f"/api/action-queue/actions/{action.id}/file",
-                        }
-                    )
-            results.append(
-                {
-                    "id": str(action.id),
-                    "document_id": action.document_id,
-                    "document_group_id": f"paperless:{action.document_id}",
-                    "sibling_action_ids": [
-                        str(sibling_id) for sibling_id in serialized["sibling_action_ids"]
-                    ],
-                    "sibling_count": serialized["sibling_count"],
-                    "action_position": serialized["action_position"],
-                    "is_primary": serialized["is_primary"],
-                    "parent_action_id": (
-                        str(action.parent_action_id) if action.parent_action_id else None
-                    ),
-                    "superseded_by_action_id": (
-                        str(action.superseded_by_action_id)
-                        if action.superseded_by_action_id
-                        else None
-                    ),
-                    "document_title": action.document_title or "",
-                    "title": action.title or "",
-                    # Contract (INTEGRATION-API-CONTRACT.md) requires lowercase enum values —
-                    # the DB stores these uppercase (PAY, CRITICAL, ...) for internal use, so
-                    # normalize here. Mismatched casing silently breaks MC's isTaskAction() filter.
-                    "action_type": (action.action_type or "review").lower(),
-                    "category": (action.action_type or "review").lower(),
-                    "urgency": (action.urgency or "medium").lower(),
-                    "confidence": action.confidence,
-                    "due_date": action.due_date.isoformat() if action.due_date else None,
-                    "amount": action.amount,
-                    "correspondent": action.correspondent,
-                    "summary": action.summary or "",
-                    "document_created_at": serialized["document_created_at"],
-                    "recommended_cta": _deserialize_recommended_cta(action.recommended_cta),
-                    "action_ready": serialized["action_ready"],
-                    "review_state": serialized["review_state"],
-                    "needs_review_url": serialized["needs_review_url"],
-                    "action_url": serialized["action_url"],
-                    "source_actions": source_actions,
-                    "extracted_data": serialized["extracted_data"],
-                    "status": normalized_status,
-                    "created_at": serialize_utc_datetime(action.created_at),
-                    "updated_at": serialize_utc_datetime(action.updated_at),
-                    "completed_at": serialize_utc_datetime(action.completed_at),
-                    "snoozed_until": serialize_utc_datetime(action.snoozed_until),
-                    "document_url": f"{base_url}/documents/{action.document_id}/details"
-                    if base_url and action.document_id
-                    else None,
-                }
-            )
-        return results
+        return [_serialize_mc_action(request, db, action) for action in actions]
     finally:
         db.close()
 

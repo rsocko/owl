@@ -19,10 +19,44 @@ document/Paperless metadata, lifecycle transitions, and correction history.
 
 OWL owns the durable relationship between an Action Queue obligation and normalized
 payment evidence. Paperless remains the canonical artifact store, Monarch remains the
-transaction authority, and Tyrion supplies bounded native receipt evidence or the
-existing Bill Matching v1 decision. Receipt evidence never completes an obligation:
-only the explicit Action Queue completion transition changes an obligation to
-`settled`.
+transaction authority, and Tyrion supplies bounded native receipt evidence or a Bill
+Matching v2 decision. Receipt evidence never proves settlement. A posted transaction
+candidate also remains evidence until the user explicitly confirms it.
+
+Configure OWL's active Tyrion connector with:
+
+- `OWL_TYRION_BILL_MATCHING_URL`, normally
+  `http://tyrion/api/connector/v1/bill-matches`;
+- `OWL_TYRION_BILL_MATCHING_API_TOKEN`, when Tyrion requires bearer auth; and
+- `OWL_TYRION_BILL_MATCHING_CONNECTOR_REF`, an opaque source identity persisted with
+  normalized evidence.
+
+OWL sends Tyrion `contractVersion: "2.0"` with the bill reference, payee, expected
+amount/currency, due or bill date, optional reference, and
+`accountScope: "configuredEligible"`. Tyrion owns the eligible-account configuration.
+OWL never sends or projects unrestricted account IDs.
+
+`GET /api/action-queue/actions` adds a versioned `payment_check` projection to eligible
+`PAY` actions. Its state is one of `unchecked`, `checking`, `posted_match`,
+`pending_match`, `multiple_matches`, `no_match`, `partial_payment`,
+`source_unavailable`, `stale`, `conflict`, `possible_double_payment`, or `confirmed`.
+Decision-grade candidates contain only payee, actual amount/currency, transaction date
+and state, account display name and masked last four, confidence, score/rank, match
+reasons, and optional receipt association. Search context is bounded to the date and
+amount tolerances, source/search timestamps, and account/candidate counts.
+
+Eligible actions expose these OWL-owned source actions:
+
+- `check_payment` — `POST /api/action-queue/actions/{id}/check-payment`
+- `confirm_payment_and_complete` —
+  `POST /api/action-queue/actions/{id}/confirm-payment-and-complete`
+
+Each action carries an opaque `revision` and stable `idempotency_key`; callers echo both
+in the JSON body. Missing or stale revisions fail explicitly with `409`. Confirmation
+is offered only for a posted match. It atomically confirms the selected OWL evidence,
+completes the Action Queue action, settles the obligation, appends audit history, and
+returns the refreshed completed action with `payment_check.state = "confirmed"`.
+Pending or ambiguous candidates can never use this operation.
 
 All payment-review routes require `Authorization: Bearer
 <OWL_MISSION_CONTROL_API_TOKEN>`. List active exceptions with:

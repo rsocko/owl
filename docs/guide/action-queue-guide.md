@@ -64,6 +64,20 @@ If receipt metadata conflicts with text indicating a remaining balance or paymen
 request, OWL creates a low-confidence `REVIEW` action and routes it to Needs Review
 instead of suppressing it or creating a new `PAY` action.
 
+### Check for payment
+
+Action Review shows **Check for payment** for eligible `PAY` actions with a payee,
+amount, obligation, and due or bill date. OWL asks Tyrion Bill Matching to search only
+configured eligible financial accounts and persists the authoritative result, source
+freshness, candidate reasons, and audit history.
+
+The workspace keeps posted, pending, multiple-match, no-match, partial-payment,
+source-unavailable, stale, conflict, and possible-double-payment results distinct. A
+posted candidate does not complete the action automatically. The operator must choose
+**Confirm payment and complete**, which records the chosen evidence and completes the
+action and obligation atomically. Pending transactions and receipt links remain
+supporting evidence and cannot be confirmed as settlement.
+
 ## Action Lifecycle
 
 Actions follow a clear lifecycle from detection to resolution:
@@ -275,6 +289,11 @@ curl -X PUT http://service-005.example.invalid/api/admin/schedules/action_queue 
 ### Write-Back Control
 
 Set `WRITE_TO_PAPERLESS=true` to allow OWL to enrich documents with custom fields. When `false`, OWL operates read-only and actions exist only in OWL's database.
+
+Use **Action Queue Operations → Paperless metadata schema** to validate and provision the
+complete active OWL metadata registry. The check covers durable document fields, action
+status, generic relationships, and obligation projections; setup is offered only when the
+missing fields or select options can be added safely.
 
 The default document source and resolution behavior are durable settings under
 **Settings → Action Queue — Document Source**. The default source is the

@@ -10,6 +10,7 @@ import {
   Maximize2,
   MoreHorizontal,
   Plus,
+  RefreshCw,
   Search,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -88,6 +89,45 @@ interface ActionItem {
   linked_documents?: LinkedDocument[];
   linked_document_count?: number;
   history?: ActionHistoryEvent[];
+  obligation_id?: string | null;
+}
+
+type PaymentCheckState =
+  | 'unchecked'
+  | 'checking'
+  | 'posted_match'
+  | 'pending_match'
+  | 'multiple_matches'
+  | 'no_match'
+  | 'partial_payment'
+  | 'source_unavailable'
+  | 'stale'
+  | 'conflict'
+  | 'possible_double_payment'
+  | 'confirmed';
+
+interface PaymentCandidate {
+  id: string;
+  payee?: string | null;
+  amount?: number | null;
+  currency?: string | null;
+  transaction_date?: string | null;
+  status?: 'posted' | 'pending' | null;
+  account_display_name?: string | null;
+  account_last_four?: string | null;
+  confidence?: string | null;
+  score?: number | null;
+  match_reasons?: string[];
+}
+
+interface PaymentCheck {
+  state: PaymentCheckState;
+  checked_at?: string | null;
+  stale_after?: string | null;
+  source: string;
+  revision: string;
+  message?: string | null;
+  candidates: PaymentCandidate[];
 }
 
 interface ActionListResponse {
@@ -172,10 +212,10 @@ function formatDate(value?: string | null) {
   return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function formatCurrency(value?: number | null) {
+function formatCurrency(value?: number | null, currency = 'USD') {
   return value == null
     ? '—'
-    : value.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+    : value.toLocaleString(undefined, { style: 'currency', currency });
 }
 
 function isOverdue(action: ActionItem) {
@@ -271,6 +311,9 @@ export default function ActionWorkspace() {
   const [ocr, setOcr] = useState<{ text?: string; quality_score?: number | null } | null>(null);
   const [confirmNotAction, setConfirmNotAction] = useState<number | null>(null);
   const [confirmAllDone, setConfirmAllDone] = useState(false);
+  const [paymentCheck, setPaymentCheck] = useState<PaymentCheck | null>(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [confirmPayment, setConfirmPayment] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -365,6 +408,29 @@ export default function ActionWorkspace() {
         .then((response) => setOcr(response as { text?: string; quality_score?: number | null }))
         .catch(() => setOcr(null));
     }
+  }, [selectedAction]);
+
+  useEffect(() => {
+    if (!selectedAction || normalizedType(selectedAction.action_type) !== 'PAY' || !selectedAction.obligation_id) {
+      setPaymentCheck(null);
+      setPaymentLoading(false);
+      return;
+    }
+    let active = true;
+    setPaymentLoading(true);
+    void endpoints.actionQueue.paymentCheck(String(selectedAction.id))
+      .then((response) => {
+        if (active) setPaymentCheck((response as { payment_check: PaymentCheck }).payment_check);
+      })
+      .catch(() => {
+        if (active) setPaymentCheck(null);
+      })
+      .finally(() => {
+        if (active) setPaymentLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [selectedAction]);
 
   useEffect(() => {
@@ -525,6 +591,54 @@ export default function ActionWorkspace() {
     } catch (bulkError) {
       setToast({
         message: bulkError instanceof Error ? bulkError.message : 'Could not complete all actions.',
+        tone: 'error',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const checkForPayment = async () => {
+    if (!selectedAction || !paymentCheck) return;
+    setBusy(`payment-${selectedAction.id}`);
+    try {
+      const response = await endpoints.actionQueue.checkPayment(String(selectedAction.id), {
+        revision: paymentCheck.revision,
+        idempotency_key: `owl-check-payment:${selectedAction.id}:${paymentCheck.revision}`,
+      }) as { payment: PaymentCheck };
+      setPaymentCheck(response.payment);
+      setToast({
+        message: response.payment.state === 'posted_match'
+          ? 'Posted payment candidate found. Confirm it before completing the action.'
+          : response.payment.message || 'Payment check completed.',
+        tone: 'success',
+      });
+    } catch (paymentError) {
+      setToast({
+        message: paymentError instanceof Error ? paymentError.message : 'Could not check for payment.',
+        tone: 'error',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const confirmPaymentAndComplete = async () => {
+    if (!selectedAction || !paymentCheck) return;
+    setConfirmPayment(false);
+    setBusy(`payment-${selectedAction.id}`);
+    try {
+      await endpoints.actionQueue.confirmPaymentAndComplete(String(selectedAction.id), {
+        revision: paymentCheck.revision,
+        idempotency_key: `owl-confirm-payment:${selectedAction.id}:${paymentCheck.revision}`,
+      });
+      setToast({ message: 'Payment confirmed and action completed.', tone: 'success' });
+      await loadData();
+    } catch (paymentError) {
+      setToast({
+        message: paymentError instanceof Error
+          ? paymentError.message
+          : 'Could not confirm the payment.',
         tone: 'error',
       });
     } finally {
@@ -826,6 +940,20 @@ export default function ActionWorkspace() {
                               </div>
                             )}
                           />
+                          {normalizedType(selectedAction.action_type) === 'PAY' && selectedAction.obligation_id ? (
+                            <PaymentCheckPanel
+                              paymentCheck={paymentCheck}
+                              loading={paymentLoading}
+                              busy={busy === `payment-${selectedAction.id}`}
+                              eligible={Boolean(
+                                selectedAction.amount
+                                && (selectedAction.payee_or_owner || selectedAction.correspondent)
+                                && (selectedAction.due_date || selectedAction.document_date),
+                              )}
+                              onCheck={() => void checkForPayment()}
+                              onConfirm={() => setConfirmPayment(true)}
+                            />
+                          ) : null}
                           <QuickWorkLinks action={selectedAction} />
                           <details className="action-disclosure">
                             <summary>Why OWL suggested this <ChevronDown size={16} /></summary>
@@ -971,9 +1099,97 @@ export default function ActionWorkspace() {
         </div>
       ) : null}
 
+      {confirmPayment && selectedAction && paymentCheck ? (
+        <div className="workspace-dialog-backdrop">
+          <section role="dialog" aria-modal="true" aria-labelledby="confirm-payment-title" className="workspace-dialog">
+            <h2 id="confirm-payment-title">Confirm this posted payment?</h2>
+            <p>OWL will record your confirmation and complete the selected action and obligation in one operation.</p>
+            <div>
+              <Button onClick={() => setConfirmPayment(false)}>Cancel</Button>
+              <Button variant="primary" onClick={() => void confirmPaymentAndComplete()}>
+                Confirm payment and complete
+              </Button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {toast ? <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} /> : null}
       {queueStatus?.read_only ? <div className="workspace-read-only">Paperless writeback is currently read-only.</div> : null}
     </div>
+  );
+}
+
+function PaymentCheckPanel({
+  paymentCheck,
+  loading,
+  busy,
+  eligible,
+  onCheck,
+  onConfirm,
+}: {
+  paymentCheck: PaymentCheck | null;
+  loading: boolean;
+  busy: boolean;
+  eligible: boolean;
+  onCheck: () => void;
+  onConfirm: () => void;
+}) {
+  const candidate = paymentCheck?.candidates[0];
+  const stateLabel: Record<PaymentCheckState, string> = {
+    unchecked: 'Ready to check',
+    checking: 'Checking accounts',
+    posted_match: 'Posted payment found',
+    pending_match: 'Pending payment found',
+    multiple_matches: 'Multiple possible payments',
+    no_match: 'No payment found',
+    partial_payment: 'Partial payment found',
+    source_unavailable: 'Payment source unavailable',
+    stale: 'Payment result is stale',
+    conflict: 'Conflicting payment evidence',
+    possible_double_payment: 'Possible double payment',
+    confirmed: 'Payment confirmed',
+  };
+  return (
+    <section className={`payment-check-card state-${paymentCheck?.state || 'unchecked'}`} aria-label="Payment check">
+      <div className="payment-check-heading">
+        <div>
+          <span>Payment reconciliation</span>
+          <strong>{loading ? 'Loading payment status…' : stateLabel[paymentCheck?.state || 'unchecked']}</strong>
+        </div>
+        <Button
+          size="sm"
+          disabled={!eligible || loading || busy || paymentCheck?.state === 'checking'}
+          onClick={onCheck}
+        >
+          <RefreshCw size={15} className={busy ? 'spin' : ''} />
+          {paymentCheck?.state === 'unchecked' ? 'Check for payment' : 'Check again'}
+        </Button>
+      </div>
+      <p>
+        {!eligible
+          ? 'Add a payee, amount, and due or bill date before checking for payment.'
+          : paymentCheck?.message || 'Search configured eligible financial accounts for a matching transaction.'}
+      </p>
+      {candidate ? (
+        <dl className="payment-candidate">
+          <div><dt>Payee</dt><dd>{candidate.payee || 'Not provided'}</dd></div>
+          <div><dt>Amount</dt><dd>{candidate.amount == null ? 'Not provided' : formatCurrency(candidate.amount, candidate.currency || 'USD')}</dd></div>
+          <div><dt>Transaction</dt><dd>{formatDate(candidate.transaction_date)} · {candidate.status || 'unknown'}</dd></div>
+          <div><dt>Account</dt><dd>{candidate.account_display_name || 'Eligible account'}{candidate.account_last_four ? ` •••• ${candidate.account_last_four}` : ''}</dd></div>
+          <div><dt>Confidence</dt><dd>{candidate.confidence || 'Not scored'}{candidate.score == null ? '' : ` · ${candidate.score.toFixed(0)}%`}</dd></div>
+          <div><dt>Match reasons</dt><dd>{candidate.match_reasons?.join(', ') || 'Not provided'}</dd></div>
+        </dl>
+      ) : null}
+      {paymentCheck?.state === 'posted_match' ? (
+        <div className="payment-check-confirm">
+          <span>A posted match does not complete this obligation until you confirm it.</span>
+          <Button variant="primary" size="sm" disabled={busy} onClick={onConfirm}>
+            Confirm payment and complete
+          </Button>
+        </div>
+      ) : null}
+    </section>
   );
 }
 

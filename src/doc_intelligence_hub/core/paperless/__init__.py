@@ -33,6 +33,7 @@ from doc_intelligence_hub.core.paperless.metadata import (
     get_metadata_field_spec,
     govern_account_identifier,
     mask_account_identifier,
+    provisioned_metadata_field_keys,
     resolve_metadata_schema,
     resolve_metadata_value,
 )
@@ -67,6 +68,7 @@ __all__ = [
     "govern_account_identifier",
     "get_metadata_field_spec",
     "mask_account_identifier",
+    "provisioned_metadata_field_keys",
     "load_fixture",
     "resolve_metadata_schema",
     "resolve_metadata_value",

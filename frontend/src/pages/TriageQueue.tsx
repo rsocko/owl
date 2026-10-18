@@ -67,7 +67,18 @@ type ActionCorrectionDraft = {
   amount: string;
 };
 
-const ACTION_TYPES = ['PAY', 'RESPOND', 'SIGN', 'SCHEDULE', 'TASK', 'REVIEW', 'SHARE'];
+const ACTION_TYPES = [
+  'PAY',
+  'RESPOND',
+  'SIGN',
+  'SCHEDULE',
+  'TASK',
+  'REVIEW',
+  'SHARE',
+  'CANCEL',
+  'RENEW',
+  'DISPUTE',
+];
 
 const ITEM_TYPE_FILTERS: ReadonlySet<ItemTypeFilter> = new Set([
   'all',
