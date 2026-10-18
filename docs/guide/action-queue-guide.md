@@ -68,8 +68,10 @@ instead of suppressing it or creating a new `PAY` action.
 
 Action Review shows **Check for payment** for eligible `PAY` actions with a payee,
 amount, obligation, and due or bill date. OWL asks Tyrion Bill Matching to search only
-configured eligible financial accounts and persists the authoritative result, source
-freshness, candidate reasons, and audit history.
+all financial accounts except any optional configured exclusions, and persists the
+authoritative result, source freshness, candidate reasons, and audit history. Checks
+that remain active beyond the connector timeout and finalization grace period are
+recorded as source unavailable so the operator can safely retry.
 
 The workspace keeps posted, pending, multiple-match, no-match, partial-payment,
 source-unavailable, stale, conflict, and possible-double-payment results distinct. A
