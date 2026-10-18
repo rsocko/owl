@@ -4,6 +4,7 @@ import asyncio
 from datetime import date
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from fastapi import Request
 from pydantic import SecretStr
@@ -20,6 +21,7 @@ from doc_intelligence_hub.modules.action_queue.payment_reconciliation import (
     PaymentCheckRun,
     PaymentRelationshipEvent,
     TyrionBillMatchResponseV2,
+    TyrionInvalidResponseError,
 )
 
 RECEIPT_HEADERS = {"Authorization": "Bearer receipt-intake-test-token"}
@@ -470,5 +472,75 @@ async def test_unexpected_check_failure_is_finalized_before_reraising(app) -> No
         run = db.query(PaymentCheckRun).filter_by(action_id=action_id).one()
         assert run.status == "source_unavailable"
         assert run.error_code == "tyrion_check_failed"
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action_id", "error", "expected_error_code"),
+    [
+        (
+            710,
+            httpx.ReadTimeout(
+                "timed out",
+                request=httpx.Request("POST", "http://tyrion.test"),
+            ),
+            "tyrion_timeout",
+        ),
+        (
+            711,
+            httpx.HTTPStatusError(
+                "unauthorized",
+                request=httpx.Request("POST", "http://tyrion.test"),
+                response=httpx.Response(401),
+            ),
+            "tyrion_http_401",
+        ),
+        (
+            712,
+            httpx.ConnectError(
+                "connection failed",
+                request=httpx.Request("POST", "http://tyrion.test"),
+            ),
+            "tyrion_transport_unavailable",
+        ),
+        (
+            713,
+            TyrionInvalidResponseError("tyrion_response_invalid"),
+            "tyrion_response_invalid",
+        ),
+    ],
+)
+async def test_tyrion_failures_record_distinct_durable_reason_codes(
+    app,
+    action_id: int,
+    error: Exception,
+    expected_error_code: str,
+) -> None:
+    _seed_check_action(action_id, f"failed-check-obligation-{action_id}")
+    app.state.hub_settings.tyrion_bill_matching_url = (
+        "http://tyrion.test/api/connector/v1/bill-matches"
+    )
+
+    with patch(
+        "doc_intelligence_hub.modules.action_queue.payment_reconciliation."
+        "TyrionBillMatchingClient.check",
+        new=AsyncMock(side_effect=error),
+    ):
+        result = await _check_payment(
+            _request_for(app, action_id),
+            action_id,
+            PaymentCheckRequest(
+                revision="v1:1:1",
+                idempotency_key=f"failed-payment-check-{action_id}",
+            ),
+        )
+
+    assert result["status"] == "source_unavailable"
+    db = get_session()
+    try:
+        run = db.query(PaymentCheckRun).filter_by(action_id=action_id).one()
+        assert run.error_code == expected_error_code
     finally:
         db.close()

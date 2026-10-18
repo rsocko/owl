@@ -646,7 +646,7 @@ class TyrionBillCheckRequestV2(BaseModel):
         default="configuredEligible",
         alias="accountScope",
     )
-    date_window_days: int | None = Field(default=None, alias="dateWindowDays", ge=1, le=365)
+    date_window_days: int | None = Field(default=None, alias="dateWindowDays", ge=0, le=365)
     amount_tolerance_minor: int | None = Field(
         default=None,
         alias="amountToleranceMinor",
@@ -826,23 +826,40 @@ class PaymentCheckInProgressError(ValueError):
     pass
 
 
+class TyrionInvalidResponseError(ValueError):
+    pass
+
+
 class TyrionBillMatchingClient:
-    def __init__(self, *, url: str, api_token: str | None = None):
+    def __init__(
+        self,
+        *,
+        url: str,
+        api_token: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
         self.url = url
         self.api_token = api_token
+        self.transport = transport
 
     async def check(self, request: TyrionBillCheckRequestV2) -> TyrionBillMatchResponseV2:
         headers = {"Accept": "application/json"}
         if self.api_token:
             headers["Authorization"] = f"Bearer {self.api_token}"
-        async with httpx.AsyncClient(timeout=TYRION_BILL_MATCH_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(
+            timeout=TYRION_BILL_MATCH_TIMEOUT_SECONDS,
+            transport=self.transport,
+        ) as client:
             response = await client.post(
                 self.url,
                 headers=headers,
-                json=request.model_dump(by_alias=True, mode="json"),
+                json=request.model_dump(by_alias=True, mode="json", exclude_none=True),
             )
             response.raise_for_status()
-        return TyrionBillMatchResponseV2.model_validate(response.json())
+        try:
+            return TyrionBillMatchResponseV2.model_validate(response.json())
+        except ValueError as exc:
+            raise TyrionInvalidResponseError("tyrion_response_invalid") from exc
 
 
 class PaymentReconciliationService:
