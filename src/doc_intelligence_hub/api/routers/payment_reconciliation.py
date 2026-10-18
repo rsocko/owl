@@ -247,12 +247,17 @@ async def mc_act_on_payment_review(
 @router.get(
     "/api/payment-reconciliation/v2/actions/{action_id}",
 )
-async def get_action_payment_check(action_id: int) -> dict:
+async def get_action_payment_check(request: Request, action_id: int) -> dict:
     init_db()
     db = get_session()
     try:
         try:
-            projection = PaymentReconciliationService(db).payment_projection(action_id)
+            projection = PaymentReconciliationService(
+                db,
+                bill_matching_connector_ref=(
+                    request.app.state.hub_settings.tyrion_bill_matching_connector_ref
+                ),
+            ).payment_projection(action_id)
             return {
                 "contract_version": "2.0",
                 "payment_check": _public_payment_projection(projection),
@@ -267,7 +272,11 @@ async def _check_payment(request: Request, action_id: int, body: PaymentCheckReq
     init_db()
     db = get_session()
     try:
-        service = PaymentReconciliationService(db)
+        settings = request.app.state.hub_settings
+        service = PaymentReconciliationService(
+            db,
+            bill_matching_connector_ref=settings.tyrion_bill_matching_connector_ref,
+        )
         try:
             run, tyrion_request, replay = service.start_check(action_id, body)
             if replay:
@@ -279,7 +288,6 @@ async def _check_payment(request: Request, action_id: int, body: PaymentCheckReq
                     payment=_public_payment_projection(projection),
                 ).model_dump(mode="json")
 
-            settings = request.app.state.hub_settings
             connector_ref = settings.tyrion_bill_matching_connector_ref
             if not settings.tyrion_bill_matching_url:
                 projection = service.fail_check(
@@ -451,7 +459,11 @@ async def _confirm_payment(
     db = get_session()
     try:
         try:
-            service = PaymentReconciliationService(db)
+            settings = request.app.state.hub_settings
+            service = PaymentReconciliationService(
+                db,
+                bill_matching_connector_ref=settings.tyrion_bill_matching_connector_ref,
+            )
             result = service.confirm_and_complete(action_id, body, actor=actor)
             action = db.query(Action).filter_by(id=action_id).one()
             return {

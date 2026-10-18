@@ -273,7 +273,12 @@ def _serialize_mc_action(request: Request, db, action: Action) -> dict[str, Any]
     payment_check = None
     if (action.action_type or "").upper() == "PAY" and action.obligation_id:
         try:
-            raw_payment_check = PaymentReconciliationService(db).payment_projection(action.id)
+            raw_payment_check = PaymentReconciliationService(
+                db,
+                bill_matching_connector_ref=(
+                    request.app.state.hub_settings.tyrion_bill_matching_connector_ref
+                ),
+            ).payment_projection(action.id)
             payment_check = {
                 key: value for key, value in raw_payment_check.items() if not key.startswith("_")
             }

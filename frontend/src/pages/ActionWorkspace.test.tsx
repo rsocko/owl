@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ActionWorkspace from './ActionWorkspace';
@@ -383,5 +383,84 @@ describe('ActionWorkspace', () => {
 
     expect(await screen.findByText('Payment source unavailable')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Check again' })).toBeEnabled();
+  });
+
+  it('reloads missing payment status instead of rendering a dead check button', async () => {
+    actionsMock.mockResolvedValue({
+      actions: actions.map((action) => (
+        action.id === 1 ? { ...action, obligation_id: 'obligation-1' } : { ...action }
+      )),
+      total: actions.length,
+    });
+    let resolveReload: ((value: unknown) => void) | undefined;
+    paymentCheckMock
+      .mockRejectedValueOnce(new Error('Payment status could not be loaded.'))
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveReload = resolve;
+      }));
+    renderWorkspace();
+
+    expect(await screen.findByText('Payment status unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Payment status could not be loaded.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry check' }));
+
+    const checkingButton = await screen.findByRole('button', { name: 'Checking…' });
+    expect(checkingButton).toBeDisabled();
+    expect(checkingButton.querySelector('svg')).toHaveClass('spin');
+
+    await act(async () => {
+      resolveReload?.({
+        payment_check: {
+          state: 'source_unavailable',
+          checked_at: '2026-10-18T16:14:53.398188',
+          stale_after: null,
+          source: 'tyrion_bill_match',
+          revision: 'v1:2:2',
+          message: 'The payment source could not complete the check.',
+          candidates: [],
+        },
+      });
+    });
+
+    await waitFor(() => expect(checkPaymentMock).toHaveBeenCalledWith('1', {
+      revision: 'v1:2:2',
+      idempotency_key: 'owl-check-payment:1:v1:2:2',
+    }));
+    expect(await screen.findByText('Posted payment found')).toBeInTheDocument();
+  });
+
+  it('ignores a late payment status response after switching documents', async () => {
+    actionsMock.mockResolvedValue({
+      actions: actions.map((action) => (
+        action.id === 1 ? { ...action, obligation_id: 'obligation-1' } : { ...action }
+      )),
+      total: actions.length,
+    });
+    let resolvePaymentStatus: ((value: unknown) => void) | undefined;
+    paymentCheckMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolvePaymentStatus = resolve;
+    }));
+    renderWorkspace();
+
+    await screen.findByRole('heading', { name: 'Utility bill' });
+    fireEvent.click(screen.getByRole('button', { name: 'Next doc' }));
+    expect(await screen.findByRole('heading', { name: 'Insurance renewal' })).toBeInTheDocument();
+
+    await act(async () => {
+      resolvePaymentStatus?.({
+        payment_check: {
+          state: 'checking',
+          checked_at: '2026-10-18T16:14:08.398188',
+          stale_after: null,
+          source: 'tyrion_bill_match',
+          revision: 'v1:2:2',
+          message: 'Checking all financial accounts except any configured exclusions.',
+          candidates: [],
+        },
+      });
+    });
+
+    expect(screen.queryByRole('region', { name: 'Payment check' })).not.toBeInTheDocument();
   });
 });

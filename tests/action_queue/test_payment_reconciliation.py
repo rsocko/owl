@@ -13,6 +13,7 @@ from doc_intelligence_hub.modules.action_queue.database import (
     ObligationPaymentEdge,
     PaymentCheckRun,
     PaymentEvidence,
+    PaymentEvidenceGeneration,
     PaymentReconciliationCase,
     PaymentRelationshipEvent,
     get_session,
@@ -28,6 +29,7 @@ from doc_intelligence_hub.modules.action_queue.payment_reconciliation import (
     PaymentReviewAction,
     RevisionConflictError,
     TyrionBillMatchIngestRequest,
+    TyrionBillMatchResponseV2,
     TyrionReceiptEvidenceIngestRequest,
 )
 
@@ -111,6 +113,31 @@ def _snapshot(
                     "reason_codes": ["amount_exact", "date_exact"],
                 }
             ],
+        }
+    )
+
+
+def _no_match_response(run_id: str, document_id: int) -> TyrionBillMatchResponseV2:
+    return TyrionBillMatchResponseV2.model_validate(
+        {
+            "contractVersion": "2.0",
+            "requestRef": run_id,
+            "billRef": f"paperless:{document_id}",
+            "matchStatus": "noMatch",
+            "paymentStatus": "unmatched",
+            "selectedTransactionRef": None,
+            "candidates": [],
+            "searchContext": {
+                "anchorDate": "2026-10-20",
+                "windowStart": "2026-09-20",
+                "windowEnd": "2026-10-27",
+                "dateWindowDays": 30,
+                "amountToleranceMinor": 100,
+                "sourceAsOf": "2026-10-18T12:00:00Z",
+                "searchedAt": "2026-10-18T12:01:00Z",
+                "eligibleAccountCount": 3,
+                "candidatePoolSize": 8,
+            },
         }
     )
 
@@ -322,6 +349,29 @@ def test_orphaned_check_expires_with_audit_and_allows_retry(db) -> None:
     assert replay is False
 
 
+def test_orphaned_check_uses_the_configured_connector_reference(db) -> None:
+    obligation = _obligation(db)
+    action = _pay_action(db, obligation)
+    service = PaymentReconciliationService(
+        db,
+        bill_matching_connector_ref="custom-bill-matching",
+    )
+    run, _request, _replay = service.start_check(
+        action.id,
+        PaymentCheckRequest(
+            revision="v1:1:1",
+            idempotency_key="payment-check-custom-connector",
+        ),
+    )
+    run.updated_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=1)
+    db.commit()
+
+    service.payment_projection(action.id)
+
+    generation = db.query(PaymentEvidenceGeneration).filter_by(source_generation=run.id).one()
+    assert generation.connector_ref == "custom-bill-matching"
+
+
 def test_active_check_rejects_a_different_idempotency_key(db) -> None:
     obligation = _obligation(db)
     action = _pay_action(db, obligation)
@@ -344,6 +394,72 @@ def test_active_check_rejects_a_different_idempotency_key(db) -> None:
         )
 
     assert db.query(PaymentCheckRun).filter_by(status="checking").count() == 1
+
+
+def test_failure_status_is_committed_before_projection_build(db, monkeypatch) -> None:
+    obligation = _obligation(db)
+    action = _pay_action(db, obligation)
+    service = PaymentReconciliationService(db)
+    run, _request, _replay = service.start_check(
+        action.id,
+        PaymentCheckRequest(
+            revision="v1:1:1",
+            idempotency_key="payment-check-failure-order",
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "payment_projection",
+        lambda _action_id: (_ for _ in ()).throw(RuntimeError("projection failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="projection failed"):
+        service.fail_check(
+            run.id,
+            connector_ref="tyrion-bill-matching-v2",
+            error_code="tyrion_check_failed",
+        )
+
+    db.expire_all()
+    stored = db.query(PaymentCheckRun).filter_by(id=run.id).one()
+    assert stored.status == "source_unavailable"
+    assert stored.error_code == "tyrion_check_failed"
+    assert (
+        db.query(PaymentRelationshipEvent)
+        .filter_by(action_scope=f"payment_check:{run.id}", action="check_failed")
+        .count()
+        == 1
+    )
+
+
+def test_completion_status_is_committed_before_projection_build(db, monkeypatch) -> None:
+    obligation = _obligation(db)
+    action = _pay_action(db, obligation)
+    service = PaymentReconciliationService(db)
+    run, _request, _replay = service.start_check(
+        action.id,
+        PaymentCheckRequest(
+            revision="v1:1:1",
+            idempotency_key="payment-check-completion-order",
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "payment_projection",
+        lambda _action_id: (_ for _ in ()).throw(RuntimeError("projection failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="projection failed"):
+        service.finish_check(
+            run.id,
+            _no_match_response(run.id, action.document_id),
+            connector_ref="tyrion-bill-matching-v2",
+        )
+
+    db.expire_all()
+    stored = db.query(PaymentCheckRun).filter_by(id=run.id).one()
+    assert stored.status == "completed"
+    assert stored.response_payload is not None
 
 
 def test_manual_rejection_survives_newer_generation(db) -> None:

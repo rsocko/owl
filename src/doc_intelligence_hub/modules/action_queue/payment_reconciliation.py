@@ -837,8 +837,14 @@ class TyrionBillMatchingClient:
 
 
 class PaymentReconciliationService:
-    def __init__(self, db: Session):
+    def __init__(
+        self,
+        db: Session,
+        *,
+        bill_matching_connector_ref: str = TYRION_BILL_MATCH_CONNECTOR_REF,
+    ):
         self.db = db
+        self.bill_matching_connector_ref = bill_matching_connector_ref
 
     @staticmethod
     def _action_revision(action: Action, obligation: Obligation) -> str:
@@ -861,7 +867,7 @@ class PaymentReconciliationService:
         if latest_run and self._is_stale_check(latest_run):
             return self.fail_check(
                 latest_run.id,
-                connector_ref=TYRION_BILL_MATCH_CONNECTOR_REF,
+                connector_ref=self.bill_matching_connector_ref,
                 error_code="tyrion_check_expired",
             )
         cases = (
@@ -1095,7 +1101,7 @@ class PaymentReconciliationService:
         if active_run and self._is_stale_check(active_run):
             self.fail_check(
                 active_run.id,
-                connector_ref=TYRION_BILL_MATCH_CONNECTOR_REF,
+                connector_ref=self.bill_matching_connector_ref,
                 error_code="tyrion_check_expired",
             )
             active_run = None
@@ -1237,11 +1243,11 @@ class PaymentReconciliationService:
             obligation_id=run.obligation_id,
             evidence=evidence,
         )
+        run.status = "completed"
+        run.response_payload = response.model_dump(by_alias=True, mode="json")
         self._retire_prior_check_cases(run.obligation_id)
         self.ingest_snapshot(snapshot)
         run = self.db.query(PaymentCheckRun).filter_by(id=run_id).one()
-        run.status = "completed"
-        run.response_payload = response.model_dump(by_alias=True, mode="json")
         projection = self.payment_projection(action.id)
         run.result = {key: value for key, value in projection.items() if not key.startswith("_")}
         self.db.commit()
@@ -1259,6 +1265,27 @@ class PaymentReconciliationService:
         if run.status != "checking":
             return self.payment_projection(action.id)
         obligation = self.db.query(Obligation).filter_by(id=run.obligation_id).one()
+        run.status = "source_unavailable"
+        run.error_code = error_code
+        self.db.add(
+            PaymentRelationshipEvent(
+                id=_stable_id("event", run.id, "source_unavailable"),
+                action_scope=f"payment_check:{run.id}",
+                idempotency_key=f"{run.id}:source_unavailable",
+                obligation_id=run.obligation_id,
+                action="check_failed",
+                actor="system",
+                provenance="tyrion_bill_match",
+                previous_state={"state": "checking", "run_id": run.id},
+                new_state={
+                    "state": "source_unavailable",
+                    "run_id": run.id,
+                    "error_code": error_code,
+                },
+                source_generation=run.id,
+                expected_revision=run.expected_revision,
+            )
+        )
         snapshot = PaymentEvidenceSnapshot(
             source_system="tyrion_bill_match",
             connector_ref=connector_ref,
@@ -1284,27 +1311,6 @@ class PaymentReconciliationService:
         self._retire_prior_check_cases(run.obligation_id)
         self.ingest_snapshot(snapshot)
         run = self.db.query(PaymentCheckRun).filter_by(id=run_id).one()
-        run.status = "source_unavailable"
-        run.error_code = error_code
-        self.db.add(
-            PaymentRelationshipEvent(
-                id=_stable_id("event", run.id, "source_unavailable"),
-                action_scope=f"payment_check:{run.id}",
-                idempotency_key=f"{run.id}:source_unavailable",
-                obligation_id=run.obligation_id,
-                action="check_failed",
-                actor="system",
-                provenance="tyrion_bill_match",
-                previous_state={"state": "checking", "run_id": run.id},
-                new_state={
-                    "state": "source_unavailable",
-                    "run_id": run.id,
-                    "error_code": error_code,
-                },
-                source_generation=run.id,
-                expected_revision=run.expected_revision,
-            )
-        )
         projection = self.payment_projection(action.id)
         run.result = {key: value for key, value in projection.items() if not key.startswith("_")}
         self.db.commit()
