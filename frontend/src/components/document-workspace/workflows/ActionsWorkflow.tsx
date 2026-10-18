@@ -5,26 +5,24 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
-  FileText,
-  Maximize2,
   Search,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../../ui';
 import {
-  DocumentWorkspaceBody,
   DocumentWorkspaceFrame,
-  DocumentWorkspaceHeader,
-  DocumentWorkspaceTabs,
 } from '../../DocumentWorkspace';
-import DocumentActionsPanel from '../../DocumentActionsPanel';
+import DocumentWorkspaceDocumentView from '../DocumentWorkspaceDocumentView';
+import DocumentActionsTab from '../tabs/DocumentActionsTab';
+import DocumentMetadataTab from '../tabs/DocumentMetadataTab';
+import DocumentOcrTab from '../tabs/DocumentOcrTab';
+import DocumentRelatedTab from '../tabs/DocumentRelatedTab';
 import {
   documentActionMutation,
   type DocumentActionDraft,
   type DocumentActionStatus,
 } from '../../../lib/documentActions';
-import OcrSummaryPanel from '../../OcrSummaryPanel';
 import OcrFocusInspector from '../../OcrFocusInspector';
 import { useOcrSummary } from '../../../hooks/useOcrSummary';
 import { endpoints, type DocumentSummaryModel } from '../../../lib/api';
@@ -621,47 +619,49 @@ export default function ActionsWorkflow() {
           <EmptyState title="Select a document" desc="Choose a document to review its actions and source evidence." />
         ) : (
           <>
-            <DocumentWorkspaceHeader
-              context={`Document ${selectedGroupIndex >= 0 ? selectedGroupIndex + 1 : '—'} of ${groups.length} · Paperless #${selectedGroup.documentId}`}
-              title={selectedAction.document_title || `Document #${selectedGroup.documentId}`}
-              metadata={[
-                { label: 'Date', value: formatDate(selectedAction.document_date) },
-                { label: 'Correspondent', value: selectedAction.correspondent || 'Not set' },
-                { label: 'Type', value: selectedAction.document_type || 'Not set' },
-              ]}
-              actions={(
+            <DocumentWorkspaceDocumentView
+              document={{
+                id: selectedGroup.documentId,
+                context: `Document ${selectedGroupIndex >= 0 ? selectedGroupIndex + 1 : '—'} of ${groups.length} · Paperless #${selectedGroup.documentId}`,
+                title: selectedAction.document_title || `Document #${selectedGroup.documentId}`,
+                date: formatDate(selectedAction.document_date),
+                correspondent: selectedAction.correspondent || 'Not set',
+                documentType: selectedAction.document_type || 'Not set',
+              }}
+              activeTab={tab}
+              onTabChange={(value) => setTab(value as WorkspaceTab)}
+              previewUrl={previewUrl}
+              previewClassName="document-workspace-preview"
+              panelClassName="document-workspace-panel"
+              headerActions={(
                 <a className="btn ghost" href={selectedAction.preview_url || previewUrl} target="_blank" rel="noopener noreferrer">
                   <ExternalLink size={16} /> Paperless
                 </a>
               )}
-            />
-
-            <DocumentWorkspaceBody
-              previewClassName="document-workspace-preview"
-              panelClassName="document-workspace-panel"
-              preview={(
-                <>
-                {previewUrl ? <iframe title={`Preview of ${selectedAction.document_title || 'document'}`} src={previewUrl} /> : (
-                  <div className="document-workspace-preview-empty"><FileText size={42} /><span>No document preview available</span></div>
-                )}
-                {previewUrl ? (
-                  <a href={previewUrl} target="_blank" rel="noopener noreferrer"><Maximize2 size={15} /> Open preview</a>
-                ) : null}
-                </>
-              )}
-            >
-                <DocumentWorkspaceTabs
-                  tabs={[
-                    { key: 'metadata', label: 'Metadata' },
-                    { key: 'actions', label: `Actions ${selectedGroup.actions.length}` },
-                    { key: 'related', label: `Related ${selectedAction.linked_document_count ?? selectedAction.linked_documents?.length ?? 0}` },
-                    { key: 'ocr', label: 'OCR' },
-                  ]}
-                  active={tab}
-                  onChange={(value) => setTab(value as WorkspaceTab)}
-                >
-                  {tab === 'actions' ? (
-                    <DocumentActionsPanel
+              tabs={[
+                {
+                  key: 'metadata',
+                  label: 'Metadata',
+                  content: (
+                    <DocumentMetadataTab
+                      document={{
+                        document_id: selectedGroup.documentId,
+                        title: selectedAction.document_title,
+                        correspondent: selectedAction.correspondent,
+                        document_type: selectedAction.document_type,
+                        document_date: selectedAction.document_date,
+                        date_label: formatDate(selectedAction.document_date),
+                      }}
+                      editHref={`#/inbox?document=${selectedGroup.documentId}&tab=metadata`}
+                      note="Resolving an action never files the document or changes Paperless metadata."
+                    />
+                  ),
+                },
+                {
+                  key: 'actions',
+                  label: `Actions ${selectedGroup.actions.length}`,
+                  content: (
+                    <DocumentActionsTab
                       actions={selectedGroup.actions}
                       selectedActionId={selectedAction.id}
                       onSelectAction={selectAction}
@@ -691,51 +691,32 @@ export default function ActionsWorkflow() {
                       }}
                       onStatus={(action, status: DocumentActionStatus, until) => changeStatus(action, status, until)}
                     />
-                  ) : null}
-
-                  {tab === 'metadata' ? (
-                    <div className="workspace-metadata">
-                      <div className="workspace-panel-heading">
-                        <div><h3>Document metadata</h3><p>Paperless remains authoritative.</p></div>
-                        <a className="btn" href={`#/inbox?document=${selectedGroup.documentId}&tab=metadata`}>Edit in Inbox</a>
-                      </div>
-                      <dl>
-                        <div><dt>Title</dt><dd>{selectedAction.document_title || 'Not set'}</dd></div>
-                        <div><dt>Correspondent</dt><dd>{selectedAction.correspondent || 'Not set'}</dd></div>
-                        <div><dt>Document type</dt><dd>{selectedAction.document_type || 'Not set'}</dd></div>
-                        <div><dt>Document date</dt><dd>{formatDate(selectedAction.document_date)}</dd></div>
-                      </dl>
-                      <p className="workspace-scope-note">Resolving an action never files the document or changes Paperless metadata.</p>
-                    </div>
-                  ) : null}
-
-                  {tab === 'related' ? (
-                    <div className="workspace-related">
-                      <div className="workspace-panel-heading"><div><h3>Related evidence</h3><p>Documents connected to this obligation.</p></div></div>
-                      {selectedAction.linked_documents?.length ? selectedAction.linked_documents.map((document) => (
-                        <a
-                          key={document.document_id}
-                          href={document.preview_url || endpoints.documents.previewUrl(document.document_id)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          <img src={document.thumbnail_url || endpoints.statements.documentThumb(String(document.document_id))} alt="" />
-                          <span><strong>{document.title || `Document #${document.document_id}`}</strong><small>{document.role} · {document.correspondent || 'Unknown correspondent'}</small></span>
-                          <ExternalLink size={16} />
-                        </a>
-                      )) : <EmptyState title="No related evidence" desc="No related documents are attached to this action." />}
-                    </div>
-                  ) : null}
-
-                  {tab === 'ocr' ? (
-                    <div className="workspace-ocr">
-                      <OcrSummaryPanel documentId={selectedGroup.documentId} state={ocrSummary} onInspect={openOcrFocus} />
-                    </div>
-                  ) : null}
-                </DocumentWorkspaceTabs>
-            </DocumentWorkspaceBody>
-
-            <footer className="document-workspace-lifecycle">
+                  ),
+                },
+                {
+                  key: 'related',
+                  label: `Related ${selectedAction.linked_document_count ?? selectedAction.linked_documents?.length ?? 0}`,
+                  content: (
+                    <DocumentRelatedTab
+                      documents={selectedAction.linked_documents ?? []}
+                      emptyDescription="No related documents are attached to this action."
+                    />
+                  ),
+                },
+                {
+                  key: 'ocr',
+                  label: 'OCR',
+                  content: (
+                    <DocumentOcrTab
+                      documentId={selectedGroup.documentId}
+                      state={ocrSummary}
+                      onInspect={openOcrFocus}
+                    />
+                  ),
+                },
+              ]}
+              footer={(
+                <footer className="document-workspace-lifecycle">
               <div>
                 <span className="lifecycle-dot" />
                 <span><strong>{selectedAction.title || `Action #${selectedAction.id}`}</strong><small>{selectedGroup.actions.length > 1 ? 'These outcomes apply only to the selected action.' : 'Choose an outcome or move to the next document.'}</small></span>
@@ -787,7 +768,9 @@ export default function ActionsWorkflow() {
                   </div>
                 </div>
               )}
-            </footer>
+                </footer>
+              )}
+            />
           </>
         )}
 

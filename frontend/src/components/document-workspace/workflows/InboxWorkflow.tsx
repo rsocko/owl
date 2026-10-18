@@ -6,7 +6,6 @@ import {
   ExternalLink,
   FileCheck2,
   FileClock,
-  Maximize2,
   Minimize2,
   Plus,
   RefreshCw,
@@ -17,13 +16,12 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../../ui';
-import {
-  DocumentWorkspaceBody,
-  DocumentWorkspaceFrame,
-  DocumentWorkspaceHeader,
-  DocumentWorkspaceTabs,
-} from '../../DocumentWorkspace';
-import DocumentActionsPanel from '../../DocumentActionsPanel';
+import { DocumentWorkspaceFrame } from '../../DocumentWorkspace';
+import DocumentWorkspaceDocumentView from '../DocumentWorkspaceDocumentView';
+import DocumentActionsTab from '../tabs/DocumentActionsTab';
+import DocumentMetadataTab from '../tabs/DocumentMetadataTab';
+import DocumentOcrTab from '../tabs/DocumentOcrTab';
+import DocumentRelatedTab from '../tabs/DocumentRelatedTab';
 import {
   documentActionMutation,
   type DocumentAction,
@@ -31,7 +29,6 @@ import {
   type DocumentActionStatus,
 } from '../../../lib/documentActions';
 import DocumentRelationshipsPanel from '../../DocumentRelationshipsPanel';
-import OcrSummaryPanel from '../../OcrSummaryPanel';
 import OcrFocusInspector from '../../OcrFocusInspector';
 import { ocrNeedsAttention, useOcrSummary } from '../../../hooks/useOcrSummary';
 import { endpoints } from '../../../lib/api';
@@ -1191,19 +1188,27 @@ export default function InboxWorkflow() {
           <EmptyState title="Select a document" desc="Choose an Inbox document to review its metadata, actions, and OCR." />
         ) : (
           <>
-            <DocumentWorkspaceHeader
-              className="intake-document-header"
+            <DocumentWorkspaceDocumentView
+              document={{
+                id: selectedId,
+                title,
+                date: metadata ? formatDate(metadata.created) : 'Loading…',
+                correspondent: core && metadata ? optionName(core.taxonomies.correspondents, metadata.correspondent) : 'Loading…',
+                documentType: core && metadata ? optionName(core.taxonomies.document_types, metadata.document_type) : 'Loading…',
+              }}
+              activeTab={tab}
+              onTabChange={(value) => chooseTab(value as ReviewTab)}
+              headerClassName="intake-document-header"
               titleClassName="intake-document-title"
               metadataClassName="intake-live-metadata"
               actionsClassName="intake-header-actions"
-              context={`Document #${selectedId}`}
-              title={title}
-              metadata={[
-                { label: 'Date', value: metadata ? formatDate(metadata.created) : 'Loading…' },
-                { label: 'Correspondent', value: core && metadata ? optionName(core.taxonomies.correspondents, metadata.correspondent) : 'Loading…' },
-                { label: 'Type', value: core && metadata ? optionName(core.taxonomies.document_types, metadata.document_type) : 'Loading…' },
-              ]}
-              actions={(
+              bodyClassName="intake-workspace-grid"
+              previewClassName="intake-preview"
+              panelClassName="intake-review-panel"
+              contentClassName="intake-tab-content"
+              previewUrl={previewUrl}
+              onExpandPreview={() => setPreviewExpanded(true)}
+              headerActions={(
                 <>
                 {core ? (
                   <div
@@ -1223,49 +1228,25 @@ export default function InboxWorkflow() {
                 <Button disabled={busyKey === 'refresh' || !core} onClick={() => void refreshAnalysis()}><RefreshCw size={16} /> {busyKey === 'refresh' ? 'Analyzing…' : core?.analysis.available ? 'Re-evaluate' : 'Analyze'}</Button>
                 </>
               )}
-            />
-
-            <DocumentWorkspaceBody
-              className="intake-workspace-grid"
-              previewClassName="intake-preview"
-              panelClassName="intake-review-panel"
-              preview={(
-                <>
-                <iframe title={`Preview of ${title}`} src={previewUrl} />
-                <div className="intake-preview-tools">
-                  <button type="button" onClick={() => setPreviewExpanded(true)}>
-                    <Maximize2 size={16} /> Expand
-                  </button>
-                  <a href={previewUrl} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink size={16} /> New tab
-                  </a>
-                </div>
-                </>
-              )}
+              tabs={[
+                { key: 'metadata', label: 'Metadata' },
+                {
+                  key: 'actions',
+                  className: pendingActions.length ? 'needs-attention' : '',
+                  label: <>Actions <span className="document-workspace-tab-count">{loadingActions ? '…' : pendingActions.length}</span></>,
+                },
+                { key: 'related', label: 'Related' },
+                {
+                  key: 'ocr',
+                  ariaLabel: ocrNeedsAttention(ocrSummary.assessment) ? 'OCR, needs review' : 'OCR',
+                  label: <>OCR {ocrNeedsAttention(ocrSummary.assessment) ? <span className="intake-tab-alert" aria-label="OCR needs review"><CircleAlert size={13} /> Review</span> : null}</>,
+                },
+              ]}
             >
-                <DocumentWorkspaceTabs
-                  contentClassName="intake-tab-content"
-                  ariaLabel="Document review sections"
-                  tabs={[
-                    { key: 'metadata', label: 'Metadata' },
-                    {
-                      key: 'actions',
-                      className: pendingActions.length ? 'needs-attention' : '',
-                      label: <>Actions <span className="document-workspace-tab-count">{loadingActions ? '…' : pendingActions.length}</span></>,
-                    },
-                    { key: 'related', label: 'Related' },
-                    {
-                      key: 'ocr',
-                      ariaLabel: ocrNeedsAttention(ocrSummary.assessment) ? 'OCR, needs review' : 'OCR',
-                      label: <>OCR {ocrNeedsAttention(ocrSummary.assessment) ? <span className="intake-tab-alert" aria-label="OCR needs review"><CircleAlert size={13} /> Review</span> : null}</>,
-                    },
-                  ]}
-                  active={tab}
-                  onChange={(value) => chooseTab(value as ReviewTab)}
-                >
                   {coreError ? <ErrorState message={`Document metadata unavailable: ${coreError}`} onRetry={() => void loadDocument(selectedId)} /> : null}
                   {tab === 'metadata' && !coreError ? (
                     loadingCore || !core || !metadata ? <SkeletonLoader variant="detail-panel" /> : (
+                      <DocumentMetadataTab>
                       <div className="intake-metadata-panel">
                         {loadingSuggestions ? <div className="intake-inline-state"><RefreshCw className="intake-spin" size={15} /> Loading Paperless suggestions in the background…</div> : null}
                         {suggestionError ? <div className="intake-inline-error">Suggestions unavailable: {suggestionError}</div> : null}
@@ -1374,11 +1355,12 @@ export default function InboxWorkflow() {
                           </div>
                         ) : null}
                       </div>
+                      </DocumentMetadataTab>
                     )
                   ) : null}
 
                   {tab === 'actions' ? (
-                    <DocumentActionsPanel
+                    <DocumentActionsTab
                       actions={actions}
                       selectedActionId={selectedActionId}
                       onSelectAction={setSelectedActionId}
@@ -1394,6 +1376,7 @@ export default function InboxWorkflow() {
                   ) : null}
 
                   {tab === 'related' ? (
+                    <DocumentRelatedTab>
                     <DocumentRelationshipsPanel
                       document={{
                         id: selectedId,
@@ -1406,15 +1389,13 @@ export default function InboxWorkflow() {
                       onToast={showToast}
                       refreshKey={relationshipRefreshKey}
                     />
+                    </DocumentRelatedTab>
                   ) : null}
 
                   {tab === 'ocr' ? (
-                    <div className="intake-ocr-panel">
-                      <OcrSummaryPanel documentId={selectedId} state={ocrSummary} onInspect={openOcrFocus} />
-                    </div>
+                    <DocumentOcrTab documentId={selectedId} state={ocrSummary} onInspect={openOcrFocus} />
                   ) : null}
-                </DocumentWorkspaceTabs>
-            </DocumentWorkspaceBody>
+            </DocumentWorkspaceDocumentView>
 
             <footer className="intake-footer">
               <div className="intake-footer-left">
