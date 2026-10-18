@@ -20,6 +20,7 @@ import { getToastDuration } from '../lib/toast';
 import { StatementGroupingDetail } from '../components/triage/StatementGroupingDetail';
 import DuplicateDetail from './DuplicateDetail';
 import OcrFocusInspector from '../components/OcrFocusInspector';
+import { DocumentWorkspaceFrame } from '../components/DocumentWorkspace';
 import '../styles/triage-queue.css';
 import '../styles/document-workspace.css';
 
@@ -894,7 +895,11 @@ export default function TriageQueue() {
       ) : error ? (
         <ErrorState message={error} onRetry={() => void loadData()} />
       ) : (
-        <div className={`triage-shell document-review-workspace${collapsed ? ' rail-collapsed' : ''}`}>
+        <DocumentWorkspaceFrame
+          collapsed={collapsed}
+          className="triage-shell document-review-workspace"
+          rail={(
+            <>
           {/* ── Queue list panel (left) ── */}
           <section className={collapsed ? 'triage-queue-panel collapsed' : 'triage-queue-panel'}>
             <div className="triage-queue-header">
@@ -1149,6 +1154,9 @@ export default function TriageQueue() {
               </>
             )}
           </section>
+            </>
+          )}
+        >
 
           {/* ── Detail panel (right) ── */}
           <section className="triage-detail-panel">
@@ -1577,7 +1585,7 @@ export default function TriageQueue() {
               />
             )}
           </section>
-        </div>
+        </DocumentWorkspaceFrame>
       )}
 
       {/* Confirmation modal for destructive bulk actions */}

@@ -205,9 +205,10 @@ describe('ActionWorkspace', () => {
   });
 
   it('shows each document once while exposing every action on the selected document', async () => {
-    renderWorkspace();
+    const { container } = renderWorkspace();
 
     const utilityRows = await screen.findAllByRole('button', { name: /Utility bill/ });
+    expect(container.querySelector('.document-workspace-frame.action-document-workspace')).toBeInTheDocument();
     expect(utilityRows).toHaveLength(1);
     expect(screen.getByRole('tab', { name: 'Actions 2' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('button', { name: /PAY · Pay electric bill/ })).toBeInTheDocument();
