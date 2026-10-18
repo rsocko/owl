@@ -1255,16 +1255,21 @@ export default function IntakeReview() {
     setBusyKey('refresh');
     try {
       const response = await endpoints.intake.refresh(core.document.id, core.document.modified) as {
+        core: IntakeCore;
         actions: { actions: IntakeAction[]; ocr_quality: Omit<OcrState, 'text'> };
         suggestions: Suggestion[];
         suggestion_sources: Record<string, { available: boolean; error?: string | null }>;
       };
+      setCore(response.core);
+      const refreshedMetadata = initialMetadata(response.core);
+      setMetadata(refreshedMetadata);
+      setBaseline(refreshedMetadata);
       setActions(response.actions.actions);
       setOcr((current) => ({ text: current?.text || '', ...response.actions.ocr_quality }));
       setSuggestions(response.suggestions);
       setSuggestionSources(response.suggestion_sources);
       setSuggestionsCached(false);
-      showToast('Suggestions and action analysis refreshed.');
+      showToast('Metadata, suggestions, and action analysis refreshed.');
     } catch (error) {
       showToast(errorMessage(error), 'error');
     } finally {
