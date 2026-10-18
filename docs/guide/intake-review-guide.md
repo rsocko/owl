@@ -54,7 +54,7 @@ rejects a save if Paperless changed while the document was open.
 | Control | Result |
 |---|---|
 | **Save changes** | Persist metadata without changing Inbox disposition |
-| **Defer & next** | Persist metadata, keep the `Inbox` tag, and advance |
+| **Defer & next** | Discard unsaved metadata changes, keep the `Inbox` tag, and advance |
 | **Save & file** | Persist metadata, remove the `Inbox` tag, and advance |
 | **File only** | File the document while leaving proposed actions pending |
 | **Confirm action(s) & file** | Confirm active actions and file the document |

@@ -453,6 +453,64 @@ describe('IntakeReview', () => {
     ));
   });
 
+  it('discards metadata changes and advances without saving when deferred', async () => {
+    renderPage();
+
+    const title = await screen.findByLabelText('Title');
+    fireEvent.change(title, { target: { value: 'Unsaved title' } });
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Defer & next' }));
+
+    await waitFor(() => expect(documentCoreMock).toHaveBeenCalledWith(2));
+    expect(saveDocumentMock).not.toHaveBeenCalled();
+    expect(await screen.findByText('Changes discarded; document kept in Inbox.')).toBeInTheDocument();
+  });
+
+  it('keeps save actions disabled until the refreshed revision finishes loading', async () => {
+    let resolveReload: ((value: ReturnType<typeof core>) => void) | undefined;
+    documentCoreMock
+      .mockResolvedValueOnce(core(1))
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveReload = resolve;
+      }));
+    renderPage();
+
+    await screen.findByLabelText('Title');
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(documentCoreMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('button', { name: 'Save & file' })).toBeDisabled();
+
+    resolveReload?.({
+      ...core(1),
+      document: { ...core(1).document, modified: 'revision-1-after-save' },
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save & file' })).toBeEnabled());
+  });
+
+  it('offers to reload when Paperless changed after the document was opened', async () => {
+    const conflict = Object.assign(new Error('This document changed in Paperless.'), {
+      details: { error: { code: 'source_revision_conflict' } },
+    });
+    saveDocumentMock.mockRejectedValueOnce(conflict);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Title'), { target: { value: 'Unsaved title' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    const reload = await screen.findByRole('button', { name: 'Reload' });
+    expect(screen.getByText(
+      'This document changed after it was opened. Reload it to review the latest version before saving.',
+    )).toBeInTheDocument();
+    fireEvent.click(reload);
+
+    expect(confirm).toHaveBeenCalledWith('Reload this document and discard your unsaved changes?');
+    await waitFor(() => expect(documentCoreMock).toHaveBeenCalledTimes(2));
+    confirm.mockRestore();
+  });
+
   it('opens the document preview full screen and exposes external links', async () => {
     renderPage();
 
