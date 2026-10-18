@@ -279,6 +279,50 @@ describe('IntakeReview', () => {
     expect(screen.queryByLabelText('Invoice or reference')).not.toBeInTheDocument();
   });
 
+  it('uses the canonical action lifecycle controls inside Inbox Review', async () => {
+    documentActionsMock.mockResolvedValue({
+      actions: [{
+        id: 11,
+        document_id: 1,
+        action_type: 'REVIEW',
+        title: 'Review policy changes',
+        summary: 'Decide whether the new terms are acceptable.',
+        due_date: '2026-10-31',
+        status: 'pending',
+        version: 1,
+        origin: 'inferred',
+        confidence: 95,
+      }],
+      analysis: { available: true },
+      ocr_quality: { quality_score: 90, quality_band: 'green', poor_quality: false },
+    });
+    updateActionMock.mockResolvedValue({
+      id: 11,
+      document_id: 1,
+      action_type: 'REVIEW',
+      title: 'Review policy changes',
+      status: 'snoozed',
+      version: 2,
+      origin: 'inferred',
+    });
+
+    const { container } = renderPage('/inbox-review?document=1&tab=actions');
+
+    expect(container.querySelector('.document-workspace-frame.intake-review-page')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'More outcomes for Review policy changes' }));
+    expect(await screen.findByRole('button', { name: 'Mark done' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remind later' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not an action' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: "Won't do" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remind later' }));
+    await waitFor(() => expect(updateActionMock).toHaveBeenCalledWith('11', expect.objectContaining({
+      version: 1,
+      status: 'snoozed',
+      snoozed_until: expect.any(String),
+    })));
+  });
+
   it('clears fields that do not apply when an action type changes', async () => {
     const action = {
       id: 12,
@@ -458,7 +502,9 @@ describe('IntakeReview', () => {
 
     renderPage();
 
-    expect(await screen.findByRole('button', { name: 'Analyze' })).toBeEnabled();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Analyze' })).toBeEnabled();
+    });
     expect(screen.getByRole('status')).toHaveTextContent('Not analyzed');
   });
 

@@ -7,6 +7,7 @@ vi.mock('../lib/api', () => ({
   endpoints: {
     ocrQuality: {
       documentDetail: vi.fn(),
+      assessDocument: vi.fn(),
       candidates: { list: vi.fn() },
     },
     intake: {
@@ -93,33 +94,42 @@ describe('OcrSummaryPanel', () => {
     expect(screen.getByText('Text placement is inconsistent on several pages.')).toBeInTheDocument();
   });
 
-  it('shows a no-assessment state while preserving searchable text', () => {
-    render(
-      <OcrSummaryPanel
-        documentId={42}
-        state={summary({ assessment: null, text: 'Text exists before assessment.' })}
-      />,
-    );
-
-    expect(screen.getByText('No OCR assessment yet')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Text exists before assessment.')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Inspect OCR/ })).toHaveAttribute(
-      'href',
-      '#/ocr-quality/documents/42',
-    );
-  });
-
-  it('surfaces assessment failures with a retry action', () => {
+  it('shows a compact retry state while preserving collapsed searchable text', () => {
     const reload = vi.fn();
     render(
       <OcrSummaryPanel
         documentId={42}
-        state={summary({ assessment: null, assessmentError: 'Service unavailable', reload })}
+        state={summary({ assessment: null, text: 'Text exists before assessment.', reload })}
       />,
     );
 
-    expect(screen.getByText(/OCR assessment unavailable: Service unavailable/)).toBeInTheDocument();
-    screen.getByRole('button', { name: /Retry/i }).click();
+    expect(screen.getByText('Assessment unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Analyze now/ })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Text exists before assessment.')).toBeInTheDocument();
+    expect(screen.getByText('Searchable text preview').closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByRole('link', { name: /Inspect OCR/ })).toHaveAttribute(
+      'href',
+      '#/ocr-quality/documents/42',
+    );
+    expect(screen.queryByRole('link', { name: /Open scores/ })).not.toBeInTheDocument();
+  });
+
+  it('surfaces assessment failures without hiding searchable text', () => {
+    const reload = vi.fn();
+    render(
+      <OcrSummaryPanel
+        documentId={42} state={summary({
+          assessment: null,
+          assessmentError: 'Service unavailable',
+          text: 'Still readable',
+          reload,
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/OWL could not score this document: Service unavailable/)).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Still readable')).toBeInTheDocument();
+    screen.getByRole('button', { name: /Analyze now/i }).click();
     expect(reload).toHaveBeenCalledOnce();
   });
 });

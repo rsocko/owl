@@ -4,6 +4,7 @@ import OcrFocusInspector from './OcrFocusInspector';
 
 const mocks = vi.hoisted(() => ({
   documentDetail: vi.fn(),
+  assessDocument: vi.fn(),
   forceStage2: vi.fn(),
   candidatesList: vi.fn(),
   candidateGet: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('../lib/api', () => ({
   endpoints: {
     ocrQuality: {
       documentDetail: mocks.documentDetail,
+      assessDocument: mocks.assessDocument,
       forceStage2: mocks.forceStage2,
       rollback: mocks.rollback,
       regions: mocks.regions,
@@ -108,6 +110,7 @@ describe('OcrFocusInspector', () => {
     window.localStorage.clear();
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.documentDetail.mockResolvedValue(detail());
+    mocks.assessDocument.mockResolvedValue(detail());
     mocks.candidatesList.mockResolvedValue({ candidates: [] });
     mocks.regions.mockResolvedValue({ page: 1, page_count: 1, width: 600, height: 800, words: [] });
     mocks.candidateRegions.mockResolvedValue({ page: 1, page_count: 1, width: 600, height: 800, words: [] });
@@ -125,6 +128,17 @@ describe('OcrFocusInspector', () => {
     expect(await screen.findByText(/No candidates yet/)).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: 'Return to review' })[0]);
     expect(onReturn).toHaveBeenCalledOnce();
+  });
+
+  it('creates the text assessment when the compatibility route opens an unscanned document', async () => {
+    const notFound = Object.assign(new Error('Not found'), { status: 404 });
+    mocks.documentDetail.mockRejectedValueOnce(notFound);
+    mocks.assessDocument.mockResolvedValueOnce(detail({ has_stage2_analysis: false }));
+
+    render(<OcrFocusInspector documentId={501} />);
+
+    expect(await screen.findByRole('heading', { name: 'OCR focus inspector' })).toBeInTheDocument();
+    expect(mocks.assessDocument).toHaveBeenCalledWith(501);
   });
 
   it('shows synchronized candidate comparison and text diff for a selected ready candidate', async () => {

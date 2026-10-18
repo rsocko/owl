@@ -82,13 +82,14 @@ beforeEach(() => {
 
 describe('Needs Review actions', () => {
   it('uses decision language and keeps Dismiss under More', async () => {
-    render(
+    const { container } = render(
       <MemoryRouter>
         <TriageQueue />
       </MemoryRouter>,
     );
 
     const item = await screen.findByText('OTHER: target-1');
+    expect(container.querySelector('.document-workspace-frame.document-review-workspace')).toBeInTheDocument();
     fireEvent.click(item);
 
     await waitFor(() => {

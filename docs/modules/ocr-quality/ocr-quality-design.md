@@ -67,6 +67,12 @@ text-quality assessment. Digital extraction can still have missing text, bad
 encoding, or incorrect reading order. Classification is page-aware so mixed
 image/text PDFs are not treated as wholly digital or wholly scanned.
 
+The corpus inventory remains the efficient bulk-assessment mechanism. When a
+user opens a document workspace before that inventory has reached the document,
+OWL idempotently creates the inexpensive text-only Stage-1 assessment on demand
+from Paperless's existing OCR content. Page geometry and overlay scoring remain
+the explicit, deeper Stage-2 operation.
+
 ## Candidate engines
 
 The initial candidate providers are:
