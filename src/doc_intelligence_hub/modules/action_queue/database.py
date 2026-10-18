@@ -206,6 +206,12 @@ class PaymentEvidence(Base):
     receipt_ref = Column(String, nullable=True)
     kind = Column(String, nullable=False)
     payee_hint = Column(String, nullable=True)
+    account_display_name = Column(String, nullable=True)
+    account_last_four = Column(String, nullable=True)
+    score_basis_points = Column(Integer, nullable=True)
+    rank = Column(Integer, nullable=True)
+    score_gap_basis_points = Column(Integer, nullable=True)
+    receipt_association = Column(JSON, nullable=True)
     amount_minor = Column(Integer, nullable=True)
     currency = Column(String, nullable=True)
     evidence_date = Column(Date, nullable=True)
@@ -369,6 +375,33 @@ class PaymentActionReceipt(Base):
     payload_digest = Column(String, nullable=False)
     result = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class PaymentCheckRun(Base):
+    """Durable active-check command state and bounded Tyrion exchange."""
+
+    __tablename__ = "payment_check_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "obligation_id",
+            "idempotency_key",
+            name="uq_payment_check_obligation_key",
+        ),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    obligation_id = Column(String, nullable=False, index=True)
+    action_id = Column(Integer, nullable=False, index=True)
+    idempotency_key = Column(String, nullable=False)
+    request_digest = Column(String, nullable=False)
+    expected_revision = Column(Integer, nullable=False)
+    status = Column(String, nullable=False, default="checking", index=True)
+    request_payload = Column(JSON, nullable=False)
+    response_payload = Column(JSON, nullable=True)
+    error_code = Column(String, nullable=True)
+    result = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class ObligationEvent(Base):
@@ -547,6 +580,14 @@ def _migrate_missing_columns(engine):
         "obligation_documents": [
             ("excluded", "BOOLEAN DEFAULT 0 NOT NULL"),
             ("excluded_at", "TIMESTAMP"),
+        ],
+        "payment_evidence": [
+            ("account_display_name", "TEXT"),
+            ("account_last_four", "TEXT"),
+            ("score_basis_points", "INTEGER"),
+            ("rank", "INTEGER"),
+            ("score_gap_basis_points", "INTEGER"),
+            ("receipt_association", "TEXT"),
         ],
     }
 

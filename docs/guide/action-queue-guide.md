@@ -64,6 +64,20 @@ If receipt metadata conflicts with text indicating a remaining balance or paymen
 request, OWL creates a low-confidence `REVIEW` action and routes it to Needs Review
 instead of suppressing it or creating a new `PAY` action.
 
+### Check for payment
+
+Action Review shows **Check for payment** for eligible `PAY` actions with a payee,
+amount, obligation, and due or bill date. OWL asks Tyrion Bill Matching to search only
+configured eligible financial accounts and persists the authoritative result, source
+freshness, candidate reasons, and audit history.
+
+The workspace keeps posted, pending, multiple-match, no-match, partial-payment,
+source-unavailable, stale, conflict, and possible-double-payment results distinct. A
+posted candidate does not complete the action automatically. The operator must choose
+**Confirm payment and complete**, which records the chosen evidence and completes the
+action and obligation atomically. Pending transactions and receipt links remain
+supporting evidence and cannot be confirmed as settlement.
+
 ## Action Lifecycle
 
 Actions follow a clear lifecycle from detection to resolution:
