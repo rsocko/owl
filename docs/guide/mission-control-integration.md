@@ -27,7 +27,8 @@ Configure OWL's active Tyrion connector with:
 
 - `OWL_TYRION_BILL_MATCHING_URL`, normally
   `http://tyrion/api/connector/v1/bill-matches`;
-- `OWL_TYRION_BILL_MATCHING_API_TOKEN`, when Tyrion requires bearer auth; and
+- `OWL_TYRION_API_TOKEN`, the server-only bearer token shared by OWL's Tyrion
+  clients; and
 - `OWL_TYRION_BILL_MATCHING_CONNECTOR_REF`, an opaque source identity persisted with
   normalized evidence.
 
@@ -35,6 +36,19 @@ OWL sends Tyrion `contractVersion: "2.0"` with the bill reference, payee, expect
 amount/currency, due or bill date, optional reference, and
 `accountScope: "configuredEligible"`. Tyrion owns the eligible-account configuration.
 OWL never sends or projects unrestricted account IDs.
+
+### Dockhand token cutover
+
+OWL uses one Tyrion credential for both Bill Matching and receipt delivery. In
+the OWL Dockhand stack:
+
+1. Add `OWL_TYRION_API_TOKEN` with Tyrion's existing `BRIDGE_API_TOKEN` value.
+2. Remove `OWL_TYRION_BILL_MATCHING_API_TOKEN`.
+3. Remove `OWL_MONARCH_DELIVERY_TYRION_API_TOKEN`.
+4. Redeploy OWL after saving the environment changes.
+
+The removed names are not accepted by OWL. Keep `BRIDGE_API_TOKEN` configured in
+Tyrion itself; only OWL's environment variable name changes.
 
 `GET /api/action-queue/actions` adds a versioned `payment_check` projection to eligible
 `PAY` actions. Its state is one of `unchecked`, `checking`, `posted_match`,
