@@ -993,43 +993,90 @@ class PaymentReconciliationService:
             "possible_double_payment": "Evidence indicates a possible additional payment.",
             "confirmed": "Payment was confirmed and the obligation was completed.",
         }
-        candidates = [
-            {
-                "id": evidence.id,
-                "payee": evidence.payee_hint,
-                "amount": (
-                    evidence.amount_minor / 100 if evidence.amount_minor is not None else None
-                ),
-                "currency": evidence.currency,
-                "transaction_date": (
-                    evidence.evidence_date.isoformat() if evidence.evidence_date else None
-                ),
-                "status": (
-                    evidence.source_state
-                    if evidence.source_state in {"posted", "pending"}
-                    else (
-                        "posted"
-                        if evidence.payment_status == "paid"
-                        else "pending"
-                        if evidence.payment_status == "pending"
-                        else None
-                    )
-                ),
-                "account_display_name": evidence.account_display_name,
-                "account_last_four": evidence.account_last_four,
-                "confidence": evidence.confidence,
-                "score": (
-                    evidence.score_basis_points / 100
-                    if evidence.score_basis_points is not None
-                    else None
-                ),
-                "rank": evidence.rank,
-                "score_gap_basis_points": evidence.score_gap_basis_points,
-                "match_reasons": evidence.reason_codes,
-                "receipt_association": evidence.receipt_association,
-            }
+        raw_candidates = (
+            (latest_run.response_payload or {}).get("candidates")
+            if latest_run and latest_run.response_payload
+            else None
+        )
+        evidence_by_transaction = {
+            evidence.transaction_ref: evidence
             for evidence, _edge in evidence_rows
-        ]
+            if evidence.transaction_ref
+        }
+        candidates = (
+            [
+                {
+                    "id": (
+                        evidence_by_transaction[candidate["transactionRef"]].id
+                        if candidate["transactionRef"] in evidence_by_transaction
+                        else f"{latest_run.id}:{candidate['transactionRef']}"
+                    ),
+                    "payee": candidate.get("payee"),
+                    "amount": (
+                        candidate["amountMinor"] / 100
+                        if candidate.get("amountMinor") is not None
+                        else None
+                    ),
+                    "currency": candidate.get("currency"),
+                    "transaction_date": candidate.get("transactionDate"),
+                    "status": candidate.get("transactionState"),
+                    "account_display_name": candidate.get("accountDisplayName"),
+                    "account_last_four": candidate.get("accountLastFour"),
+                    "confidence": candidate.get("confidence"),
+                    "score": (
+                        candidate["scoreBasisPoints"] / 100
+                        if candidate.get("scoreBasisPoints") is not None
+                        else None
+                    ),
+                    "rank": candidate.get("rank"),
+                    "score_gap_basis_points": candidate.get("scoreGapBasisPoints"),
+                    "match_reasons": [
+                        f"{signal['kind']}_{signal['strength']}".lower()
+                        for signal in candidate.get("signals", [])
+                    ],
+                    "receipt_association": candidate.get("receiptAssociation"),
+                }
+                for candidate in raw_candidates
+            ]
+            if isinstance(raw_candidates, list)
+            else [
+                {
+                    "id": evidence.id,
+                    "payee": evidence.payee_hint,
+                    "amount": (
+                        evidence.amount_minor / 100 if evidence.amount_minor is not None else None
+                    ),
+                    "currency": evidence.currency,
+                    "transaction_date": (
+                        evidence.evidence_date.isoformat() if evidence.evidence_date else None
+                    ),
+                    "status": (
+                        evidence.source_state
+                        if evidence.source_state in {"posted", "pending"}
+                        else (
+                            "posted"
+                            if evidence.payment_status == "paid"
+                            else "pending"
+                            if evidence.payment_status == "pending"
+                            else None
+                        )
+                    ),
+                    "account_display_name": evidence.account_display_name,
+                    "account_last_four": evidence.account_last_four,
+                    "confidence": evidence.confidence,
+                    "score": (
+                        evidence.score_basis_points / 100
+                        if evidence.score_basis_points is not None
+                        else None
+                    ),
+                    "rank": evidence.rank,
+                    "score_gap_basis_points": evidence.score_gap_basis_points,
+                    "match_reasons": evidence.reason_codes,
+                    "receipt_association": evidence.receipt_association,
+                }
+                for evidence, _edge in evidence_rows
+            ]
+        )
         confirmation_case = next(
             (
                 case

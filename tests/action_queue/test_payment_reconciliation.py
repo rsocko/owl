@@ -147,6 +147,81 @@ def _no_match_response(run_id: str, document_id: int) -> TyrionBillMatchResponse
     )
 
 
+def _matched_response_with_alternatives(
+    run_id: str,
+    document_id: int,
+) -> TyrionBillMatchResponseV2:
+    def candidate(
+        rank: int,
+        transaction_ref: str,
+        payee: str,
+        score: int,
+        score_gap: int | None,
+    ) -> dict:
+        return {
+            "rank": rank,
+            "transactionRef": transaction_ref,
+            "transactionDate": "2026-10-18",
+            "transactionState": "posted",
+            "payee": payee,
+            "amountMinor": 10_000,
+            "currency": "USD",
+            "accountDisplayName": "Household checking",
+            "accountLastFour": None,
+            "scoreBasisPoints": score,
+            "confidence": "high" if rank == 1 else "medium",
+            "scoreGapBasisPoints": score_gap,
+            "signals": [
+                {
+                    "kind": "amount",
+                    "strength": "exact",
+                    "contributionBasisPoints": 5500,
+                },
+                {
+                    "kind": "date",
+                    "strength": "strong",
+                    "contributionBasisPoints": 2200,
+                },
+                {
+                    "kind": "payee",
+                    "strength": "strong" if rank == 1 else "partial",
+                    "contributionBasisPoints": 1400 if rank == 1 else 900,
+                },
+                {
+                    "kind": "account",
+                    "strength": "notProvided",
+                    "contributionBasisPoints": 500,
+                },
+            ],
+        }
+
+    return TyrionBillMatchResponseV2.model_validate(
+        {
+            "contractVersion": "2.0",
+            "requestRef": run_id,
+            "billRef": f"paperless:{document_id}",
+            "matchStatus": "matched",
+            "paymentStatus": "paid",
+            "selectedTransactionRef": "transaction-selected",
+            "candidates": [
+                candidate(1, "transaction-selected", "City Utilities", 9600, 900),
+                candidate(2, "transaction-alternative", "City Services", 8700, None),
+            ],
+            "searchContext": {
+                "anchorDate": "2026-10-20",
+                "windowStart": "2026-10-11",
+                "windowEnd": "2026-10-18",
+                "dateWindowDays": 7,
+                "amountToleranceMinor": 200,
+                "sourceAsOf": "2026-10-18T12:00:00Z",
+                "searchedAt": "2026-10-18T12:01:00Z",
+                "eligibleAccountCount": 3,
+                "candidatePoolSize": 18,
+            },
+        }
+    )
+
+
 def test_tyrion_v2_response_accepts_nullable_candidate_metadata() -> None:
     response = TyrionBillMatchResponseV2.model_validate(
         {
@@ -725,6 +800,35 @@ def test_completion_status_is_committed_before_projection_build(db, monkeypatch)
     stored = db.query(PaymentCheckRun).filter_by(id=run.id).one()
     assert stored.status == "completed"
     assert stored.response_payload is not None
+
+
+def test_projection_reports_ranked_alternatives_without_persisting_them_as_payments(db) -> None:
+    obligation = _obligation(db)
+    action = _pay_action(db, obligation)
+    service = PaymentReconciliationService(db)
+    run, _request, _replay = service.start_check(
+        action.id,
+        PaymentCheckRequest(
+            revision="v1:1:1",
+            idempotency_key="payment-check-ranked-alternatives",
+        ),
+    )
+
+    projection = service.finish_check(
+        run.id,
+        _matched_response_with_alternatives(run.id, action.document_id),
+        connector_ref="tyrion-bill-matching-v2",
+    )
+
+    assert projection["state"] == "posted_match"
+    assert [candidate["payee"] for candidate in projection["candidates"]] == [
+        "City Utilities",
+        "City Services",
+    ]
+    assert projection["search_context"]["eligible_account_count"] == 3
+    assert projection["search_context"]["candidate_pool_size"] == 18
+    assert db.query(PaymentEvidence).count() == 1
+    assert db.query(PaymentEvidence).one().transaction_ref == "transaction-selected"
 
 
 def test_manual_rejection_survives_newer_generation(db) -> None:
