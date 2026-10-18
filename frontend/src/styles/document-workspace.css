@@ -654,6 +654,102 @@
   font-size: .62rem;
 }
 
+.payment-check-card {
+  margin-top: 1rem;
+  padding: .8rem;
+  display: grid;
+  gap: .7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.payment-check-card.state-posted_match {
+  border-color: color-mix(in srgb, var(--success) 48%, var(--border));
+}
+
+.payment-check-card.state-pending_match,
+.payment-check-card.state-multiple_matches,
+.payment-check-card.state-partial_payment,
+.payment-check-card.state-stale {
+  border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
+}
+
+.payment-check-card.state-source_unavailable,
+.payment-check-card.state-conflict,
+.payment-check-card.state-possible_double_payment {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
+}
+
+.payment-check-heading,
+.payment-check-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.payment-check-heading > div {
+  display: grid;
+  gap: .15rem;
+}
+
+.payment-check-heading span,
+.payment-check-card > p,
+.payment-check-confirm span {
+  color: var(--text-muted);
+  font-size: .66rem;
+}
+
+.payment-check-heading strong {
+  font-size: .78rem;
+}
+
+.payment-check-card > p {
+  margin: 0;
+}
+
+.payment-candidate {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .5rem .8rem;
+}
+
+.payment-candidate div {
+  min-width: 0;
+  display: grid;
+  gap: .1rem;
+}
+
+.payment-candidate dt {
+  color: var(--text-muted);
+  font-size: .59rem;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.payment-candidate dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: .68rem;
+  font-weight: 700;
+}
+
+.payment-check-confirm {
+  padding-top: .65rem;
+  border-top: 1px solid var(--border);
+}
+
+.spin {
+  animation: payment-check-spin .9s linear infinite;
+}
+
+@keyframes payment-check-spin {
+  to { transform: rotate(360deg); }
+}
+
 .action-disclosure {
   margin-top: 1rem;
   border-top: 1px solid var(--border);

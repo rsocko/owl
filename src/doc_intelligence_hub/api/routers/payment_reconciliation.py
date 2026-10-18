@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import logging
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import ValidationError
 
 from doc_intelligence_hub.api.routers import (
     require_mission_control_auth,
@@ -12,17 +16,26 @@ from doc_intelligence_hub.modules.action_queue.database import get_session, init
 from doc_intelligence_hub.modules.action_queue.payment_reconciliation import (
     IdempotencyConflictError,
     PaymentActionResult,
+    PaymentCheckRequest,
+    PaymentCheckResult,
+    PaymentConfirmRequest,
     PaymentEvidenceSnapshot,
     PaymentReconciliationService,
     PaymentReviewAction,
     PaymentReviewItem,
     PaymentSnapshotResult,
     RevisionConflictError,
+    TyrionBillMatchingClient,
     TyrionBillMatchIngestRequest,
     TyrionReceiptEvidenceIngestRequest,
 )
 
 router = APIRouter(tags=["payment-reconciliation"])
+logger = logging.getLogger(__name__)
+
+
+def _public_payment_projection(projection: dict) -> dict:
+    return {key: value for key, value in projection.items() if not key.startswith("_")}
 
 
 def _raise_service_error(exc: Exception) -> None:
@@ -199,3 +212,201 @@ async def mc_act_on_payment_review(
             _raise_service_error(exc)
     finally:
         db.close()
+
+
+@router.get(
+    "/api/payment-reconciliation/v2/actions/{action_id}",
+)
+async def get_action_payment_check(action_id: int) -> dict:
+    init_db()
+    db = get_session()
+    try:
+        try:
+            projection = PaymentReconciliationService(db).payment_projection(action_id)
+            return {
+                "contract_version": "2.0",
+                "payment_check": _public_payment_projection(projection),
+            }
+        except (KeyError, ValueError) as exc:
+            _raise_service_error(exc)
+    finally:
+        db.close()
+
+
+async def _check_payment(request: Request, action_id: int, body: PaymentCheckRequest) -> dict:
+    init_db()
+    db = get_session()
+    try:
+        service = PaymentReconciliationService(db)
+        try:
+            run, tyrion_request, replay = service.start_check(action_id, body)
+            if replay:
+                projection = service.payment_projection(action_id)
+                return PaymentCheckResult(
+                    run_id=run.id,
+                    status=run.status,
+                    idempotent=True,
+                    payment=_public_payment_projection(projection),
+                ).model_dump(mode="json")
+
+            settings = request.app.state.hub_settings
+            connector_ref = settings.tyrion_bill_matching_connector_ref
+            if not settings.tyrion_bill_matching_url:
+                projection = service.fail_check(
+                    run.id,
+                    connector_ref=connector_ref,
+                    error_code="tyrion_not_configured",
+                )
+                return PaymentCheckResult(
+                    run_id=run.id,
+                    status="source_unavailable",
+                    idempotent=False,
+                    payment=_public_payment_projection(projection),
+                ).model_dump(mode="json")
+            token = (
+                settings.tyrion_bill_matching_api_token.get_secret_value()
+                if settings.tyrion_bill_matching_api_token
+                else None
+            )
+            try:
+                response = await TyrionBillMatchingClient(
+                    url=settings.tyrion_bill_matching_url,
+                    api_token=token,
+                ).check(tyrion_request)
+            except (httpx.HTTPError, ValidationError) as exc:
+                logger.warning("Tyrion payment check failed for action %s: %s", action_id, exc)
+                projection = service.fail_check(
+                    run.id,
+                    connector_ref=connector_ref,
+                    error_code="tyrion_source_unavailable",
+                )
+                return PaymentCheckResult(
+                    run_id=run.id,
+                    status="source_unavailable",
+                    idempotent=False,
+                    payment=_public_payment_projection(projection),
+                ).model_dump(mode="json")
+            try:
+                projection = service.finish_check(
+                    run.id,
+                    response,
+                    connector_ref=connector_ref,
+                )
+            except ValueError as exc:
+                if str(exc) not in {
+                    "tyrion_request_ref_mismatch",
+                    "tyrion_bill_ref_mismatch",
+                }:
+                    raise
+                logger.warning(
+                    "Tyrion payment check returned mismatched identifiers for action %s: %s",
+                    action_id,
+                    exc,
+                )
+                projection = service.fail_check(
+                    run.id,
+                    connector_ref=connector_ref,
+                    error_code=str(exc),
+                )
+                return PaymentCheckResult(
+                    run_id=run.id,
+                    status="source_unavailable",
+                    idempotent=False,
+                    payment=_public_payment_projection(projection),
+                ).model_dump(mode="json")
+            return PaymentCheckResult(
+                run_id=run.id,
+                status="completed",
+                idempotent=False,
+                payment=_public_payment_projection(projection),
+            ).model_dump(mode="json")
+        except (KeyError, ValueError) as exc:
+            _raise_service_error(exc)
+    finally:
+        db.close()
+
+
+@router.post(
+    "/api/payment-reconciliation/v2/actions/{action_id}/check-payment",
+)
+async def check_action_payment(
+    request: Request,
+    action_id: int,
+    body: PaymentCheckRequest,
+) -> dict:
+    return await _check_payment(request, action_id, body)
+
+
+@router.post(
+    "/api/action-queue/actions/{action_id}/check-payment",
+)
+async def mc_check_action_payment(
+    request: Request,
+    action_id: int,
+    body: PaymentCheckRequest,
+) -> dict:
+    from doc_intelligence_hub.api.routers.mc_connector import _serialize_mc_action
+    from doc_intelligence_hub.modules.action_queue.database import Action
+
+    result = await _check_payment(request, action_id, body)
+    db = get_session()
+    try:
+        action = db.query(Action).filter_by(id=action_id).one()
+        return {
+            "action": _serialize_mc_action(request, db, action),
+            "idempotent": result["idempotent"],
+            "run_id": result["run_id"],
+        }
+    finally:
+        db.close()
+
+
+async def _confirm_payment(
+    request: Request,
+    action_id: int,
+    body: PaymentConfirmRequest,
+    *,
+    actor: str,
+) -> dict:
+    from doc_intelligence_hub.api.routers.mc_connector import _serialize_mc_action
+    from doc_intelligence_hub.modules.action_queue.database import Action
+
+    init_db()
+    db = get_session()
+    try:
+        try:
+            service = PaymentReconciliationService(db)
+            result = service.confirm_and_complete(action_id, body, actor=actor)
+            action = db.query(Action).filter_by(id=action_id).one()
+            return {
+                "contract_version": "2.0",
+                "action": _serialize_mc_action(request, db, action),
+                "payment_check": _public_payment_projection(service.payment_projection(action_id)),
+                "idempotent": result["idempotent"],
+            }
+        except (KeyError, ValueError) as exc:
+            _raise_service_error(exc)
+    finally:
+        db.close()
+
+
+@router.post(
+    "/api/payment-reconciliation/v2/actions/{action_id}/confirm-payment-and-complete",
+)
+async def confirm_action_payment(
+    request: Request,
+    action_id: int,
+    body: PaymentConfirmRequest,
+) -> dict:
+    return await _confirm_payment(request, action_id, body, actor="owl")
+
+
+@router.post(
+    "/api/action-queue/actions/{action_id}/confirm-payment-and-complete",
+)
+async def mc_confirm_action_payment(
+    request: Request,
+    action_id: int,
+    body: PaymentConfirmRequest,
+) -> dict:
+    return await _confirm_payment(request, action_id, body, actor="mission_control")

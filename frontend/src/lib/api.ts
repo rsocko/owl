@@ -243,6 +243,18 @@ export const endpoints = {
     sendToReview: (id: string) => api.post(`/api/queue/actions/${id}/review`),
     settings: () => api.get('/api/queue/settings'),
     updateSettings: (body: unknown) => api.put('/api/queue/settings', body),
+    paymentCheck: (id: string) =>
+      api.get(`/api/payment-reconciliation/v2/actions/${id}`),
+    checkPayment: (id: string, body: { revision: string; idempotency_key: string }) =>
+      api.post(`/api/payment-reconciliation/v2/actions/${id}/check-payment`, body),
+    confirmPaymentAndComplete: (
+      id: string,
+      body: { revision: string; idempotency_key: string },
+    ) =>
+      api.post(
+        `/api/payment-reconciliation/v2/actions/${id}/confirm-payment-and-complete`,
+        body,
+      ),
     metadataTags: () => api.get('/api/queue/metadata/tags'),
     metadataSavedViews: () => api.get('/api/queue/metadata/saved-views'),
     metadataCorrespondents: (documentId?: number) => api.get(
