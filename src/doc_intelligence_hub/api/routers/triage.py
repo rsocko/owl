@@ -545,11 +545,7 @@ async def undo_item(item_id: str) -> dict[str, Any]:
         init_action_db()
         action_db = get_action_session()
         try:
-            action = (
-                action_db.query(Action)
-                .filter_by(id=int(current["target_id"]))
-                .first()
-            )
+            action = action_db.query(Action).filter_by(id=int(current["target_id"])).first()
             if not action:
                 raise HTTPException(status_code=404, detail="Source action not found")
             action.action_ready = False
