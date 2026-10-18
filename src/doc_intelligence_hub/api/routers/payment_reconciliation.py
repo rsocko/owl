@@ -16,6 +16,7 @@ from doc_intelligence_hub.modules.action_queue.database import get_session, init
 from doc_intelligence_hub.modules.action_queue.payment_reconciliation import (
     IdempotencyConflictError,
     PaymentActionResult,
+    PaymentCandidateDecisionRequest,
     PaymentCheckInProgressError,
     PaymentCheckRequest,
     PaymentCheckResult,
@@ -539,6 +540,35 @@ async def confirm_action_payment(
     body: PaymentConfirmRequest,
 ) -> dict:
     return await _confirm_payment(request, action_id, body, actor="owl")
+
+
+@router.post(
+    "/api/payment-reconciliation/v2/actions/{action_id}/review-payment-candidate",
+)
+async def review_action_payment_candidate(
+    request: Request,
+    action_id: int,
+    body: PaymentCandidateDecisionRequest,
+) -> dict:
+    init_db()
+    db = get_session()
+    try:
+        try:
+            result = PaymentReconciliationService(
+                db,
+                bill_matching_connector_ref=(
+                    request.app.state.hub_settings.tyrion_bill_matching_connector_ref
+                ),
+            ).review_candidate(action_id, body, actor="owl")
+            return {
+                "contract_version": "2.0",
+                "payment_check": _public_payment_projection(result["payment_check"]),
+                "idempotent": result["idempotent"],
+            }
+        except (KeyError, ValueError) as exc:
+            _raise_service_error(exc)
+    finally:
+        db.close()
 
 
 @router.post(

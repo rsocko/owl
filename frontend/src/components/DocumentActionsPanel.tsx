@@ -61,6 +61,13 @@ interface PaymentCheck {
   search_context?: PaymentSearchContext | null;
 }
 
+type PaymentCandidateDecision = 'confirm' | 'reject' | 'reject_all';
+
+interface PendingPaymentDecision {
+  action: PaymentCandidateDecision;
+  candidate?: PaymentCandidate;
+}
+
 const RESOLVED_STATUSES = new Set(['completed', 'dismissed', 'not_an_action']);
 
 function formatDate(value?: string | null) {
@@ -141,6 +148,8 @@ export default function DocumentActionsPanel({
   const [paymentError, setPaymentError] = useState('');
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [confirmPayment, setConfirmPayment] = useState(false);
+  const [selectedPaymentCandidateId, setSelectedPaymentCandidateId] = useState<string | null>(null);
+  const [pendingPaymentDecision, setPendingPaymentDecision] = useState<PendingPaymentDecision | null>(null);
   const [selectionWarning, setSelectionWarning] = useState('');
 
   useEffect(() => {
@@ -150,6 +159,8 @@ export default function DocumentActionsPanel({
   useEffect(() => {
     setPaymentCheck(null);
     setPaymentError('');
+    setSelectedPaymentCandidateId(null);
+    setPendingPaymentDecision(null);
     if (!selectedAction || normalizeDocumentActionType(selectedAction.action_type) !== 'PAY' || !selectedAction.obligation_id) return;
     let cancelled = false;
     setPaymentLoading(true);
@@ -210,8 +221,43 @@ export default function DocumentActionsPanel({
         idempotency_key: `owl-check-payment:${selectedAction.id}:${current.revision}`,
       }) as { payment: PaymentCheck };
       setPaymentCheck(response.payment);
+      setSelectedPaymentCandidateId(null);
     } catch (requestError) {
       setPaymentError(requestError instanceof Error ? requestError.message : 'Could not check for payment.');
+    } finally {
+      setPaymentBusy(false);
+    }
+  };
+
+  const reviewPaymentCandidate = async (decision: PendingPaymentDecision) => {
+    if (!selectedAction || !paymentCheck) return;
+    const evidenceId = decision.candidate?.id;
+    setPaymentBusy(true);
+    setPaymentError('');
+    try {
+      const response = await endpoints.actionQueue.reviewPaymentCandidate(
+        String(selectedAction.id),
+        {
+          action: decision.action,
+          revision: paymentCheck.revision,
+          idempotency_key: [
+            'owl-review-payment',
+            decision.action,
+            selectedAction.id,
+            paymentCheck.revision,
+            evidenceId || 'all',
+          ].join(':'),
+          ...(evidenceId ? { evidence_id: evidenceId } : {}),
+        },
+      ) as { payment_check: PaymentCheck };
+      setPaymentCheck(response.payment_check);
+      setSelectedPaymentCandidateId(null);
+      setPendingPaymentDecision(null);
+      if (decision.action === 'confirm' && decision.candidate?.status === 'posted') {
+        await onRefresh();
+      }
+    } catch (requestError) {
+      setPaymentError(requestError instanceof Error ? requestError.message : 'Could not review this payment candidate.');
     } finally {
       setPaymentBusy(false);
     }
@@ -354,6 +400,9 @@ export default function DocumentActionsPanel({
               )}
               onCheck={() => void checkForPayment()}
               onConfirm={() => setConfirmPayment(true)}
+              selectedCandidateId={selectedPaymentCandidateId}
+              onSelectCandidate={setSelectedPaymentCandidateId}
+              onReviewCandidate={(action, candidate) => setPendingPaymentDecision({ action, candidate })}
             />
           ) : null}
           <QuickWorkLinks action={selectedAction} />
@@ -399,6 +448,47 @@ export default function DocumentActionsPanel({
             <div>
               <Button onClick={() => setConfirmPayment(false)}>Cancel</Button>
               <Button variant="primary" onClick={() => void confirmPaymentAndComplete()}>Confirm payment and complete</Button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {pendingPaymentDecision && selectedAction && paymentCheck ? (
+        <div className="workspace-dialog-backdrop">
+          <section role="dialog" aria-modal="true" aria-labelledby="review-payment-candidate-title" className="workspace-dialog">
+            <h2 id="review-payment-candidate-title">
+              {pendingPaymentDecision.action === 'confirm'
+                ? 'Confirm this transaction?'
+                : pendingPaymentDecision.action === 'reject_all'
+                  ? 'None of these transactions match?'
+                  : 'Discard this candidate?'}
+            </h2>
+            <p>
+              {pendingPaymentDecision.action === 'confirm'
+                ? pendingPaymentDecision.candidate?.status === 'posted'
+                  ? 'OWL will use this posted transaction as payment evidence and complete the action and obligation.'
+                  : 'OWL will record this pending transaction as the selected match without completing the obligation.'
+                : pendingPaymentDecision.action === 'reject_all'
+                  ? 'OWL will reject every suggested transaction. The payment action will remain open.'
+                  : 'OWL will remove this transaction from the candidate list. You can run the payment check again later.'}
+            </p>
+            <div>
+              <Button onClick={() => setPendingPaymentDecision(null)} disabled={paymentBusy}>Cancel</Button>
+              <Button
+                variant={pendingPaymentDecision.action === 'confirm' ? 'primary' : 'danger'}
+                disabled={paymentBusy}
+                onClick={() => void reviewPaymentCandidate(pendingPaymentDecision)}
+              >
+                {paymentBusy
+                  ? 'Saving…'
+                  : pendingPaymentDecision.action === 'confirm'
+                    ? pendingPaymentDecision.candidate?.status === 'posted'
+                      ? 'Confirm and complete'
+                      : 'Confirm pending match'
+                    : pendingPaymentDecision.action === 'reject_all'
+                      ? 'Reject all candidates'
+                      : 'Discard candidate'}
+              </Button>
             </div>
           </section>
         </div>
@@ -475,6 +565,9 @@ function PaymentCheckPanel({
   eligible,
   onCheck,
   onConfirm,
+  selectedCandidateId,
+  onSelectCandidate,
+  onReviewCandidate,
 }: {
   paymentCheck: PaymentCheck | null;
   error: string;
@@ -483,6 +576,9 @@ function PaymentCheckPanel({
   eligible: boolean;
   onCheck: () => void;
   onConfirm: () => void;
+  selectedCandidateId: string | null;
+  onSelectCandidate: (candidateId: string) => void;
+  onReviewCandidate: (action: PaymentCandidateDecision, candidate?: PaymentCandidate) => void;
 }) {
   const candidates = paymentCheck?.candidates || [];
   const candidate = candidates[0];
@@ -518,20 +614,23 @@ function PaymentCheckPanel({
       </div>
       <p>{error || paymentCheck?.message || 'Search eligible financial accounts for a matching transaction.'}</p>
       {searchContext ? (
-        <dl className="payment-search-context" aria-label="Payment search scope">
-          {searchContext.eligible_account_count != null ? (
-            <div><dt>Accounts searched</dt><dd>{searchContext.eligible_account_count}</dd></div>
-          ) : null}
-          {searchContext.candidate_pool_size != null ? (
-            <div><dt>Transactions evaluated</dt><dd>{searchContext.candidate_pool_size}</dd></div>
-          ) : null}
-          {searchContext.window_start && searchContext.window_end ? (
-            <div><dt>Search period</dt><dd>{formatDate(searchContext.window_start)}–{formatDate(searchContext.window_end)}</dd></div>
-          ) : null}
-          {searchContext.amount_tolerance != null ? (
-            <div><dt>Amount tolerance</dt><dd>{formatCurrency(searchContext.amount_tolerance, candidate?.currency || 'USD')}</dd></div>
-          ) : null}
-        </dl>
+        <details className="payment-diagnostics">
+          <summary>Search details <ChevronDown size={15} /></summary>
+          <dl className="payment-search-context" aria-label="Payment search scope">
+            {searchContext.eligible_account_count != null ? (
+              <div><dt>Accounts searched</dt><dd>{searchContext.eligible_account_count}</dd></div>
+            ) : null}
+            {searchContext.candidate_pool_size != null ? (
+              <div><dt>Transactions evaluated</dt><dd>{searchContext.candidate_pool_size}</dd></div>
+            ) : null}
+            {searchContext.window_start && searchContext.window_end ? (
+              <div><dt>Search period</dt><dd>{formatDate(searchContext.window_start)}–{formatDate(searchContext.window_end)}</dd></div>
+            ) : null}
+            {searchContext.amount_tolerance != null ? (
+              <div><dt>Amount tolerance</dt><dd>{formatCurrency(searchContext.amount_tolerance, candidate?.currency || 'USD')}</dd></div>
+            ) : null}
+          </dl>
+        </details>
       ) : null}
       {candidates.length ? (
         <section className="payment-candidate-results" aria-label="Payment candidates">
@@ -544,8 +643,18 @@ function PaymentCheckPanel({
           ) : null}
           <ol>
             {candidates.map((item, index) => (
-              <li key={item.id}>
+              <li key={item.id} className={selectedCandidateId === item.id ? 'selected' : ''}>
                 <div className="payment-candidate-heading">
+                  {paymentCheck?.state === 'multiple_matches' ? (
+                    <input
+                      type="radio"
+                      name="payment-candidate"
+                      value={item.id}
+                      checked={selectedCandidateId === item.id}
+                      onChange={() => onSelectCandidate(item.id)}
+                      aria-label={`Select ${item.payee || `candidate ${index + 1}`}`}
+                    />
+                  ) : null}
                   <span className="payment-candidate-rank" aria-label={`Rank ${item.rank || index + 1}`}>
                     {item.rank || index + 1}
                   </span>
@@ -556,17 +665,32 @@ function PaymentCheckPanel({
                       {item.score == null ? '' : ` · ${item.score.toFixed(0)}% score`}
                     </span>
                   </div>
+                  {paymentCheck?.state === 'multiple_matches' ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => onReviewCandidate('reject', item)}
+                    >
+                      Discard
+                    </Button>
+                  ) : null}
                 </div>
                 <dl className="payment-candidate">
                   <div><dt>Amount</dt><dd>{item.amount == null ? 'Not provided' : formatCurrency(item.amount, item.currency || 'USD')}</dd></div>
                   <div><dt>Transaction</dt><dd>{formatDate(item.transaction_date)} · {item.status || 'unknown'}</dd></div>
                   <div><dt>Account</dt><dd>{item.account_display_name || 'Eligible account'}{item.account_last_four ? ` •••• ${item.account_last_four}` : ''}</dd></div>
                 </dl>
-                <ul className="payment-match-reasons" aria-label={`Match signals for ${item.payee || `candidate ${index + 1}`}`}>
-                  {(item.match_reasons || []).map((reason) => (
-                    <li key={reason}>{formatMatchReason(reason)}</li>
-                  ))}
-                </ul>
+                {(item.match_reasons || []).length ? (
+                  <details className="payment-candidate-details">
+                    <summary>Why this result? <ChevronDown size={14} /></summary>
+                    <ul className="payment-match-reasons" aria-label={`Match signals for ${item.payee || `candidate ${index + 1}`}`}>
+                      {(item.match_reasons || []).map((reason) => (
+                        <li key={reason}>{formatMatchReason(reason)}</li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
               </li>
             ))}
           </ol>
@@ -578,6 +702,34 @@ function PaymentCheckPanel({
         <div className="payment-check-confirm">
           <span>A posted match does not complete this obligation until you confirm it.</span>
           <Button variant="primary" size="sm" disabled={busy} onClick={onConfirm}>Confirm payment and complete</Button>
+        </div>
+      ) : null}
+      {paymentCheck?.state === 'multiple_matches' ? (
+        <div className="payment-check-confirm">
+          <span>Select the transaction that belongs to this obligation, or reject all suggestions.</span>
+          <div className="payment-review-actions">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => onReviewCandidate('reject_all')}
+            >
+              None of these
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={busy || !selectedCandidateId}
+              onClick={() => {
+                const selected = candidates.find((item) => item.id === selectedCandidateId);
+                if (selected) onReviewCandidate('confirm', selected);
+              }}
+            >
+              {candidates.find((item) => item.id === selectedCandidateId)?.status === 'pending'
+                ? 'Confirm pending match'
+                : 'Confirm selected'}
+            </Button>
+          </div>
         </div>
       ) : null}
     </section>

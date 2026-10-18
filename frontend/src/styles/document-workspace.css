@@ -711,11 +711,33 @@
 
 .payment-search-context {
   margin: 0;
-  padding: .55rem 0;
+  padding: .55rem 0 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: .45rem .8rem;
-  border-block: 1px solid var(--border);
+}
+
+.payment-diagnostics,
+.payment-candidate-details {
+  border-top: 1px solid var(--border);
+}
+
+.payment-diagnostics summary,
+.payment-candidate-details summary {
+  padding-top: .55rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: .64rem;
+  font-weight: 750;
+  cursor: pointer;
+  list-style: none;
+}
+
+.payment-diagnostics[open] summary > svg,
+.payment-candidate-details[open] summary > svg {
+  transform: rotate(180deg);
 }
 
 .payment-search-context div,
@@ -791,6 +813,10 @@
   border-top: 1px solid var(--border);
 }
 
+.payment-candidate-results > ol > li.selected {
+  background: color-mix(in srgb, var(--accent-bg) 58%, transparent);
+}
+
 .payment-candidate-rank {
   width: 1.35rem;
   height: 1.35rem;
@@ -808,6 +834,15 @@
   min-width: 0;
   display: grid;
   gap: .05rem;
+}
+
+.payment-candidate-heading > input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.payment-candidate-heading > .btn {
+  margin-inline-start: auto;
 }
 
 .payment-candidate-heading strong {
@@ -829,7 +864,7 @@
 }
 
 .payment-match-reasons {
-  margin: 0;
+  margin: .45rem 0 0;
   padding: 0;
   display: flex;
   flex-wrap: wrap;
@@ -845,6 +880,12 @@
 .payment-check-confirm {
   padding-top: .65rem;
   border-top: 1px solid var(--border);
+}
+
+.payment-review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: .45rem;
 }
 
 .spin {

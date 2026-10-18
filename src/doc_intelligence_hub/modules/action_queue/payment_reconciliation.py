@@ -814,6 +814,22 @@ class PaymentConfirmRequest(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=200, pattern=r"^[A-Za-z0-9._:-]+$")
 
 
+class PaymentCandidateDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    contract_version: Literal["1.0"] = "1.0"
+    action: Literal["confirm", "reject", "reject_all"]
+    revision: str = Field(min_length=3, max_length=100, pattern=r"^[A-Za-z0-9._:-]+$")
+    idempotency_key: str = Field(min_length=8, max_length=200, pattern=r"^[A-Za-z0-9._:-]+$")
+    evidence_id: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_candidate(self) -> PaymentCandidateDecisionRequest:
+        if self.action != "reject_all" and not self.evidence_id:
+            raise ValueError(f"{self.action} requires evidence_id")
+        return self
+
+
 class RevisionConflictError(ValueError):
     pass
 
@@ -921,6 +937,26 @@ class PaymentReconciliationService:
             .limit(10)
             .all()
         )
+        latest_generation_rows = (
+            self.db.query(PaymentEvidence, ObligationPaymentEdge)
+            .join(
+                ObligationPaymentEdge,
+                ObligationPaymentEdge.evidence_id == PaymentEvidence.id,
+            )
+            .filter(
+                ObligationPaymentEdge.obligation_id == obligation.id,
+                PaymentEvidence.source_system == "tyrion_bill_match",
+                PaymentEvidence.source_generation == latest_run.id,
+            )
+            .all()
+            if latest_run
+            else []
+        )
+        rejected_transaction_refs = {
+            evidence.transaction_ref
+            for evidence, edge in latest_generation_rows
+            if edge.state == "rejected" and evidence.transaction_ref
+        }
         latest_evidence = evidence_rows[0][0] if evidence_rows else None
         state = "unchecked"
         if latest_run and latest_run.status == "checking":
@@ -998,6 +1034,15 @@ class PaymentReconciliationService:
             if latest_run and latest_run.response_payload
             else None
         )
+        visible_raw_candidates = (
+            [
+                candidate
+                for candidate in raw_candidates
+                if candidate.get("transactionRef") not in rejected_transaction_refs
+            ]
+            if isinstance(raw_candidates, list)
+            else None
+        )
         evidence_by_transaction = {
             evidence.transaction_ref: evidence
             for evidence, _edge in evidence_rows
@@ -1036,9 +1081,9 @@ class PaymentReconciliationService:
                     ],
                     "receipt_association": candidate.get("receiptAssociation"),
                 }
-                for candidate in raw_candidates
+                for candidate in visible_raw_candidates
             ]
-            if isinstance(raw_candidates, list)
+            if visible_raw_candidates is not None
             else [
                 {
                     "id": evidence.id,
@@ -1077,6 +1122,16 @@ class PaymentReconciliationService:
                 for evidence, _edge in evidence_rows
             ]
         )
+        message = messages[state]
+        if (
+            latest_run
+            and latest_run.status == "completed"
+            and isinstance(raw_candidates, list)
+            and raw_candidates
+            and not candidates
+        ):
+            state = "no_match"
+            message = "You rejected all suggested transactions."
         confirmation_case = next(
             (
                 case
@@ -1116,7 +1171,7 @@ class PaymentReconciliationService:
             ),
             "source": "tyrion_bill_match",
             "revision": revision,
-            "message": messages[state],
+            "message": message,
             "candidates": candidates,
             "search_context": search_context,
             "_confirmation_case_id": confirmation_case.id if confirmable else None,
@@ -1810,6 +1865,134 @@ class PaymentReconciliationService:
             expected_action_version=action.version or 1,
         )
         return result
+
+    def review_candidate(
+        self,
+        action_id: int,
+        request: PaymentCandidateDecisionRequest,
+        *,
+        actor: str,
+    ) -> dict:
+        action = self.db.query(Action).filter_by(id=action_id).first()
+        if action is None:
+            raise KeyError("action_not_found")
+        if not action.obligation_id:
+            raise ValueError("payment_check_not_eligible")
+        obligation = self.db.query(Obligation).filter_by(id=action.obligation_id).one()
+        obligation_case_ids = select(PaymentReconciliationCase.id).where(
+            PaymentReconciliationCase.obligation_id == obligation.id
+        )
+        prior = (
+            self.db.query(PaymentActionReceipt)
+            .filter(
+                PaymentActionReceipt.idempotency_key == request.idempotency_key,
+                PaymentActionReceipt.case_id.in_(obligation_case_ids),
+            )
+            .first()
+        )
+        if prior:
+            return {
+                "payment_check": self.payment_projection(action.id),
+                "idempotent": True,
+            }
+        if request.revision != self._action_revision(action, obligation):
+            raise RevisionConflictError("payment_check_revision_conflict")
+
+        projection = self.payment_projection(action.id)
+        candidates = {candidate["id"]: candidate for candidate in projection["candidates"]}
+        if request.action == "reject_all":
+            target_ids = list(candidates)
+        else:
+            if request.evidence_id not in candidates:
+                raise ValueError("payment_candidate_not_found")
+            target_ids = [request.evidence_id]
+        if not target_ids:
+            raise ValueError("payment_candidate_not_found")
+        review_ids = (
+            list(candidates)
+            if request.action in {"confirm", "reject_all"}
+            else target_ids
+        )
+
+        cases = (
+            self.db.query(PaymentReconciliationCase)
+            .filter(
+                PaymentReconciliationCase.obligation_id == obligation.id,
+                PaymentReconciliationCase.evidence_id.in_(review_ids),
+                PaymentReconciliationCase.active.is_(True),
+            )
+            .all()
+        )
+        cases_by_evidence = {case.evidence_id: case for case in cases}
+        if any(evidence_id not in cases_by_evidence for evidence_id in review_ids):
+            raise ValueError("payment_candidate_not_reviewable")
+
+        primary_id = request.evidence_id or target_ids[0]
+        primary_case = cases_by_evidence[primary_id]
+
+        def reject_case(case: PaymentReconciliationCase, key: str) -> None:
+            edge = self._edge_for_action(obligation.id, case.evidence_id)
+            edge.manual_precedence = True
+            edge.provenance = "user"
+            self._transition_edge(
+                edge,
+                "rejected",
+                actor=actor,
+                action="rejected",
+                idempotency_key=key,
+                expected_revision=case.revision,
+            )
+            case.revision += 1
+            case.state = "resolved"
+            case.active = False
+            case.attention_state = "settled"
+
+        if request.action == "confirm":
+            candidate = candidates[primary_id]
+            if candidate["status"] not in {"posted", "pending"}:
+                raise ValueError("payment_candidate_not_confirmable")
+            evidence = self.db.query(PaymentEvidence).filter_by(id=primary_id).one()
+            evidence.match_state = "matched"
+            evidence.payment_status = "paid" if candidate["status"] == "posted" else "pending"
+            for evidence_id, case in cases_by_evidence.items():
+                if evidence_id != primary_id:
+                    reject_case(case, f"{request.idempotency_key}:reject:{evidence_id}")
+            self.act(
+                primary_case.id,
+                PaymentReviewAction(
+                    action="confirm",
+                    expected_revision=primary_case.revision,
+                    idempotency_key=request.idempotency_key,
+                    evidence_id=primary_id,
+                    allocated_amount_minor=(
+                        round(candidate["amount"] * 100)
+                        if candidate["amount"] is not None
+                        else None
+                    ),
+                ),
+                actor=actor,
+                complete_action_id=action.id if candidate["status"] == "posted" else None,
+                expected_action_version=action.version or 1,
+            )
+        else:
+            for evidence_id, case in cases_by_evidence.items():
+                if evidence_id != primary_id:
+                    reject_case(case, f"{request.idempotency_key}:reject:{evidence_id}")
+            self.act(
+                primary_case.id,
+                PaymentReviewAction(
+                    action="reject",
+                    expected_revision=primary_case.revision,
+                    idempotency_key=request.idempotency_key,
+                    evidence_id=primary_id,
+                ),
+                actor=actor,
+            )
+
+        return {
+            "payment_check": self.payment_projection(action.id),
+            "idempotent": False,
+        }
 
     def _retire_prior_check_cases(self, obligation_id: str) -> None:
         for case in (
