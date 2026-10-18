@@ -39,6 +39,10 @@ from doc_intelligence_hub.modules.action_queue.database import (
 )
 from doc_intelligence_hub.modules.action_queue.lifecycle import mark_action_ready
 from doc_intelligence_hub.modules.action_queue.pipeline import run_pipeline
+from doc_intelligence_hub.modules.triage.reference_discovery import (
+    extract_explicit_references,
+    resolve_references,
+)
 from doc_intelligence_hub.modules.triage.relationship_discovery import (
     normalize_paperless_document,
 )
@@ -74,6 +78,7 @@ _HIDDEN_CUSTOM_FIELD_NAMES = {
     "Action Summary",
     "Action Count",
     "Related Document IDs",
+    "OWL Related Documents",
     "Relationship Summary",
     "Related Documents",
     "Obligation ID",
@@ -531,10 +536,16 @@ def _relationship_metadata(
         for item in taxonomies["custom_fields"]
         if isinstance(item.get("id"), int) and item.get("name")
     }
+    document_types = {
+        int(item["id"]): str(item["name"])
+        for item in taxonomies["document_types"]
+        if isinstance(item.get("id"), int) and item.get("name")
+    }
     return normalize_paperless_document(
         document,
         correspondents=correspondents,
         field_names=field_names,
+        document_types=document_types,
     ) or {"document_id": document.get("id"), "title": document.get("title")}
 
 
@@ -951,23 +962,63 @@ async def get_intake_relationship_candidates(
     bounded_limit = max(1, min(limit, 25))
     try:
         try:
-            current, taxonomies = await asyncio.gather(
+            current, taxonomies, current_content = await asyncio.gather(
                 client.get_document(document_id),
                 _load_taxonomies(client),
+                client.get_document_content(document_id),
             )
+            current_relationship_metadata = _relationship_metadata(current, taxonomies)
             query = (q or "").strip()
             if query:
                 documents = await client.list_documents(query=query, limit=bounded_limit)
-            elif isinstance(current.get("correspondent"), int):
-                documents = await client.list_documents(
-                    correspondent_id=current["correspondent"],
-                    limit=bounded_limit,
-                )
+                reference_matches: dict[int, list[str]] = {}
             else:
-                documents = await client.list_documents(
-                    query=str(current.get("title") or "").strip(),
-                    limit=bounded_limit,
+                references = await extract_explicit_references(
+                    current_content if isinstance(current_content, str) else "",
+                    title=str(current.get("title") or ""),
+                    document_type=str(
+                        current_relationship_metadata.get("document_type_name") or ""
+                    ),
                 )
+                resolutions = await resolve_references(
+                    client,
+                    references,
+                    exclude_document_id=document_id,
+                )
+                reference_matches = {}
+                reference_document_ids: set[int] = set()
+                for resolution in resolutions:
+                    if resolution.status != "resolved":
+                        continue
+                    for related_id in resolution.document_ids:
+                        reference_document_ids.add(related_id)
+                        reference_matches.setdefault(related_id, []).append(
+                            resolution.reference.value
+                        )
+
+                if isinstance(current.get("correspondent"), int):
+                    standard_documents = await client.list_documents(
+                        correspondent_id=current["correspondent"],
+                        limit=bounded_limit,
+                    )
+                else:
+                    standard_documents = await client.list_documents(
+                        query=str(current.get("title") or "").strip(),
+                        limit=bounded_limit,
+                    )
+                reference_documents = await asyncio.gather(
+                    *(
+                        client.get_document(related_id)
+                        for related_id in sorted(reference_document_ids)
+                    )
+                )
+                documents_by_id = {
+                    int(document["id"]): document
+                    for document in [*standard_documents, *reference_documents]
+                    if isinstance(document.get("id"), int)
+                    and not isinstance(document.get("id"), bool)
+                }
+                documents = list(documents_by_id.values())
         except Exception as exc:
             _raise_paperless_error(exc, "finding related documents")
 
@@ -977,7 +1028,7 @@ async def get_intake_relationship_candidates(
             else relationship["source_document_id"]
             for relationship in list_document_relationships(document_id)
         }
-        current_metadata = _relationship_metadata(current, taxonomies)
+        base_current_metadata = current_relationship_metadata
         candidates = []
         for document in documents:
             candidate_id = document.get("id")
@@ -988,7 +1039,12 @@ async def get_intake_relationship_candidates(
                 or candidate_id in linked_ids
             ):
                 continue
+            current_metadata = dict(base_current_metadata)
             candidate_metadata = _relationship_metadata(document, taxonomies)
+            matched_references = reference_matches.get(candidate_id, [])
+            if matched_references:
+                current_metadata["explicit_references"] = matched_references
+                candidate_metadata["explicit_references"] = matched_references
             proposal = classify_related_notice(
                 document_id,
                 current_metadata,
@@ -1010,10 +1066,17 @@ async def get_intake_relationship_candidates(
                     "relationship_type": (
                         "same_sequence" if same_correspondent and same_type else "supports"
                     ),
-                    "confidence": 0.58 if same_correspondent and same_type else 0.35,
+                    "confidence": (
+                        0.68
+                        if matched_references
+                        else 0.58
+                        if same_correspondent and same_type
+                        else 0.35
+                    ),
                     "reason_codes": [
                         reason
                         for matched, reason in (
+                            (bool(matched_references), "explicit_reference_match"),
                             (same_correspondent, "correspondent_match"),
                             (same_type, "document_type_match"),
                             (bool(query), "search_match"),

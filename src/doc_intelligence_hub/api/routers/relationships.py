@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -9,6 +10,21 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from doc_intelligence_hub.api.routers import make_paperless_client
+from doc_intelligence_hub.modules.action_queue.database import (
+    Action,
+    Obligation,
+    ObligationDocument,
+)
+from doc_intelligence_hub.modules.action_queue.database import (
+    get_session as get_action_queue_session,
+)
+from doc_intelligence_hub.modules.action_queue.database import (
+    init_db as init_action_queue_db,
+)
+from doc_intelligence_hub.modules.action_queue.obligations import (
+    completion_suggestion,
+    manually_link_document,
+)
 from doc_intelligence_hub.modules.action_queue.relationship_graph import (
     RelationshipGraphNotFoundError,
     build_relationship_graph,
@@ -21,6 +37,7 @@ from doc_intelligence_hub.modules.triage.relationships import (
     PROVENANCE_TYPES,
     RELATIONSHIP_TYPES,
     RelationshipConflictError,
+    classify_document_role,
     classify_related_notice,
     create_document_relationship,
     get_projection_health,
@@ -52,6 +69,11 @@ class RelationshipProposalRequest(BaseModel):
     right_document_id: int = Field(gt=0)
     left_metadata: dict[str, Any] | None = None
     right_metadata: dict[str, Any] | None = None
+
+
+class PaymentEvidenceLinkRequest(BaseModel):
+    left_document_id: int = Field(gt=0)
+    right_document_id: int = Field(gt=0)
 
 
 @router.get("/graph")
@@ -162,6 +184,132 @@ async def create_relationship(
         return {"relationship": relationship, "created": created, "projection": None}
     result = await _project_and_record(request, relationship)
     return {**result, "created": created}
+
+
+@router.post("/payment-evidence")
+async def create_payment_evidence_relationship(
+    request: Request,
+    body: PaymentEvidenceLinkRequest,
+) -> dict[str, Any]:
+    client = make_paperless_client(request, timeout=30.0)
+    try:
+        try:
+            left, right, metadata, left_content, right_content = await asyncio.gather(
+                client.get_document(body.left_document_id),
+                client.get_document(body.right_document_id),
+                client.fetch_all_metadata(),
+                client.get_document_content(body.left_document_id),
+                client.get_document_content(body.right_document_id),
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="The documents could not be loaded from Paperless.",
+            ) from exc
+    finally:
+        await client.aclose()
+
+    correspondents, _, document_types = metadata
+
+    def enrich(document: dict[str, Any], content: str) -> dict[str, Any]:
+        correspondent = document.get("correspondent")
+        document_type = document.get("document_type")
+        return {
+            **document,
+            "content": content,
+            "correspondent_name": (
+                correspondents.get(correspondent)
+                if isinstance(correspondent, int)
+                else correspondent
+            ),
+            "document_type_name": (
+                document_types.get(document_type)
+                if isinstance(document_type, int)
+                else document_type
+            ),
+        }
+
+    left = enrich(left, left_content)
+    right = enrich(right, right_content)
+    left_role = classify_document_role(left)
+    right_role = classify_document_role(right)
+    if {left_role, right_role} != {"invoice", "receipt"}:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Choose one invoice or bill and one receipt or payment confirmation "
+                "to record payment evidence."
+            ),
+        )
+    receipt = left if left_role == "receipt" else right
+    invoice = left if left_role == "invoice" else right
+    receipt_id = int(receipt["id"])
+    invoice_id = int(invoice["id"])
+
+    init_action_queue_db()
+    db = get_action_queue_session()
+    try:
+        action = (
+            db.query(Action)
+            .filter(
+                Action.document_id == invoice_id,
+                Action.action_type == "PAY",
+                Action.status != "source_deleted",
+            )
+            .order_by(Action.is_primary.desc(), Action.id.asc())
+            .first()
+        )
+        if action is None:
+            linked = (
+                db.query(ObligationDocument)
+                .filter_by(document_id=invoice_id, excluded=False)
+                .order_by(ObligationDocument.created_at.asc())
+                .first()
+            )
+            obligation = db.get(Obligation, linked.obligation_id) if linked else None
+            action = db.get(Action, obligation.primary_action_id) if obligation else None
+        if action is None or action.action_type != "PAY":
+            raise HTTPException(
+                status_code=409,
+                detail="The selected invoice does not have a payable obligation to update.",
+            )
+
+        manually_link_document(db, action, receipt)
+        obligation = db.get(Obligation, action.obligation_id) if action.obligation_id else None
+        primary = (
+            db.get(Action, obligation.primary_action_id)
+            if obligation and obligation.primary_action_id
+            else action
+        )
+        primary.version = (primary.version or 1) + 1
+        db.commit()
+        db.refresh(primary)
+        suggestion = completion_suggestion(db, primary)
+        completion_offer = (
+            {
+                "action_id": primary.id,
+                "action_title": primary.title,
+                "action_version": primary.version,
+                "reason": suggestion["reason"],
+            }
+            if suggestion and primary.status != "completed"
+            else None
+        )
+    finally:
+        db.close()
+
+    relationship = next(
+        (
+            item
+            for item in list_document_relationships(receipt_id, direction="outgoing")
+            if item["relationship_type"] == "supports" and item["target_document_id"] == invoice_id
+        ),
+        None,
+    )
+    if relationship is None:
+        raise HTTPException(status_code=500, detail="The payment evidence link was not persisted.")
+    result = await _project_and_record(request, relationship)
+    return {**result, "created": True, "completion_offer": completion_offer}
 
 
 @router.get("/documents/{document_id}")

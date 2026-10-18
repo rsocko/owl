@@ -12,6 +12,7 @@ const {
   documentRelationshipsMock,
   relationshipCandidatesMock,
   createRelationshipMock,
+  createPaymentEvidenceMock,
   removeRelationshipMock,
   saveDocumentMock,
   refreshMock,
@@ -28,6 +29,7 @@ const {
   documentRelationshipsMock: vi.fn(),
   relationshipCandidatesMock: vi.fn(),
   createRelationshipMock: vi.fn(),
+  createPaymentEvidenceMock: vi.fn(),
   removeRelationshipMock: vi.fn(),
   saveDocumentMock: vi.fn(),
   refreshMock: vi.fn(),
@@ -58,6 +60,7 @@ vi.mock('../lib/api', () => ({
     },
     relationships: {
       create: createRelationshipMock,
+      createPaymentEvidence: createPaymentEvidenceMock,
       remove: removeRelationshipMock,
     },
     documents: {
@@ -337,6 +340,30 @@ describe('IntakeReview', () => {
     );
   });
 
+  it('reloads relationships when analysis is refreshed', async () => {
+    refreshMock.mockResolvedValue({
+      core: core(1),
+      actions: {
+        actions: [],
+        ocr_quality: { quality_score: 90, quality_band: 'green', poor_quality: false },
+      },
+      suggestions: [],
+      suggestion_sources: {
+        paperless_ml: { available: true },
+        paperless_ai: { available: true },
+      },
+    });
+    renderPage('/inbox-review?document=1&tab=related');
+
+    await waitFor(() => expect(documentRelationshipsMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh analysis' }));
+
+    await waitFor(() => expect(documentRelationshipsMock).toHaveBeenCalledTimes(2));
+    expect(
+      screen.getByText('Metadata, suggestions, actions, and relationships refreshed.'),
+    ).toBeInTheDocument();
+  });
+
   it('adds a suggested relationship using its recommended type', async () => {
     relationshipCandidatesMock.mockResolvedValue({
       candidates: [{
@@ -375,6 +402,57 @@ describe('IntakeReview', () => {
         provenance: 'user',
       }),
     ));
+  });
+
+  it('offers to complete an obligation after manually linking payment evidence', async () => {
+    relationshipCandidatesMock.mockResolvedValue({
+      candidates: [{
+        document: {
+          id: 7,
+          title: 'Payment receipt 4826',
+          created: '2026-09-14',
+          correspondent_name: 'Example Co',
+          document_type_name: 'Receipt',
+          thumbnail_url: '/thumb/7',
+          preview_url: '/preview/7',
+        },
+        suggested: true,
+        recommendation: {
+          source_document_id: 7,
+          target_document_id: 1,
+          relationship_type: 'supports',
+          confidence: 0.9,
+          reason_codes: ['payment_evidence', 'title_reference_match'],
+          priority_adjustment: 0,
+          priority_explanation: 'No relationship priority adjustment',
+        },
+      }],
+      query: '',
+    });
+    createPaymentEvidenceMock.mockResolvedValue({
+      completion_offer: {
+        action_id: 12,
+        action_title: 'Pay invoice 4826',
+        action_version: 4,
+        reason: 'Payment receipt #7 matches this obligation.',
+      },
+    });
+    updateActionMock.mockResolvedValue({ id: 12, status: 'completed', version: 5 });
+    renderPage('/inbox-review?document=1&tab=related');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add link' }));
+
+    await waitFor(() => expect(createPaymentEvidenceMock).toHaveBeenCalledWith({
+      left_document_id: 1,
+      right_document_id: 7,
+    }));
+    expect(screen.getByText('Would you like to mark “Pay invoice 4826” done?')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark obligation done' }));
+    await waitFor(() => expect(updateActionMock).toHaveBeenCalledWith('12', {
+      version: 4,
+      status: 'completed',
+    }));
   });
 
   it('uses Paperless tag colors inside one combined tag control', async () => {

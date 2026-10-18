@@ -806,6 +806,7 @@ export default function IntakeReview() {
   const [actionError, setActionError] = useState('');
   const [ocrError, setOcrError] = useState('');
   const [busyKey, setBusyKey] = useState('');
+  const [relationshipRefreshKey, setRelationshipRefreshKey] = useState(0);
   const [toast, setToast] = useState<{
     message: string;
     tone?: 'success' | 'error';
@@ -1269,7 +1270,8 @@ export default function IntakeReview() {
       setSuggestions(response.suggestions);
       setSuggestionSources(response.suggestion_sources);
       setSuggestionsCached(false);
-      showToast('Metadata, suggestions, and action analysis refreshed.');
+      setRelationshipRefreshKey((current) => current + 1);
+      showToast('Metadata, suggestions, actions, and relationships refreshed.');
     } catch (error) {
       showToast(errorMessage(error), 'error');
     } finally {
@@ -1577,6 +1579,7 @@ export default function IntakeReview() {
                           : selectedQueueItem?.document_type_name,
                       }}
                       onToast={showToast}
+                      refreshKey={relationshipRefreshKey}
                     />
                   ) : null}
 

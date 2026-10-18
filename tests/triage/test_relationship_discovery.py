@@ -87,6 +87,35 @@ def test_candidate_generation_reports_bounded_exclusion_reasons():
     }
 
 
+def test_explicit_references_create_cross_provider_candidate_pair():
+    documents = {
+        1: {"provider": "Builder", "explicit_references": ["PO-91827"]},
+        2: {"provider": "Supplier", "explicit_references": ["PO-91827"]},
+    }
+
+    pairs, groups, exclusions = build_relationship_candidate_pairs(documents)
+
+    assert pairs == [(1, 2)]
+    assert groups == 1
+    assert exclusions == {}
+
+
+def test_ambiguous_explicit_reference_fails_closed():
+    documents = {
+        document_id: {
+            "provider": f"Provider {document_id}",
+            "explicit_references": ["CASE-91827"],
+        }
+        for document_id in range(1, 5)
+    }
+
+    pairs, groups, exclusions = build_relationship_candidate_pairs(documents)
+
+    assert pairs == []
+    assert groups == 0
+    assert exclusions == {"ambiguous_explicit_reference": 4}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("scope", "expected"),

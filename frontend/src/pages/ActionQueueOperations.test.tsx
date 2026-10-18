@@ -229,6 +229,7 @@ describe('ActionQueueOperations', () => {
     fireEvent.click(setup);
 
     await waitFor(() => expect(setupMetadataSchemaMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(projectionHealthMock).toHaveBeenCalledTimes(2));
     expect(
       await screen.findByText('Complete Paperless metadata schema is ready.'),
     ).toBeInTheDocument();

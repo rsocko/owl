@@ -653,6 +653,28 @@ class PaperlessClient:
             client, "/api/documents/", params, limit=limit, on_progress=on_progress
         )
 
+    async def search_documents_by_content(
+        self,
+        reference: str,
+        *,
+        limit: int = 201,
+    ) -> list[dict]:
+        """Return a deterministically ordered, bounded OCR substring search."""
+        normalized = str(reference).strip()
+        if not normalized:
+            return []
+        client = self._get_client()
+        return await self._paginate(
+            client,
+            "/api/documents/",
+            {
+                "content__icontains": normalized,
+                "ordering": "id",
+                "page_size": min(100, limit),
+            },
+            limit=limit,
+        )
+
     async def count_documents_for_saved_view(self, view_id: int) -> int:
         """Return Paperless's server-side count for one saved-view definition."""
         view = await self.get_saved_view(view_id)

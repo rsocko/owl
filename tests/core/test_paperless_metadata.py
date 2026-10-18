@@ -70,9 +70,9 @@ def test_relationship_projection_fields_are_creatable() -> None:
     related = get_metadata_field_spec(MetadataFieldKey.RELATED_DOCUMENTS)
     summary = get_metadata_field_spec(MetadataFieldKey.RELATIONSHIP_SUMMARY)
 
-    assert related.canonical_name == "Related Document IDs"
+    assert related.canonical_name == "OWL Related Documents"
     assert related.create_policy is MetadataCreatePolicy.IF_MISSING
-    assert related.create_definition()["data_type"] == "string"
+    assert related.create_definition()["data_type"] == "documentlink"
     assert summary.create_policy is MetadataCreatePolicy.IF_MISSING
 
 

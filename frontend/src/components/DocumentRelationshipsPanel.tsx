@@ -1,5 +1,7 @@
 import {
   ArrowRight,
+  CheckCircle2,
+  CircleDollarSign,
   Eye,
   FileStack,
   GitBranch,
@@ -16,6 +18,7 @@ import DocumentViewerModal from './DocumentViewerModal';
 import { Button, EmptyState, ErrorState, SkeletonLoader } from './ui';
 
 type RelationshipType = 'follows' | 'supersedes' | 'supports' | 'same_sequence';
+type RelationshipChoice = RelationshipType | 'payment_evidence';
 
 interface RelatedDocument {
   id: number;
@@ -60,6 +63,13 @@ interface CurrentDocument {
   document_type_name?: string | null;
 }
 
+interface CompletionOffer {
+  action_id: number;
+  action_title: string;
+  action_version: number;
+  reason: string;
+}
+
 const RELATIONSHIP_LABELS: Record<RelationshipType, string> = {
   follows: 'Follows',
   supersedes: 'Supersedes',
@@ -67,7 +77,8 @@ const RELATIONSHIP_LABELS: Record<RelationshipType, string> = {
   same_sequence: 'Same recurring series',
 };
 
-const RELATIONSHIP_OPTIONS: Array<{ value: RelationshipType; label: string }> = [
+const RELATIONSHIP_OPTIONS: Array<{ value: RelationshipChoice; label: string }> = [
+  { value: 'payment_evidence', label: 'Payment receipt / evidence' },
   { value: 'same_sequence', label: 'Same recurring series' },
   { value: 'supports', label: 'Supporting document' },
   { value: 'follows', label: 'Later notice / follows' },
@@ -87,9 +98,11 @@ function reasonLabel(reason: string): string {
 export default function DocumentRelationshipsPanel({
   document,
   onToast,
+  refreshKey = 0,
 }: {
   document: CurrentDocument;
   onToast: (message: string, tone?: 'success' | 'error') => void;
+  refreshKey?: number;
 }) {
   const [relationships, setRelationships] = useState<DocumentRelationship[]>([]);
   const [suggestions, setSuggestions] = useState<RelationshipCandidate[]>([]);
@@ -100,8 +113,9 @@ export default function DocumentRelationshipsPanel({
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
   const [busyKey, setBusyKey] = useState('');
-  const [types, setTypes] = useState<Record<number, RelationshipType>>({});
+  const [types, setTypes] = useState<Record<number, RelationshipChoice>>({});
   const [preview, setPreview] = useState<RelatedDocument | null>(null);
+  const [completionOffer, setCompletionOffer] = useState<CompletionOffer | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -127,8 +141,9 @@ export default function DocumentRelationshipsPanel({
     setQuery('');
     setSearchResults([]);
     setAddOpen(false);
+    setCompletionOffer(null);
     void load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   const lifecycle = useMemo(
     () => relationships.filter((relationship) => (
@@ -190,8 +205,12 @@ export default function DocumentRelationshipsPanel({
   };
 
   const addRelationship = async (candidate: RelationshipCandidate) => {
+    const suggestedPaymentEvidence = (
+      candidate.recommendation.relationship_type === 'supports'
+      && candidate.recommendation.reason_codes.includes('payment_evidence')
+    );
     const selectedType = types[candidate.document.id]
-      || candidate.recommendation.relationship_type;
+      || (suggestedPaymentEvidence ? 'payment_evidence' : candidate.recommendation.relationship_type);
     const directional = selectedType === 'follows' || selectedType === 'supersedes';
     const sourceDocumentId = directional
       ? candidate.recommendation.source_document_id
@@ -201,23 +220,52 @@ export default function DocumentRelationshipsPanel({
       : candidate.document.id;
     setBusyKey(`add-${candidate.document.id}`);
     try {
-      await endpoints.relationships.create({
-        source_document_id: sourceDocumentId,
-        target_document_id: targetDocumentId,
-        relationship_type: selectedType,
-        provenance: 'user',
-        confidence: candidate.recommendation.confidence,
-        reason_codes: candidate.recommendation.reason_codes,
-        priority_adjustment: candidate.recommendation.priority_adjustment,
-        priority_explanation: candidate.recommendation.priority_explanation,
-      });
-      onToast(`${candidate.document.title} linked.`);
+      if (selectedType === 'payment_evidence') {
+        const response = await endpoints.relationships.createPaymentEvidence({
+          left_document_id: document.id,
+          right_document_id: candidate.document.id,
+        }) as { completion_offer?: CompletionOffer | null };
+        setCompletionOffer(response.completion_offer || null);
+        onToast(`${candidate.document.title} linked as payment evidence.`);
+      } else {
+        await endpoints.relationships.create({
+          source_document_id: sourceDocumentId,
+          target_document_id: targetDocumentId,
+          relationship_type: selectedType,
+          provenance: 'user',
+          confidence: candidate.recommendation.confidence,
+          reason_codes: candidate.recommendation.reason_codes,
+          priority_adjustment: candidate.recommendation.priority_adjustment,
+          priority_explanation: candidate.recommendation.priority_explanation,
+        });
+        onToast(`${candidate.document.title} linked.`);
+      }
       setSearchResults((current) => current.filter(
         (item) => item.document.id !== candidate.document.id,
       ));
       await load();
     } catch (reason) {
       onToast(reason instanceof Error ? reason.message : 'Document could not be linked.', 'error');
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const completeObligation = async () => {
+    if (!completionOffer) return;
+    setBusyKey(`complete-${completionOffer.action_id}`);
+    try {
+      await endpoints.actionQueue.updateAction(String(completionOffer.action_id), {
+        version: completionOffer.action_version,
+        status: 'completed',
+      });
+      setCompletionOffer(null);
+      onToast('Payment obligation marked done.');
+    } catch (reason) {
+      onToast(
+        reason instanceof Error ? reason.message : 'The payment obligation could not be completed.',
+        'error',
+      );
     } finally {
       setBusyKey('');
     }
@@ -274,7 +322,7 @@ export default function DocumentRelationshipsPanel({
               value={selectedType}
               onChange={(event) => setTypes((current) => ({
                 ...current,
-                [candidate.document.id]: event.target.value as RelationshipType,
+                [candidate.document.id]: event.target.value as RelationshipChoice,
               }))}
             >
               {RELATIONSHIP_OPTIONS.map((option) => (
@@ -317,6 +365,36 @@ export default function DocumentRelationshipsPanel({
           {addOpen ? 'Close search' : 'Add related'}
         </Button>
       </div>
+
+      {completionOffer ? (
+        <section className="intake-payment-completion-offer" aria-live="polite">
+          <CircleDollarSign size={20} aria-hidden="true" />
+          <div>
+            <strong>Payment evidence linked</strong>
+            <span>{completionOffer.reason}</span>
+            <span>Would you like to mark “{completionOffer.action_title}” done?</span>
+          </div>
+          <div className="intake-payment-completion-actions">
+            <Button
+              size="sm"
+              variant="success"
+              disabled={Boolean(busyKey)}
+              onClick={() => void completeObligation()}
+            >
+              <CheckCircle2 size={14} />
+              {busyKey === `complete-${completionOffer.action_id}` ? 'Marking done…' : 'Mark obligation done'}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={Boolean(busyKey)}
+              onClick={() => setCompletionOffer(null)}
+            >
+              Not now
+            </Button>
+          </div>
+        </section>
+      ) : null}
 
       {addOpen ? (
         <section className="intake-related-search" aria-label="Add a related document">
