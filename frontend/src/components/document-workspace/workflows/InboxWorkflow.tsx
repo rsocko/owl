@@ -1205,7 +1205,6 @@ export default function InboxWorkflow() {
               bodyClassName="intake-workspace-grid"
               previewClassName="intake-preview"
               panelClassName="intake-review-panel"
-              contentClassName="intake-tab-content"
               previewUrl={previewUrl}
               onExpandPreview={() => setPreviewExpanded(true)}
               headerActions={(
