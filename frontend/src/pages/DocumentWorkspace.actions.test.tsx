@@ -427,6 +427,20 @@ describe('DocumentWorkspace actions mode', () => {
     expect(screen.getByText("These are the closest results, but none met Tyrion's match threshold.")).toBeInTheDocument();
     expect(screen.getByText('Search details').closest('details')).not.toHaveAttribute('open');
     expect(screen.getAllByText('Why this result?')[0].closest('details')).not.toHaveAttribute('open');
+    expect(screen.getAllByRole('button', { name: 'Not the match' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'This is the match' })).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'None of these' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Not the match' })[0]);
+    const rejectDialog = screen.getByRole('dialog', { name: 'Mark this as not the match?' });
+    fireEvent.click(within(rejectDialog).getByRole('button', { name: 'Not the match' }));
+
+    await waitFor(() => expect(reviewPaymentCandidateMock).toHaveBeenCalledWith('1', {
+      action: 'reject',
+      revision: 'v1:2:3',
+      idempotency_key: 'owl-review-payment:reject:1:v1:2:3:evidence-near-1',
+      evidence_id: 'evidence-near-1',
+    }));
   });
 
   it('lets the user select, discard, or reject all ambiguous candidates', async () => {

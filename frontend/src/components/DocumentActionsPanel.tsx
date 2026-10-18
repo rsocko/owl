@@ -461,7 +461,9 @@ export default function DocumentActionsPanel({
                 ? 'Confirm this transaction?'
                 : pendingPaymentDecision.action === 'reject_all'
                   ? 'None of these transactions match?'
-                  : 'Discard this candidate?'}
+                  : paymentCheck.state === 'no_match'
+                    ? 'Mark this as not the match?'
+                    : 'Discard this candidate?'}
             </h2>
             <p>
               {pendingPaymentDecision.action === 'confirm'
@@ -470,7 +472,9 @@ export default function DocumentActionsPanel({
                   : 'OWL will record this pending transaction as the selected match without completing the obligation.'
                 : pendingPaymentDecision.action === 'reject_all'
                   ? 'OWL will reject every suggested transaction. The payment action will remain open.'
-                  : 'OWL will remove this transaction from the candidate list. You can run the payment check again later.'}
+                  : paymentCheck.state === 'no_match'
+                    ? 'OWL will record that this transaction is not the payment and remove it from the ranked results.'
+                    : 'OWL will remove this transaction from the candidate list. You can run the payment check again later.'}
             </p>
             <div>
               <Button onClick={() => setPendingPaymentDecision(null)} disabled={paymentBusy}>Cancel</Button>
@@ -487,7 +491,9 @@ export default function DocumentActionsPanel({
                       : 'Confirm pending match'
                     : pendingPaymentDecision.action === 'reject_all'
                       ? 'Reject all candidates'
-                      : 'Discard candidate'}
+                      : paymentCheck.state === 'no_match'
+                        ? 'Not the match'
+                        : 'Discard candidate'}
               </Button>
             </div>
           </section>
@@ -585,9 +591,10 @@ function PaymentCheckPanel({
   const searchContext = paymentCheck?.search_context;
   const checking = busy || paymentCheck?.state === 'checking';
   const unavailable = !loading && !paymentCheck && Boolean(error);
+  const closestResults = paymentCheck?.state === 'no_match';
   const candidateHeading = paymentCheck?.state === 'multiple_matches'
     ? 'Candidates requiring review'
-    : paymentCheck?.state === 'no_match'
+    : closestResults
       ? 'Closest transactions'
       : 'Matched transaction';
   const stateLabel: Record<PaymentCheckState, string> = {
@@ -691,6 +698,26 @@ function PaymentCheckPanel({
                     </ul>
                   </details>
                 ) : null}
+                {closestResults ? (
+                  <div className="payment-candidate-actions">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => onReviewCandidate('reject', item)}
+                    >
+                      Not the match
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => onReviewCandidate('confirm', item)}
+                    >
+                      {item.status === 'pending' ? 'Use pending match' : 'This is the match'}
+                    </Button>
+                  </div>
+                ) : null}
               </li>
             ))}
           </ol>
@@ -728,6 +755,21 @@ function PaymentCheckPanel({
               {candidates.find((item) => item.id === selectedCandidateId)?.status === 'pending'
                 ? 'Confirm pending match'
                 : 'Confirm selected'}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {closestResults && candidates.length ? (
+        <div className="payment-check-confirm">
+          <span>Review the ranked results or confirm that none belongs to this payment.</span>
+          <div className="payment-review-actions">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => onReviewCandidate('reject_all')}
+            >
+              None of these
             </Button>
           </div>
         </div>
