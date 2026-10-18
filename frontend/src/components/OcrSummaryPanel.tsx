@@ -2,7 +2,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock3,
-  ExternalLink,
   FileSearch,
   RefreshCw,
 } from 'lucide-react';
@@ -14,7 +13,7 @@ import {
   type OcrCandidateSummary,
   type OcrSummaryState,
 } from '../hooks/useOcrSummary';
-import { Button, EmptyState, ErrorState, SkeletonLoader } from './ui';
+import { Button, ErrorState, SkeletonLoader } from './ui';
 import '../styles/ocr-summary.css';
 
 const ACTIVE_CANDIDATE_STATES = new Set(['requested', 'running']);
@@ -142,10 +141,6 @@ export default function OcrSummaryPanel({
 
   if (summary.loading) return <SkeletonLoader variant="detail-panel" />;
 
-  if (summary.assessmentError) {
-    return <ErrorState message={`OCR assessment unavailable: ${summary.assessmentError}`} onRetry={summary.reload} />;
-  }
-
   return (
     <section className="ocr-summary" aria-label="OCR summary">
       <div className="ocr-summary-heading">
@@ -165,10 +160,20 @@ export default function OcrSummaryPanel({
       </div>
 
       {!assessment ? (
-        <EmptyState
-          title="No OCR assessment yet"
-          desc="Searchable text may be available, but the multidimensional OCR scorer has not assessed this document."
-        />
+        <div className="ocr-summary-unassessed">
+          <FileSearch size={19} />
+          <div>
+            <strong>Assessment unavailable</strong>
+            <span>
+              {summary.assessmentError
+                ? `OWL could not score this document: ${summary.assessmentError}`
+                : 'OWL is creating the text-quality assessment for this document.'}
+            </span>
+          </div>
+          <Button size="sm" onClick={summary.reload}>
+            <RefreshCw size={14} /> Analyze now
+          </Button>
+        </div>
       ) : (
         <>
           <div className={`ocr-summary-status tone-${statusTone(assessment.review_status)}`}>
@@ -247,25 +252,23 @@ export default function OcrSummaryPanel({
         </>
       )}
 
-      <div className="ocr-summary-text">
-        <div>
+      <details className="ocr-summary-text">
+        <summary>
           <strong>Searchable text preview</strong>
           <span>{summary.text ? `${summary.text.length.toLocaleString()} characters` : 'No text available'}</span>
+        </summary>
+        <div className="ocr-summary-text-body">
+          {summary.textError ? (
+            <ErrorState message={`Searchable text unavailable: ${summary.textError}`} onRetry={summary.reload} />
+          ) : (
+            <textarea readOnly value={summary.text || 'No searchable OCR text is available for this document.'} />
+          )}
         </div>
-        {summary.textError ? (
-          <ErrorState message={`Searchable text unavailable: ${summary.textError}`} onRetry={summary.reload} />
-        ) : (
-          <textarea readOnly value={summary.text || 'No searchable OCR text is available for this document.'} />
-        )}
-      </div>
+      </details>
 
       <p className="ocr-summary-scope-note">
         OCR decisions update document text only. They do not file this document or complete any action.
       </p>
-
-      <a className="ocr-summary-detail-link" href={href}>
-        Open scores, page inspection, and candidate comparison <ExternalLink size={14} />
-      </a>
     </section>
   );
 }

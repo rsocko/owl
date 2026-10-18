@@ -85,7 +85,9 @@ supporting evidence and cannot be confirmed as settlement.
 Action Review uses the same OCR tab as Inbox Review. It summarizes OWL's
 authoritative overall assessment, overlay/readability and machine-extraction
 scores, scorer freshness, candidate or resolution state, top reasons, page
-profile, and current searchable text. **Inspect OCR** opens the full page and
+profile, and current searchable text. A missing corpus assessment is created
+automatically from the selected document's existing Paperless OCR text, and
+the text preview stays collapsed until requested. **Inspect OCR** opens the full page and
 candidate comparison workflow in the same Action Review context. The action
 document rail collapses but remains recoverable, and **Return to review**
 restores the selected action, document, and OCR tab. Candidate selection opens

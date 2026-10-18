@@ -42,6 +42,9 @@ class RunStage(str, Enum):
     """
 
     STAGE_1_CORPUS_SCAN = "stage_1_corpus_scan"
+    # Cheap, text-only assessment created on demand when a user opens one
+    # document's OCR workspace before the corpus inventory has reached it.
+    STAGE_1_MANUAL_SINGLE_DOCUMENT = "stage_1_manual_single_document"
     STAGE_2_STRATIFIED_SAMPLE = "stage_2_stratified_sample"
     # A single-document, on-demand Stage-2 trigger (e.g. from the document
     # detail page) rather than a corpus-wide random sample.

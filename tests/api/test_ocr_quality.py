@@ -25,8 +25,10 @@ def ocr_quality_db(tmp_path):
     ocr_quality_config.settings.database_url = f"sqlite:///{tmp_path / 'api_test_ocr_quality.db'}"
     init_db()
     ocr_quality_router._active_run_ids.clear()
+    ocr_quality_router._active_manual_stage1_document_ids.clear()
     yield
     ocr_quality_router._active_run_ids.clear()
+    ocr_quality_router._active_manual_stage1_document_ids.clear()
     ocr_quality_config.settings.database_url = original
 
 
@@ -458,6 +460,65 @@ class TestGetDocument:
         body = resp.json()
         assert body["has_stage2_analysis"] is True
         assert body["overlay_score"] is None
+
+
+# ---------------------------------------------------------------------------
+# Ensure Stage-1 for a single document
+# ---------------------------------------------------------------------------
+
+
+class TestAssessDocument:
+    def test_creates_text_assessment_without_waiting_for_corpus_scan(
+        self, client, ocr_quality_db, mock_paperless
+    ):
+        mock_paperless.get_document.return_value = {
+            "id": 9924,
+            "title": "Fence estimate",
+            "content": "Reliable Fence Co. estimate total 2923 dollars.",
+            "created": "2026-10-18",
+            "modified": "2026-10-18T12:00:00Z",
+            "document_type": 2,
+            "correspondent": 4,
+        }
+
+        resp = client.post("/api/ocr-quality/documents/9924/assess")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["document_id"] == 9924
+        assert body["machine_score"] is not None
+        assert body["overlay_score"] is None
+        assert body["has_stage2_analysis"] is False
+        mock_paperless.get_document.assert_awaited_once_with(9924)
+
+    def test_repeated_assessment_is_idempotent(self, client, ocr_quality_db, mock_paperless):
+        mock_paperless.get_document.return_value = {
+            "id": 9924,
+            "content": "Existing searchable OCR text.",
+            "modified": "2026-10-18T12:00:00Z",
+        }
+
+        first = client.post("/api/ocr-quality/documents/9924/assess")
+        second = client.post("/api/ocr-quality/documents/9924/assess")
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        db = get_session()
+        try:
+            assert db.query(DocumentAssessment).filter_by(document_id=9924).count() == 1
+        finally:
+            db.close()
+
+    def test_concurrent_assessment_returns_conflict(self, client, ocr_quality_db, mock_paperless):
+        ocr_quality_router._active_manual_stage1_document_ids.add(9924)
+        try:
+            resp = client.post("/api/ocr-quality/documents/9924/assess")
+        finally:
+            ocr_quality_router._active_manual_stage1_document_ids.discard(9924)
+
+        assert resp.status_code == 409
+        assert resp.json()["error"]["code"] == "assessment_already_in_progress"
+        mock_paperless.get_document.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

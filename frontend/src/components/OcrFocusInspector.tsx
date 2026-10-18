@@ -111,7 +111,18 @@ export default function OcrFocusInspector({
     try {
       setDetail(await endpoints.ocrQuality.documentDetail(documentId) as DocumentDetail);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Failed to load OCR assessment.');
+      const isNotFound = loadError instanceof Error
+        && 'status' in loadError
+        && (loadError as { status?: number }).status === 404;
+      if (isNotFound) {
+        try {
+          setDetail(await endpoints.ocrQuality.assessDocument(documentId) as DocumentDetail);
+        } catch (assessmentError) {
+          setError(assessmentError instanceof Error ? assessmentError.message : 'Failed to assess OCR.');
+        }
+      } else {
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load OCR assessment.');
+      }
     } finally {
       setLoading(false);
     }
