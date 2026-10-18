@@ -72,6 +72,9 @@ from doc_intelligence_hub.modules.action_queue.obligations import (
 from doc_intelligence_hub.modules.action_queue.pipeline import get_pipeline_progress, run_pipeline
 from doc_intelligence_hub.modules.action_queue.risk_scoring import recalculate_risk_scores
 from doc_intelligence_hub.modules.statements.config import resolve_api_token
+from doc_intelligence_hub.modules.triage.relationships import (
+    requeue_active_relationship_projections,
+)
 
 router = APIRouter(prefix="/api/queue", tags=["action-queue"])
 logger = logging.getLogger(__name__)
@@ -861,6 +864,9 @@ async def queue_setup_metadata_schema(request: Request) -> dict[str, Any]:
         keys = provisioned_metadata_field_keys()
         current = await resolver.resolve(keys)
         readiness = _metadata_schema_readiness(current, write_enabled=True)
+        native_relationship_field_missing = (
+            current.field(MetadataFieldKey.RELATED_DOCUMENTS).canonical_id is None
+        )
         if readiness["status"] == "incompatible":
             raise HTTPException(
                 status_code=409,
@@ -873,7 +879,11 @@ async def queue_setup_metadata_schema(request: Request) -> dict[str, Any]:
                 },
             )
         schema = await resolver.ensure(keys)
-        return _metadata_schema_readiness(schema, write_enabled=True)
+        result = _metadata_schema_readiness(schema, write_enabled=True)
+        result["requeued_relationships"] = (
+            requeue_active_relationship_projections() if native_relationship_field_missing else 0
+        )
+        return result
     except HTTPException:
         raise
     except httpx.HTTPStatusError as exc:

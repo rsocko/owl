@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from doc_intelligence_hub.api.routers import intake_review
 from doc_intelligence_hub.core.paperless.client import PaperlessPage
+from doc_intelligence_hub.modules.triage.reference_discovery import (
+    ExplicitReference,
+    ResolvedReference,
+)
 
 
 def _document(**overrides):
@@ -180,6 +184,71 @@ def test_relationship_candidates_suggest_same_recurring_series(client, mock_pape
         "document_type_match",
     ]
     mock_paperless.list_documents.assert_awaited_once_with(correspondent_id=1, limit=12)
+
+
+def test_relationship_candidates_classify_receipt_as_payment_evidence(client, mock_paperless):
+    intake_review._taxonomy_cache = None
+    mock_paperless.get_document.return_value = _document(title="New invoice 4826")
+    mock_paperless.list_documents.return_value = [
+        _document(title="New invoice 4826"),
+        _document(id=77, title="Pool Fence - 4826 Payment Receipt", created="2026-02-05"),
+    ]
+
+    response = client.get("/api/intake/documents/42/relationship-candidates")
+
+    assert response.status_code == 200
+    recommendation = response.json()["candidates"][0]["recommendation"]
+    assert recommendation["source_document_id"] == 77
+    assert recommendation["target_document_id"] == 42
+    assert recommendation["relationship_type"] == "supports"
+    assert recommendation["auto_create"] is True
+    assert "payment_evidence" in recommendation["reason_codes"]
+
+
+def test_relationship_candidates_include_cross_correspondent_reference_match(
+    client, mock_paperless
+):
+    intake_review._taxonomy_cache = None
+    current = _document(title="Notice for case CV-2026-1042", correspondent=1)
+    related = _document(
+        id=77,
+        title="Prior filing",
+        correspondent=2,
+        document_type=3,
+        created="2026-09-14",
+    )
+    mock_paperless.get_document.side_effect = [current, related]
+    mock_paperless.list_documents.return_value = [current]
+    reference = ExplicitReference(kind="case", value="CV-2026-1042", source="llm")
+    resolution = ResolvedReference(
+        reference=reference,
+        document_ids=(77,),
+        substring_match_count=2,
+        status="resolved",
+    )
+
+    with (
+        patch(
+            "doc_intelligence_hub.api.routers.intake_review.extract_explicit_references",
+            new=AsyncMock(return_value=[reference]),
+        ),
+        patch(
+            "doc_intelligence_hub.api.routers.intake_review.resolve_references",
+            new=AsyncMock(return_value=[resolution]),
+        ),
+    ):
+        response = client.get("/api/intake/documents/42/relationship-candidates")
+
+    assert response.status_code == 200
+    candidate = response.json()["candidates"][0]
+    assert candidate["document"]["id"] == 77
+    assert candidate["recommendation"]["relationship_type"] == "same_sequence"
+    assert candidate["recommendation"]["confidence"] == 0.7
+    assert candidate["recommendation"]["reason_codes"] == [
+        "explicit_reference_match",
+        "chronology",
+    ]
+    assert candidate["recommendation"]["auto_create"] is False
 
 
 def test_suggestions_are_cached_for_the_document_revision(client, mock_paperless):

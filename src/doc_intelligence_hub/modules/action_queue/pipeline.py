@@ -22,6 +22,13 @@ from doc_intelligence_hub.modules.analysis_invalidation.database import (
 )
 from doc_intelligence_hub.modules.analysis_invalidation.models import FreshnessStatus
 from doc_intelligence_hub.modules.analysis_invalidation.service import AnalysisFreshnessService
+from doc_intelligence_hub.modules.triage.relationship_projection import (
+    project_relationships_to_paperless,
+)
+from doc_intelligence_hub.modules.triage.relationships import (
+    list_document_relationships,
+    set_projection_result,
+)
 
 from .analyzer import OllamaAnalyzer, is_non_actionable_receipt, urgency_to_severity
 from .config import settings
@@ -828,19 +835,28 @@ class Pipeline:
                                 await self.enricher.sync_status(doc_id, "not_an_action")
                                 if receipt_match:
                                     matched_action, _ = receipt_match
-                                    projection_ids = obligation_projection_document_ids(
-                                        db,
-                                        (
-                                            {matched_action.obligation_id}
-                                            if matched_action.obligation_id
-                                            else set()
-                                        ),
-                                    )
-                                    projection = await project_obligations_to_paperless(
-                                        db,
+                                    relationships = [
+                                        relationship
+                                        for relationship in list_document_relationships(doc_id)
+                                        if relationship["relationship_type"] == "supports"
+                                        and relationship["target_document_id"]
+                                        == matched_action.document_id
+                                    ]
+                                    if not relationships:
+                                        raise RuntimeError(
+                                            "The matched receipt relationship was not persisted."
+                                        )
+                                    projection = await project_relationships_to_paperless(
                                         self.paperless,
-                                        document_ids=projection_ids,
+                                        {doc_id, matched_action.document_id},
                                     )
+                                    for relationship in relationships:
+                                        set_projection_result(
+                                            relationship["id"],
+                                            synced=bool(projection["synced"]),
+                                            error=projection["error"],
+                                            error_code=projection.get("error_code"),
+                                        )
                                     if not projection["synced"]:
                                         raise RuntimeError(projection["error"])
                                 for existing_action in existing_actions:

@@ -423,6 +423,8 @@ export const endpoints = {
     graph: (actionId: number) => api.get(`/api/relationships/graph?action_id=${actionId}`),
     propose: (body: unknown) => api.post('/api/relationships/propose', body),
     create: (body: unknown) => api.post('/api/relationships', body),
+    createPaymentEvidence: (body: { left_document_id: number; right_document_id: number }) =>
+      api.post('/api/relationships/payment-evidence', body),
     remove: (id: string) => api.delete(`/api/relationships/${id}`),
     projectionHealth: () => api.get('/api/relationships/projection-health'),
     reconcileProjections: () => api.post('/api/relationships/reconcile-projections'),

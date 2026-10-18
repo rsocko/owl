@@ -54,9 +54,9 @@ be retired. Unknown fields are user-owned and are always preserved.
 | Outcome | Fields |
 |---|---|
 | Keep — durable archive metadata | `Account Identifier`, `Patient Name`, `Provider Name`, `Date of Service`, `Patient Responsibility`, `Claim Number`, `Invoice Number`, `Series Name`, `Document Amount`, `Document Due Date` |
-| Keep — OWL projection | `Related Document IDs`, `Relationship Summary`, `Related Documents`, `Obligation ID`, `Obligation Role`, `Action Status` |
+| Keep — OWL projection | `OWL Related Documents`, `Relationship Summary`, `Related Documents`, `Obligation ID`, `Obligation Role`, `Action Status` |
 | Migrate, then retire when empty | `di_account_id`, `di_patient_name`, `di_provider_name`, `di_date_of_service`, `di_patient_resp`, `di_claim_number`, `di_invoice_number`, `Action Amount` |
-| Retire when empty | `Action Analyzed`, `Action Type`, `Action Due Date`, `Action Urgency`, `Action Summary`, `Action Count`, `EOB Match Status`, `EOB Match Score`, `EOB Match Confidence`, `EOB Matched Document`, `EOB Document Type`, `EOB Patient Responsibility`, `EOB Analyzed` |
+| Retire when empty | `Related Document IDs`, `Action Analyzed`, `Action Type`, `Action Due Date`, `Action Urgency`, `Action Summary`, `Action Count`, `EOB Match Status`, `EOB Match Score`, `EOB Match Confidence`, `EOB Matched Document`, `EOB Document Type`, `EOB Patient Responsibility`, `EOB Analyzed` |
 | Preserve | Every unregistered/custom deployment field |
 
 The action fields are retired because OWL stores actions as first-class records and one
@@ -75,9 +75,9 @@ OWL provisions three additional Paperless custom fields for obligation navigatio
 | `Obligation ID` | Text | Stable OWL-owned obligation identifier shared by all projected documents |
 | `Obligation Role` | Select | `invoice`, `receipt`, `reminder`, `revision`, or `supporting` |
 
-These are new fields; the existing `Related Document IDs` and `Relationship Summary`
-fields describe generic document relationships and cannot provide native Paperless
-navigation or obligation identity. OWL remains authoritative for confidence, provenance,
+These are new fields; `OWL Related Documents` and `Relationship Summary` describe
+generic typed document relationships, while the obligation fields provide obligation
+membership and identity. OWL remains authoritative for confidence, provenance,
 rejected-link tombstones, action suppression, and completion state.
 
 Link and unlink operations rebuild the projection on every affected document. The

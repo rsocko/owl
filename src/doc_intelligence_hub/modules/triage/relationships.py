@@ -44,6 +44,12 @@ _NOTICE_PATTERNS: tuple[tuple[str, int, re.Pattern[str]], ...] = (
 _SUPERSESSION_PATTERN = re.compile(
     r"\b(revised|updated|corrected|replacement|replaces|supersedes)\b", re.I
 )
+_RECEIPT_PATTERN = re.compile(
+    r"\b(receipts?|payment (?:received|confirmation|confirmed|completed)|paid in full)\b",
+    re.I,
+)
+_INVOICE_PATTERN = re.compile(r"\b(invoice|bill|amount due|balance due)\b", re.I)
+_TITLE_REFERENCE_PATTERN = re.compile(r"\b(?=[A-Z0-9-]*\d)[A-Z0-9-]{4,}\b", re.I)
 
 
 class RelationshipConflictError(ValueError):
@@ -130,7 +136,44 @@ def _parse_date(metadata: dict[str, Any]) -> date | None:
 
 
 def _document_text(metadata: dict[str, Any]) -> str:
-    return " ".join(str(metadata.get(key) or "") for key in ("title", "summary", "content", "text"))
+    return " ".join(
+        str(metadata.get(key) or "")
+        for key in ("title", "document_type_name", "summary", "content", "text")
+    )
+
+
+def classify_document_role(metadata: dict[str, Any]) -> str | None:
+    title = str(metadata.get("title") or "")
+    document_type = str(metadata.get("document_type_name") or metadata.get("doc_type") or "")
+    content = " ".join(str(metadata.get(key) or "") for key in ("summary", "content", "text"))
+    if _RECEIPT_PATTERN.search(title):
+        return "receipt"
+    if _INVOICE_PATTERN.search(title):
+        return "invoice"
+    if _RECEIPT_PATTERN.search(f"{document_type} {content}"):
+        return "receipt"
+    if _INVOICE_PATTERN.search(f"{document_type} {content}"):
+        return "invoice"
+    return None
+
+
+def _title_references(metadata: dict[str, Any]) -> set[str]:
+    references = {
+        _normalized(match)
+        for match in _TITLE_REFERENCE_PATTERN.findall(str(metadata.get("title") or ""))
+    }
+    return {
+        reference
+        for reference in references
+        if reference and not (len(reference) == 4 and reference.startswith(("19", "20")))
+    }
+
+
+def _explicit_references(metadata: dict[str, Any]) -> set[str]:
+    values = metadata.get("explicit_references") or []
+    if isinstance(values, str):
+        values = [values]
+    return {_normalized(value) for value in values if _normalized(value)}
 
 
 def calculate_priority_adjustment(
@@ -172,12 +215,17 @@ def classify_related_notice(
     right_provider = _normalized(
         right.get("provider") or right.get("provider_name") or right.get("correspondent")
     )
-    if not left_provider or left_provider != right_provider:
+    shared_explicit_references = _explicit_references(left) & _explicit_references(right)
+    providers_match = bool(left_provider and left_provider == right_provider)
+    if not providers_match and not shared_explicit_references:
         return None
 
-    reasons = ["provider_match"]
-    confidence = 0.2
-    identity_match = False
+    reasons = ["provider_match"] if providers_match else []
+    confidence = 0.2 if providers_match else 0.0
+    identity_match = bool(shared_explicit_references)
+    if shared_explicit_references:
+        reasons.append("explicit_reference_match")
+        confidence += 0.6
     for key in ("invoice_number", "claim_number"):
         left_id, right_id = _normalized(left.get(key)), _normalized(right.get(key))
         if left_id and left_id == right_id:
@@ -185,6 +233,13 @@ def classify_related_notice(
             confidence += 0.5
             identity_match = True
             break
+
+    if not identity_match:
+        shared_title_references = _title_references(left) & _title_references(right)
+        if shared_title_references:
+            reasons.append("title_reference_match")
+            confidence += 0.5
+            identity_match = True
 
     if not identity_match:
         left_account = _normalized(left.get("account_identifier") or left.get("account_hint"))
@@ -203,6 +258,22 @@ def classify_related_notice(
             identity_match = True
     if not identity_match:
         return None
+
+    left_role, right_role = classify_document_role(left), classify_document_role(right)
+    if {left_role, right_role} == {"invoice", "receipt"}:
+        receipt_id = left_document_id if left_role == "receipt" else right_document_id
+        invoice_id = left_document_id if left_role == "invoice" else right_document_id
+        confidence = min(1.0, round(confidence + 0.15, 2))
+        return RelationshipProposal(
+            source_document_id=receipt_id,
+            target_document_id=invoice_id,
+            relationship_type="supports",
+            confidence=confidence,
+            reason_codes=tuple(dict.fromkeys([*reasons, "payment_evidence"])),
+            priority_adjustment=0,
+            priority_explanation="No relationship priority adjustment",
+            auto_create=confidence >= AUTOMATIC_CONFIDENCE_THRESHOLD,
+        )
 
     left_date, right_date = _parse_date(left), _parse_date(right)
     if left_date and right_date and left_date != right_date:
@@ -295,6 +366,34 @@ def list_pending_projection_relationships(limit: int = 100) -> list[dict[str, An
             .all()
         )
         return [_relationship_to_dict(relationship) for relationship in relationships]
+    finally:
+        session.close()
+
+
+def requeue_active_relationship_projections() -> int:
+    """Mark active Paperless relationship projections for a full schema rebuild."""
+    session = get_session()
+    try:
+        updated = (
+            session.query(DocumentRelationship)
+            .filter(
+                DocumentRelationship.removed_at.is_(None),
+                DocumentRelationship.paperless_projection_enabled == 1,
+            )
+            .update(
+                {
+                    DocumentRelationship.paperless_synced: 0,
+                    DocumentRelationship.projection_error: None,
+                    DocumentRelationship.projection_error_code: None,
+                },
+                synchronize_session=False,
+            )
+        )
+        session.commit()
+        return int(updated)
+    except Exception:
+        session.rollback()
+        raise
     finally:
         session.close()
 
@@ -394,6 +493,7 @@ def create_document_relationship(
     priority_explanation: str = "",
     source_duplicate_pair_id: str | None = None,
     project_to_paperless: bool = True,
+    reconcile_action_queue: bool = True,
 ) -> tuple[dict[str, Any], bool]:
     if source_document_id == target_document_id:
         raise ValueError("A document cannot be related to itself")
@@ -427,6 +527,51 @@ def create_document_relationship(
             .all()
         )
         for existing in active:
+            if relationship_type == "supports" and existing.relationship_type == "same_sequence":
+                existing.source_document_id = source_document_id
+                existing.target_document_id = target_document_id
+                existing.relationship_type = relationship_type
+                existing.provenance = provenance
+                existing.confidence = confidence
+                existing.reason_codes_json = json.dumps(list(reason_codes))
+                existing.priority_adjustment = priority_adjustment
+                existing.priority_explanation = priority_explanation
+                existing.source_duplicate_pair_id = source_duplicate_pair_id
+                existing.paperless_projection_enabled = int(project_to_paperless)
+                existing.paperless_synced = 0
+                existing.projection_error = None
+                existing.projection_error_code = None
+                session.add(
+                    CorrectionEvent(
+                        event_type="relationship_reclassified",
+                        target_type="document_relationship",
+                        target_id=existing.id,
+                        payload_json=json.dumps(
+                            {
+                                "previous_relationship_type": "same_sequence",
+                                "relationship_type": relationship_type,
+                                "source_document_id": source_document_id,
+                                "target_document_id": target_document_id,
+                                "provenance": provenance,
+                                "reason_codes": list(reason_codes),
+                            }
+                        ),
+                    )
+                )
+                session.commit()
+                session.refresh(existing)
+                result = _relationship_to_dict(existing)
+                if reconcile_action_queue:
+                    from doc_intelligence_hub.modules.action_queue.obligations import (
+                        reconcile_relationship_change,
+                    )
+
+                    reconcile_relationship_change(
+                        {source_document_id, target_document_id},
+                        relationship_id=existing.id,
+                        event_type="relationship_reclassified",
+                    )
+                return result, False
             same_direction = (
                 existing.source_document_id == source_document_id
                 and existing.target_document_id == target_document_id
@@ -478,15 +623,20 @@ def create_document_relationship(
         session.commit()
         session.refresh(relationship)
         result = _relationship_to_dict(relationship)
-        from doc_intelligence_hub.modules.action_queue.obligations import (
-            reconcile_relationship_change,
-        )
+        if reconcile_action_queue and relationship_type in {
+            "follows",
+            "supersedes",
+            "same_sequence",
+        }:
+            from doc_intelligence_hub.modules.action_queue.obligations import (
+                reconcile_relationship_change,
+            )
 
-        reconcile_relationship_change(
-            {source_document_id, target_document_id},
-            relationship_id=relationship.id,
-            event_type="relationship_created",
-        )
+            reconcile_relationship_change(
+                {source_document_id, target_document_id},
+                relationship_id=relationship.id,
+                event_type="relationship_created",
+            )
         return result, True
     finally:
         session.close()
@@ -524,18 +674,19 @@ def remove_document_relationship(
                 )
             )
             session.commit()
-            from doc_intelligence_hub.modules.action_queue.obligations import (
-                reconcile_relationship_change,
-            )
+            if relationship.relationship_type in {"follows", "supersedes", "same_sequence"}:
+                from doc_intelligence_hub.modules.action_queue.obligations import (
+                    reconcile_relationship_change,
+                )
 
-            reconcile_relationship_change(
-                {
-                    relationship.source_document_id,
-                    relationship.target_document_id,
-                },
-                relationship_id=relationship.id,
-                event_type="relationship_removed",
-            )
+                reconcile_relationship_change(
+                    {
+                        relationship.source_document_id,
+                        relationship.target_document_id,
+                    },
+                    relationship_id=relationship.id,
+                    event_type="relationship_removed",
+                )
         return _relationship_to_dict(relationship)
     finally:
         session.close()

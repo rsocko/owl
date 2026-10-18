@@ -282,12 +282,12 @@ _REGISTRY_ENTRIES = (
     ),
     _spec(
         MetadataFieldKey.RELATED_DOCUMENTS,
-        "Related Document IDs",
-        PaperlessFieldType.TEXT,
-        MetadataNormalization.TEXT,
+        "OWL Related Documents",
+        PaperlessFieldType.DOCUMENT_LINK,
+        MetadataNormalization.DOCUMENT_LINK,
         projection_policy=_OPERATIONAL,
         create_policy=_CREATE,
-        create_type=PaperlessFieldType.TEXT,
+        create_type=PaperlessFieldType.DOCUMENT_LINK,
     ),
     _spec(
         MetadataFieldKey.RELATIONSHIP_SUMMARY,

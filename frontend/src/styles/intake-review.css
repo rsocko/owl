@@ -515,6 +515,41 @@
   padding: 0.75rem;
 }
 
+.intake-payment-completion-offer {
+  margin-top: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--success) 32%, var(--border));
+  border-radius: calc(var(--radius-sm) + 2px);
+  background: var(--success-bg);
+  color: var(--success);
+  padding: 0.75rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.intake-payment-completion-offer > div:first-of-type {
+  min-width: 0;
+  display: grid;
+  gap: 0.12rem;
+}
+
+.intake-payment-completion-offer strong {
+  color: var(--text);
+  font-size: 0.76rem;
+}
+
+.intake-payment-completion-offer span {
+  color: var(--text-muted);
+  font-size: 0.66rem;
+}
+
+.intake-payment-completion-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 .intake-related-search-row {
   align-items: stretch;
   gap: 0.5rem;
@@ -1648,6 +1683,15 @@
   .intake-related-candidate-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .intake-payment-completion-offer {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .intake-payment-completion-actions {
+    grid-column: 1 / -1;
+    padding-left: 1.7rem;
   }
 
   .intake-footer-actions .btn {

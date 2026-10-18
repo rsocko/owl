@@ -18,7 +18,10 @@ from doc_intelligence_hub.modules.triage.relationships import (
     classify_related_notice,
     create_document_relationship,
     list_document_relationships,
+    list_pending_projection_relationships,
     remove_document_relationship,
+    requeue_active_relationship_projections,
+    set_projection_result,
 )
 
 
@@ -97,6 +100,78 @@ def test_classifier_requires_provider_and_obligation_identity():
     )
 
 
+def test_payment_receipt_supports_invoice_and_auto_creates():
+    proposal = classify_related_notice(
+        10,
+        {
+            **_bill(title="New invoice 4826", document_date="2026-01-06", amount=1913),
+            "invoice_number": None,
+            "document_type_name": "Receipt",
+        },
+        20,
+        {
+            **_bill(
+                title="Pool Fence - 4826 Payment Receipt", document_date="2026-02-05", amount=1913
+            ),
+            "invoice_number": None,
+            "document_type_name": "Receipt",
+        },
+    )
+
+    assert proposal is not None
+    assert proposal.source_document_id == 20
+    assert proposal.target_document_id == 10
+    assert proposal.relationship_type == "supports"
+    assert proposal.auto_create is True
+    assert proposal.reason_codes == (
+        "provider_match",
+        "title_reference_match",
+        "payment_evidence",
+    )
+
+
+def test_payment_receipt_title_wins_when_it_mentions_the_invoice():
+    proposal = classify_related_notice(
+        10,
+        _bill(title="Invoice 4826", document_date="2026-01-06", amount=1913),
+        20,
+        _bill(
+            title="Payment receipt for invoice 4826",
+            document_date="2026-02-05",
+            amount=1913,
+        ),
+    )
+
+    assert proposal is not None
+    assert proposal.relationship_type == "supports"
+    assert proposal.source_document_id == 20
+
+
+def test_explicit_reference_can_suggest_cross_provider_relationship():
+    proposal = classify_related_notice(
+        10,
+        {
+            "provider": "General Contractor",
+            "title": "Project correspondence",
+            "explicit_references": ["PO-91827"],
+            "document_date": "2026-01-01",
+        },
+        20,
+        {
+            "provider": "Material Supplier",
+            "title": "Delivery confirmation",
+            "explicit_references": ["PO-91827"],
+            "document_date": "2026-01-02",
+        },
+    )
+
+    assert proposal is not None
+    assert proposal.relationship_type == "same_sequence"
+    assert proposal.confidence == 0.7
+    assert proposal.reason_codes == ("explicit_reference_match", "chronology")
+    assert proposal.auto_create is False
+
+
 def test_priority_uses_highest_notice_stage_only():
     adjustment, reasons, explanation = calculate_priority_adjustment(
         "Second notice. Final notice before collections.", "follows"
@@ -131,6 +206,25 @@ def test_create_is_idempotent_and_queryable_in_both_directions(db):
     assert list_document_relationships(10, "incoming")[0]["source_document_id"] == 20
 
 
+def test_requeue_active_relationship_projections_rebuilds_synced_links(db):
+    relationship, _ = create_document_relationship(
+        source_document_id=10,
+        target_document_id=20,
+        relationship_type="supports",
+        provenance="automatic",
+        confidence=0.95,
+        reason_codes=("payment_evidence",),
+    )
+    set_projection_result(relationship["id"], synced=True, error=None)
+
+    assert list_pending_projection_relationships() == []
+    assert requeue_active_relationship_projections() == 1
+
+    pending = list_pending_projection_relationships()
+    assert [item["id"] for item in pending] == [relationship["id"]]
+    assert pending[0]["projection_error"] is None
+
+
 def test_symmetric_reverse_creation_is_idempotent(db):
     first, _ = create_document_relationship(
         source_document_id=2,
@@ -147,6 +241,31 @@ def test_symmetric_reverse_creation_is_idempotent(db):
     assert created is False
     assert reverse["id"] == first["id"]
     assert first["source_document_id"] == 1
+
+
+def test_payment_evidence_reclassifies_existing_recurring_link(db):
+    existing, _ = create_document_relationship(
+        source_document_id=1,
+        target_document_id=2,
+        relationship_type="same_sequence",
+        provenance="user",
+    )
+
+    updated, created = create_document_relationship(
+        source_document_id=2,
+        target_document_id=1,
+        relationship_type="supports",
+        provenance="automatic",
+        confidence=0.9,
+        reason_codes=["payment_evidence"],
+    )
+
+    assert created is False
+    assert updated["id"] == existing["id"]
+    assert updated["source_document_id"] == 2
+    assert updated["target_document_id"] == 1
+    assert updated["relationship_type"] == "supports"
+    assert len(list_document_relationships(1)) == 1
 
 
 def test_conflicting_sequence_relationship_is_rejected(db):

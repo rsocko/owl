@@ -22,19 +22,28 @@ from doc_intelligence_hub.modules.action_queue.obligations import (
     manually_link_document,
     unlink_document,
 )
+from doc_intelligence_hub.modules.triage.database import (
+    init_db as init_triage_db,
+)
+from doc_intelligence_hub.modules.triage.database import (
+    set_db_url as set_triage_db_url,
+)
 
 
 @pytest.fixture()
 def db(tmp_path):
     original_url = settings.database_url
     settings.database_url = f"sqlite:///{tmp_path / 'actions.db'}"
+    set_triage_db_url(f"sqlite:///{tmp_path / 'triage.db'}")
     init_db()
+    init_triage_db()
     session = get_session()
     try:
         yield session
     finally:
         session.close()
         settings.database_url = original_url
+        set_triage_db_url("sqlite:///data/triage.db")
 
 
 def _action(document_id: int = 10) -> Action:
