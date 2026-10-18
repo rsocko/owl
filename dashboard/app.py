@@ -1,12 +1,13 @@
 """Streamlit dashboard for the Paperless Action Queue."""
 
-import streamlit as st
 import asyncio
 from datetime import datetime
 
-from doc_intelligence_hub.modules.action_queue.database import get_session, init_db, Action
-from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
+import streamlit as st
+
 from doc_intelligence_hub.modules.action_queue.config import settings
+from doc_intelligence_hub.modules.action_queue.database import Action, get_session, init_db
+from doc_intelligence_hub.modules.action_queue.enricher import PaperlessEnricher
 
 # Page config
 st.set_page_config(
@@ -71,7 +72,19 @@ with st.sidebar:
     urgency_options = ["All", "CRITICAL", "HIGH", "MEDIUM", "LOW"]
     selected_urgency = st.selectbox("Urgency", urgency_options, index=0)
 
-    type_options = ["All", "PAY", "RESPOND", "FILE", "REVIEW", "SHARE", "SCHEDULE", "SIGN", "ARCHIVE"]
+    type_options = [
+        "All",
+        "PAY",
+        "RESPOND",
+        "REVIEW",
+        "SHARE",
+        "SCHEDULE",
+        "SIGN",
+        "CANCEL",
+        "RENEW",
+        "DISPUTE",
+        "TASK",
+    ]
     selected_type = st.selectbox("Action Type", type_options, index=0)
 
     st.divider()

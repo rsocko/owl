@@ -277,6 +277,8 @@ _REGISTRY_ENTRIES = (
         PaperlessFieldType.TEXT,
         MetadataNormalization.TEXT,
         projection_policy=_DURABLE,
+        create_policy=_CREATE,
+        create_type=PaperlessFieldType.TEXT,
     ),
     _spec(
         MetadataFieldKey.RELATED_DOCUMENTS,
@@ -477,6 +479,18 @@ _REGISTRY_ENTRIES = (
 PAPERLESS_METADATA_REGISTRY: Mapping[MetadataFieldKey, MetadataFieldSpec] = MappingProxyType(
     {entry.key: entry for entry in _REGISTRY_ENTRIES}
 )
+
+
+def provisioned_metadata_field_keys() -> tuple[MetadataFieldKey, ...]:
+    """Return every active Paperless field OWL can safely provision."""
+    return tuple(
+        spec.key
+        for spec in PAPERLESS_METADATA_REGISTRY.values()
+        if spec.retirement_policy is MetadataRetirementPolicy.KEEP
+        and spec.write_policy is MetadataWritePolicy.READ_WRITE
+        and spec.create_policy is not MetadataCreatePolicy.NEVER
+        and spec.create_type is not None
+    )
 
 
 def get_metadata_field_spec(key: MetadataFieldKey | str) -> MetadataFieldSpec:
@@ -1132,6 +1146,7 @@ __all__ = [
     "govern_account_identifier",
     "get_metadata_field_spec",
     "mask_account_identifier",
+    "provisioned_metadata_field_keys",
     "resolve_metadata_schema",
     "resolve_metadata_value",
 ]

@@ -30,7 +30,7 @@ Return a JSON object with these fields:
 {{
   "actions": [
     {{
-      "action_type": "PAY|RESPOND|FILE|REVIEW|SHARE|SCHEDULE|SIGN|ARCHIVE|CANCEL|RENEW|DISPUTE|TASK",
+      "action_type": "PAY|RESPOND|REVIEW|SHARE|SCHEDULE|SIGN|CANCEL|RENEW|DISPUTE|TASK",
       "title": "Short action title (e.g., 'Pay Electric Bill - $142.35')",
       "summary": "One sentence describing what needs to be done",
       "due_date": "YYYY-MM-DD or null if no deadline",
@@ -73,6 +73,7 @@ Return a JSON object with these fields:
 IMPORTANT:
 - Most documents will have exactly ONE action. Only include multiple if the document genuinely requires separate actions.
 - If the document requires NO action (informational receipt, old statement, etc.), set "requires_action": false and return an empty actions array.
+- Filing, retaining, or archiving a document is metadata/intake work, not an action. Statements, receipts, tax records, confirmations, reference documents, and "for your records" notices return no action unless the text explicitly requires a separate real-world task.
 - PAY requires clear evidence of an unresolved obligation: an amount currently due, a payment request, or an unpaid balance.
 - Receipts, payment confirmations, and successful-transaction notices record completed payments. Return no action for them, even if they contain an amount, payment URL, provider name, or references to a bill or invoice.
 - If receipt metadata conflicts with text indicating an outstanding balance or payment request, create a REVIEW action instead of PAY so a person can resolve the contradiction.
@@ -88,12 +89,10 @@ Rules for urgency:
 Rules for action_type:
 - PAY: Bills, invoices, payment requests
 - RESPOND: Forms, surveys, letters requiring a reply or communication back
-- FILE: Statements, receipts, informational documents (no action needed)
 - REVIEW: Contracts, policies, notices requiring careful reading before deciding
 - SHARE: Tax forms, documents to forward to accountant/lawyer/family
 - SCHEDULE: Appointments, renewals, events to put on calendar
 - SIGN: Documents requiring signature
-- ARCHIVE: Already processed, ready for long-term storage
 - CANCEL: Cancellation notices, opt-outs, unsubscribes, service terminations requiring confirmation
 - RENEW: Subscriptions, memberships, licenses, or registrations coming due for renewal
 - DISPUTE: Documents indicating an error, overcharge, or discrepancy requiring correction or challenge
@@ -485,12 +484,10 @@ class OllamaAnalyzer:
         valid_types = {
             "PAY",
             "RESPOND",
-            "FILE",
             "REVIEW",
             "SHARE",
             "SCHEDULE",
             "SIGN",
-            "ARCHIVE",
             "CANCEL",
             "RENEW",
             "DISPUTE",
@@ -499,10 +496,14 @@ class OllamaAnalyzer:
         valid_urgency = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 
         validated_actions = []
+        informational_actions = 0
         for action in data.get("actions", []):
             if not action.get("action_type") or not action.get("title"):
                 continue
             action["action_type"] = action["action_type"].upper()
+            if action["action_type"] in {"FILE", "ARCHIVE"}:
+                informational_actions += 1
+                continue
             if action["action_type"] not in valid_types:
                 action["action_type"] = "TASK"
             action["urgency"] = action.get("urgency", "MEDIUM").upper()
@@ -515,6 +516,18 @@ class OllamaAnalyzer:
             validated_actions.append(action)
 
         data["actions"] = validated_actions
+        if informational_actions and not validated_actions:
+            assessment["requires_action"] = False
+            assessment["primary_action_index"] = 0
+            assessment["reasoning"] = (
+                "Informational filing or archival outcome; no real-world action is required."
+            )
+        elif validated_actions:
+            assessment["requires_action"] = True
+            assessment["primary_action_index"] = min(
+                int(assessment.get("primary_action_index", 0) or 0),
+                len(validated_actions) - 1,
+            )
 
         valid_quality = {"good", "fair", "poor", "unreadable"}
         if assessment.get("text_quality", "").lower() not in valid_quality:
@@ -530,12 +543,10 @@ class OllamaAnalyzer:
         valid_types = {
             "PAY",
             "RESPOND",
-            "FILE",
             "REVIEW",
             "SHARE",
             "SCHEDULE",
             "SIGN",
-            "ARCHIVE",
             "CANCEL",
             "RENEW",
             "DISPUTE",
@@ -544,6 +555,22 @@ class OllamaAnalyzer:
         valid_urgency = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 
         action_type = data.get("action_type", "TASK").upper()
+        if action_type in {"FILE", "ARCHIVE"}:
+            return {
+                "actions": [],
+                "document_assessment": {
+                    "primary_action_index": 0,
+                    "correspondent": data.get("correspondent"),
+                    "overall_confidence": data.get("confidence", 50),
+                    "requires_action": False,
+                    "reasoning": (
+                        "Informational filing or archival outcome; "
+                        "no real-world action is required."
+                    ),
+                    "text_quality": data.get("text_quality", "fair"),
+                    "extracted_data": normalize_extracted_data(data.get("extracted_data")),
+                },
+            }
         if action_type not in valid_types:
             action_type = "TASK"
 

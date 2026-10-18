@@ -21,6 +21,7 @@ from doc_intelligence_hub.core.paperless import (
     build_account_identifier_update,
     build_metadata_update,
     get_metadata_field_spec,
+    provisioned_metadata_field_keys,
     resolve_metadata_schema,
     resolve_metadata_value,
 )
@@ -73,6 +74,17 @@ def test_relationship_projection_fields_are_creatable() -> None:
     assert related.create_policy is MetadataCreatePolicy.IF_MISSING
     assert related.create_definition()["data_type"] == "string"
     assert summary.create_policy is MetadataCreatePolicy.IF_MISSING
+
+
+def test_complete_provisioning_set_contains_every_active_owned_field() -> None:
+    keys = provisioned_metadata_field_keys()
+
+    assert MetadataFieldKey.SERIES_NAME in keys
+    assert MetadataFieldKey.ACTION_STATUS in keys
+    assert MetadataFieldKey.OBLIGATION_RELATED_DOCUMENTS in keys
+    assert MetadataFieldKey.ACTION_ANALYZED not in keys
+    assert MetadataFieldKey.LEGACY_ACTION_TYPE not in keys
+    assert all(get_metadata_field_spec(key).create_type is not None for key in keys)
 
 
 def test_obligation_projection_fields_are_creatable() -> None:

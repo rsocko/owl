@@ -5,19 +5,17 @@ import ActionQueueOperations from './ActionQueueOperations';
 const {
   projectionHealthMock,
   reconcileProjectionsMock,
-  relationshipMetadataMock,
-  setupRelationshipMetadataMock,
+  metadataSchemaMock,
+  setupMetadataSchemaMock,
   refreshMetadataMock,
   runMock,
-  setupCustomFieldsMock,
 } = vi.hoisted(() => ({
   projectionHealthMock: vi.fn(),
   reconcileProjectionsMock: vi.fn(),
-  relationshipMetadataMock: vi.fn(),
-  setupRelationshipMetadataMock: vi.fn(),
+  metadataSchemaMock: vi.fn(),
+  setupMetadataSchemaMock: vi.fn(),
   refreshMetadataMock: vi.fn(),
   runMock: vi.fn(),
-  setupCustomFieldsMock: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
@@ -25,10 +23,8 @@ vi.mock('../lib/api', () => ({
     actionQueue: {
       run: runMock,
       check: vi.fn(),
-      checkCustomFields: vi.fn(),
-      setupCustomFields: setupCustomFieldsMock,
-      checkRelationshipMetadata: relationshipMetadataMock,
-      setupRelationshipMetadata: setupRelationshipMetadataMock,
+      checkMetadataSchema: metadataSchemaMock,
+      setupMetadataSchema: setupMetadataSchemaMock,
       backfill: vi.fn(),
       refreshMetadata: refreshMetadataMock,
     },
@@ -43,8 +39,6 @@ describe('ActionQueueOperations', () => {
   beforeEach(() => {
     runMock.mockReset();
     runMock.mockResolvedValue({});
-    setupCustomFieldsMock.mockReset();
-    setupCustomFieldsMock.mockResolvedValue({ ready: 9, fields: [] });
     refreshMetadataMock.mockReset();
     refreshMetadataMock.mockResolvedValue({});
     projectionHealthMock.mockReset();
@@ -62,20 +56,24 @@ describe('ActionQueueOperations', () => {
       remaining: 0,
       errors: [],
     });
-    relationshipMetadataMock.mockReset();
-    relationshipMetadataMock.mockResolvedValue({
+    metadataSchemaMock.mockReset();
+    metadataSchemaMock.mockResolvedValue({
       status: 'ready',
       category: null,
       write_enabled: true,
       can_setup: false,
+      ready_count: 16,
+      total_count: 16,
       fields: [],
     });
-    setupRelationshipMetadataMock.mockReset();
-    setupRelationshipMetadataMock.mockResolvedValue({
+    setupMetadataSchemaMock.mockReset();
+    setupMetadataSchemaMock.mockResolvedValue({
       status: 'ready',
       category: null,
       write_enabled: true,
       can_setup: false,
+      ready_count: 16,
+      total_count: 16,
       fields: [],
     });
   });
@@ -138,17 +136,6 @@ describe('ActionQueueOperations', () => {
     await waitFor(() => {
       expect(refreshMetadataMock).toHaveBeenCalledWith({ force: true });
     });
-  });
-
-  it('sets up OWL-owned metadata fields in Paperless', async () => {
-    render(<ActionQueueOperations />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Set up metadata fields' }));
-
-    await waitFor(() => {
-      expect(setupCustomFieldsMock).toHaveBeenCalledTimes(1);
-    });
-    expect(await screen.findByText('Paperless metadata fields are ready.')).toBeInTheDocument();
   });
 
   it('disables relationship repair when projection health is empty', async () => {
@@ -214,25 +201,36 @@ describe('ActionQueueOperations', () => {
     expect(projectionHealthMock).toHaveBeenCalledTimes(2);
   });
 
-  it('offers safe setup when relationship metadata is missing', async () => {
-    relationshipMetadataMock.mockResolvedValue({
+  it('offers one complete setup when any active metadata field is missing', async () => {
+    metadataSchemaMock.mockResolvedValue({
       status: 'missing',
       category: 'paperless_schema_setup_required',
       write_enabled: true,
       can_setup: true,
+      ready_count: 15,
+      total_count: 16,
       fields: [
-        { key: 'related_documents', name: 'Related Document IDs', status: 'missing' },
+        {
+          key: 'patient_name',
+          name: 'Patient Name',
+          type: 'string',
+          options: [],
+          status: 'missing',
+          diagnostics: ['missing_field'],
+        },
       ],
     });
     render(<ActionQueueOperations />);
 
     const setup = await screen.findByRole(
       'button',
-      { name: 'Set up relationship metadata' },
+      { name: 'Set up complete metadata schema' },
     );
     fireEvent.click(setup);
 
-    await waitFor(() => expect(setupRelationshipMetadataMock).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText('Relationship metadata fields are ready.')).toBeInTheDocument();
+    await waitFor(() => expect(setupMetadataSchemaMock).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByText('Complete Paperless metadata schema is ready.'),
+    ).toBeInTheDocument();
   });
 });

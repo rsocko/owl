@@ -18,7 +18,8 @@ This document delineates what's **built and working today** versus what's **plan
 ### ✅ Today (Built)
 
 - Full pipeline: fetch → Ollama classify → store → enrich Paperless
-- 8 action types: PAY, RESPOND, FILE, REVIEW, SHARE, SCHEDULE, SIGN, ARCHIVE
+- Actionable types: PAY, RESPOND, REVIEW, SHARE, SCHEDULE, SIGN, CANCEL, RENEW, DISPUTE, TASK
+- Informational filing and archival outcomes route to no-action; legacy FILE/ARCHIVE rows remain readable for cleanup
 - Rule-based fallback when Ollama is unavailable
 - SQLAlchemy database persistence (Action + ProcessingHistory models)
 - API endpoints: `/api/queue/check`, `run`, `status`, `actions`, `PATCH actions/{id}`
