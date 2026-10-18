@@ -398,51 +398,6 @@
   overflow: hidden;
 }
 
-.intake-preview-tools {
-  position: absolute;
-  z-index: 3;
-  top: 1rem;
-  right: 1rem;
-  display: flex;
-  gap: 0.35rem;
-  opacity: 0;
-  transform: translateY(-0.2rem);
-  transition: opacity 140ms ease, transform 140ms ease;
-}
-
-.intake-preview:hover .intake-preview-tools,
-.intake-preview:focus-within .intake-preview-tools {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.intake-preview-tools button,
-.intake-preview-tools a {
-  border: 1px solid rgb(255 255 255 / 22%);
-  border-radius: var(--radius-sm);
-  background: rgb(24 34 49 / 92%);
-  color: #fff;
-  padding: 0.48rem 0.62rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.7rem;
-  font-weight: 750;
-  text-decoration: none;
-  box-shadow: 0 5px 16px rgb(0 0 0 / 24%);
-  cursor: pointer;
-}
-
-.intake-preview-tools button:hover,
-.intake-preview-tools button:focus-visible,
-.intake-preview-tools a:hover,
-.intake-preview-tools a:focus-visible {
-  border-color: rgb(255 255 255 / 50%);
-  background: rgb(35 50 72 / 98%);
-  outline: 2px solid #fff;
-  outline-offset: 2px;
-}
-
 .intake-preview iframe {
   display: block;
   width: 100%;

@@ -26,6 +26,7 @@ vi.mock('../lib/api', () => ({
     documents: {
       metadata: vi.fn().mockResolvedValue({ title: 'Uncertain bill' }),
       thumbnailUrl: vi.fn().mockReturnValue('/thumbnail/777'),
+      previewUrl: vi.fn().mockReturnValue('/preview/777'),
       downloadUrl: vi.fn().mockReturnValue('/download/777'),
     },
   },
@@ -227,13 +228,17 @@ describe('Needs Review actions', () => {
       pending: 1,
     });
 
-    render(
+    const { container } = render(
       <MemoryRouter initialEntries={['/needs-review?type=action_classification&item=action-review-1']}>
         <DocumentWorkspace mode="review" />
       </MemoryRouter>,
     );
 
     const type = await screen.findByLabelText('Corrected action type');
+    expect(container.querySelector('.document-workspace-detail-host .document-workspace-document')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Actions' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Metadata' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'OCR' })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).toBeNull();
     fireEvent.change(type, { target: { value: 'TASK' } });
     fireEvent.change(screen.getByLabelText('Corrected task name'), {

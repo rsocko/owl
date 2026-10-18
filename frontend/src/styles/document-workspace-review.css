@@ -899,6 +899,31 @@
   background: var(--card);
 }
 
+.document-review-workspace .triage-detail-panel.document-workspace-detail-host {
+  padding: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.document-review-workspace .document-review-document {
+  width: 100%;
+}
+
+.document-review-workspace .document-review-guidance {
+  margin: 0 0 1rem;
+  padding: .75rem .9rem;
+  display: grid;
+  gap: .2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--muted-bg);
+  font-size: .72rem;
+}
+
+.document-review-workspace .document-review-guidance span {
+  color: var(--text-muted);
+}
+
 .document-review-workspace .triage-queue-header {
   padding: 1rem .75rem .75rem;
   display: block;

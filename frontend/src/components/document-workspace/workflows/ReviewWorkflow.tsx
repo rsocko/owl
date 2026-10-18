@@ -21,6 +21,9 @@ import { StatementGroupingDetail } from '../../triage/StatementGroupingDetail';
 import DuplicateDetail from '../../../pages/DuplicateDetail';
 import OcrFocusInspector from '../../OcrFocusInspector';
 import { DocumentWorkspaceFrame } from '../../DocumentWorkspace';
+import DocumentWorkspaceDocumentView from '../DocumentWorkspaceDocumentView';
+import DocumentMetadataTab from '../tabs/DocumentMetadataTab';
+import DocumentOcrTab from '../tabs/DocumentOcrTab';
 import '../../../styles/document-workspace-review.css';
 import '../../../styles/document-workspace.css';
 
@@ -63,6 +66,7 @@ interface StatsResponse {
 type ItemTypeFilter = 'all' | 'action_classification' | 'eob_match_review' | 'grouping_anomaly' | 'orphan_document' | 'duplicate_document' | 'ocr_quality_review';
 type StatusFilter = 'pending' | 'deferred' | 'resolved';
 type OcrReviewStatusFilter = '' | 'UNCERTAIN' | 'REVIEW_RECOMMENDED' | 'FAILED';
+type ReviewDocumentTab = 'actions' | 'metadata' | 'ocr';
 type ToastState = { message: string; tone?: 'success' | 'error'; undoId?: string } | null;
 type ActionCorrectionDraft = {
   action_type: string;
@@ -403,6 +407,7 @@ export default function ReviewWorkflow() {
   const lastCheckedRef = useRef<string | null>(null);
   const [actionCorrection, setActionCorrection] = useState<ActionCorrectionDraft | null>(null);
   const [additionalActionCorrections, setAdditionalActionCorrections] = useState<ActionCorrectionDraft[]>([]);
+  const [documentTab, setDocumentTab] = useState<ReviewDocumentTab>('actions');
 
   // UI state
   const [collapsed, setCollapsed] = useState(false);
@@ -522,6 +527,10 @@ export default function ReviewWorkflow() {
     () => items.find((item) => item.id === selectedId) ?? null,
     [items, selectedId],
   );
+
+  useEffect(() => {
+    setDocumentTab(selectedItem?.item_type === 'ocr_quality_review' ? 'ocr' : 'actions');
+  }, [selectedItem?.id, selectedItem?.item_type]);
   const visibleItems = items;
   const bulkEligibleItems = useMemo(
     () => visibleItems.filter(
@@ -1159,20 +1168,41 @@ export default function ReviewWorkflow() {
         >
 
           {/* ── Detail panel (right) ── */}
-          <section className="triage-detail-panel">
+          <section className={[
+            'triage-detail-panel',
+            selectedItem && ['action_classification', 'ocr_quality_review'].includes(selectedItem.item_type)
+              ? 'document-workspace-detail-host'
+              : '',
+          ].filter(Boolean).join(' ')}>
             {selectedItem ? (
               selectedItem.item_type === 'action_classification' ? (
-                <>
-                  <TriageDetailBreadcrumb item={selectedItem} />
-                  <div className="triage-detail-header">
-                    <div>
-                      <div className="triage-detail-title">{itemTitle(selectedItem)}</div>
-                      <div className="text-muted">
-                        {selectedReviewCanResolve
-                          ? 'Decide what OWL should believe before this becomes actionable work.'
-                          : 'This review is complete. The accepted values are shown below.'}
-                      </div>
-                    </div>
+                <DocumentWorkspaceDocumentView
+                  className="document-review-document"
+                  document={{
+                    id: itemDocumentId(selectedItem) ?? Number(selectedItem.target_id),
+                    context: 'Needs Review · Action',
+                    title: itemTitle(selectedItem),
+                    date: String(selectedItem.metadata?.document_date ?? 'Not set'),
+                    correspondent: String(selectedItem.metadata?.correspondent ?? 'Not set'),
+                    documentType: String(selectedItem.metadata?.document_type ?? 'Not set'),
+                  }}
+                  activeTab={documentTab}
+                  onTabChange={(key) => setDocumentTab(key as ReviewDocumentTab)}
+                  previewUrl={itemDocumentId(selectedItem)
+                    ? `${endpoints.documents.previewUrl(itemDocumentId(selectedItem) as number)}#page=1&zoom=page-fit`
+                    : undefined}
+                  tabs={[
+                    { key: 'actions', label: 'Actions' },
+                    { key: 'metadata', label: 'Metadata' },
+                    { key: 'ocr', label: 'OCR' },
+                  ]}
+                >
+                  {documentTab === 'actions' ? (
+                  <>
+                  <div className="document-review-guidance text-muted">
+                    {selectedReviewCanResolve
+                      ? 'Decide what OWL should believe before this becomes actionable work.'
+                      : 'This review is complete. The accepted values are shown below.'}
                   </div>
                   <Card title="Document action review">
                     <div className="triage-detail-info">
@@ -1328,12 +1358,33 @@ export default function ReviewWorkflow() {
                       </div>
                     )}
                   </Card>
-                  {selectedItem.metadata?.document_id && (
-                    <Card title="Document preview">
-                      <DocumentPreview documentId={Number(selectedItem.metadata.document_id)} />
-                    </Card>
-                  )}
-                </>
+                  </>
+                  ) : null}
+                  {documentTab === 'metadata' ? (
+                    <DocumentMetadataTab
+                      document={{
+                        document_id: itemDocumentId(selectedItem) ?? selectedItem.target_id,
+                        title: String(selectedItem.metadata?.document_title ?? itemTitle(selectedItem)),
+                        correspondent: selectedItem.metadata?.correspondent
+                          ? String(selectedItem.metadata.correspondent)
+                          : null,
+                        document_type: selectedItem.metadata?.document_type
+                          ? String(selectedItem.metadata.document_type)
+                          : null,
+                        document_date: selectedItem.metadata?.document_date
+                          ? String(selectedItem.metadata.document_date)
+                          : null,
+                      }}
+                      editHref={itemDocumentId(selectedItem)
+                        ? `#/inbox?document=${itemDocumentId(selectedItem)}&tab=metadata`
+                        : undefined}
+                      note="Review decisions do not file the document or change Paperless metadata."
+                    />
+                  ) : null}
+                  {documentTab === 'ocr' && itemDocumentId(selectedItem) ? (
+                    <DocumentOcrTab documentId={itemDocumentId(selectedItem) as number} />
+                  ) : null}
+                </DocumentWorkspaceDocumentView>
               ) : selectedItem.item_type === 'eob_match_review' ? (
                 /* EOB Match Review — rich detail component (#834) */
                 <>
@@ -1355,19 +1406,23 @@ export default function ReviewWorkflow() {
                   />
                 </>
               ) : selectedItem.item_type === 'ocr_quality_review' ? (
-                <>
-                  <TriageDetailBreadcrumb item={selectedItem} />
-                  <div className="triage-detail-header">
-                    <div>
-                      <div className="triage-detail-title">{itemTitle(selectedItem)}</div>
-                      <div className="text-muted">
-                        {selectedItem.metadata?.weakest_dimension
-                          ? `Weakest signal: ${String(selectedItem.metadata.weakest_dimension)} ${String(selectedItem.metadata.weakest_score ?? '—')}`
-                          : 'Review the OCR evidence and candidate state.'}
-                        {' · '}
-                        Candidate: {String(selectedItem.metadata?.candidate_state ?? 'none')}
-                      </div>
-                    </div>
+                <DocumentWorkspaceDocumentView
+                  className="document-review-document document-review-ocr"
+                  document={{
+                    id: itemDocumentId(selectedItem) ?? Number(selectedItem.target_id),
+                    context: 'Needs Review · OCR',
+                    title: itemTitle(selectedItem),
+                    date: String(selectedItem.metadata?.document_date ?? 'Not set'),
+                    correspondent: String(selectedItem.metadata?.correspondent ?? 'Not set'),
+                    documentType: String(selectedItem.metadata?.document_type ?? 'Not set'),
+                  }}
+                  activeTab={documentTab}
+                  onTabChange={(key) => setDocumentTab(key as ReviewDocumentTab)}
+                  tabs={[
+                    { key: 'ocr', label: 'OCR' },
+                    { key: 'metadata', label: 'Metadata' },
+                  ]}
+                  headerActions={(
                     <div className="btn-group">
                       {['pending', 'deferred'].includes(selectedItem.status) ? (
                         <>
@@ -1395,18 +1450,51 @@ export default function ReviewWorkflow() {
                         </Button>
                       )}
                     </div>
-                  </div>
-                  <div className="triage-reason-banner">
-                    <strong>OCR review reason:</strong> {selectedItem.reason || 'OCR quality needs review.'}
-                  </div>
-                  <div className="triage-ocr-inspector">
+                  )}
+                >
+                  {documentTab === 'ocr' ? (
+                    <>
+                    <div className="document-review-guidance">
+                      <strong>OCR review reason:</strong> {selectedItem.reason || 'OCR quality needs review.'}
+                      <span>
+                        {selectedItem.metadata?.weakest_dimension
+                          ? `Weakest signal: ${String(selectedItem.metadata.weakest_dimension)} ${String(selectedItem.metadata.weakest_score ?? '—')}`
+                          : 'Review the OCR evidence and candidate state.'}
+                        {' · '}
+                        Candidate: {String(selectedItem.metadata?.candidate_state ?? 'none')}
+                      </span>
+                    </div>
+                    <div className="triage-ocr-inspector">
                     <OcrFocusInspector
                       documentId={Number(selectedItem.metadata?.document_id ?? selectedItem.target_id)}
                       contextLabel="Needs Review"
                       onReturn={() => selectItem(null)}
                     />
-                  </div>
-                </>
+                    </div>
+                    </>
+                  ) : null}
+                  {documentTab === 'metadata' ? (
+                    <DocumentMetadataTab
+                      document={{
+                        document_id: itemDocumentId(selectedItem) ?? selectedItem.target_id,
+                        title: String(selectedItem.metadata?.document_title ?? itemTitle(selectedItem)),
+                        correspondent: selectedItem.metadata?.correspondent
+                          ? String(selectedItem.metadata.correspondent)
+                          : null,
+                        document_type: selectedItem.metadata?.document_type
+                          ? String(selectedItem.metadata.document_type)
+                          : null,
+                        document_date: selectedItem.metadata?.document_date
+                          ? String(selectedItem.metadata.document_date)
+                          : null,
+                      }}
+                      editHref={itemDocumentId(selectedItem)
+                        ? `#/inbox?document=${itemDocumentId(selectedItem)}&tab=metadata`
+                        : undefined}
+                      note="Resolving OCR review changes OCR trust only; it does not file this document."
+                    />
+                  ) : null}
+                </DocumentWorkspaceDocumentView>
               ) : selectedItem.item_type === 'orphan_document' ? (
                 /* Orphan Document — rich detail component (#831) */
                 <>

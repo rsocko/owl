@@ -1,17 +1,3 @@
-.document-workspace-page {
-  display: grid;
-  grid-template-columns: clamp(20rem, 24vw, 24rem) minmax(0, 1fr);
-  height: calc(100dvh - var(--topnav-height));
-  min-height: 42rem;
-  margin: -20px;
-  overflow: hidden;
-  background: var(--bg);
-}
-
-.document-workspace-page.rail-collapsed {
-  grid-template-columns: 3.75rem minmax(0, 1fr);
-}
-
 .document-workspace-rail {
   min-width: 0;
   min-height: 0;
@@ -271,81 +257,12 @@
   font-size: .66rem;
 }
 
-.document-workspace-main {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.document-workspace-header {
-  min-height: 4.5rem;
-  padding: .65rem 1rem;
-  display: grid;
-  grid-template-columns: minmax(15rem, 1fr) minmax(20rem, auto) auto;
-  align-items: center;
-  gap: 1rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--card);
-}
-
-.document-workspace-header > div {
-  min-width: 0;
-}
-
-.document-workspace-header > div > span {
-  color: var(--text-muted);
-  font-size: .62rem;
-  font-weight: 750;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-
-.document-workspace-header h2 {
-  margin: .15rem 0 0;
-  overflow: hidden;
-  font-size: 1rem;
-  letter-spacing: -.02em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.document-workspace-header dl {
-  margin: 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(6rem, 1fr));
-  gap: .8rem;
-}
-
-.document-workspace-header dl div {
-  padding-left: .7rem;
-  border-left: 1px solid var(--border);
-}
-
-.document-workspace-header dt,
 .workspace-metadata dt {
   color: var(--text-muted);
   font-size: .58rem;
   font-weight: 800;
   letter-spacing: .05em;
   text-transform: uppercase;
-}
-
-.document-workspace-header dd {
-  margin: .1rem 0 0;
-  overflow: hidden;
-  font-size: .68rem;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.document-workspace-content {
-  min-height: 0;
-  flex: 1;
-  display: grid;
-  grid-template-columns: minmax(23rem, 1.08fr) minmax(28rem, .92fr);
-  overflow: hidden;
 }
 
 .document-workspace-preview {
@@ -362,32 +279,6 @@
   background: white;
 }
 
-.document-workspace-preview > a {
-  position: absolute;
-  top: .7rem;
-  right: .7rem;
-  padding: .45rem .6rem;
-  display: inline-flex;
-  align-items: center;
-  gap: .35rem;
-  border: 1px solid rgb(255 255 255 / 22%);
-  border-radius: var(--radius-sm);
-  background: rgb(24 34 46 / 84%);
-  color: white;
-  font-size: .68rem;
-  font-weight: 750;
-  text-decoration: none;
-}
-
-.document-workspace-preview-empty {
-  height: 100%;
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: .5rem;
-  color: #dce4ec;
-}
-
 .document-workspace-panel {
   min-width: 0;
   min-height: 0;
@@ -395,50 +286,6 @@
   flex-direction: column;
   border-left: 1px solid var(--border);
   background: var(--card);
-}
-
-.document-workspace-tabs {
-  min-height: 3rem;
-  display: flex;
-  border-bottom: 1px solid var(--border);
-}
-
-.document-workspace-tabs button {
-  position: relative;
-  flex: 1;
-  border: 0;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: .7rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.document-workspace-tabs button::after {
-  position: absolute;
-  right: 18%;
-  bottom: 0;
-  left: 18%;
-  height: 3px;
-  border-radius: 3px 3px 0 0;
-  background: var(--accent);
-  content: "";
-  transform: scaleX(0);
-}
-
-.document-workspace-tabs button.active {
-  color: var(--accent);
-}
-
-.document-workspace-tabs button.active::after {
-  transform: scaleX(1);
-}
-
-.document-workspace-tab-content {
-  min-height: 0;
-  flex: 1;
-  padding: 1rem 1.2rem 1.75rem;
-  overflow-y: auto;
 }
 
 .action-set-header,
@@ -1166,22 +1013,6 @@
 }
 
 @media (max-width: 1180px) {
-  .document-workspace-page {
-    grid-template-columns: 19rem minmax(0, 1fr);
-  }
-
-  .document-workspace-header {
-    grid-template-columns: 1fr auto;
-  }
-
-  .document-workspace-header dl {
-    display: none;
-  }
-
-  .document-workspace-content {
-    grid-template-columns: minmax(20rem, 1fr) minmax(24rem, .95fr);
-  }
-
   .document-workspace-lifecycle {
     align-items: flex-start;
     flex-direction: column;
@@ -1193,14 +1024,6 @@
 }
 
 @media (max-width: 900px) {
-  .document-workspace-page,
-  .document-workspace-page.rail-collapsed {
-    height: auto;
-    min-height: calc(100dvh - var(--topnav-height));
-    grid-template-columns: 1fr;
-    overflow: visible;
-  }
-
   .document-workspace-collapse {
     display: none;
   }
@@ -1222,15 +1045,6 @@
     min-width: 18rem;
   }
 
-  .document-workspace-main {
-    min-height: 58rem;
-  }
-
-  .document-workspace-content {
-    grid-template-columns: minmax(19rem, 1fr) minmax(22rem, 1fr);
-    overflow: visible;
-  }
-
   .document-workspace-lifecycle {
     position: sticky;
     z-index: 20;
@@ -1239,19 +1053,6 @@
 }
 
 @media (max-width: 640px) {
-  .document-workspace-header {
-    min-height: 3.8rem;
-    padding-inline: .7rem;
-  }
-
-  .document-workspace-header > a {
-    display: none;
-  }
-
-  .document-workspace-content {
-    grid-template-columns: 1fr;
-  }
-
   .document-workspace-preview {
     min-height: 35rem;
   }
@@ -1326,6 +1127,14 @@
 }
 
 .document-workspace-frame-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.document-workspace-document {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
 }
@@ -1414,6 +1223,45 @@
   min-width: 0;
   min-height: 0;
   background: #273443;
+}
+
+.document-workspace-preview-tools {
+  position: absolute;
+  right: .75rem;
+  bottom: .75rem;
+  display: flex;
+  gap: .4rem;
+}
+
+.document-workspace-preview-tools a,
+.document-workspace-preview-tools button {
+  min-height: 2rem;
+  padding: .35rem .65rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: var(--radius-sm);
+  background: rgb(17 27 41 / 86%);
+  color: #fff;
+  font: inherit;
+  font-size: .68rem;
+  font-weight: 750;
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: 0 5px 18px rgb(0 0 0 / 24%);
+}
+
+.document-workspace-preview-tools a:hover,
+.document-workspace-preview-tools button:hover {
+  background: rgb(17 27 41 / 96%);
+}
+
+.document-workspace-metadata-tab,
+.document-workspace-actions-tab,
+.document-workspace-related-tab,
+.document-workspace-ocr-tab {
+  min-height: 0;
 }
 
 .document-workspace-frame-panel {

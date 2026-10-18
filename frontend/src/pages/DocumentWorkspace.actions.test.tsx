@@ -217,6 +217,7 @@ describe('DocumentWorkspace actions mode', () => {
 
     const utilityRows = await screen.findAllByRole('button', { name: /Utility bill/ });
     expect(container.querySelector('.document-workspace-frame.action-document-workspace')).toBeInTheDocument();
+    expect(container.querySelector('.document-workspace-document')).toBeInTheDocument();
     expect(utilityRows).toHaveLength(1);
     expect(screen.getByRole('tab', { name: 'Actions 2' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('button', { name: /PAY · Pay electric bill/ })).toBeInTheDocument();
