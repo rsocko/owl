@@ -3,6 +3,15 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ActionWorkspace from './ActionWorkspace';
 
+vi.mock('../components/OcrFocusInspector', () => ({
+  default: ({ documentId, onReturn }: { documentId: number; onReturn?: () => void }) => (
+    <section aria-label="OCR focus inspector">
+      Focus document {documentId}
+      <button type="button" onClick={onReturn}>Return to review</button>
+    </section>
+  ),
+}));
+
 const {
   statusMock,
   actionsMock,
@@ -246,6 +255,23 @@ describe('ActionWorkspace', () => {
     expect(screen.getByText('Good')).toBeInTheDocument();
     expect(screen.getByText('Overlay / readability')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Extracted document text')).toBeInTheDocument();
+    expect(updateActionMock).not.toHaveBeenCalled();
+    expect(feedbackMock).not.toHaveBeenCalled();
+  });
+
+  it('opens OCR focus mode in the selected action context and returns without lifecycle changes', async () => {
+    renderWorkspace();
+
+    await screen.findByRole('heading', { name: 'Utility bill' });
+    fireEvent.click(screen.getByRole('tab', { name: 'OCR' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect OCR' }));
+
+    expect(screen.getByLabelText('OCR focus inspector')).toHaveTextContent('Focus document 101');
+    expect(screen.getByRole('button', { name: 'Expand action documents' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Return to review' }));
+
+    expect(await screen.findByRole('heading', { name: 'OCR assessment' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'OCR' })).toHaveAttribute('aria-selected', 'true');
     expect(updateActionMock).not.toHaveBeenCalled();
     expect(feedbackMock).not.toHaveBeenCalled();
   });

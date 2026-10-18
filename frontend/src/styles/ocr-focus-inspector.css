@@ -1,0 +1,295 @@
+.ocr-focus {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.ocr-focus-header {
+  min-height: 4.5rem;
+  padding: .7rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+.ocr-focus-header span,
+.ocr-focus-header p {
+  color: var(--text-muted);
+  font-size: .72rem;
+}
+
+.ocr-focus-header h2,
+.ocr-focus-header p {
+  margin: .15rem 0 0;
+}
+
+.ocr-focus-layout {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr) minmax(18rem, 22rem);
+  overflow: hidden;
+}
+
+.ocr-focus-candidates,
+.ocr-focus-evidence {
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--card);
+}
+
+.ocr-focus-candidates {
+  border-right: 1px solid var(--border);
+}
+
+.ocr-focus-candidates .card {
+  border: 0;
+  box-shadow: none;
+}
+
+.ocr-focus-candidates .data-table {
+  font-size: .68rem;
+}
+
+.ocr-focus-candidates .data-table th:nth-child(n+4),
+.ocr-focus-candidates .data-table td:nth-child(n+4):not(:last-child) {
+  display: none;
+}
+
+.ocr-focus-canvas {
+  min-width: 0;
+  min-height: 0;
+  padding: .75rem;
+  overflow: auto;
+}
+
+.ocr-focus-view-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  width: max-content;
+  margin: 0 auto .75rem;
+  padding: .22rem;
+  display: flex;
+  gap: .2rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.ocr-focus-view-tabs button {
+  padding: .38rem .7rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.ocr-focus-view-tabs button.active {
+  background: var(--accent);
+  color: white;
+}
+
+.ocr-focus-evidence {
+  padding: .85rem;
+  border-left: 1px solid var(--border);
+}
+
+.ocr-focus-evidence section,
+.ocr-focus-status,
+.ocr-focus-settings,
+.ocr-focus-correction,
+.ocr-focus-disclosure {
+  margin-bottom: .75rem;
+  padding: .75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+}
+
+.ocr-focus-status {
+  display: grid;
+  gap: .35rem;
+}
+
+.ocr-focus-evidence h3 {
+  margin: 0 0 .55rem;
+  font-size: .8rem;
+}
+
+.ocr-focus-evidence table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .72rem;
+}
+
+.ocr-focus-evidence th,
+.ocr-focus-evidence td {
+  padding: .35rem .25rem;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+}
+
+.ocr-focus-evidence th:first-child,
+.ocr-focus-evidence td:first-child {
+  text-align: left;
+}
+
+.ocr-focus-suggested {
+  padding: .55rem;
+  border-radius: 6px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: .72rem;
+}
+
+.ocr-focus-evidence dl {
+  margin: 0;
+}
+
+.ocr-focus-evidence dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .25rem 0;
+  font-size: .72rem;
+}
+
+.ocr-focus-evidence dd {
+  margin: 0;
+  text-align: right;
+}
+
+.ocr-focus-blockers {
+  display: grid;
+  gap: .35rem;
+  padding: .6rem;
+  border-radius: 6px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: .72rem;
+}
+
+.ocr-focus-settings summary,
+.ocr-focus-disclosure summary {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.ocr-focus-settings label,
+.ocr-focus-correction {
+  display: grid;
+  gap: .35rem;
+}
+
+.ocr-focus-settings input,
+.ocr-focus-correction input,
+.ocr-focus-correction select {
+  min-width: 0;
+}
+
+.ocr-focus-text-grid,
+.ocr-overlay-comparison-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ocr-focus-text-grid {
+  display: grid;
+  gap: .75rem;
+}
+
+.ocr-focus-text-grid pre {
+  min-height: 28rem;
+  max-height: 65vh;
+  overflow: auto;
+  padding: .8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  white-space: pre-wrap;
+}
+
+.ocr-focus-findings article {
+  padding: .65rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ocr-focus-findings article p {
+  margin: .4rem 0;
+}
+
+.ocr-focus-actions {
+  min-height: 4rem;
+  padding: .65rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: 0 -8px 24px rgb(20 31 48 / 8%);
+}
+
+.ocr-focus-actions p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: .7rem;
+}
+
+.ocr-focus-actions > div {
+  display: flex;
+  gap: .45rem;
+}
+
+.region-overlay-canvas {
+  transform-origin: top left;
+}
+
+@media (max-width: 1100px) {
+  .ocr-focus-layout {
+    grid-template-columns: minmax(15rem, 19rem) minmax(0, 1fr);
+  }
+
+  .ocr-focus-evidence {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .ocr-focus-layout,
+  .ocr-focus-text-grid,
+  .ocr-overlay-comparison-grid {
+    display: block;
+    overflow: auto;
+  }
+
+  .ocr-focus-candidates,
+  .ocr-focus-evidence,
+  .ocr-focus-canvas {
+    overflow: visible;
+    border: 0;
+  }
+
+  .ocr-focus-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ocr-focus-actions > div {
+    overflow-x: auto;
+  }
+}

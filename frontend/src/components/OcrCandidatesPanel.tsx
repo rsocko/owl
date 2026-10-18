@@ -14,45 +14,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Badge, Button, Card, EmptyState, type Tone } from './ui';
 import { endpoints } from '../lib/api';
 import { formatScore } from '../pages/OcrQualityReviewQueue';
-
-type CandidateSummary = {
-  candidate_id: string;
-  document_id: number;
-  state: string;
-  engine: string;
-  model_version?: string | null;
-  overlay_score?: number | null;
-  machine_score?: number | null;
-  content_score?: number | null;
-  page_count: number;
-  requested_at?: string | null;
-  completed_at?: string | null;
-  decision?: string | null;
-  expires_at?: string | null;
-};
-
-type ComparisonSummary = {
-  comparison_id: string;
-  blocking_findings: string[];
-  text_diff_summary: Record<string, unknown>;
-  overlay_score_delta?: number | null;
-  machine_score_delta?: number | null;
-  content_score_delta?: number | null;
-  performed_at?: string | null;
-};
-
-type CandidateDetail = CandidateSummary & {
-  comparison: ComparisonSummary | null;
-  failure_reason?: string | null;
-  decision_reason?: string | null;
-  decided_at?: string | null;
-  actor?: string | null;
-};
-
-const ENGINE_LABELS: Record<string, string> = {
-  'ocrmypdf-tesseract-5': 'OCRmyPDF / Tesseract 5',
-  'azure-prebuilt-layout': 'Azure Document Intelligence (prebuilt-layout)',
-};
+import { OCR_ENGINE_LABELS, type CandidateDetail, type CandidateSummary } from './ocrCandidateTypes';
 
 const ACTIVE_STATES = new Set(['requested', 'running']);
 const ACCEPTED_STATES = new Set(['accepted', 'accepted_pending_invalidation']);
@@ -186,12 +148,22 @@ export default function OcrCandidatesPanel({
   currentOverlayScore,
   currentMachineScore,
   currentContentScore,
+  compact = false,
+  selectedCandidateId,
+  onSelectCandidate,
+  onCandidatesChange,
+  refreshKey = 0,
 }: {
   documentId: number;
   hasStage2Analysis?: boolean;
   currentOverlayScore?: number | null;
   currentMachineScore?: number | null;
   currentContentScore?: number | null;
+  compact?: boolean;
+  selectedCandidateId?: string | null;
+  onSelectCandidate?: (candidateId: string) => void;
+  onCandidatesChange?: (candidates: CandidateSummary[]) => void;
+  refreshKey?: number;
 }) {
   const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -224,18 +196,22 @@ export default function OcrCandidatesPanel({
     setError(null);
     endpoints.ocrQuality.candidates
       .list({ document_id: documentId })
-      .then((data) => setCandidates((data as { candidates: CandidateSummary[] }).candidates))
+      .then((data) => {
+        const next = (data as { candidates: CandidateSummary[] }).candidates;
+        setCandidates(next);
+        onCandidatesChange?.(next);
+      })
       .catch((err) => {
         if (!background) setError(err instanceof Error ? err.message : 'Failed to load candidates.');
       })
       .finally(() => {
         if (!background) setLoading(false);
       });
-  }, [documentId]);
+  }, [documentId, onCandidatesChange]);
 
   useEffect(() => {
     loadCandidates();
-  }, [loadCandidates]);
+  }, [loadCandidates, refreshKey]);
 
   // Lightweight polling while any candidate is still generating, so the
   // reviewer doesn't have to manually refresh to see it flip to READY/FAILED.
@@ -246,6 +222,11 @@ export default function OcrCandidatesPanel({
   }, [candidates, loadCandidates]);
 
   const loadDetail = useCallback((candidateId: string) => {
+    onSelectCandidate?.(candidateId);
+    if (compact) {
+      setSelectedId(candidateId);
+      return;
+    }
     setSelectedId(candidateId);
     setDetail(null);
     setText(null);
@@ -258,7 +239,7 @@ export default function OcrCandidatesPanel({
       .text(candidateId)
       .then((data) => setText(data as { current_text: string | null; candidate_text: string | null }))
       .catch(() => setText(null));
-  }, []);
+  }, [compact, onSelectCandidate]);
 
   const toggleEngine = (engine: string) => {
     setEngines((prev) => (prev.includes(engine) ? prev.filter((e) => e !== engine) : [...prev, engine]));
@@ -350,14 +331,14 @@ export default function OcrCandidatesPanel({
 
   return (
     <Card title="OCR candidates">
-      <div className="ocr-stub-note">
+      {!compact && <div className="ocr-stub-note">
         Accepting a candidate applies it to the live Paperless document as a new version (after
         freshness/idempotency/preview/content safety checks) and records downstream invalidation.
         Rejecting only records a decision and never touches Paperless. Applied candidates can be
         rolled back, which restores the previous Paperless version.
-      </div>
+      </div>}
 
-      <div style={{ marginTop: 12, marginBottom: 4 }}>
+      {!compact && <div style={{ marginTop: 12, marginBottom: 4 }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span>Your name</span>
           <input
@@ -371,11 +352,11 @@ export default function OcrCandidatesPanel({
         <div className="text-muted" style={{ fontSize: 12 }}>
           Recorded as the actor on every accept/reject/rollback/retry decision (remembered on this device).
         </div>
-      </div>
+      </div>}
 
       <div className="ocr-candidate-generate" style={{ marginTop: 12, marginBottom: 16 }}>
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-          {Object.entries(ENGINE_LABELS).map(([value, label]) => (
+          {Object.entries(OCR_ENGINE_LABELS).map(([value, label]) => (
             <label key={value} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <input
                 type="checkbox"
@@ -386,7 +367,7 @@ export default function OcrCandidatesPanel({
             </label>
           ))}
           <Button onClick={requestGeneration} disabled={requesting || engines.length === 0}>
-            {requesting ? 'Requesting…' : 'Generate candidates'}
+            {requesting ? 'Requesting…' : 'Generate candidate'}
           </Button>
         </div>
       </div>
@@ -445,8 +426,8 @@ export default function OcrCandidatesPanel({
                 ...(c.state === 'ready' ? relativeBadges(c, readyCandidates) : []),
               ];
               return (
-                <tr key={c.candidate_id} className={selectedId === c.candidate_id ? 'is-selected' : ''}>
-                  <td>{ENGINE_LABELS[c.engine] ?? c.engine}</td>
+                <tr key={c.candidate_id} className={(selectedCandidateId ?? selectedId) === c.candidate_id ? 'is-selected' : ''}>
+                  <td>{OCR_ENGINE_LABELS[c.engine] ?? c.engine}</td>
                   <td><Badge tone={stateTone(c.state)}>{c.state}</Badge></td>
                   <td>{c.overlay_score == null ? '—' : c.overlay_score}</td>
                   <td>{c.machine_score == null ? '—' : c.machine_score}</td>
@@ -540,7 +521,7 @@ export default function OcrCandidatesPanel({
                 <pre className="ocr-text-pane">{text.current_text || '(no text)'}</pre>
               </div>
               <div>
-                <h4>Candidate ({ENGINE_LABELS[detail.engine] ?? detail.engine})</h4>
+                <h4>Candidate ({OCR_ENGINE_LABELS[detail.engine] ?? detail.engine})</h4>
                 <pre className="ocr-text-pane">{text.candidate_text || '(no text)'}</pre>
               </div>
             </div>

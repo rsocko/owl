@@ -117,8 +117,22 @@ bypasses the snapshot.
 for the current source revision. It is blocked while metadata edits are
 unsaved, and a changed Paperless revision returns a conflict.
 
-**Inspect OCR** opens the detailed OCR Quality workflow for page inspection,
-candidate generation, comparison, acceptance, rollback, and deep analysis.
+**Inspect OCR** enters a focus inspector without leaving Inbox Review. The
+originating queue becomes a compact thumbnail rail, and **Return to review**
+restores the same document and OCR tab. Current-only inspection includes the
+page image, word boxes, heatmap and flag tools, word details, synchronized
+page navigation and zoom, annotations, and region-driven metadata correction.
+Selecting a candidate changes the canvas to synchronized current-versus-
+candidate views with Visual, Text diff, and Page findings modes.
+
+The persistent evidence rail shows current and candidate scores and deltas,
+blocking findings, candidate provenance and state, assessment freshness, and
+downstream invalidation state. Candidate generation, cancellation, per-
+document accept/reject, invalidation retry, rollback, and Stage 2 analysis are
+available only when supported by the candidate state. Technical reason codes,
+the full page profile, candidate history, and actor identity are progressively
+disclosed.
+
 The summary calls out accepted candidates whose downstream invalidation is
 still pending and assessments that predate the accepted OCR. After accepting
 new OCR, return to Inbox Review and refresh analysis so metadata suggestions

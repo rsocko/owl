@@ -30,7 +30,7 @@ const CURRENT_SOURCE = 'current';
 // Only these states still have a stored PDF artifact on disk (requested/
 // running haven't generated one yet, failed never produced one, expired
 // have had theirs deleted) — see candidate_service.py's artifact lifecycle.
-const STATES_WITH_PDF = new Set(['ready', 'accepted', 'rejected']);
+const STATES_WITH_PDF = new Set(['ready', 'accepted', 'accepted_pending_invalidation', 'rejected']);
 
 type DiffResponse = {
   removed_from_b: number[];
@@ -109,7 +109,15 @@ function DiffLegend() {
   );
 }
 
-export default function OcrOverlayComparisonPanel({ documentId }: { documentId: number }) {
+export default function OcrOverlayComparisonPanel({
+  documentId,
+  candidateId,
+  lockedSources = false,
+}: {
+  documentId: number;
+  candidateId?: string | null;
+  lockedSources?: boolean;
+}) {
   const [candidates, setCandidates] = useState<ComparisonCandidateOption[]>([]);
   const [sourceA, setSourceA] = useState<string>(CURRENT_SOURCE);
   const [sourceB, setSourceB] = useState<string>(CURRENT_SOURCE);
@@ -122,6 +130,7 @@ export default function OcrOverlayComparisonPanel({ documentId }: { documentId: 
   const [diff, setDiff] = useState<DiffResponse | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
+  const [zoom, setZoom] = useState(1);
 
   // Fetch the candidate list ourselves (mirrors OcrCandidatesPanel's own
   // fetch) so this panel can be mounted independently of that component.
@@ -145,6 +154,10 @@ export default function OcrOverlayComparisonPanel({ documentId }: { documentId: 
 
   // Keep the "B" side pointed at a real candidate once one becomes
   // available, so the panel isn't stuck comparing "current vs current".
+  useEffect(() => {
+    if (candidateId) setSourceB(candidateId);
+  }, [candidateId]);
+
   useEffect(() => {
     if (sourceB === CURRENT_SOURCE && candidates.length > 0) {
       setSourceB(candidates[0].candidate_id);
@@ -240,8 +253,8 @@ export default function OcrOverlayComparisonPanel({ documentId }: { documentId: 
         </div>
       )}
       <div className="ocr-overlay-comparison-controls">
-        <SourceSelect label="Side A" value={sourceA} onChange={setSourceA} candidates={candidates} />
-        <SourceSelect label="Side B" value={sourceB} onChange={setSourceB} candidates={candidates} />
+        {!lockedSources && <SourceSelect label="Side A" value={sourceA} onChange={setSourceA} candidates={candidates} />}
+        {!lockedSources && <SourceSelect label="Side B" value={sourceB} onChange={setSourceB} candidates={candidates} />}
         <Button
           variant={showDiff ? 'primary' : 'ghost'}
           size="sm"
@@ -265,6 +278,8 @@ export default function OcrOverlayComparisonPanel({ documentId }: { documentId: 
               imageUrl={pageImageUrlFor(sourceA, documentId, page)}
               regions={regionsA}
               onPageChange={setPage}
+              zoom={zoom}
+              onZoomChange={setZoom}
               diffHighlights={showDiff ? diffHighlightsA : undefined}
             />
           )}
@@ -277,6 +292,8 @@ export default function OcrOverlayComparisonPanel({ documentId }: { documentId: 
               imageUrl={pageImageUrlFor(sourceB, documentId, page)}
               regions={regionsB}
               onPageChange={setPage}
+              zoom={zoom}
+              onZoomChange={setZoom}
               diffHighlights={showDiff ? diffHighlightsB : undefined}
             />
           )}

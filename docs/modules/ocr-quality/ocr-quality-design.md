@@ -101,6 +101,16 @@ OWL is the primary UI. It provides:
 - explicit accept, reject, retry, and rollback actions; and
 - a normal deep link from OWL to the Paperless document.
 
+Document workspaces open these capabilities as a focus inspector rather than
+navigating to a disconnected generic detail page. The originating Inbox or
+Action Review rail remains collapsed and recoverable, while the main canvas
+shows either the current Paperless document or a synchronized current-versus-
+candidate comparison. Visual, text-diff, and page-finding modes share a
+persistent evidence and decision rail. The legacy
+`/ocr-quality/documents/:documentId` route renders the same inspector shell;
+the OCR dashboard and review queue remain available until their navigation is
+consolidated separately.
+
 The design does not add an OWL URL custom field to Paperless. A Paperless-side
 trigger may be reconsidered only if a clean native extension point becomes
 available.

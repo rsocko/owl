@@ -3,6 +3,15 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import IntakeReview from './IntakeReview';
 
+vi.mock('../components/OcrFocusInspector', () => ({
+  default: ({ documentId, onReturn }: { documentId: number; onReturn?: () => void }) => (
+    <section aria-label="OCR focus inspector">
+      Focus document {documentId}
+      <button type="button" onClick={onReturn}>Return to review</button>
+    </section>
+  ),
+}));
+
 const {
   documentsMock,
   documentCoreMock,
@@ -207,6 +216,18 @@ describe('IntakeReview', () => {
     expect(screen.getByText('Machine extraction')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Searchable text')).toBeInTheDocument();
     expect(screen.queryByText('OCR quality')).not.toBeInTheDocument();
+  });
+
+  it('opens OCR focus mode and returns to the same document and tab', async () => {
+    renderPage('/inbox-review?document=1&tab=ocr');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect OCR' }));
+    expect(screen.getByLabelText('OCR focus inspector')).toHaveTextContent('Focus document 1');
+    expect(screen.getByRole('button', { name: /Document 1/ })).toHaveAttribute('aria-current', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Return to review' }));
+    expect(await screen.findByRole('heading', { name: 'OCR assessment' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'OCR, needs review' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('selects a document and tab from the query string', async () => {

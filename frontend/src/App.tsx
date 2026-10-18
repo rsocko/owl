@@ -24,7 +24,7 @@ import NotFound from './pages/NotFound';
 import DocumentViews from './pages/DocumentViews';
 import OcrQualityDashboard from './pages/OcrQualityDashboard';
 import OcrQualityReviewQueue from './pages/OcrQualityReviewQueue';
-import OcrQualityDocumentDetail from './pages/OcrQualityDocumentDetail';
+import OcrFocusInspectorPage from './pages/OcrFocusInspectorPage';
 import IntakeReview from './pages/IntakeReview';
 import { endpoints } from './lib/api';
 import { canonicalActionTarget, type CanonicalActionLocation } from './lib/canonicalAction';
@@ -113,7 +113,7 @@ function App() {
             <Route path="/insights" element={<Insights />} />
             <Route path="/ocr-quality" element={<OcrQualityDashboard />} />
             <Route path="/ocr-quality/queue" element={<OcrQualityReviewQueue />} />
-            <Route path="/ocr-quality/documents/:documentId" element={<OcrQualityDocumentDetail />} />
+            <Route path="/ocr-quality/documents/:documentId" element={<OcrFocusInspectorPage />} />
             <Route path="/history" element={<History />} />
             <Route path="/orphans" element={<OrphansDupes />} />
             <Route path="/settings" element={<Settings />} />
