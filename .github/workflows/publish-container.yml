@@ -58,6 +58,7 @@ jobs:
     permissions:
       contents: read
     outputs:
+      should_publish: ${{ steps.source.outputs.should_publish }}
       source_sha: ${{ steps.source.outputs.sha }}
     steps:
       - name: Check out main history
@@ -91,12 +92,27 @@ jobs:
             echo "::error::Commit is not in the checked-out main history"
             exit 1
           fi
+          should_publish=true
+          if [[ "${EVENT_NAME}" == "workflow_run" ]] &&
+             git rev-parse "${source_sha}^" >/dev/null 2>&1; then
+            should_publish=false
+            while IFS= read -r path; do
+              case "${path}" in
+                .dockerignore|Dockerfile|config/*|docker-entrypoint.sh|frontend/*|pyproject.toml|src/*)
+                  should_publish=true
+                  break
+                  ;;
+              esac
+            done < <(git diff --name-only "${source_sha}^" "${source_sha}")
+          fi
           echo "sha=${source_sha}" >> "$GITHUB_OUTPUT"
+          echo "should_publish=${should_publish}" >> "$GITHUB_OUTPUT"
 
   publish:
     name: Build, attest, and publish
     needs:
       - prepare
+    if: needs.prepare.outputs.should_publish == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
