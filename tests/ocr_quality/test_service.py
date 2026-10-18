@@ -73,11 +73,11 @@ def ocr_db(tmp_path):
 
 
 def _minimal_pdf_bytes() -> bytes:
-    reportlab = pytest.importorskip("reportlab")
+    canvas = pytest.importorskip("reportlab.pdfgen.canvas")
     from io import BytesIO
 
     buffer = BytesIO()
-    c = reportlab.pdfgen.canvas.Canvas(buffer)
+    c = canvas.Canvas(buffer)
     c.drawString(100, 750, "Native digital text page for profiling tests.")
     c.showPage()
     c.save()

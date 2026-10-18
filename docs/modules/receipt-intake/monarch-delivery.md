@@ -32,7 +32,7 @@ structurally blocked from delivery to prevent a recovery loop.
 it only for an OWL deployment whose existing private access boundary authorizes
 the document users. The browser never receives the Tyrion bearer token; OWL
 authorizes the user action and authenticates server-to-server with
-`OWL_MONARCH_DELIVERY_TYRION_API_TOKEN`.
+`OWL_TYRION_API_TOKEN`.
 
 The ledger stores only opaque hashes, state, bounded reason codes, counters, and
 timestamps. It does not store document bytes, OCR, filenames, signed URLs, raw
@@ -51,8 +51,8 @@ for idempotency or delivery truth.
 ## Configuration
 
 ```dotenv
+OWL_TYRION_API_TOKEN=replace-with-secret
 OWL_MONARCH_DELIVERY_TYRION_AUTHORITY=http://tyrion-operations-ui:3000
-OWL_MONARCH_DELIVERY_TYRION_API_TOKEN=replace-with-secret
 OWL_MONARCH_DELIVERY_IDENTITY_SECRET=replace-with-stable-random-secret
 OWL_MONARCH_DELIVERY_WRITE_ENABLED=false
 OWL_MONARCH_DELIVERY_SENT_TAG=
