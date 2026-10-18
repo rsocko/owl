@@ -68,6 +68,7 @@ let customMetadataSnapshot = "";
 let conflictPending = false;
 let externalTitle = "";
 let scenario = "ready";
+let inboxFilter = "all";
 let discoveryTimer;
 let analysisTimer;
 let analysisRunning = false;
@@ -295,7 +296,13 @@ function pendingDocuments() {
 }
 function visibleDocuments() {
   const query = byId("queue-search").value.trim().toLowerCase();
-  return pendingDocuments().filter((doc) => `${doc.short} ${doc.title} ${doc.correspondent}`.toLowerCase().includes(query));
+  return pendingDocuments().filter((doc) => {
+    const matchesQuery = `${doc.short} ${doc.title} ${doc.correspondent}`.toLowerCase().includes(query);
+    const matchesFilter = inboxFilter === "all"
+      || (inboxFilter === "actions" && doc.assessment === "pay")
+      || (inboxFilter === "missing-type" && !doc.type);
+    return matchesQuery && matchesFilter;
+  });
 }
 function selectDocument(doc) {
   if ((dirty || actionDirty) && !window.confirm("Discard unsaved metadata or action changes and review another document?")) return false;
@@ -334,8 +341,12 @@ function renderQueue() {
     list.append(row);
   }
   byId("queue-empty").hidden = visible.length > 0;
-  byId("awaiting-count").textContent = `${pendingDocuments().length} documents`;
-  byId("intake-count").textContent = pendingDocuments().length;
+  const pending = pendingDocuments();
+  byId("awaiting-count").textContent = `${pending.length} documents`;
+  byId("intake-count").textContent = pending.length;
+  document.querySelector('[data-inbox-filter="all"] span').textContent = pending.length;
+  document.querySelector('[data-inbox-filter="actions"] span').textContent = pending.filter((doc) => doc.assessment === "pay").length;
+  document.querySelector('[data-inbox-filter="missing-type"] span').textContent = pending.filter((doc) => !doc.type).length;
   updateBulkControls();
 }
 function updateBulkControls() {
@@ -1001,6 +1012,13 @@ byId("rerun-ocr").addEventListener("click", () => {
 });
 byId("scenario").addEventListener("change", (event) => setScenario(event.target.value));
 byId("queue-search").addEventListener("input", renderQueue);
+document.querySelectorAll("[data-inbox-filter]").forEach((button) => {
+  button.addEventListener("click", () => {
+    inboxFilter = button.dataset.inboxFilter;
+    document.querySelectorAll("[data-inbox-filter]").forEach((item) => item.classList.toggle("active", item === button));
+    renderQueue();
+  });
+});
 byId("tag-input").addEventListener("keydown", (event) => {
   if (!["Enter", ","].includes(event.key)) return;
   event.preventDefault();

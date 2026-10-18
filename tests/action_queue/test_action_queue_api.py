@@ -1264,6 +1264,10 @@ class TestUpdateAction:
                 "action_type": "RESPOND",
                 "title": "Dispute late fee",
                 "summary": "Ask the provider to remove the fee",
+                "due_date": "2026-03-18",
+                "amount": 48.25,
+                "payee_or_owner": "City Utilities",
+                "reference": "INV-4421",
                 "urgency": "HIGH",
             },
         )
@@ -1275,6 +1279,10 @@ class TestUpdateAction:
         assert created["is_primary"] is False
         assert created["sibling_count"] == 2
         assert set(created["sibling_action_ids"]) == {1, created["id"]}
+        assert created["due_date"] == "2026-03-18"
+        assert created["amount"] == 48.25
+        assert created["payee_or_owner"] == "City Utilities"
+        assert created["reference"] == "INV-4421"
 
     def test_merge_requires_explicit_conflict_resolution(self, seeded_client):
         created = seeded_client.post(

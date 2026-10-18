@@ -39,6 +39,45 @@
   margin: 16px 0;
 }
 
+.triage-action-set-review {
+  margin-top: 1rem;
+}
+
+.triage-action-set-heading,
+.triage-additional-action-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.triage-action-set-heading > div {
+  display: grid;
+  gap: .15rem;
+}
+
+.triage-action-set-heading strong,
+.triage-additional-action-header strong {
+  font-size: .82rem;
+}
+
+.triage-action-set-heading span {
+  color: var(--text-muted);
+  font-size: .68rem;
+}
+
+.triage-additional-action {
+  margin-top: .8rem;
+  padding: .8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.triage-additional-action .triage-action-correction {
+  margin-bottom: 0;
+}
+
 .triage-action-correction label {
   display: grid;
   gap: 6px;
@@ -229,8 +268,7 @@
 
 .triage-item.selected {
   background: var(--selected-bg);
-  border-left: 3px solid var(--selected-border);
-  padding-left: 13px;
+  box-shadow: inset 0 0 0 1px var(--selected-border);
 }
 
 .triage-item-top,
@@ -322,7 +360,7 @@
 }
 
 .triage-reason-banner {
-  border-left: 4px solid var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border));
   background: var(--warning-bg);
   color: var(--text);
   border-radius: var(--radius-sm);
@@ -808,4 +846,212 @@
 .triage-metadata-link a:hover {
   background: #dbeafe;
   border-color: #93c5fd;
+}
+
+/* Unified Document Workspace treatment for Needs Review. */
+.document-review-workspace {
+  grid-template-columns: clamp(20rem, 24vw, 24rem) minmax(0, 1fr);
+  height: calc(100dvh - var(--topnav-height));
+  min-height: 42rem;
+  margin: -20px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.document-review-workspace.rail-collapsed {
+  grid-template-columns: 3.75rem minmax(0, 1fr);
+}
+
+.document-review-workspace .triage-queue-panel,
+.document-review-workspace .triage-detail-panel {
+  min-height: 0;
+  border-radius: 0;
+}
+
+.document-review-workspace .triage-queue-panel {
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 94%, var(--accent) 6%);
+  box-shadow: 8px 0 28px rgb(25 38 61 / 7%);
+  z-index: 2;
+}
+
+.document-review-workspace .triage-queue-panel.collapsed {
+  width: auto;
+}
+
+.document-review-workspace .triage-detail-panel {
+  padding: 1.2rem 1.4rem 5rem;
+  border: 0;
+  background: var(--card);
+}
+
+.document-review-workspace .triage-queue-header {
+  padding: 1rem .75rem .75rem;
+  display: block;
+  border-bottom: 1px solid var(--border);
+}
+
+.document-review-workspace .triage-queue-header-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: .7rem;
+}
+
+.document-review-workspace .triage-queue-title {
+  min-width: 0;
+  margin: 0;
+  display: grid;
+}
+
+.document-review-workspace .triage-queue-title strong {
+  font-size: 1.25rem;
+  letter-spacing: -.03em;
+}
+
+.document-review-workspace .triage-queue-title span {
+  margin: .2rem 0 0;
+  font-size: .72rem;
+}
+
+.document-review-workspace .document-workspace-search,
+.document-review-workspace .workspace-filter-group,
+.document-review-workspace .triage-threshold-bar {
+  grid-column: 1 / -1;
+}
+
+.document-review-workspace .triage-threshold-bar {
+  margin-top: 0;
+}
+
+.document-review-workspace .triage-queue-list {
+  min-height: 0;
+  flex: 1;
+  padding: .4rem;
+}
+
+.document-review-workspace .triage-item {
+  margin-bottom: .2rem;
+  padding: .5rem;
+  display: grid;
+  grid-template-columns: 3.25rem minmax(0, 1fr);
+  gap: .6rem;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius-sm) + 2px);
+  background: transparent;
+}
+
+.document-review-workspace .triage-item:hover {
+  border-color: var(--border);
+}
+
+.document-review-workspace .triage-item.selected {
+  border-color: var(--selected-border);
+  background: var(--selected-bg);
+  box-shadow: 0 5px 16px rgb(34 75 143 / 10%);
+}
+
+.triage-item-thumbnail,
+.triage-item-thumbnail-placeholder {
+  width: 3.25rem;
+  height: 4.1rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card);
+  object-fit: cover;
+  box-shadow: 0 2px 6px rgb(23 34 53 / 12%);
+}
+
+.triage-item-thumbnail-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.triage-item-content {
+  min-width: 0;
+}
+
+.document-review-workspace .triage-item-title,
+.document-review-workspace .triage-item-reason {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.document-review-workspace .triage-item-title {
+  font-size: .74rem;
+  white-space: nowrap;
+}
+
+.document-review-workspace .triage-item-reason {
+  margin-bottom: .4rem;
+  display: -webkit-box;
+  font-size: .65rem;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.document-review-workspace .triage-item-top {
+  margin-bottom: .35rem;
+}
+
+.document-review-workspace .triage-item-meta {
+  font-size: .62rem;
+}
+
+.document-review-workspace .triage-list-toolbar,
+.document-review-workspace .triage-bulk-bar {
+  padding: .55rem .75rem;
+}
+
+.document-review-workspace .triage-collapsed-strip {
+  padding: 0;
+  border: 0;
+}
+
+.document-review-workspace .triage-queue-panel.collapsed .triage-queue-header-content {
+  height: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.document-review-workspace .triage-queue-panel.collapsed .triage-queue-title {
+  display: none;
+}
+
+.document-review-workspace .triage-detail-breadcrumb {
+  position: sticky;
+  z-index: 5;
+  top: -1.2rem;
+  margin: -1.2rem -1.4rem 0;
+  padding: .75rem 1.4rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+@media (max-width: 1080px) {
+  .document-review-workspace,
+  .document-review-workspace.rail-collapsed {
+    height: auto;
+    min-height: calc(100dvh - var(--topnav-height));
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .document-review-workspace .triage-queue-panel {
+    margin: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .document-review-workspace .triage-queue-list {
+    max-height: 18rem;
+  }
+
+  .document-review-workspace .triage-detail-panel {
+    min-height: 36rem;
+  }
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { useSearchParams } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import {
   Badge,
   Button,
@@ -8,10 +9,7 @@ import {
   ConfidenceBadge,
   EmptyState,
   ErrorState,
-  FilterPills,
-  PageHeader,
   SkeletonLoader,
-  Tabs,
   Toast,
 } from '../components/ui';
 import EobMatchDetail from '../components/EobMatchDetail';
@@ -22,6 +20,7 @@ import { getToastDuration } from '../lib/toast';
 import { StatementGroupingDetail } from '../components/triage/StatementGroupingDetail';
 import DuplicateDetail from './DuplicateDetail';
 import '../styles/triage-queue.css';
+import '../styles/document-workspace.css';
 
 // ------------------------------------------------------------------
 // Types
@@ -68,7 +67,7 @@ type ActionCorrectionDraft = {
   amount: string;
 };
 
-const ACTION_TYPES = ['PAY', 'RESPOND', 'SIGN', 'SCHEDULE', 'TASK', 'REVIEW', 'SHARE', 'FILE', 'ARCHIVE'];
+const ACTION_TYPES = ['PAY', 'RESPOND', 'SIGN', 'SCHEDULE', 'TASK', 'REVIEW', 'SHARE'];
 
 const ITEM_TYPE_FILTERS: ReadonlySet<ItemTypeFilter> = new Set([
   'all',
@@ -105,6 +104,25 @@ function actionDraftsMatch(
   return Object.keys(current).every(
     (key) => current[key as keyof ActionCorrectionDraft] === detected[key as keyof ActionCorrectionDraft],
   );
+}
+
+function actionDraftRequirement(draft: ActionCorrectionDraft, position = 0): string | null {
+  const prefix = position > 0 ? `Action ${position + 1}: ` : '';
+  if (!(draft.title || '').trim()) return `${prefix}Enter a task name to continue.`;
+  if (draft.action_type === 'PAY' && draft.amount === '') {
+    return `${prefix}Enter an amount to continue. A due date is optional.`;
+  }
+  return null;
+}
+
+function emptyActionCorrection(): ActionCorrectionDraft {
+  return {
+    action_type: 'TASK',
+    title: '',
+    summary: '',
+    due_date: '',
+    amount: '',
+  };
 }
 
 // ------------------------------------------------------------------
@@ -186,6 +204,19 @@ function itemTitle(item: TriageItem): string {
   return `${typeLabel(item.item_type)}: ${item.target_id}`;
 }
 
+function itemDocumentId(item: TriageItem): number | null {
+  const metadata = item.metadata ?? {};
+  const candidates = [
+    metadata.document_id,
+    metadata.eob_document_id,
+    metadata.doc_a_id,
+    item.target_type === 'document' ? item.target_id : null,
+  ];
+  const value = candidates.find((candidate) => candidate != null);
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 function TriageDetailBreadcrumb({ item }: { item: TriageItem }) {
   const typeIcons: Record<string, string> = {
     eob_match_review: '🔗',
@@ -251,6 +282,69 @@ function reviewActionLabel(action: string): string {
   return labels[action] ?? action;
 }
 
+function ActionCorrectionEditor({
+  draft,
+  index,
+  onChange,
+}: {
+  draft: ActionCorrectionDraft;
+  index: number;
+  onChange: (draft: ActionCorrectionDraft) => void;
+}) {
+  const suffix = index === 0 ? '' : ` for action ${index + 1}`;
+  return (
+    <div className="triage-action-correction">
+      <label>
+        <span>Action type</span>
+        <select
+          aria-label={`Corrected action type${suffix}`}
+          value={draft.action_type}
+          onChange={(event) => onChange({ ...draft, action_type: event.target.value })}
+        >
+          {ACTION_TYPES.map((type) => <option value={type} key={type}>{type}</option>)}
+        </select>
+      </label>
+      <label>
+        <span>Task name</span>
+        <input
+          aria-label={`Corrected task name${suffix}`}
+          value={draft.title}
+          onChange={(event) => onChange({ ...draft, title: event.target.value })}
+        />
+      </label>
+      <label className="triage-action-correction-wide">
+        <span>Summary</span>
+        <textarea
+          aria-label={`Corrected summary${suffix}`}
+          rows={3}
+          value={draft.summary}
+          onChange={(event) => onChange({ ...draft, summary: event.target.value })}
+        />
+      </label>
+      <label>
+        <span>Due date</span>
+        <input
+          aria-label={`Corrected due date${suffix}`}
+          type="date"
+          value={draft.due_date}
+          onChange={(event) => onChange({ ...draft, due_date: event.target.value })}
+        />
+      </label>
+      <label>
+        <span>Amount</span>
+        <input
+          aria-label={`Corrected amount${suffix}`}
+          type="number"
+          min="0"
+          step="0.01"
+          value={draft.amount}
+          onChange={(event) => onChange({ ...draft, amount: event.target.value })}
+        />
+      </label>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------
 // Component
 // ------------------------------------------------------------------
@@ -269,12 +363,14 @@ export default function TriageQueue() {
   // Filters
   const typeFilter = queryTypeFilter;
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
+  const [query, setQuery] = useState('');
 
   // Selection
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const lastCheckedRef = useRef<string | null>(null);
   const [actionCorrection, setActionCorrection] = useState<ActionCorrectionDraft | null>(null);
+  const [additionalActionCorrections, setAdditionalActionCorrections] = useState<ActionCorrectionDraft[]>([]);
 
   // UI state
   const [collapsed, setCollapsed] = useState(false);
@@ -282,6 +378,7 @@ export default function TriageQueue() {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [populating, setPopulating] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [confirmReviseId, setConfirmReviseId] = useState<string | null>(null);
 
   // Bulk confirm modal & threshold
   const [pendingBulkAction, setPendingBulkAction] = useState<{ action: string; ids: string[] } | null>(null);
@@ -312,12 +409,20 @@ export default function TriageQueue() {
       params.set('status', statusFilter);
       params.set('limit', '200');
 
-      const [queueRes, statsRes] = await Promise.all([
+      const dismissedParams = new URLSearchParams(params);
+      dismissedParams.set('status', 'dismissed');
+      const [queueRes, dismissedRes, statsRes] = await Promise.all([
         endpoints.triage.queue(params.toString()) as Promise<QueueResponse>,
+        statusFilter === 'resolved'
+          ? endpoints.triage.queue(dismissedParams.toString()) as Promise<QueueResponse>
+          : Promise.resolve(null),
         endpoints.triage.stats() as Promise<StatsResponse>,
       ]);
 
-      setItems(queueRes?.items ?? []);
+      setItems([
+        ...(queueRes?.items ?? []),
+        ...(dismissedRes?.items ?? []),
+      ]);
       setStats(statsRes ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load items needing review.');
@@ -347,9 +452,20 @@ export default function TriageQueue() {
     () => items.find((item) => item.id === selectedId) ?? null,
     [items, selectedId],
   );
+  const visibleItems = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return items;
+    return items.filter((item) => [
+      itemTitle(item),
+      item.reason,
+      item.source,
+      item.target_id,
+      JSON.stringify(item.metadata ?? {}),
+    ].filter(Boolean).join(' ').toLowerCase().includes(needle));
+  }, [items, query]);
   const bulkEligibleItems = useMemo(
-    () => items.filter((item) => item.item_type !== 'action_classification'),
-    [items],
+    () => visibleItems.filter((item) => item.item_type !== 'action_classification'),
+    [visibleItems],
   );
   const selectedReviewCanResolve = selectedItem?.item_type !== 'action_classification'
     || ['pending', 'deferred'].includes(selectedItem.status);
@@ -357,17 +473,17 @@ export default function TriageQueue() {
     () => actionCorrectionDraft(selectedItem),
     [selectedItem],
   );
-  const actionCorrectionIsDirty = !actionDraftsMatch(actionCorrection, detectedActionCorrection);
+  const actionCorrectionIsDirty = !actionDraftsMatch(actionCorrection, detectedActionCorrection)
+    || additionalActionCorrections.length > 0;
   const actionCorrectionMissingRequirement = actionCorrection
-    ? !(actionCorrection.title || '').trim()
-      ? 'Enter a task name to continue.'
-      : actionCorrection.action_type === 'PAY' && actionCorrection.amount === ''
-        ? 'Enter an amount to continue. A due date is optional.'
-        : null
+    ? [actionCorrection, ...additionalActionCorrections]
+      .map((draft, index) => actionDraftRequirement(draft, index))
+      .find((requirement) => requirement !== null) ?? null
     : null;
 
   useEffect(() => {
     setActionCorrection(detectedActionCorrection);
+    setAdditionalActionCorrections([]);
   }, [detectedActionCorrection]);
 
   // Keep selectedId valid when items change
@@ -390,12 +506,12 @@ export default function TriageQueue() {
       const next = new Set(prev);
 
       if (shiftKey && lastCheckedRef.current) {
-        const startIdx = items.findIndex((i) => i.id === lastCheckedRef.current);
-        const endIdx = items.findIndex((i) => i.id === itemId);
+        const startIdx = visibleItems.findIndex((i) => i.id === lastCheckedRef.current);
+        const endIdx = visibleItems.findIndex((i) => i.id === itemId);
         if (startIdx >= 0 && endIdx >= 0) {
           const [lo, hi] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
           for (let i = lo; i <= hi; i++) {
-            if (items[i].item_type !== 'action_classification') next.add(items[i].id);
+            if (visibleItems[i].item_type !== 'action_classification') next.add(visibleItems[i].id);
           }
           lastCheckedRef.current = itemId;
           return next;
@@ -422,18 +538,18 @@ export default function TriageQueue() {
     }
   };
 
-  const moveSelection = (direction: -1 | 1) => {
-    if (items.length === 0) return;
-    const idx = items.findIndex((i) => i.id === selectedId);
-    const next = idx < 0 ? 0 : Math.max(0, Math.min(items.length - 1, idx + direction));
-    setSelectedId(items[next]?.id ?? null);
-  };
+  const moveSelection = useCallback((direction: -1 | 1) => {
+    if (visibleItems.length === 0) return;
+    const idx = visibleItems.findIndex((i) => i.id === selectedId);
+    const next = idx < 0 ? 0 : Math.max(0, Math.min(visibleItems.length - 1, idx + direction));
+    setSelectedId(visibleItems[next]?.id ?? null);
+  }, [selectedId, visibleItems]);
 
   // ------------------------------------------------------------------
   // Actions
   // ------------------------------------------------------------------
 
-  const handleResolve = async (itemId: string, action: string) => {
+  const handleResolve = useCallback(async (itemId: string, action: string) => {
     setBusyAction(`${itemId}-${action}`);
     try {
       const result = await endpoints.triage.resolve(itemId, { action }) as {
@@ -441,7 +557,7 @@ export default function TriageQueue() {
         review_state?: string;
         reason?: string;
       };
-      const isActionClassification = selectedItem?.item_type === 'action_classification';
+      const isActionClassification = items.find((item) => item.id === itemId)?.item_type === 'action_classification';
       const remainsInReview = isActionClassification && result.action_ready === false;
       setToast({
         message: remainsInReview
@@ -462,7 +578,7 @@ export default function TriageQueue() {
     } finally {
       setBusyAction(null);
     }
-  };
+  }, [items, loadData]);
 
   const correctActionClassification = async (itemId: string) => {
     if (!actionCorrection) return;
@@ -470,17 +586,29 @@ export default function TriageQueue() {
     try {
       const result = await endpoints.triage.resolve(itemId, {
         action: 'correct',
-        payload: {
-          action_type: actionCorrection.action_type,
-          title: actionCorrection.title,
-          summary: actionCorrection.summary,
-          due_date: actionCorrection.due_date || null,
-          amount: actionCorrection.amount === '' ? null : Number(actionCorrection.amount),
-        },
+        payload: additionalActionCorrections.length > 0
+          ? {
+              actions: [actionCorrection, ...additionalActionCorrections].map((draft) => ({
+                action_type: draft.action_type,
+                title: draft.title,
+                summary: draft.summary,
+                due_date: draft.due_date || null,
+                amount: draft.amount === '' ? null : Number(draft.amount),
+              })),
+            }
+          : {
+              action_type: actionCorrection.action_type,
+              title: actionCorrection.title,
+              summary: actionCorrection.summary,
+              due_date: actionCorrection.due_date || null,
+              amount: actionCorrection.amount === '' ? null : Number(actionCorrection.amount),
+            },
       }) as { action_ready?: boolean; reason?: string };
       setToast({
         message: result.action_ready
-          ? 'Correction saved and action added to Action Queue.'
+          ? additionalActionCorrections.length > 0
+            ? `${additionalActionCorrections.length + 1} actions accepted and added to Actions.`
+            : 'Correction saved and action added to Actions.'
           : result.reason || 'Correction saved; this item still needs review.',
         tone: result.action_ready ? 'success' : undefined,
       });
@@ -492,7 +620,7 @@ export default function TriageQueue() {
     }
   };
 
-  const handleDefer = async (itemId: string) => {
+  const handleDefer = useCallback(async (itemId: string) => {
     setBusyAction(`${itemId}-defer`);
     try {
       await endpoints.triage.defer(itemId);
@@ -503,7 +631,7 @@ export default function TriageQueue() {
     } finally {
       setBusyAction(null);
     }
-  };
+  }, [loadData]);
 
   const handleDismiss = async (itemId: string) => {
     setBusyAction(`${itemId}-dismiss`);
@@ -521,6 +649,7 @@ export default function TriageQueue() {
   const handleUndo = async (itemId: string) => {
     try {
       await endpoints.triage.undo(itemId);
+      setStatusFilter('pending');
       setToast({ message: 'Action undone.', tone: 'success' });
       await loadData();
     } catch (err) {
@@ -659,7 +788,16 @@ export default function TriageQueue() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [items, selectedId, selectedItem, pendingBulkAction, pendingThreshold, showShortcuts]);
+  }, [
+    handleDefer,
+    handleResolve,
+    moveSelection,
+    pendingBulkAction,
+    pendingThreshold,
+    selectedId,
+    selectedItem,
+    showShortcuts,
+  ]);
 
   // ------------------------------------------------------------------
   // Derived counts
@@ -675,61 +813,86 @@ export default function TriageQueue() {
 
   return (
     <>
-      <PageHeader
-        title="Needs Review"
-        desc="Help OWL resolve uncertain matches, possible duplicates, grouping issues, and unmatched documents."
-      />
-
       {loading && !items.length ? (
         <SkeletonLoader variant="table" rows={8} />
       ) : error ? (
         <ErrorState message={error} onRetry={() => void loadData()} />
       ) : (
-        <div className="triage-shell">
+        <div className={`triage-shell document-review-workspace${collapsed ? ' rail-collapsed' : ''}`}>
           {/* ── Queue list panel (left) ── */}
           <section className={collapsed ? 'triage-queue-panel collapsed' : 'triage-queue-panel'}>
             <div className="triage-queue-header">
-              <button
-                className="triage-collapse-button"
-                onClick={() => setCollapsed((c) => !c)}
-                title="Toggle queue panel (F)"
-              >
-                {collapsed ? '▶' : '◀'}
-              </button>
               <div className="triage-queue-header-content">
                 <div className="triage-queue-title">
-                  Needs Review <span>{pendingCount} pending</span>
+                  <strong>Needs Review</strong>
+                  <span>{pendingCount} pending · {visibleItems.length} shown</span>
                 </div>
-
-                {/* Type filter tabs */}
-                <Tabs
-                  active={typeFilter}
-                  onChange={handleTypeFilterChange}
-                  tabs={[
-                    { key: 'all', label: `All (${stats?.total ?? 0})` },
-                    { key: 'action_classification', label: `Actions (${typeCounts.action_classification ?? 0})` },
-                    { key: 'eob_match_review', label: `EOB (${typeCounts.eob_match_review ?? 0})` },
-                    { key: 'grouping_anomaly', label: `Groups (${typeCounts.grouping_anomaly ?? 0})` },
-                    { key: 'orphan_document', label: `Orphans (${typeCounts.orphan_document ?? 0})` },
-                    { key: 'duplicate_document', label: `Dupes (${typeCounts.duplicate_document ?? 0})` },
-                  ]}
-                />
-
-                {/* Status filter */}
-                <div className="triage-status-filter">
-                  <FilterPills
-                    active={statusFilter}
-                    onChange={(v) => setStatusFilter(v as StatusFilter)}
-                    options={[
-                      { key: 'pending', label: `Pending (${statusCounts.pending ?? 0})` },
-                      { key: 'deferred', label: `Review later (${statusCounts.deferred ?? 0})` },
-                      { key: 'resolved', label: `Resolved (${statusCounts.resolved ?? 0})` },
-                    ]}
-                  />
-                </div>
+                <button
+                  type="button"
+                  className="document-workspace-collapse"
+                  onClick={() => setCollapsed((current) => !current)}
+                  title="Toggle review queue (F)"
+                  aria-label={collapsed ? 'Expand review queue' : 'Collapse review queue'}
+                >
+                  {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+                </button>
+                {!collapsed ? (
+                  <>
+                    <label className="document-workspace-search">
+                      <Search size={16} />
+                      <input
+                        aria-label="Search review items"
+                        placeholder="Find document, reason, or review"
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                      />
+                    </label>
+                    <div className="workspace-filter-group">
+                      <span>Status</span>
+                      <div className="workspace-segments">
+                        {([
+                          ['pending', 'Pending', statusCounts.pending ?? 0],
+                          ['deferred', 'Review later', statusCounts.deferred ?? 0],
+                          ['resolved', 'Resolved', (statusCounts.resolved ?? 0) + (statusCounts.dismissed ?? 0)],
+                        ] as const).map(([value, label, count]) => (
+                          <button
+                            type="button"
+                            key={value}
+                            className={statusFilter === value ? 'active' : ''}
+                            onClick={() => setStatusFilter(value)}
+                          >
+                            {label} <b>{count}</b>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="workspace-filter-group">
+                      <span>Review type</span>
+                      <div className="workspace-chips">
+                        {([
+                          ['all', 'All', stats?.total ?? 0],
+                          ['action_classification', 'Actions', typeCounts.action_classification ?? 0],
+                          ['eob_match_review', 'EOB', typeCounts.eob_match_review ?? 0],
+                          ['grouping_anomaly', 'Groups', typeCounts.grouping_anomaly ?? 0],
+                          ['orphan_document', 'Orphans', typeCounts.orphan_document ?? 0],
+                          ['duplicate_document', 'Duplicates', typeCounts.duplicate_document ?? 0],
+                        ] as const).map(([value, label, count]) => (
+                          <button
+                            type="button"
+                            key={value}
+                            className={typeFilter === value ? 'active' : ''}
+                            onClick={() => handleTypeFilterChange(value)}
+                          >
+                            {label} <b>{count}</b>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                ) : null}
 
                 {/* Auto-accept threshold */}
-                {statusFilter === 'pending' && typeFilter !== 'action_classification' && (
+                {!collapsed && statusFilter === 'pending' && typeFilter !== 'action_classification' && (
                   <div className="triage-threshold-bar">
                     <button
                       className="triage-auto-confirm-btn"
@@ -755,7 +918,7 @@ export default function TriageQueue() {
 
             {collapsed ? (
               <div className="triage-collapsed-strip">
-                <span>{items.length} items</span>
+                <span>{visibleItems.length}</span>
               </div>
             ) : (
               <>
@@ -813,17 +976,21 @@ export default function TriageQueue() {
 
                 {/* Queue list */}
                 <div className="triage-queue-list">
-                  {items.length === 0 ? (
+                  {visibleItems.length === 0 ? (
                     <EmptyState
                       title="Queue is empty"
                       desc={
-                        statusFilter === 'pending'
+                        query.trim()
+                          ? 'No review items match the current search.'
+                          : statusFilter === 'pending'
                           ? 'No items need review. Use "Populate" to scan for new flagged items.'
                           : `No ${statusFilter} items found.`
                       }
                     />
                   ) : (
-                    items.map((item) => (
+                    visibleItems.map((item) => {
+                      const documentId = itemDocumentId(item);
+                      return (
                       <article
                         key={item.id}
                         className={[
@@ -833,28 +1000,38 @@ export default function TriageQueue() {
                         ].filter(Boolean).join(' ')}
                         onClick={() => setSelectedId(item.id)}
                       >
-                        <div className="triage-item-top">
-                          {statusFilter === 'pending' && item.item_type !== 'action_classification' && (
-                            <input
-                              type="checkbox"
-                              checked={checkedIds.has(item.id)}
-                              onChange={(e) => toggleCheck(item.id, e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey)}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                          )}
-                          <Badge tone={typeBadgeTone(item.item_type)}>{typeLabel(item.item_type)}</Badge>
-                          {item.metadata && typeof item.metadata.score_pct === 'number' && (
-                            <ConfidenceBadge pct={item.metadata.score_pct as number} />
-                          )}
-                        </div>
-                        <div className="triage-item-title">{itemTitle(item)}</div>
-                        <div className="triage-item-reason">{item.reason || 'Flagged for review'}</div>
-                        <div className="triage-item-meta">
-                          <Badge tone={priorityBadgeTone(item.priority)}>{priorityLabel(item.priority)}</Badge>
-                          <span>{timeAgo(item.created_at)}</span>
+                        {documentId ? (
+                          <img
+                            className="triage-item-thumbnail"
+                            src={endpoints.documents.thumbnailUrl(documentId)}
+                            alt=""
+                            loading="lazy"
+                          />
+                        ) : <div className="triage-item-thumbnail-placeholder">{typeLabel(item.item_type).slice(0, 1)}</div>}
+                        <div className="triage-item-content">
+                          <div className="triage-item-top">
+                            {statusFilter === 'pending' && item.item_type !== 'action_classification' && (
+                              <input
+                                type="checkbox"
+                                checked={checkedIds.has(item.id)}
+                                onChange={(e) => toggleCheck(item.id, e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey)}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            )}
+                            <Badge tone={typeBadgeTone(item.item_type)}>{typeLabel(item.item_type)}</Badge>
+                            {item.metadata && typeof item.metadata.score_pct === 'number' && (
+                              <ConfidenceBadge pct={item.metadata.score_pct as number} />
+                            )}
+                          </div>
+                          <div className="triage-item-title">{itemTitle(item)}</div>
+                          <div className="triage-item-reason">{item.reason || 'Flagged for review'}</div>
+                          <div className="triage-item-meta">
+                            <Badge tone={priorityBadgeTone(item.priority)}>{priorityLabel(item.priority)}</Badge>
+                            <span>{timeAgo(item.created_at)}</span>
+                          </div>
                         </div>
                       </article>
-                    ))
+                    )})
                   )}
                 </div>
               </>
@@ -877,7 +1054,7 @@ export default function TriageQueue() {
                       </div>
                     </div>
                   </div>
-                  <Card title="Action classification">
+                  <Card title="Document action review">
                     <div className="triage-detail-info">
                       <div className="triage-detail-row">
                         <span>Suggested type</span>
@@ -897,64 +1074,52 @@ export default function TriageQueue() {
                       </div>
                     </div>
                     {selectedReviewCanResolve && actionCorrection && (
-                      <div className="triage-action-correction">
-                        <label>
-                          <span>Action type</span>
-                          <select
-                            aria-label="Corrected action type"
-                            value={actionCorrection.action_type}
-                            onChange={(event) => setActionCorrection((current) => (
-                              current ? { ...current, action_type: event.target.value } : current
-                            ))}
+                      <div className="triage-action-set-review">
+                        <div className="triage-action-set-heading">
+                          <div>
+                            <strong>Proposed actions on this document</strong>
+                            <span>{additionalActionCorrections.length + 1} proposed</span>
+                          </div>
+                          <Button
+                            size="sm"
+                            onClick={() => setAdditionalActionCorrections((current) => [
+                              ...current,
+                              emptyActionCorrection(),
+                            ])}
                           >
-                            {ACTION_TYPES.map((type) => <option value={type} key={type}>{type}</option>)}
-                          </select>
-                        </label>
-                        <label>
-                          <span>Task name</span>
-                          <input
-                            aria-label="Corrected task name"
-                            value={actionCorrection.title}
-                            onChange={(event) => setActionCorrection((current) => (
-                              current ? { ...current, title: event.target.value } : current
-                            ))}
-                          />
-                        </label>
-                        <label className="triage-action-correction-wide">
-                          <span>Summary</span>
-                          <textarea
-                            aria-label="Corrected summary"
-                            rows={3}
-                            value={actionCorrection.summary}
-                            onChange={(event) => setActionCorrection((current) => (
-                              current ? { ...current, summary: event.target.value } : current
-                            ))}
-                          />
-                        </label>
-                        <label>
-                          <span>Due date</span>
-                          <input
-                            aria-label="Corrected due date"
-                            type="date"
-                            value={actionCorrection.due_date}
-                            onChange={(event) => setActionCorrection((current) => (
-                              current ? { ...current, due_date: event.target.value } : current
-                            ))}
-                          />
-                        </label>
-                        <label>
-                          <span>Amount</span>
-                          <input
-                            aria-label="Corrected amount"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={actionCorrection.amount}
-                            onChange={(event) => setActionCorrection((current) => (
-                              current ? { ...current, amount: event.target.value } : current
-                            ))}
-                          />
-                        </label>
+                            Add action
+                          </Button>
+                        </div>
+                        <ActionCorrectionEditor
+                          draft={actionCorrection}
+                          index={0}
+                          onChange={(draft) => setActionCorrection(draft)}
+                        />
+                        {additionalActionCorrections.map((draft, index) => (
+                          <div className="triage-additional-action" key={index}>
+                            <div className="triage-additional-action-header">
+                              <strong>Action {index + 2}</strong>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setAdditionalActionCorrections((current) => (
+                                  current.filter((_, candidateIndex) => candidateIndex !== index)
+                                ))}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                            <ActionCorrectionEditor
+                              draft={draft}
+                              index={index + 1}
+                              onChange={(nextDraft) => setAdditionalActionCorrections((current) => (
+                                current.map((candidate, candidateIndex) => (
+                                  candidateIndex === index ? nextDraft : candidate
+                                ))
+                              ))}
+                            />
+                          </div>
+                        ))}
                       </div>
                     )}
                     {selectedReviewCanResolve && actionCorrectionMissingRequirement && (
@@ -978,13 +1143,20 @@ export default function TriageQueue() {
                             }
                           }}
                         >
-                          {actionCorrectionIsDirty ? 'Save corrections' : 'Accept suggestion'}
+                          {additionalActionCorrections.length > 0
+                            ? `Accept ${additionalActionCorrections.length + 1} actions`
+                            : actionCorrectionIsDirty
+                              ? 'Save corrections'
+                              : 'Accept suggestion'}
                         </Button>
                         {actionCorrectionIsDirty && (
                           <Button
                             variant="ghost"
                             disabled={busyAction !== null}
-                            onClick={() => setActionCorrection(detectedActionCorrection)}
+                            onClick={() => {
+                              setActionCorrection(detectedActionCorrection);
+                              setAdditionalActionCorrections([]);
+                            }}
                           >
                             Reset to suggested values
                           </Button>
@@ -994,7 +1166,7 @@ export default function TriageQueue() {
                           disabled={busyAction !== null}
                           onClick={() => void handleResolve(selectedItem.id, 'no_action')}
                         >
-                          No action needed
+                          Not an action
                         </Button>
                         <Button
                           variant="ghost"
@@ -1013,7 +1185,7 @@ export default function TriageQueue() {
                               ? 'Corrections saved'
                               : selectedItem.resolved_action === 'confirm'
                                 ? 'Suggestion accepted'
-                                : 'No action needed'}
+                                  : 'Not an action'}
                           </strong>
                           <span>
                             {selectedItem.resolved_at
@@ -1026,6 +1198,13 @@ export default function TriageQueue() {
                             View action
                           </a>
                         )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setConfirmReviseId(selectedItem.id)}
+                        >
+                          Revise decision
+                        </Button>
                       </div>
                     )}
                   </Card>
@@ -1115,6 +1294,15 @@ export default function TriageQueue() {
                       disabled={busyAction !== null || selectedItem.status !== 'pending'}
                       onDismiss={() => void handleDismiss(selectedItem.id)}
                     />
+                    {selectedItem.status !== 'pending' ? (
+                      <Button
+                        variant="ghost"
+                        disabled={busyAction !== null}
+                        onClick={() => setConfirmReviseId(selectedItem.id)}
+                      >
+                        Revise decision
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
 
@@ -1247,6 +1435,34 @@ export default function TriageQueue() {
                 onClick={() => void confirmPendingBulkAction()}
               >
                 {pendingBulkAction.action === 'reject' ? 'Reject' : 'Dismiss'} {pendingBulkAction.ids.length} items
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmReviseId && (
+        <div className="triage-modal-overlay" onClick={() => setConfirmReviseId(null)}>
+          <div className="triage-modal" role="dialog" aria-modal="true" aria-labelledby="revise-review-title" onClick={(event) => event.stopPropagation()}>
+            <div className="triage-modal-title" id="revise-review-title">
+              Reopen this document review?
+            </div>
+            <p className="triage-modal-desc">
+              The accepted values will remain visible while you revise them. If the resulting action was already completed,
+              its completion history is preserved and the revised classification may change downstream metadata.
+            </p>
+            <div className="triage-modal-actions">
+              <Button size="sm" onClick={() => setConfirmReviseId(null)}>Cancel</Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  const itemId = confirmReviseId;
+                  setConfirmReviseId(null);
+                  void handleUndo(itemId);
+                }}
+              >
+                Reopen review
               </Button>
             </div>
           </div>

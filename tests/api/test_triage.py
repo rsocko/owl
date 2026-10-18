@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from doc_intelligence_hub.modules.action_queue.database import Action
+from doc_intelligence_hub.modules.action_queue.database import get_session as get_action_session
 from doc_intelligence_hub.modules.triage.database import (
     create_action_classification_review,
     create_queue_item,
@@ -284,7 +286,7 @@ class TestTriageResolve:
             json={"action": "confirm"},
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         assert response.json()["action_ready"] is False
         assert response.json()["review_state"] == "needs_review"
         session = get_action_session()
@@ -490,7 +492,7 @@ class TestTriageResolve:
         item = client.get(f"/api/triage/queue/{action_review['item_id']}").json()
         assert item["status"] == "pending"
 
-    def test_action_classification_undo_is_rejected(self, client, action_review):
+    def test_action_classification_can_be_reopened_for_revision(self, client, action_review):
         from unittest.mock import AsyncMock, patch
 
         with patch(
@@ -501,10 +503,105 @@ class TestTriageResolve:
                 f"/api/triage/queue/{action_review['item_id']}/resolve",
                 json={"action": "confirm"},
             )
-        undo_response = client.post(f"/api/triage/queue/{action_review['item_id']}/undo")
+            undo_response = client.post(f"/api/triage/queue/{action_review['item_id']}/undo")
 
         assert confirm_response.status_code == 200
-        assert undo_response.status_code == 422
+        assert undo_response.status_code == 200
+        assert undo_response.json()["status"] == "pending"
+        session = get_action_session()
+        try:
+            action = session.get(Action, action_review["action_id"])
+            assert action is not None
+            assert action.action_ready is False
+            assert action.review_state == "needs_review"
+            assert action.review_item_id == action_review["item_id"]
+        finally:
+            session.close()
+
+    def test_action_classification_accepts_multiple_actions_atomically(self, client, action_review):
+        from unittest.mock import AsyncMock, patch
+
+        with patch(
+            "doc_intelligence_hub.modules.action_queue.lifecycle.project_action_metadata",
+            new=AsyncMock(),
+        ):
+            response = client.post(
+                f"/api/triage/queue/{action_review['item_id']}/resolve",
+                json={
+                    "action": "correct",
+                    "payload": {
+                        "actions": [
+                            {
+                                "action_type": "PAY",
+                                "title": "Pay renewal invoice",
+                                "summary": "Pay the current renewal balance",
+                                "amount": 125.5,
+                                "due_date": "2026-11-01",
+                            },
+                            {
+                                "action_type": "SIGN",
+                                "title": "Sign renewal authorization",
+                                "summary": "Return the signed authorization",
+                                "amount": None,
+                                "due_date": "2026-10-28",
+                            },
+                        ]
+                    },
+                },
+            )
+
+        assert response.status_code == 200, response.text
+        assert len(response.json()["action_ids"]) == 2
+        session = get_action_session()
+        try:
+            actions = (
+                session.query(Action)
+                .filter_by(document_id=779)
+                .order_by(Action.action_index.asc())
+                .all()
+            )
+            assert [action.action_type for action in actions] == ["PAY", "SIGN"]
+            assert [action.title for action in actions] == [
+                "Pay renewal invoice",
+                "Sign renewal authorization",
+            ]
+            assert all(action.action_ready for action in actions)
+            assert actions[1].parent_action_id == actions[0].id
+            assert actions[1].is_primary is False
+        finally:
+            session.close()
+
+    def test_invalid_multi_action_review_does_not_partially_update(self, client, action_review):
+        response = client.post(
+            f"/api/triage/queue/{action_review['item_id']}/resolve",
+            json={
+                "action": "correct",
+                "payload": {
+                    "actions": [
+                        {
+                            "action_type": "PAY",
+                            "title": "Pay renewal invoice",
+                            "amount": 125.5,
+                        },
+                        {
+                            "action_type": "SIGN",
+                            "title": "",
+                        },
+                    ]
+                },
+            },
+        )
+
+        assert response.status_code == 422
+        session = get_action_session()
+        try:
+            actions = session.query(Action).filter_by(document_id=779).all()
+            assert len(actions) == 1
+            assert actions[0].action_type == "RESPOND"
+            assert actions[0].title == "Respond to notice"
+            assert actions[0].action_ready is False
+        finally:
+            session.close()
 
     def test_action_classification_confirm_projects_pending_metadata(self, client, action_review):
         from unittest.mock import AsyncMock, patch
