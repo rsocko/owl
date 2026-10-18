@@ -110,7 +110,7 @@ class TestMcListActions:
         assert action["urgency"] == action["urgency"].lower()
 
     def test_response_exposes_authoritative_paperless_created_date(self, seeded_client):
-        action = seeded_client.get("/api/action-queue/actions").json()[0]
+        action = seeded_client.get("/api/action-queue/actions?include_not_ready=true").json()[0]
 
         assert action["document_created_at"] == "2026-01-24"
         assert action["document_created_at"] != action["created_at"]
@@ -128,7 +128,7 @@ class TestMcListActions:
         assert action["confidence"] not in (None, "")
 
     def test_response_preserves_action_helpers(self, seeded_client):
-        action = seeded_client.get("/api/action-queue/actions").json()[0]
+        action = seeded_client.get("/api/action-queue/actions?include_not_ready=true").json()[0]
 
         assert action["recommended_cta"] == {
             "id": "pay-online",
@@ -272,7 +272,7 @@ class TestMcListActions:
         finally:
             db.close()
 
-        action = seeded_client.get("/api/action-queue/actions").json()[0]
+        action = seeded_client.get("/api/action-queue/actions?include_not_ready=true").json()[0]
         assert action["recommended_cta"]["phone"] == "555-0100"
         assert action["recommended_cta"]["metadata"] == {"department": "records"}
         assert {source["id"] for source in action["source_actions"]} == {
@@ -313,7 +313,9 @@ class TestMcListActions:
             finally:
                 db.close()
 
-            action = TestClient(app).get("/api/action-queue/actions").json()[0]
+            action = (
+                TestClient(app).get("/api/action-queue/actions?include_not_ready=true").json()[0]
+            )
             assert {source["id"] for source in action["source_actions"]} == {"send_to_review"}
         finally:
             aq_settings.database_url = original_db_url
@@ -334,6 +336,19 @@ class TestMcListActions:
         extracted = seeded_client.get("/api/action-queue/actions").json()[0]["extracted_data"]
         assert "account_number" not in extracted
         assert "account_identifier" not in extracted
+
+    def test_default_connector_excludes_legacy_filing_actions(self, seeded_client):
+        db = get_session()
+        try:
+            action = db.query(Action).filter_by(id=1).one()
+            action.action_type = "ARCHIVE"
+            db.commit()
+        finally:
+            db.close()
+
+        assert seeded_client.get("/api/action-queue/actions").json() == []
+        diagnostic = seeded_client.get("/api/action-queue/actions?include_not_ready=true").json()
+        assert diagnostic[0]["action_type"] == "archive"
 
     def test_incomplete_mc_type_correction_routes_to_review_and_returns_current_cta(
         self, seeded_client

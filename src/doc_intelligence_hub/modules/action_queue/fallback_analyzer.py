@@ -75,25 +75,22 @@ _REVIEW_KEYWORDS = re.compile(
     r"tax\s*assessment|property\s*assessment|zoning)\b",
     re.IGNORECASE,
 )
-_FILE_KEYWORDS = re.compile(
+_INFORMATIONAL_KEYWORDS = re.compile(
     r"\b(receipt|confirmation|summary|record|tax\s*form|"
     r"w[\-\s]?2|1099|w[\-\s]?4|1098|k[\-\s]?1|"
     r"statement\s*of|proof\s*of|certificate|"
     r"annual\s*statement|year[\s-]?end|quarterly\s*report|"
     r"closing\s*disclosure|settlement\s*statement|title\s*report|"
     r"vaccination|immunization|lab\s*results?|diagnosis|"
-    r"prescription|referral|discharge\s*summary)\b",
+    r"prescription|referral|discharge\s*summary|"
+    r"for\s*your\s*records|keep\s*for|retain|archive|"
+    r"no\s*action\s*needed|informational\s*only|fyi)\b",
     re.IGNORECASE,
 )
 _SIGN_KEYWORDS = re.compile(
     r"\b(sign\s*here|signature\s*required|notarize|witness|"
     r"consent\s*form|authorization\s*form|power\s*of\s*attorney|"
     r"affidavit|declaration|acknowledgment)\b",
-    re.IGNORECASE,
-)
-_ARCHIVE_KEYWORDS = re.compile(
-    r"\b(for\s*your\s*records|keep\s*for|retain|archive|"
-    r"no\s*action\s*needed|informational\s*only|fyi)\b",
     re.IGNORECASE,
 )
 _TASK_KEYWORDS = re.compile(
@@ -154,8 +151,7 @@ class RuleBasedAnalyzer:
         # Detect action type
         action_type, confidence = self._detect_action_type(text, tags)
 
-        # Skip if we can't determine anything useful
-        if action_type == "FILE" and confidence < 30:
+        if action_type is None:
             return {
                 "actions": [],
                 "document_assessment": {
@@ -163,7 +159,9 @@ class RuleBasedAnalyzer:
                     "correspondent": correspondent or None,
                     "overall_confidence": confidence,
                     "requires_action": False,
-                    "reasoning": "Rule-based: no clear actionable keywords found",
+                    "reasoning": (
+                        "Rule-based: informational document or no clear real-world action found"
+                    ),
                     "text_quality": "fair",
                     "extracted_data": {},
                 },
@@ -242,16 +240,14 @@ class RuleBasedAnalyzer:
         match = _EMAIL_PATTERN.search(text)
         return match.group(0) if match else None
 
-    def _detect_action_type(self, text: str, tags: list) -> tuple[str, int]:
+    def _detect_action_type(self, text: str, tags: list) -> tuple[str | None, int]:
         """Return (action_type, confidence) based on keyword matching."""
         scores = {
             "PAY": len(_PAY_KEYWORDS.findall(text)) * 20,
             "RESPOND": len(_RESPOND_KEYWORDS.findall(text)) * 18,
             "SCHEDULE": len(_SCHEDULE_KEYWORDS.findall(text)) * 15,
             "REVIEW": len(_REVIEW_KEYWORDS.findall(text)) * 12,
-            "FILE": len(_FILE_KEYWORDS.findall(text)) * 10,
             "SIGN": len(_SIGN_KEYWORDS.findall(text)) * 18,
-            "ARCHIVE": len(_ARCHIVE_KEYWORDS.findall(text)) * 8,
             "TASK": len(_TASK_KEYWORDS.findall(text)) * 15,
             "CANCEL": len(_CANCEL_KEYWORDS.findall(text)) * 18,
             "RENEW": len(_RENEW_KEYWORDS.findall(text)) * 17,
@@ -268,8 +264,6 @@ class RuleBasedAnalyzer:
             scores["REVIEW"] += 15
         if "medical" in tag_str or "health" in tag_str or "eob" in tag_str:
             scores["REVIEW"] += 20
-        if "tax" in tag_str or "financial" in tag_str:
-            scores["FILE"] += 20
         if "legal" in tag_str or "contract" in tag_str:
             scores["SIGN"] += 15
         if "insurance" in tag_str:
@@ -279,12 +273,15 @@ class RuleBasedAnalyzer:
         # Find best match
         best_type = max(scores, key=scores.get)
         best_score = scores[best_type]
+        informational_score = len(_INFORMATIONAL_KEYWORDS.findall(text)) * 12
 
         # Confidence is capped at 70 for rule-based (always less certain than AI)
         confidence = min(70, max(15, best_score))
 
-        if best_score == 0:
-            return "FILE", 10
+        if best_score == 0 or (
+            informational_score >= best_score and not _OUTSTANDING_PAYMENT_REQUEST.search(text)
+        ):
+            return None, min(70, max(15, informational_score))
 
         return best_type, confidence
 

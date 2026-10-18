@@ -114,14 +114,14 @@ class TestListActions:
         resp = client.get("/api/queue/actions")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["total"] == 3
-        assert len(data["actions"]) == 3
+        assert data["total"] == 2
+        assert len(data["actions"]) == 2
 
     def test_list_actions_filter_by_status(self, client, seed_actions):
         resp = client.get("/api/queue/actions?status=pending")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["total"] == 2
+        assert data["total"] == 1
         for action in data["actions"]:
             assert action["status"] == "pending"
 
@@ -130,7 +130,7 @@ class TestListActions:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["actions"]) == 1
-        assert data["total"] == 3
+        assert data["total"] == 2
 
     def test_list_actions_structure(self, client, seed_actions):
         resp = client.get("/api/queue/actions?limit=1")
@@ -341,9 +341,9 @@ class TestBulkAction:
         assert data["affected"] == 1
         assert data["action"] == "complete"
 
-        # Verify all are now completed
+        # Verify the actionable queue is now empty.
         check = client.get("/api/queue/actions?status=pending").json()
-        assert check["total"] == 1
+        assert check["total"] == 0
 
     def test_bulk_complete_rejects_source_filing_action(self, client, seed_actions):
         from doc_intelligence_hub.modules.action_queue.database import Action, get_session
@@ -375,7 +375,7 @@ class TestBulkAction:
             json={"action": "dismiss", "action_ids": ids},
         )
         assert resp.status_code == 200
-        assert resp.json()["affected"] == 2
+        assert resp.json()["affected"] == len(ids)
 
     def test_bulk_snooze_requires_and_persists_reminder_time(self, client, seed_actions):
         actions = client.get("/api/queue/actions?status=pending").json()
@@ -397,10 +397,10 @@ class TestBulkAction:
             },
         )
         assert resp.status_code == 200
-        assert resp.json()["affected"] == 2
+        assert resp.json()["affected"] == len(ids)
 
         snoozed = client.get("/api/queue/actions?status=snoozed").json()
-        assert snoozed["total"] == 2
+        assert snoozed["total"] == len(ids)
         assert {action["snoozed_until"] for action in snoozed["actions"]} == {snoozed_until}
 
     def test_bulk_no_action_needed_records_feedback(self, client, seed_actions):
@@ -412,12 +412,12 @@ class TestBulkAction:
             json={"action": "not_an_action", "action_ids": ids},
         )
         assert resp.status_code == 200
-        assert resp.json()["affected"] == 2
+        assert resp.json()["affected"] == len(ids)
 
         no_action = client.get(
             "/api/queue/actions?status=not_an_action&include_not_ready=true"
         ).json()
-        assert no_action["total"] == 2
+        assert no_action["total"] == len(ids)
         for action_id in ids:
             feedback = client.get(f"/api/queue/actions/{action_id}/feedback").json()
             assert feedback["feedback"][0]["feedback_type"] == "not_an_action"

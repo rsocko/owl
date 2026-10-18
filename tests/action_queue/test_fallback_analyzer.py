@@ -232,8 +232,8 @@ class TestFileDetection:
                 "tag_names": ["tax"],
             }
         )
-        action = result["actions"][0]
-        assert action["action_type"] == "FILE"
+        assert result["actions"] == []
+        assert result["document_assessment"]["requires_action"] is False
 
     def test_1099_form(self, analyzer):
         result = analyzer.analyze_document(
@@ -243,8 +243,8 @@ class TestFileDetection:
                 "tag_names": ["tax", "financial"],
             }
         )
-        action = result["actions"][0]
-        assert action["action_type"] == "FILE"
+        assert result["actions"] == []
+        assert result["document_assessment"]["requires_action"] is False
 
     def test_lab_results(self, analyzer):
         result = analyzer.analyze_document(
@@ -254,8 +254,8 @@ class TestFileDetection:
                 "tag_names": ["medical"],
             }
         )
-        action = result["actions"][0]
-        assert action["action_type"] in ("FILE", "REVIEW")
+        assert result["actions"] == []
+        assert result["document_assessment"]["requires_action"] is False
 
 
 class TestSignDetection:
@@ -280,10 +280,8 @@ class TestArchiveDetection:
                 "tag_names": [],
             }
         )
-        # Either ARCHIVE or low-confidence FILE is acceptable
-        action = result["actions"][0] if result["actions"] else None
-        if action:
-            assert action["action_type"] in ("ARCHIVE", "FILE", "REVIEW")
+        assert result["actions"] == []
+        assert result["document_assessment"]["requires_action"] is False
 
 
 class TestEdgeCases:

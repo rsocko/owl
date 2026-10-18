@@ -118,7 +118,7 @@ One web app with sidebar navigation, combining all feature modules into a single
 | Route | Module | Description |
 |-------|--------|-------------|
 | `/` | Dashboard | Unified summary, cross-module alerts, recent activity |
-| `/action-queue` | Action Queue | Document triage: PAY, RESPOND, FILE, REVIEW, etc. |
+| `/action-queue` | Action Queue | Trusted work: PAY, RESPOND, REVIEW, TASK, and other actionable outcomes |
 | `/eob-matching` | EOB Matcher | Match review, unmatched docs (#27), payment tracking |
 | `/statements` | Statement Tracker | Recurring statement catalog, gap detection, reminders |
 | `/settings` | Settings | Paperless connection, notification preferences |
@@ -362,7 +362,7 @@ For environments where the built-in scheduler is not suitable, `config/crontab.e
 
 ### Phase 3: Action Queue Module (Weeks 5–6)
 - Inbox/Todo document scanner
-- Action type classification (PAY, RESPOND, FILE, etc.)
+- Action type classification for real-world work; informational filing outcomes resolve as no-action
 - Priority/urgency scoring
 - Action queue UI
 - Unified alert system across all modules
