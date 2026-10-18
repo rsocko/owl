@@ -113,11 +113,11 @@ class HubSettings(BaseSettings):
             "OWL_TYRION_BILL_MATCHING_URL",
         ),
     )
-    tyrion_bill_matching_api_token: SecretStr | None = Field(
+    tyrion_api_token: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices(
-            "tyrion_bill_matching_api_token",
-            "OWL_TYRION_BILL_MATCHING_API_TOKEN",
+            "tyrion_api_token",
+            "OWL_TYRION_API_TOKEN",
         ),
     )
     tyrion_bill_matching_connector_ref: str = Field(

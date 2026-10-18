@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings
 
 
@@ -13,7 +13,13 @@ class Settings(BaseSettings):
     tyrion_authority: Literal["http://tyrion-operations-ui:3000"] = (
         "http://tyrion-operations-ui:3000"
     )
-    tyrion_api_token: SecretStr | None = None
+    tyrion_api_token: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "tyrion_api_token",
+            "OWL_TYRION_API_TOKEN",
+        ),
+    )
     identity_secret: SecretStr | None = None
     write_enabled: bool = False
     sent_tag: str | None = None
@@ -27,6 +33,5 @@ class Settings(BaseSettings):
         "extra": "ignore",
         "env_prefix": "OWL_MONARCH_DELIVERY_",
     }
-
 
 settings = Settings()

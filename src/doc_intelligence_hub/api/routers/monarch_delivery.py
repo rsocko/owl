@@ -56,7 +56,7 @@ def _gateway(*, required: bool) -> TyrionReceiptBrokerClient | _UnavailableGatew
             raise_api_error(
                 503,
                 "monarch_delivery_auth_not_configured",
-                "Configure OWL_MONARCH_DELIVERY_TYRION_API_TOKEN before sending.",
+                "Configure OWL_TYRION_API_TOKEN before sending.",
             )
         return _UnavailableGateway()
     return TyrionReceiptBrokerClient(
