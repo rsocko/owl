@@ -573,7 +573,10 @@ class PaperlessClient:
         created_before: str | None = None,
         added_after: str | None = None,
         added_before: str | None = None,
+        id_after: int | None = None,
+        id_before: int | None = None,
         saved_view: int | None = None,
+        ordering: str | None = None,
         page_size: int = 100,
         limit: int | None = None,
         on_progress: ProgressCallback | None = None,
@@ -609,6 +612,9 @@ class PaperlessClient:
                     created_before,
                     added_after,
                     added_before,
+                    id_after,
+                    id_before,
+                    ordering,
                 )
             ):
                 raise PaperlessError("A saved view cannot be combined with explicit filters")
@@ -625,6 +631,16 @@ class PaperlessClient:
             params["added__date__gte"] = added_after
         if added_before:
             params["added__date__lte"] = added_before
+        if id_after is not None:
+            if id_after <= 0:
+                raise PaperlessError("id_after must be positive")
+            params["id__gte"] = id_after
+        if id_before is not None:
+            if id_before <= 0:
+                raise PaperlessError("id_before must be positive")
+            params["id__lte"] = id_before
+        if ordering:
+            params["ordering"] = ordering
 
         if tags:
             tag_ids = await self._resolve_tag_ids(client, tags)
@@ -729,6 +745,7 @@ class PaperlessClient:
         page_size: int = 100,
         cursor: str | None = None,
         scope_params: dict[str, Any] | None = None,
+        ordering: str = "id",
     ) -> PaperlessPage:
         """Fetch one deterministically ordered document page.
 
@@ -751,7 +768,7 @@ class PaperlessClient:
         if page < 1:
             raise ValueError("Invalid Paperless pagination cursor")
 
-        params: dict[str, Any] = {"page": page, "page_size": page_size, "ordering": "id"}
+        params: dict[str, Any] = {"page": page, "page_size": page_size, "ordering": ordering}
         if scope_params:
             params.update(scope_params)
 

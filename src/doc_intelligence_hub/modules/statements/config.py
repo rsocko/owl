@@ -16,6 +16,7 @@ class SourceConfig(BaseModel):
     api_token_env: str | None = None
     verify_ssl: bool = True
     timeout_seconds: int = 30
+    lookback_days: int | None = Field(default=548, ge=30, le=3650)
 
 
 class ProviderHintGroup(BaseModel):

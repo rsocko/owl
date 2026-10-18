@@ -28,6 +28,7 @@ from doc_intelligence_hub.core.paperless import (
     get_metadata_field_spec,
     resolve_metadata_schema,
 )
+from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer
 from doc_intelligence_hub.modules.action_queue.database import (
     VALID_ACTION_TYPES,
     Action,
@@ -38,7 +39,32 @@ from doc_intelligence_hub.modules.action_queue.database import (
     init_db,
 )
 from doc_intelligence_hub.modules.action_queue.lifecycle import mark_action_ready
-from doc_intelligence_hub.modules.action_queue.pipeline import run_pipeline
+from doc_intelligence_hub.modules.action_queue.pipeline import (
+    ACTION_QUEUE_ANALYSIS_MODULE_NAME,
+    ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
+    _analysis_config_hash,
+    run_pipeline,
+)
+from doc_intelligence_hub.modules.analysis_invalidation.config import (
+    settings as invalidation_settings,
+)
+from doc_intelligence_hub.modules.analysis_invalidation.database import (
+    init_db as init_invalidation_db,
+)
+from doc_intelligence_hub.modules.analysis_invalidation.fingerprint import (
+    document_source_fingerprint,
+)
+from doc_intelligence_hub.modules.analysis_invalidation.models import (
+    FreshnessStatus,
+    InvalidationReason,
+)
+from doc_intelligence_hub.modules.analysis_invalidation.service import (
+    AnalysisFreshnessService,
+)
+from doc_intelligence_hub.modules.analysis_invalidation.targeted_reanalysis import (
+    TargetedReanalysisService,
+    spawn_debounced_reanalysis,
+)
 from doc_intelligence_hub.modules.triage.reference_discovery import (
     extract_explicit_references,
     resolve_references,
@@ -459,7 +485,136 @@ def _intake_core_payload(
         "download_url": f"/api/documents/{document_id}/download",
         "paperless_url": _paperless_document_url(request, document_id),
         "write_enabled": bool(request.app.state.hub_settings.write_to_paperless),
+        "analysis": _analysis_freshness_payload(document, taxonomies),
     }
+
+
+def _analysis_input_ids(
+    taxonomies: dict[str, list[dict[str, Any]]],
+) -> tuple[set[int], set[int]]:
+    governed_custom_field_ids = {
+        int(definition["id"])
+        for definition in taxonomies["custom_fields"]
+        if isinstance(definition, dict)
+        and definition.get("id")
+        and (matched := _metadata_spec_by_name(str(definition.get("name") or "")))
+        and matched[0] in _EDITABLE_CUSTOM_FIELD_KEYS
+    }
+    ignored_tag_ids = {
+        int(tag["id"])
+        for tag in taxonomies["tags"]
+        if isinstance(tag, dict)
+        and tag.get("id")
+        and str(tag.get("name") or "").strip().casefold() == _INBOX_TAG_NAME.casefold()
+    }
+    return governed_custom_field_ids, ignored_tag_ids
+
+
+def _document_analysis_inputs(
+    document: dict[str, Any],
+    taxonomies: dict[str, list[dict[str, Any]]],
+) -> tuple[str, str, dict[str, Any]]:
+    governed_custom_field_ids, ignored_tag_ids = _analysis_input_ids(taxonomies)
+    return document_source_fingerprint(
+        document,
+        governed_custom_field_ids=governed_custom_field_ids,
+        ignored_tag_ids=ignored_tag_ids,
+    )
+
+
+def _analysis_freshness_payload(
+    document: dict[str, Any],
+    taxonomies: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    init_invalidation_db()
+    source_fingerprint, content_identity, metadata_fields = _document_analysis_inputs(
+        document, taxonomies
+    )
+    freshness_service = AnalysisFreshnessService()
+    freshness = freshness_service.check_freshness(
+        document_id=int(document["id"]),
+        module_name=ACTION_QUEUE_ANALYSIS_MODULE_NAME,
+        module_version=ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
+        config_hash=_analysis_config_hash(OllamaAnalyzer().model),
+        current_checksum=content_identity,
+        metadata_fields=metadata_fields,
+    )
+    latest = freshness_service.get_latest_fingerprint(
+        document_id=int(document["id"]),
+        module_name=ACTION_QUEUE_ANALYSIS_MODULE_NAME,
+    )
+    request = TargetedReanalysisService().get(int(document["id"]))
+    status = freshness.status.value
+    if freshness.status is FreshnessStatus.UNKNOWN:
+        status = "not_analyzed"
+    if request and request["source_fingerprint"] == source_fingerprint:
+        if request["status"] in {"pending", "running"}:
+            status = "reanalyzing"
+        elif request["status"] == "failed":
+            status = "failed"
+    return {
+        "status": status,
+        "available": latest is not None,
+        "reasons": [reason.value for reason in freshness.reasons],
+        "reason": request["reason"] if request else None,
+        "analyzer_version": ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
+        "current_source_fingerprint": source_fingerprint,
+        "evaluated_source_fingerprint": latest["source_fingerprint"] if latest else None,
+        "evaluated_at": latest["computed_at"] if latest else None,
+        "requested_at": request["requested_at"] if request else None,
+        "due_at": request["due_at"] if request else None,
+        "last_error_code": request["last_error_code"] if request else None,
+    }
+
+
+async def _run_targeted_analysis(
+    request: Request,
+    service: TargetedReanalysisService,
+    document_id: int,
+    expected_source_fingerprint: str,
+    *,
+    force: bool,
+    verify_source: bool = True,
+) -> dict[str, Any]:
+    if verify_source:
+        client = make_paperless_client(request, timeout=30.0)
+        try:
+            document, taxonomies = await asyncio.gather(
+                client.get_document(document_id),
+                _load_taxonomies(client),
+            )
+        finally:
+            await client.aclose()
+        current_source_fingerprint, _, _ = _document_analysis_inputs(document, taxonomies)
+        if current_source_fingerprint != expected_source_fingerprint:
+            replacement = service.schedule(
+                document_id=document_id,
+                source_fingerprint=current_source_fingerprint,
+                source_modified=document.get("modified"),
+                reason="source_changed_during_reanalysis",
+                analyzer_version=ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
+                debounce_seconds=invalidation_settings.targeted_reanalysis_debounce_seconds,
+            )
+            spawn_debounced_reanalysis(
+                service=service,
+                document_id=document_id,
+                generation=replacement["generation"],
+                delay_seconds=invalidation_settings.targeted_reanalysis_debounce_seconds,
+                analyze=lambda target_id, fingerprint: _run_targeted_analysis(
+                    request,
+                    service,
+                    target_id,
+                    fingerprint,
+                    force=False,
+                ),
+            )
+            return {"status": "superseded"}
+
+    _sync_action_queue_settings(request)
+    result = await run_pipeline(document_id=document_id, force=force, dry_run=False)
+    if result.get("failed") or result.get("fetch_timed_out") or result.get("timed_out"):
+        raise RuntimeError("targeted action analysis failed")
+    return result
 
 
 def _native_document_payload(
@@ -724,6 +879,7 @@ async def _document_detail(request: Request, document_id: int) -> dict[str, Any]
             "analysis": {
                 **action_payload["analysis"],
                 "source_modified": document.get("modified"),
+                **_analysis_freshness_payload(document, taxonomies),
             },
             "preview_url": f"/api/statements/documents/{document_id}/preview",
             "download_url": f"/api/documents/{document_id}/download",
@@ -1353,9 +1509,54 @@ async def save_intake_document(
             patch["tags"] = [tag_id for tag_id in source_tags if tag_id != inbox_tag_id]
 
         try:
-            updated = await client.update_document(document_id, patch) if patch else current
+            updated_response = (
+                await client.update_document(document_id, patch) if patch else current
+            )
+            updated = {**current, **updated_response}
         except Exception as exc:
             _raise_paperless_error(exc, "saving document metadata")
+
+        reanalysis: dict[str, Any] | None = None
+        if patch:
+            try:
+                taxonomies = await _load_taxonomies(client)
+            except Exception as exc:
+                _raise_paperless_error(exc, "loading analysis inputs after saving")
+            before_source_fingerprint, _, _ = _document_analysis_inputs(current, taxonomies)
+            after_source_fingerprint, content_identity, metadata_fields = _document_analysis_inputs(
+                updated, taxonomies
+            )
+            if before_source_fingerprint != after_source_fingerprint:
+                init_invalidation_db()
+                AnalysisFreshnessService().record_invalidation(
+                    document_id=document_id,
+                    accepted_checksum=content_identity,
+                    metadata_fields=metadata_fields,
+                    reason=InvalidationReason.METADATA_CHANGED,
+                    triggered_by="intake-review:save",
+                )
+                targeted_service = TargetedReanalysisService()
+                reanalysis = targeted_service.schedule(
+                    document_id=document_id,
+                    source_fingerprint=after_source_fingerprint,
+                    source_modified=updated.get("modified"),
+                    reason="metadata_changed",
+                    analyzer_version=ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
+                    debounce_seconds=invalidation_settings.targeted_reanalysis_debounce_seconds,
+                )
+                spawn_debounced_reanalysis(
+                    service=targeted_service,
+                    document_id=document_id,
+                    generation=reanalysis["generation"],
+                    delay_seconds=invalidation_settings.targeted_reanalysis_debounce_seconds,
+                    analyze=lambda target_id, fingerprint: _run_targeted_analysis(
+                        request,
+                        targeted_service,
+                        target_id,
+                        fingerprint,
+                        force=False,
+                    ),
+                )
 
         if body.disposition == "confirm_and_file" and action_db is not None:
             for action in actions_to_confirm:
@@ -1381,6 +1582,7 @@ async def save_intake_document(
             "confirmed_action_ids": sorted(body.action_versions)
             if body.disposition == "confirm_and_file"
             else [],
+            "reanalysis": reanalysis,
         }
     finally:
         if action_db is not None:
@@ -1395,7 +1597,10 @@ async def refresh_intake_analysis(
     client = make_paperless_client(request, timeout=30.0)
     try:
         try:
-            current = await client.get_document(document_id)
+            current, current_taxonomies = await asyncio.gather(
+                client.get_document(document_id),
+                _load_taxonomies(client),
+            )
         except Exception as exc:
             _raise_paperless_error(exc, "checking the document before analysis")
         if current.get("modified") != expected_modified:
@@ -1410,8 +1615,36 @@ async def refresh_intake_analysis(
     finally:
         await client.aclose()
 
-    _sync_action_queue_settings(request)
-    result = await run_pipeline(document_id=document_id, force=True, dry_run=False)
+    source_fingerprint, _, _ = _document_analysis_inputs(current, current_taxonomies)
+    targeted_service = TargetedReanalysisService()
+    reanalysis = targeted_service.schedule(
+        document_id=document_id,
+        source_fingerprint=source_fingerprint,
+        source_modified=current.get("modified"),
+        reason="manual_reanalysis",
+        analyzer_version=ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
+        debounce_seconds=0,
+    )
+    result = await targeted_service.run_if_current(
+        document_id=document_id,
+        generation=reanalysis["generation"],
+        analyze=lambda target_id, fingerprint: _run_targeted_analysis(
+            request,
+            targeted_service,
+            target_id,
+            fingerprint,
+            force=True,
+            verify_source=False,
+        ),
+    )
+    if result.get("status") == "failed":
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "analysis_failed",
+                "message": "The targeted analysis failed. Metadata changes were preserved.",
+            },
+        )
     client = make_paperless_client(request, timeout=30.0)
     try:
         document, taxonomies = await asyncio.gather(
@@ -1430,6 +1663,28 @@ async def refresh_intake_analysis(
         "suggestions": suggestions,
         "suggestion_sources": sources,
     }
+
+
+@router.post("/reanalysis/drain")
+async def drain_targeted_reanalysis(request: Request, limit: int = 25) -> dict[str, Any]:
+    targeted_service = TargetedReanalysisService()
+    due = targeted_service.list_due(limit=max(1, min(limit, 100)))
+    results = []
+    for pending in due:
+        results.append(
+            await targeted_service.run_if_current(
+                document_id=pending["document_id"],
+                generation=pending["generation"],
+                analyze=lambda target_id, fingerprint: _run_targeted_analysis(
+                    request,
+                    targeted_service,
+                    target_id,
+                    fingerprint,
+                    force=False,
+                ),
+            )
+        )
+    return {"processed": len(results), "results": results}
 
 
 @router.post("/documents/{document_id}/actions")

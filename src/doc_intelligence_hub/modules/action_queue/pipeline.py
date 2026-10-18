@@ -1,7 +1,6 @@
 """Main processing pipeline — orchestrates fetch → analyze → store → enrich."""
 
 import asyncio
-import hashlib
 import io
 import json
 import logging
@@ -20,6 +19,11 @@ from doc_intelligence_hub.core.paperless import PaperlessClient
 from doc_intelligence_hub.modules.analysis_invalidation.database import (
     init_db as init_freshness_db,
 )
+from doc_intelligence_hub.modules.analysis_invalidation.fingerprint import (
+    document_content_identity,
+    document_metadata_fields,
+    stable_digest,
+)
 from doc_intelligence_hub.modules.analysis_invalidation.models import FreshnessStatus
 from doc_intelligence_hub.modules.analysis_invalidation.service import AnalysisFreshnessService
 from doc_intelligence_hub.modules.triage.relationship_projection import (
@@ -30,7 +34,12 @@ from doc_intelligence_hub.modules.triage.relationships import (
     set_projection_result,
 )
 
-from .analyzer import OllamaAnalyzer, is_non_actionable_receipt, urgency_to_severity
+from .analyzer import (
+    ANALYSIS_PROMPT,
+    OllamaAnalyzer,
+    is_non_actionable_receipt,
+    urgency_to_severity,
+)
 from .config import settings
 from .database import Action, ProcessingHistory, get_session, init_db
 from .enricher import PaperlessEnricher
@@ -63,43 +72,36 @@ console = Console(file=io.StringIO(), force_terminal=False, highlight=False)
 # analyzer/fallback-analyzer logic should make previously-computed actions
 # be treated as stale even if the document content hasn't changed.
 ACTION_QUEUE_ANALYSIS_MODULE_NAME = "action_queue"
-ACTION_QUEUE_ANALYSIS_MODULE_VERSION = "action-queue-analyzer-v2"
+ACTION_QUEUE_ANALYSIS_MODULE_VERSION = "action-queue-analyzer-v3"
+ACTION_QUEUE_RULES_VERSION = "action-queue-rules-v1"
 
 
 def _document_content_identity(doc: dict[str, Any]) -> str:
-    """Best-effort proxy for detecting a changed document version.
-
-    Mirrors ``ocr_quality.service._document_version_key`` — same field
-    preference order, kept as a separate copy here since this module
-    shouldn't import from ocr_quality for a one-line helper.
-    """
-    for key in ("checksum", "modified", "added"):
-        value = doc.get(key)
-        if value:
-            return f"{key}:{value}"
-    return "unknown"
+    return document_content_identity(doc)
 
 
-def _document_metadata_fields(doc: dict[str, Any]) -> dict[str, Any]:
-    """Metadata fields Action Queue's analysis actually depends on.
-
-    Deliberately reads the *raw* Paperless fields (``correspondent``,
-    ``document_type``, ``tags`` — ids, not resolved display names) so the
-    fingerprint computed here is identical whether or not
-    ``_resolve_document_metadata`` has already run on this dict.
-    """
-    return {
-        "title": doc.get("title"),
-        "correspondent": doc.get("correspondent"),
-        "document_type": doc.get("document_type"),
-        "tags": sorted(str(t) for t in (doc.get("tags") or [])),
-    }
+def _document_metadata_fields(
+    doc: dict[str, Any],
+    *,
+    governed_custom_field_ids: set[int] | None = None,
+    ignored_tag_ids: set[int] | None = None,
+) -> dict[str, Any]:
+    return document_metadata_fields(
+        doc,
+        governed_custom_field_ids=governed_custom_field_ids or (),
+        ignored_tag_ids=ignored_tag_ids or (),
+    )
 
 
 def _analysis_config_hash(model_name: str) -> str:
     """Digest of the configuration that affects Action Queue's analysis output."""
-    payload = {"confidence_threshold": settings.confidence_threshold, "model": model_name}
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    payload = {
+        "confidence_threshold": settings.confidence_threshold,
+        "model": model_name,
+        "prompt_hash": stable_digest(ANALYSIS_PROMPT),
+        "rules_version": ACTION_QUEUE_RULES_VERSION,
+    }
+    return stable_digest(payload)
 
 
 def _serialize_cta(cta: dict | str | None) -> str | None:
@@ -119,7 +121,7 @@ def _action_analysis_identity(action_data: dict[str, Any]) -> str:
         "action_type": str(action_data.get("action_type") or "").strip().upper(),
         "title": " ".join(str(action_data.get("title") or "").lower().split()),
     }
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    return stable_digest(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +334,29 @@ class Pipeline:
         except Exception as exc:
             logger.warning("Unexpected error loading tag and document type caches: %s", exc)
 
+        self._ignored_analysis_tag_ids = {
+            tag_id for tag_id, name in self._tag_cache.items() if name.strip().casefold() == "inbox"
+        }
+        self._governed_custom_field_ids: set[int] = set()
+        try:
+            custom_fields = await self.paperless.list_custom_fields()
+            governed_names = {
+                "account identifier",
+                "document amount",
+                "document due date",
+            }
+            self._governed_custom_field_ids = {
+                int(field["id"])
+                for field in custom_fields
+                if isinstance(field, dict)
+                and field.get("id")
+                and str(field.get("name") or "").strip().casefold() in governed_names
+            }
+        except (httpx.TimeoutException, httpx.ConnectError, OSError) as exc:
+            logger.info("Could not load analysis custom fields (will use core metadata): %s", exc)
+        except Exception as exc:
+            logger.warning("Unexpected error loading analysis custom fields: %s", exc)
+
         # Step 1: Ensure custom fields exist (skip in dry-run or read-only mode)
         self._enrichment_available = True
         if not dry_run and settings.write_to_paperless:
@@ -480,7 +505,7 @@ class Pipeline:
                     module_version=ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
                     config_hash=config_hash,
                     current_checksum=_document_content_identity(d),
-                    metadata_fields=_document_metadata_fields(d),
+                    metadata_fields=self._analysis_metadata_fields(d),
                 )
                 if freshness.status == FreshnessStatus.STALE:
                     stale_count += 1
@@ -1207,7 +1232,16 @@ class Pipeline:
 
         if saved_view_id:
             console.print(f"[dim]Fetching documents from saved view #{saved_view_id}...[/dim]")
-            return await self.paperless.list_documents(saved_view=saved_view_id, limit=fetch_limit)
+            return await self.paperless.list_documents(
+                saved_view=saved_view_id,
+                created_after=created_after,
+                created_before=created_before,
+                added_after=added_after,
+                added_before=added_before,
+                correspondent=correspondent,
+                document_type=document_type,
+                limit=fetch_limit,
+            )
 
         if all_documents:
             console.print("[dim]Fetching all Paperless documents in the selected scope...[/dim]")
@@ -1562,8 +1596,15 @@ class Pipeline:
                 module_version=ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
                 config_hash=_analysis_config_hash(self.analyzer.model),
                 current_checksum=checksum,
-                metadata_fields=_document_metadata_fields(doc),
+                metadata_fields=self._analysis_metadata_fields(doc),
             )
+
+    def _analysis_metadata_fields(self, doc: dict[str, Any]) -> dict[str, Any]:
+        return _document_metadata_fields(
+            doc,
+            governed_custom_field_ids=getattr(self, "_governed_custom_field_ids", set()),
+            ignored_tag_ids=getattr(self, "_ignored_analysis_tag_ids", set()),
+        )
 
     @staticmethod
     def _compute_text_quality(content: str) -> dict:

@@ -131,6 +131,21 @@ interface IntakeCore {
   preview_url: string;
   paperless_url?: string | null;
   write_enabled: boolean;
+  analysis: AnalysisFreshness;
+}
+
+interface AnalysisFreshness {
+  status: 'fresh' | 'stale' | 'reanalyzing' | 'failed' | 'not_analyzed';
+  available: boolean;
+  reasons: string[];
+  reason?: string | null;
+  analyzer_version: string;
+  current_source_fingerprint: string;
+  evaluated_source_fingerprint?: string | null;
+  evaluated_at?: string | null;
+  requested_at?: string | null;
+  due_at?: string | null;
+  last_error_code?: string | null;
 }
 
 interface MetadataDraft {
@@ -714,6 +729,21 @@ export default function InboxWorkflow() {
     if (selectedId != null) void loadDocument(selectedId);
   }, [loadDocument, selectedId]);
   useEffect(() => {
+    if (!core || core.analysis.status !== 'reanalyzing') return undefined;
+    const documentId = core.document.id;
+    const timeout = window.setTimeout(() => {
+      void Promise.all([
+        endpoints.intake.documentCore(documentId),
+        endpoints.intake.documentActions(documentId),
+      ]).then(([coreResponse, actionsResponse]) => {
+        if (selectedId !== documentId) return;
+        setCore(coreResponse as IntakeCore);
+        setActions((actionsResponse as { actions: IntakeAction[] }).actions);
+      }).catch(() => undefined);
+    }, 1500);
+    return () => window.clearTimeout(timeout);
+  }, [core, selectedId]);
+  useEffect(() => {
     if (!previewExpanded) return undefined;
     const previousOverflow = document.body.style.overflow;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -1024,6 +1054,31 @@ export default function InboxWorkflow() {
     ? `${core?.preview_url || `/api/statements/documents/${selectedId}/preview`}#page=1&zoom=page-fit`
     : '';
   const title = metadata?.title || core?.document.title || selectedQueueItem?.title || 'Loading document…';
+  const analysisLabel = core?.analysis.status === 'fresh'
+    ? 'Fresh'
+    : core?.analysis.status === 'stale'
+      ? 'Stale'
+      : core?.analysis.status === 'reanalyzing'
+        ? 'Reanalyzing'
+        : core?.analysis.status === 'failed'
+          ? 'Analysis failed'
+          : 'Not analyzed';
+  const analysisDetail = core?.analysis.status === 'fresh'
+    ? `Evaluated ${formatDate(core.analysis.evaluated_at)}`
+    : core?.analysis.status === 'reanalyzing'
+      ? 'Metadata changed; a targeted update is queued.'
+      : core?.analysis.status === 'failed'
+        ? 'The last targeted update failed. Editing remains available.'
+        : core?.analysis.status === 'stale'
+          ? 'Source inputs changed after the last evaluation.'
+          : 'No prior action analysis is available.';
+  const analysisProvenance = core
+    ? `${core.analysis.analyzer_version} · ${
+      core.analysis.evaluated_source_fingerprint
+        ? `source ${core.analysis.evaluated_source_fingerprint.slice(0, 12)}`
+        : 'no evaluated source'
+    }`
+    : '';
 
   return (
     <DocumentWorkspaceFrame
@@ -1150,12 +1205,22 @@ export default function InboxWorkflow() {
               ]}
               actions={(
                 <>
+                {core ? (
+                  <div
+                    className={`intake-analysis-status ${core.analysis.status}`}
+                    title={`${analysisDetail} Analyzer ${core.analysis.analyzer_version}.`}
+                    role="status"
+                  >
+                    {core.analysis.status === 'fresh' ? <CheckCircle2 size={15} /> : core.analysis.status === 'reanalyzing' ? <RefreshCw className="intake-spin" size={15} /> : <CircleAlert size={15} />}
+                    <span><strong>{analysisLabel}</strong><small>{analysisDetail}</small><small>{analysisProvenance}</small></span>
+                  </div>
+                ) : null}
                 {core?.paperless_url ? (
                   <a className="btn ghost" href={core.paperless_url} target="_blank" rel="noopener noreferrer">
                     <ExternalLink size={16} /> Open in Paperless
                   </a>
                 ) : null}
-                <Button disabled={busyKey === 'refresh' || !core} onClick={() => void refreshAnalysis()}><RefreshCw size={16} /> {busyKey === 'refresh' ? 'Refreshing…' : 'Refresh analysis'}</Button>
+                <Button disabled={busyKey === 'refresh' || !core} onClick={() => void refreshAnalysis()}><RefreshCw size={16} /> {busyKey === 'refresh' ? 'Analyzing…' : core?.analysis.available ? 'Re-evaluate' : 'Analyze'}</Button>
                 </>
               )}
             />

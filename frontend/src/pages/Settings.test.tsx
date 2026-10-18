@@ -54,6 +54,7 @@ vi.mock('../lib/api', () => ({
         scan_mode: 'tags',
         monitor_tags: ['Inbox'],
         saved_view_id: null,
+        lookback_days: 548,
         confidence_threshold: 70,
         document_limit: null,
         rate_limit_delay: 0.25,
@@ -112,6 +113,20 @@ describe('Action Queue settings', () => {
           monitor_tags: ['Inbox'],
           remove_source_tag_on_resolve: false,
         }),
+      );
+    });
+  });
+
+  it('saves the action and payment lookback', async () => {
+    render(<Settings />);
+
+    const lookback = await screen.findByLabelText('Action/payment lookback');
+    fireEvent.change(lookback, { target: { value: '365' } });
+    fireEvent.click(screen.getByRole('button', { name: /save source settings/i }));
+
+    await waitFor(() => {
+      expect(updateSettingsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ lookback_days: 365 }),
       );
     });
   });

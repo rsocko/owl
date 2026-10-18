@@ -93,6 +93,23 @@ async def test_rule_surfaces_capacity_rejection(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_rule_surfaces_pipeline_failure(monkeypatch):
+    trigger = AsyncMock(
+        return_value=FastPathResult(
+            status="completed",
+            document_id=42,
+            pipeline_result={"processed": 0, "failed": 1},
+        )
+    )
+    monkeypatch.setattr(rule_module, "trigger_fast_path_analysis", trigger)
+
+    result = await _make_rule().execute(ContextData(current_document={"id": 42}))
+
+    assert result.success is False
+    assert result.error == "Action Queue analysis failed for document #42"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("outcome", "expected_status"),
     [

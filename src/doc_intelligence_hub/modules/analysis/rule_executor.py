@@ -68,7 +68,7 @@ async def execute_trigger(
         Summary of execution results.
     """
     # Get matching rules
-    if rule_ids:
+    if rule_ids is not None:
         rules = [get_rule(rid) for rid in rule_ids]
         rules = [r for r in rules if r and r.enabled]
     else:
@@ -302,6 +302,21 @@ def _matches_trigger_filter(rule: RuleConfig, document: dict[str, Any] | None) -
         return True
     if document is None:
         return False
+
+    if trigger_filter.document_type:
+        raw_document_type = document.get("document_type_name", document.get("document_type"))
+        if isinstance(raw_document_type, dict):
+            raw_document_type = raw_document_type.get("name")
+        actual_document_type = str(raw_document_type or "").strip().casefold()
+        expected_document_types = (
+            trigger_filter.document_type
+            if isinstance(trigger_filter.document_type, list)
+            else [trigger_filter.document_type]
+        )
+        if actual_document_type not in {
+            str(document_type).strip().casefold() for document_type in expected_document_types
+        }:
+            return False
 
     if trigger_filter.tags:
         raw_tags = document.get("tag_names", document.get("tags", [])) or []

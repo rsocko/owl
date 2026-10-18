@@ -17,6 +17,7 @@ from sqlalchemy import (
     DateTime,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     create_engine,
 )
@@ -116,6 +117,53 @@ class ModuleAnalysisFingerprint(Base):
     status = Column(String, nullable=False, default="fresh", index=True)
     stale_reason = Column(String, nullable=True)
     computed_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class DiscoveryCursor(Base):
+    """Restart-safe high-water and in-progress page state for Paperless scans."""
+
+    __tablename__ = "analysis_invalidation_discovery_cursors"
+
+    name = Column(String, primary_key=True)
+    state = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DiscoveredDocumentState(Base):
+    """Privacy-safe material-change and pending-analysis state for one document."""
+
+    __tablename__ = "analysis_invalidation_discovered_documents"
+
+    document_id = Column(Integer, primary_key=True)
+    accepted_source_fingerprint = Column(String, nullable=True)
+    pending_source_fingerprint = Column(String, nullable=True, index=True)
+    pending_reason = Column(String, nullable=True)
+    source_added_at = Column(DateTime, nullable=True)
+    source_modified_at = Column(DateTime, nullable=True)
+    last_seen_at = Column(DateTime, default=datetime.utcnow, index=True)
+    last_analyzed_at = Column(DateTime, nullable=True)
+    retry_count = Column(Integer, nullable=False, default=0)
+    last_error_code = Column(Text, nullable=True)
+
+
+class TargetedReanalysisRequest(Base):
+    """Latest coalesced reanalysis request for one document."""
+
+    __tablename__ = "analysis_invalidation_targeted_reanalysis"
+
+    document_id = Column(Integer, primary_key=True)
+    generation = Column(Integer, nullable=False, default=1)
+    source_fingerprint = Column(String, nullable=False, index=True)
+    source_modified = Column(String, nullable=True)
+    reason = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="pending", index=True)
+    requested_at = Column(DateTime, default=datetime.utcnow, index=True)
+    due_at = Column(DateTime, nullable=False, index=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    analyzer_version = Column(String, nullable=False)
+    last_error_code = Column(Text, nullable=True)
 
 
 def get_engine():

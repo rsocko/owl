@@ -37,6 +37,9 @@ from doc_intelligence_hub.modules.action_queue.database import (
 from doc_intelligence_hub.modules.action_queue.database import (
     init_db as aq_init_db,
 )
+from doc_intelligence_hub.modules.analysis_invalidation.config import (
+    settings as analysis_invalidation_settings,
+)
 from doc_intelligence_hub.modules.eob_matching.database import (
     BillRecord,
     EOBRecord,
@@ -242,8 +245,12 @@ def app(hub_settings, mock_llm, tmp_path, api_database_templates):
         _copy_sqlite_database(Path(api_database_templates) / f"{name}.db", destination)
 
     original_aq_db_url = aq_settings.database_url
+    original_analysis_invalidation_db_url = analysis_invalidation_settings.database_url
     original_receipt_db_url = receipt_settings.database_url
     aq_settings.database_url = f"sqlite:///{database_paths['actions']}"
+    analysis_invalidation_settings.database_url = (
+        f"sqlite:///{tmp_path / 'test_analysis_invalidation.db'}"
+    )
     eob_configure(f"sqlite:///{database_paths['eob']}")
     alerts_configure(f"sqlite:///{database_paths['alerts']}")
     triage_configure(f"sqlite:///{database_paths['triage']}")
@@ -254,6 +261,7 @@ def app(hub_settings, mock_llm, tmp_path, api_database_templates):
     yield application
 
     aq_settings.database_url = original_aq_db_url
+    analysis_invalidation_settings.database_url = original_analysis_invalidation_db_url
     receipt_settings.database_url = original_receipt_db_url
 
 
