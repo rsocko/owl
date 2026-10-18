@@ -293,6 +293,45 @@
   text-decoration: none;
 }
 
+.intake-analysis-status {
+  max-width: 15rem;
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  color: var(--text-muted);
+}
+
+.intake-analysis-status > span {
+  min-width: 0;
+  display: grid;
+}
+
+.intake-analysis-status strong {
+  color: var(--text);
+  font-size: 0.68rem;
+}
+
+.intake-analysis-status small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.59rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.intake-analysis-status.fresh > svg {
+  color: var(--success);
+}
+
+.intake-analysis-status.stale > svg,
+.intake-analysis-status.reanalyzing > svg {
+  color: var(--warning);
+}
+
+.intake-analysis-status.failed > svg {
+  color: var(--danger);
+}
+
 .intake-document-title {
   min-width: 0;
 }
@@ -1612,6 +1651,10 @@
     min-width: 2.2rem;
     padding-inline: 0.55rem;
     font-size: 0;
+  }
+
+  .intake-analysis-status {
+    display: none;
   }
 
   .intake-form-grid,

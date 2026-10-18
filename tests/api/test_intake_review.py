@@ -23,6 +23,7 @@ def _document(**overrides):
         "created": "2026-10-14",
         "added": "2026-10-15",
         "modified": "2026-10-16T12:00:00Z",
+        "archive_checksum": "document-checksum",
         "custom_fields": [{"field": 9, "value": "A-123"}],
         **overrides,
     }
@@ -415,6 +416,43 @@ def test_save_rejects_external_edit_conflict(client, mock_paperless):
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "source_revision_conflict"
     mock_paperless.update_document.assert_not_awaited()
+
+
+def test_save_queues_targeted_reanalysis_for_material_metadata_change(
+    client, mock_paperless, monkeypatch
+):
+    monkeypatch.setattr(intake_review, "spawn_debounced_reanalysis", lambda **_kwargs: None)
+    mock_paperless.get_document.return_value = _document()
+
+    response = client.put(
+        "/api/intake/documents/42",
+        json={
+            "expected_modified": "2026-10-16T12:00:00Z",
+            "metadata": {"title": "Updated utility bill"},
+            "disposition": "save",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reanalysis"]["status"] == "pending"
+    assert response.json()["reanalysis"]["reason"] == "metadata_changed"
+
+
+def test_save_does_not_reanalyze_for_storage_path_only(client, mock_paperless, monkeypatch):
+    monkeypatch.setattr(intake_review, "spawn_debounced_reanalysis", lambda **_kwargs: None)
+    mock_paperless.get_document.return_value = _document()
+
+    response = client.put(
+        "/api/intake/documents/42",
+        json={
+            "expected_modified": "2026-10-16T12:00:00Z",
+            "metadata": {"storage_path": 2},
+            "disposition": "save",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reanalysis"] is None
 
 
 def test_file_only_removes_inbox_without_resolving_actions(client, mock_paperless):

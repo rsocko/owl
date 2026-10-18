@@ -158,10 +158,13 @@ def get_rules_for_trigger(
         if document_type and rule.trigger.filter:
             rule_doc_type = rule.trigger.filter.document_type
             if rule_doc_type:
+                normalized_document_type = document_type.strip().casefold()
                 if isinstance(rule_doc_type, list):
-                    if document_type not in rule_doc_type:
+                    if normalized_document_type not in {
+                        item.strip().casefold() for item in rule_doc_type
+                    }:
                         continue
-                elif rule_doc_type != document_type:
+                elif rule_doc_type.strip().casefold() != normalized_document_type:
                     continue
 
         matching.append(rule)
@@ -229,7 +232,7 @@ def _load_builtin_defaults() -> None:
             "name": "Statement Grouping Anomaly",
             "description": "Detect anomalies in statement series grouping or timing",
             "tier": "basic",
-            "trigger": {"type": "document_added"},
+            "trigger": {"type": "document_added", "filter": {"document_type": "statement"}},
             "context": ["current_document", "series_history: 6"],
             "analyzer": "builtin:series_anomaly",
             "routing": {"default": "actionable"},
@@ -347,13 +350,13 @@ def _load_builtin_defaults() -> None:
             "params": {"webhook_url": "", "timeout": 60, "check_systems": ["monarch"]},
             "routing": {"default": "informational"},
             "display": {"card_type": "table"},
-            "enabled": False,
+            "enabled": True,
         },
         "action-queue-trigger": {
             "name": "Immediate Action Queue Analysis",
-            "description": "Analyze matching Inbox documents without waiting for the next batch",
+            "description": "Analyze documents matching the configured Action Queue source",
             "tier": "basic",
-            "trigger": {"type": "document_added", "filter": {"tags": ["Inbox"]}},
+            "trigger": {"type": "document_added"},
             "context": ["current_document"],
             "analyzer": "builtin:action_queue_trigger",
             "params": {"force": False, "dry_run": False},

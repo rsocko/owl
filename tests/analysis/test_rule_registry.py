@@ -40,7 +40,8 @@ class TestRuleRegistry:
         assert "action-queue-trigger" in rule_ids
 
         fast_path_rule = get_rule("action-queue-trigger")
-        assert fast_path_rule.enabled is False
+        assert fast_path_rule.enabled is True
+        assert fast_path_rule.trigger.filter is None
         assert fast_path_rule.analyzer == "builtin:action_queue_trigger"
 
     def test_get_rule_by_id(self):

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import httpx
@@ -381,12 +381,15 @@ async def test_paperless_connection_allows_restricted_metadata_endpoints() -> No
 
 @pytest.mark.asyncio
 async def test_fetch_paperless_documents_allows_restricted_metadata_endpoints() -> None:
+    document_queries: list[httpx.QueryParams] = []
+
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/correspondents/":
             return httpx.Response(403, json={"detail": "forbidden"})
         if request.url.path == "/api/tags/":
             return httpx.Response(403, json={"detail": "forbidden"})
         if request.url.path == "/api/documents/":
+            document_queries.append(request.url.params)
             return httpx.Response(
                 200,
                 json={
@@ -425,6 +428,10 @@ async def test_fetch_paperless_documents_allows_restricted_metadata_endpoints() 
     assert len(documents) == 1
     assert documents[0].correspondent_name == "Unknown"
     assert documents[0].tags == ["7"]
+    assert (
+        document_queries[0]["created__date__gte"]
+        == (date.today() - timedelta(days=548)).isoformat()
+    )
 
 
 @pytest.mark.asyncio

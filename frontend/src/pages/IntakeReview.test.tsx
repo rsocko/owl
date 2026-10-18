@@ -118,6 +118,15 @@ function core(id: number) {
     preview_url: `/preview/${id}`,
     paperless_url: `https://paperless.test/documents/${id}/details`,
     write_enabled: true,
+    analysis: {
+      status: 'fresh',
+      available: true,
+      reasons: [],
+      analyzer_version: 'action-queue-analyzer-v3',
+      current_source_fingerprint: `source-${id}`,
+      evaluated_source_fingerprint: `source-${id}`,
+      evaluated_at: '2026-10-14T10:00:00Z',
+    },
   };
 }
 
@@ -450,15 +459,53 @@ describe('IntakeReview', () => {
         paperless_ai: { available: true },
       },
     });
+
     renderPage('/inbox-review?document=1&tab=related');
 
     await waitFor(() => expect(documentRelationshipsMock).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh analysis' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Re-evaluate' }));
 
     await waitFor(() => expect(documentRelationshipsMock).toHaveBeenCalledTimes(2));
     expect(
       screen.getByText('Metadata, suggestions, actions, and relationships refreshed.'),
     ).toBeInTheDocument();
+  });
+
+  it('shows stale analysis without blocking metadata editing', async () => {
+    documentCoreMock.mockResolvedValue({
+      ...core(1),
+      analysis: {
+        ...core(1).analysis,
+        status: 'stale',
+        reasons: ['metadata_changed'],
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Stale');
+    expect(screen.getByLabelText('Title')).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Re-evaluate' })).toBeEnabled();
+  });
+
+  it('labels the explicit control Analyze when no prior analysis exists', async () => {
+    documentCoreMock.mockResolvedValue({
+      ...core(1),
+      analysis: {
+        ...core(1).analysis,
+        status: 'not_analyzed',
+        available: false,
+        evaluated_source_fingerprint: null,
+        evaluated_at: null,
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Analyze' })).toBeEnabled();
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('Not analyzed');
   });
 
   it('adds a suggested relationship using its recommended type', async () => {
@@ -619,7 +666,7 @@ describe('IntakeReview', () => {
     });
     renderPage();
 
-    const refresh = await screen.findByRole('button', { name: 'Refresh analysis' });
+    const refresh = await screen.findByRole('button', { name: 'Re-evaluate' });
     await waitFor(() => expect(refresh).toBeEnabled());
     fireEvent.click(refresh);
 

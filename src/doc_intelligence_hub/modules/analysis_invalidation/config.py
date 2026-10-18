@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     # in a single call, even for the "all documents" scope.
     max_manual_invalidation_batch: int = Field(default=2000, ge=1)
 
+    # Incremental Paperless reconciliation is intentionally bounded. Historical
+    # documents must be selected through an explicit backfill scope.
+    discovery_page_size: int = Field(default=100, ge=1, le=500)
+    discovery_overlap_seconds: int = Field(default=300, ge=0, le=86400)
+    max_backfill_batch: int = Field(default=500, ge=1, le=5000)
+    targeted_reanalysis_debounce_seconds: float = Field(default=3.0, ge=0, le=60)
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

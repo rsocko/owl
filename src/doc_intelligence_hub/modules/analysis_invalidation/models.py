@@ -18,6 +18,7 @@ class InvalidationReason(str, Enum):
     """Why an ``InvalidationEvent`` was created."""
 
     VERSION_CHANGED = "version_changed"
+    METADATA_CHANGED = "metadata_changed"
     ROLLBACK = "rollback"
     SIMULATED_VERSION_CHANGE = "simulated_version_change"
     MANUAL_ALL = "manual_all"
@@ -59,6 +60,8 @@ def stale_reason_for_invalidation(reason: InvalidationReason) -> StaleReason:
     """Map an invalidation-event reason onto the ``StaleReason`` a mark should carry."""
     if reason in _MANUAL_REASONS:
         return StaleReason.MANUAL_INVALIDATION
+    if reason is InvalidationReason.METADATA_CHANGED:
+        return StaleReason.METADATA_CHANGED
     return StaleReason.CONTENT_VERSION_CHANGED
 
 

@@ -186,6 +186,33 @@ async def test_list_documents_filters_by_correspondent_id_without_name_lookup(mo
 
 
 @pytest.mark.asyncio
+async def test_list_documents_supports_bounded_id_range_and_ordering(monkeypatch):
+    requests_seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests_seen.append(request)
+        return httpx.Response(200, json={"count": 0, "next": None, "results": []})
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    paperless = PaperlessClient(base_url="https://paperless.test", token="test-token")
+
+    await paperless.list_documents(id_after=10, id_before=20, ordering="id", limit=5)
+
+    request = requests_seen[0]
+    assert request.url.params["id__gte"] == "10"
+    assert request.url.params["id__lte"] == "20"
+    assert request.url.params["ordering"] == "id"
+    assert request.url.params["page_size"] == "5"
+
+
+@pytest.mark.asyncio
 async def test_search_documents_by_content_is_bounded_and_deterministic(monkeypatch):
     requests_seen: list[httpx.Request] = []
 

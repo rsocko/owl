@@ -261,6 +261,13 @@ class TestExecuteRuleWithContext:
 
 
 class TestTriggerFilters:
+    def test_document_type_matches_case_insensitively(self):
+        rule = _make_rule()
+        rule.trigger.filter = TriggerFilter(document_type=["EOB", "Bill"])
+
+        assert _matches_trigger_filter(rule, {"document_type_name": "bill"}) is True
+        assert _matches_trigger_filter(rule, {"document_type": {"name": "Statement"}}) is False
+
     def test_required_tags_match_case_insensitively(self):
         rule = _make_rule()
         rule.trigger.filter = TriggerFilter(tags=["Inbox"])

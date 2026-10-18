@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from doc_intelligence_hub.modules.eob_matching.database import (
     MatchingRun,
     MatchRecord,
@@ -78,6 +80,18 @@ class TestEOBRuns:
         assert len(data["runs"]) == 1
         assert data["limit"] == 1
         assert data["offset"] == 0
+
+    def test_first_incremental_run_uses_bounded_initial_history(self, client, mock_paperless):
+        resp = client.post(
+            "/api/eob/run",
+            json={"since_last_run": True, "initial_lookback_days": 730},
+        )
+
+        assert resp.status_code == 200
+        since_info = resp.json()["since_last_run"]
+        expected = (datetime.now(UTC) - timedelta(days=730)).date().isoformat()
+        assert since_info["resolved_created_after"] == expected
+        assert since_info["initial_lookback_days"] == 730
 
 
 class TestEOBMatches:

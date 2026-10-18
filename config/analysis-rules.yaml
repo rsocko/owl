@@ -12,13 +12,11 @@
 rules:
   - id: action-queue-trigger
     name: "Immediate Action Queue Analysis"
-    description: "Analyze new Inbox documents without waiting for the next scheduled batch"
+    description: "Analyze documents matching the configured Action Queue source without waiting for the next scheduled batch"
     tier: basic
-    enabled: false
+    enabled: true
     trigger:
       type: document_added
-      filter:
-        tags: ["Inbox"]
     context:
       - current_document
     analyzer: "builtin:action_queue_trigger"
@@ -90,6 +88,8 @@ rules:
     tier: basic
     trigger:
       type: document_added
+      filter:
+        document_type: statement
     context:
       - current_document
       - "series_history: 6"

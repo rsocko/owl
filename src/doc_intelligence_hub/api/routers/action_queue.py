@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -83,6 +83,7 @@ _INITIAL_QUEUE_SETTINGS = {
     "scan_mode": "tags",
     "monitor_tags": list(action_queue_settings.monitor_tags),
     "saved_view_id": None,
+    "lookback_days": 548,
     "confidence_threshold": action_queue_settings.confidence_threshold,
     "document_limit": None,
     "rate_limit_delay": action_queue_settings.rate_limit_delay,
@@ -202,6 +203,31 @@ def _effective_run_limit(body: QueueRunRequest, source_settings: dict[str, Any])
         )
     )
     return None if has_explicit_scope else source_settings.get("document_limit")
+
+
+def _configured_added_after(
+    body: QueueRunRequest,
+    source_settings: dict[str, Any],
+) -> str | None:
+    if body.added_after is not None:
+        return body.added_after
+    has_explicit_scope = any(
+        (
+            body.all_documents,
+            body.document_id is not None,
+            body.saved_view_id is not None,
+            bool(body.tag_override),
+            bool(body.created_after),
+            bool(body.created_before),
+            bool(body.added_before),
+            bool(body.correspondent),
+            bool(body.document_type),
+        )
+    )
+    if has_explicit_scope:
+        return None
+    lookback_days = int(source_settings.get("lookback_days") or 548)
+    return (date.today() - timedelta(days=lookback_days)).isoformat()
 
 
 class ActionUpdateRequest(BaseModel):
@@ -922,6 +948,7 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
     _sync_action_queue_settings(request)
     source_settings = _get_queue_settings(request)
     effective_limit = _effective_run_limit(body, source_settings)
+    effective_added_after = _configured_added_after(body, source_settings)
     started_at = serialize_utc_datetime(datetime.now(UTC))
     request.app.state.last_queue_status = {
         "status": "running",
@@ -954,7 +981,7 @@ async def queue_run(request: Request, body: QueueRunRequest) -> dict[str, Any]:
         document_id=body.document_id,
         created_after=body.created_after,
         created_before=body.created_before,
-        added_after=body.added_after,
+        added_after=effective_added_after,
         added_before=body.added_before,
         correspondent=body.correspondent,
         document_type=body.document_type,
@@ -1013,6 +1040,7 @@ async def queue_run_stream(
     _sync_action_queue_settings(request)
     source_settings = _get_queue_settings(request)
     effective_limit = _effective_run_limit(body, source_settings)
+    effective_added_after = _configured_added_after(body, source_settings)
 
     # Reject if a pipeline is already running
     current_status = getattr(request.app.state, "last_queue_status", None) or {}
@@ -1062,7 +1090,7 @@ async def queue_run_stream(
                 document_id=body.document_id,
                 created_after=body.created_after,
                 created_before=body.created_before,
-                added_after=body.added_after,
+                added_after=effective_added_after,
                 added_before=body.added_before,
                 correspondent=body.correspondent,
                 document_type=body.document_type,
@@ -3078,6 +3106,7 @@ class QueueSettingsResponse(BaseModel):
     )
     monitor_tags: list[str] = Field(default_factory=lambda: ["Inbox"])
     saved_view_id: int | None = None
+    lookback_days: int = 548
     confidence_threshold: int = 70
     document_limit: int | None = None
     rate_limit_delay: float = 0.25
@@ -3088,6 +3117,7 @@ class QueueSettingsUpdate(BaseModel):
     scan_mode: str | None = Field(default=None, pattern=r"^(tags|saved_view)$")
     monitor_tags: list[str] | None = None
     saved_view_id: int | None = Field(default=None, description="Set to 0 to clear")
+    lookback_days: int | None = Field(default=None, ge=30, le=3650)
     confidence_threshold: int | None = Field(default=None, ge=1, le=100)
     document_limit: int | None = Field(default=None, description="Set to 0 to clear (unlimited)")
     rate_limit_delay: float | None = Field(default=None, ge=0, le=10)
@@ -3110,6 +3140,7 @@ def _get_queue_settings(request: Request) -> dict:
             "scan_mode": stored.scan_mode,
             "monitor_tags": list(stored.monitor_tags or []),
             "saved_view_id": stored.saved_view_id,
+            "lookback_days": stored.lookback_days,
             "confidence_threshold": stored.confidence_threshold,
             "document_limit": stored.document_limit,
             "rate_limit_delay": stored.rate_limit_delay,
@@ -3170,6 +3201,9 @@ async def update_queue_settings(request: Request, body: QueueSettingsUpdate) -> 
             else None
         )
         changed.append("saved_view_id")
+    if body.lookback_days is not None:
+        current["lookback_days"] = body.lookback_days
+        changed.append("lookback_days")
     if body.confidence_threshold is not None:
         current["confidence_threshold"] = body.confidence_threshold
         changed.append("confidence_threshold")
