@@ -76,7 +76,7 @@ describe('OcrCandidatesPanel', () => {
   it('shows an empty state and a generation control when there are no candidates', async () => {
     render(<OcrCandidatesPanel documentId={501} />);
     await waitFor(() => expect(screen.getByText(/No candidates yet/i)).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: /Generate candidates/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Generate candidate/i })).toBeInTheDocument();
     expect(mocks.list).toHaveBeenCalledWith({ document_id: 501 });
   });
 
@@ -85,7 +85,7 @@ describe('OcrCandidatesPanel', () => {
     render(<OcrCandidatesPanel documentId={501} />);
     await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByRole('button', { name: /Generate candidates/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Generate candidate/i }));
 
     await waitFor(() =>
       expect(mocks.request).toHaveBeenCalledWith({

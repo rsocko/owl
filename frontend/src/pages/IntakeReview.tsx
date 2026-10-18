@@ -22,6 +22,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../components/ui';
 import DocumentRelationshipsPanel from '../components/DocumentRelationshipsPanel';
 import OcrSummaryPanel from '../components/OcrSummaryPanel';
+import OcrFocusInspector from '../components/OcrFocusInspector';
 import { ocrNeedsAttention, useOcrSummary } from '../hooks/useOcrSummary';
 import { endpoints } from '../lib/api';
 import {
@@ -765,6 +766,7 @@ export default function IntakeReview() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedDocument = searchParams.get('document') || documentId;
   const requestedTab = searchParams.get('tab');
+  const ocrFocus = searchParams.get('inspect') === 'ocr';
   const [tab, setTab] = useState<ReviewTab>(
     requestedTab === 'actions' || requestedTab === 'related' || requestedTab === 'ocr'
       ? requestedTab
@@ -991,6 +993,22 @@ export default function IntakeReview() {
   const chooseTab = (next: ReviewTab) => {
     setTab(next);
     updateUrl(selectedId, next);
+  };
+
+  const openOcrFocus = () => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('inspect', 'ocr');
+    nextParams.set('tab', 'ocr');
+    setTab('ocr');
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const closeOcrFocus = () => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('inspect');
+    nextParams.set('tab', 'ocr');
+    setTab('ocr');
+    setSearchParams(nextParams, { replace: true });
   };
 
   const activateDocument = (id: number) => {
@@ -1263,7 +1281,7 @@ export default function IntakeReview() {
   const title = metadata?.title || core?.document.title || selectedQueueItem?.title || 'Loading document…';
 
   return (
-    <div className="intake-review-page">
+    <div className={`intake-review-page${ocrFocus ? ' ocr-focus-mode' : ''}`}>
       <aside className="intake-queue" aria-label="Inbox documents">
         <div className="intake-queue-header">
           <div>
@@ -1362,7 +1380,9 @@ export default function IntakeReview() {
       </aside>
 
       <main className="intake-workspace">
-        {!selectedId ? (
+        {ocrFocus && selectedId ? (
+          <OcrFocusInspector documentId={selectedId} contextLabel="Inbox review" onReturn={closeOcrFocus} />
+        ) : !selectedId ? (
           <EmptyState title="Select a document" desc="Choose an Inbox document to review its metadata, actions, and OCR." />
         ) : (
           <>
@@ -1563,7 +1583,7 @@ export default function IntakeReview() {
 
                   {tab === 'ocr' ? (
                     <div className="intake-ocr-panel">
-                      <OcrSummaryPanel documentId={selectedId} state={ocrSummary} />
+                      <OcrSummaryPanel documentId={selectedId} state={ocrSummary} onInspect={openOcrFocus} />
                     </div>
                   ) : null}
                 </div>

@@ -78,6 +78,8 @@ interface RegionOverlayViewerProps {
    * heatmap mode, which is otherwise mutually exclusive UI state.
    */
   diffHighlights?: Map<number, DiffHighlightKind>;
+  zoom?: number;
+  onZoomChange?: (zoom: number) => void;
 }
 
 /**
@@ -98,6 +100,8 @@ export default function RegionOverlayViewer({
   onPageChange,
   onCorrectRegion,
   diffHighlights,
+  zoom = 1,
+  onZoomChange,
 }: RegionOverlayViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [imgSize, setImgSize] = useState<{ width: number; height: number } | null>(null);
@@ -288,6 +292,13 @@ export default function RegionOverlayViewer({
             </Button>
           </div>
         )}
+        {onZoomChange && (
+          <div className="region-overlay-page-nav" aria-label="Page zoom">
+            <Button size="sm" variant="ghost" disabled={zoom <= 0.6} onClick={() => onZoomChange(Math.max(0.6, zoom - 0.2))}>−</Button>
+            <span>{Math.round(zoom * 100)}%</span>
+            <Button size="sm" variant="ghost" disabled={zoom >= 2} onClick={() => onZoomChange(Math.min(2, zoom + 0.2))}>+</Button>
+          </div>
+        )}
       </div>
 
       {(onCreateAnnotation || onCorrectRegion) && (
@@ -332,6 +343,7 @@ export default function RegionOverlayViewer({
       <div
         ref={containerRef}
         className={`region-overlay-canvas ${drawMode || correctMode ? 'draw-mode' : ''}`}
+        style={{ width: `${zoom * 100}%` }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
