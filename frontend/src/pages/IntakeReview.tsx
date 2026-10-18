@@ -6,20 +6,30 @@ import {
   ExternalLink,
   FileCheck2,
   FileClock,
-  FilePlus2,
   Maximize2,
   Minimize2,
   Plus,
   RefreshCw,
-  RotateCcw,
   Save,
   Search,
-  Trash2,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../components/ui';
+import {
+  DocumentWorkspaceBody,
+  DocumentWorkspaceFrame,
+  DocumentWorkspaceHeader,
+  DocumentWorkspaceTabs,
+} from '../components/DocumentWorkspace';
+import DocumentActionsPanel from '../components/DocumentActionsPanel';
+import {
+  documentActionMutation,
+  type DocumentAction,
+  type DocumentActionDraft,
+  type DocumentActionStatus,
+} from '../lib/documentActions';
 import DocumentRelationshipsPanel from '../components/DocumentRelationshipsPanel';
 import OcrSummaryPanel from '../components/OcrSummaryPanel';
 import OcrFocusInspector from '../components/OcrFocusInspector';
@@ -31,6 +41,7 @@ import {
 } from '../lib/accountIdentifier';
 import { getToastDuration } from '../lib/toast';
 import '../styles/intake-review.css';
+import '../styles/document-workspace.css';
 
 type ReviewTab = 'metadata' | 'actions' | 'related' | 'ocr';
 type Disposition = 'save' | 'file_only' | 'confirm_and_file';
@@ -64,7 +75,7 @@ interface IntakeQueueResponse {
 
 const QUEUE_PAGE_SIZE = 100;
 
-interface IntakeAction {
+interface IntakeAction extends DocumentAction {
   id: number;
   document_id: number;
   action_type: string;
@@ -77,14 +88,6 @@ interface IntakeAction {
   status: string;
   version: number;
   origin: 'inferred' | 'user';
-  confidence?: number | null;
-  history?: Array<{
-    id: number;
-    event_type: string;
-    previous_status?: string | null;
-    new_status?: string | null;
-    created_at?: string | null;
-  }>;
 }
 
 interface Suggestion {
@@ -140,78 +143,6 @@ interface MetadataDraft {
   customFields: Record<string, string>;
 }
 
-interface ActionDraft {
-  action_type: string;
-  title: string;
-  details: string;
-  payee_or_owner: string;
-  amount: string;
-  due_date: string;
-  reference: string;
-}
-
-const ACTION_TYPES = ['PAY', 'RESPOND', 'REVIEW', 'SCHEDULE', 'SHARE', 'SIGN', 'TASK'] as const;
-type ActionType = typeof ACTION_TYPES[number];
-
-interface ActionFieldSchema {
-  ownerLabel?: string;
-  dueDateLabel: string;
-  referenceLabel?: string;
-  amount: boolean;
-}
-
-const ACTION_FIELD_SCHEMAS: Record<ActionType, ActionFieldSchema> = {
-  PAY: {
-    ownerLabel: 'Payee',
-    dueDateLabel: 'Pay by',
-    referenceLabel: 'Invoice or reference',
-    amount: true,
-  },
-  RESPOND: {
-    ownerLabel: 'Recipient',
-    dueDateLabel: 'Respond by',
-    referenceLabel: 'Case or reference',
-    amount: false,
-  },
-  REVIEW: {
-    dueDateLabel: 'Review by',
-    amount: false,
-  },
-  SCHEDULE: {
-    ownerLabel: 'With or provider',
-    dueDateLabel: 'Event date',
-    referenceLabel: 'Confirmation or reference',
-    amount: false,
-  },
-  SHARE: {
-    ownerLabel: 'Recipient',
-    dueDateLabel: 'Share by',
-    amount: false,
-  },
-  SIGN: {
-    ownerLabel: 'Counterparty or recipient',
-    dueDateLabel: 'Sign by',
-    referenceLabel: 'Agreement or reference',
-    amount: false,
-  },
-  TASK: {
-    ownerLabel: 'Owner',
-    dueDateLabel: 'Due date',
-    referenceLabel: 'Reference',
-    amount: false,
-  },
-};
-
-const EMPTY_ACTION: ActionDraft = {
-  action_type: 'TASK',
-  title: '',
-  details: '',
-  payee_or_owner: '',
-  amount: '',
-  due_date: '',
-  reference: '',
-};
-
 function initialMetadata(core: IntakeCore): MetadataDraft {
   return {
     title: core.document.title || '',
@@ -226,50 +157,6 @@ function initialMetadata(core: IntakeCore): MetadataDraft {
         field.value == null ? '' : String(field.value),
       ]),
     ),
-  };
-}
-
-function actionDraft(action: IntakeAction): ActionDraft {
-  return {
-    action_type: action.action_type || 'TASK',
-    title: action.title || '',
-    details: action.summary || '',
-    payee_or_owner: action.payee_or_owner || '',
-    amount: action.amount == null ? '' : String(action.amount),
-    due_date: action.due_date?.slice(0, 10) || '',
-    reference: action.reference || '',
-  };
-}
-
-function actionType(value: string): ActionType {
-  return ACTION_TYPES.includes(value as ActionType) ? value as ActionType : 'TASK';
-}
-
-function actionFieldSchema(value: string): ActionFieldSchema {
-  return ACTION_FIELD_SCHEMAS[actionType(value)];
-}
-
-function actionDraftValid(draft: ActionDraft): boolean {
-  const amount = Number(draft.amount);
-  return Boolean(
-    draft.title.trim()
-    && (
-      actionType(draft.action_type) !== 'PAY'
-      || (draft.amount.trim() && Number.isFinite(amount) && amount >= 0)
-    ),
-  );
-}
-
-function actionMutation(draft: ActionDraft) {
-  const schema = actionFieldSchema(draft.action_type);
-  return {
-    action_type: actionType(draft.action_type),
-    title: draft.title.trim(),
-    summary: draft.details.trim() || null,
-    payee_or_owner: schema.ownerLabel ? draft.payee_or_owner.trim() || null : null,
-    amount: schema.amount && draft.amount ? Number(draft.amount) : null,
-    due_date: draft.due_date || null,
-    reference: schema.referenceLabel ? draft.reference.trim() || null : null,
   };
 }
 
@@ -357,94 +244,6 @@ function CurrencyInput({
         onBlur={() => setFocused(false)}
         onChange={(event) => onChange(event.target.value.replace(/[^0-9.,-]/g, '').replaceAll(',', ''))}
       />
-    </div>
-  );
-}
-
-function ActionFields({
-  draft,
-  disabled = false,
-  onChange,
-}: {
-  draft: ActionDraft;
-  disabled?: boolean;
-  onChange: (draft: ActionDraft) => void;
-}) {
-  const schema = actionFieldSchema(draft.action_type);
-  return (
-    <div className="intake-action-grid">
-      <label>
-        <span>Type</span>
-        <select
-          value={draft.action_type}
-          disabled={disabled}
-          onChange={(event) => onChange({ ...draft, action_type: event.target.value })}
-        >
-          {ACTION_TYPES.map((type) => <option key={type}>{type}</option>)}
-        </select>
-      </label>
-      <label className="intake-action-title">
-        <span>Title</span>
-        <input
-          value={draft.title}
-          disabled={disabled}
-          onChange={(event) => onChange({ ...draft, title: event.target.value })}
-        />
-      </label>
-      {schema.ownerLabel ? (
-        <label>
-          <span>{schema.ownerLabel}</span>
-          <input
-            value={draft.payee_or_owner}
-            disabled={disabled}
-            onChange={(event) => onChange({ ...draft, payee_or_owner: event.target.value })}
-          />
-        </label>
-      ) : null}
-      {schema.amount ? (
-        <label>
-          <span>Amount</span>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            required
-            value={draft.amount}
-            disabled={disabled}
-            onChange={(event) => onChange({ ...draft, amount: event.target.value })}
-          />
-        </label>
-      ) : null}
-      <label>
-        <span>{schema.dueDateLabel}</span>
-        <input
-          type="date"
-          value={draft.due_date}
-          disabled={disabled}
-          onChange={(event) => onChange({ ...draft, due_date: event.target.value })}
-        />
-      </label>
-      {schema.referenceLabel ? (
-        <label>
-          <span>{schema.referenceLabel}</span>
-          <input
-            value={draft.reference}
-            disabled={disabled}
-            onChange={(event) => onChange({ ...draft, reference: event.target.value })}
-          />
-        </label>
-      ) : null}
-      <label className="intake-action-details">
-        <span>Details</span>
-        <textarea
-          value={draft.details}
-          disabled={disabled}
-          rows={3}
-          maxLength={10_000}
-          placeholder="What needs to be done, special instructions, or useful context"
-          onChange={(event) => onChange({ ...draft, details: event.target.value })}
-        />
-      </label>
     </div>
   );
 }
@@ -703,64 +502,6 @@ function TagPicker({
   );
 }
 
-function ActionEditor({
-  action,
-  busy,
-  onSave,
-  onStatus,
-  onDelete,
-}: {
-  action: IntakeAction;
-  busy: boolean;
-  onSave: (action: IntakeAction, draft: ActionDraft) => Promise<void>;
-  onStatus: (action: IntakeAction, status: string) => Promise<void>;
-  onDelete: (action: IntakeAction) => Promise<void>;
-}) {
-  const [draft, setDraft] = useState(() => actionDraft(action));
-  useEffect(() => setDraft(actionDraft(action)), [action]);
-  const completed = action.status === 'completed';
-  const inactive = completed || ['not_an_action', 'dismissed'].includes(action.status);
-  return (
-    <article className={`intake-action-card${inactive ? ' resolved' : ''}`}>
-      <div className="intake-action-heading">
-        <div>
-          <span className={`intake-action-status ${action.status}`}>{action.status.replaceAll('_', ' ')}</span>
-          <span className="intake-action-origin">{action.origin === 'user' ? 'Added by you' : 'Inferred'}</span>
-        </div>
-        {action.confidence != null ? <span>{action.confidence}% confidence</span> : null}
-      </div>
-      <ActionFields draft={draft} disabled={busy} onChange={setDraft} />
-      <div className="intake-action-controls">
-        <Button size="sm" variant="primary" disabled={busy || !actionDraftValid(draft)} onClick={() => void onSave(action, draft)}><Save size={15} /> Save action</Button>
-        {completed ? (
-          <Button size="sm" disabled={busy} onClick={() => void onStatus(action, 'pending')}><RotateCcw size={15} /> Undo completion</Button>
-        ) : (
-          <Button size="sm" disabled={busy || inactive} onClick={() => void onStatus(action, 'completed')}><CheckCircle2 size={15} /> Mark done</Button>
-        )}
-        {action.origin === 'inferred' ? (
-          <Button size="sm" disabled={busy || action.status === 'not_an_action'} onClick={() => void onStatus(action, 'not_an_action')}><X size={15} /> Not an action</Button>
-        ) : (
-          <Button size="sm" variant="danger" disabled={busy} onClick={() => void onDelete(action)}><Trash2 size={15} /> Delete</Button>
-        )}
-      </div>
-      {action.history?.length ? (
-        <details className="intake-action-history">
-          <summary>Audit history ({action.history.length})</summary>
-          <ol>
-            {action.history.map((event) => (
-              <li key={event.id}>
-                <strong>{event.event_type.replaceAll('_', ' ')}</strong>
-                {event.previous_status || event.new_status ? `: ${event.previous_status || 'none'} → ${event.new_status || 'none'}` : ''}
-                {event.created_at ? <time>{new Date(event.created_at).toLocaleString()}</time> : null}
-              </li>
-            ))}
-          </ol>
-        </details>
-      ) : null}
-    </article>
-  );
-}
-
 export default function IntakeReview() {
   const { documentId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -789,6 +530,8 @@ export default function IntakeReview() {
   const [suggestionSources, setSuggestionSources] = useState<Record<string, { available: boolean; error?: string | null }>>({});
   const [suggestionsCached, setSuggestionsCached] = useState(false);
   const [actions, setActions] = useState<IntakeAction[]>([]);
+  const [selectedActionId, setSelectedActionId] = useState<number | null>(null);
+  const [actionPanelDirty, setActionPanelDirty] = useState(false);
   const [loadingQueue, setLoadingQueue] = useState(true);
   const [loadingMoreQueue, setLoadingMoreQueue] = useState(false);
   const [loadingCore, setLoadingCore] = useState(false);
@@ -808,8 +551,6 @@ export default function IntakeReview() {
     actionLabel?: string;
     onAction?: () => void;
   } | null>(null);
-  const [newActionOpen, setNewActionOpen] = useState(false);
-  const [newAction, setNewAction] = useState<ActionDraft>(EMPTY_ACTION);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const queueButtonRefs = useRef(new Map<number, HTMLButtonElement>());
   const queueRequestId = useRef(0);
@@ -947,6 +688,11 @@ export default function IntakeReview() {
         if (requestId.current !== currentRequest) return;
         const result = response as { actions: IntakeAction[] };
         setActions(result.actions);
+        setSelectedActionId((current) => (
+          current && result.actions.some((action) => action.id === current)
+            ? current
+            : result.actions[0]?.id ?? null
+        ));
       })
       .catch((error) => {
         if (requestId.current === currentRequest) setActionError(errorMessage(error));
@@ -1183,12 +929,12 @@ export default function IntakeReview() {
     }
   };
 
-  const updateAction = async (action: IntakeAction, draft: ActionDraft) => {
+  const updateAction = async (action: DocumentAction, draft: DocumentActionDraft) => {
     setBusyKey(`action-${action.id}`);
     try {
       const updated = await endpoints.actionQueue.updateAction(String(action.id), {
         version: action.version,
-        ...actionMutation(draft),
+        ...documentActionMutation(draft),
       }) as IntakeAction;
       setActions((current) => current.map((item) => item.id === updated.id ? updated : item));
       showToast('Action saved.');
@@ -1199,10 +945,18 @@ export default function IntakeReview() {
     }
   };
 
-  const updateActionStatus = async (action: IntakeAction, status: string) => {
+  const updateActionStatus = async (
+    action: DocumentAction,
+    status: DocumentActionStatus,
+    snoozedUntil?: string,
+  ) => {
     setBusyKey(`action-${action.id}`);
     try {
-      const updated = await endpoints.actionQueue.updateAction(String(action.id), { version: action.version, status }) as IntakeAction;
+      const updated = await endpoints.actionQueue.updateAction(String(action.id), {
+        version: action.version,
+        status,
+        ...(snoozedUntil ? { snoozed_until: snoozedUntil } : {}),
+      }) as IntakeAction;
       setActions((current) => current.map((item) => item.id === updated.id ? updated : item));
       showToast(status === 'completed' ? 'Action marked done.' : status === 'pending' ? 'Action restored.' : 'Action updated.');
     } catch (error) {
@@ -1212,29 +966,15 @@ export default function IntakeReview() {
     }
   };
 
-  const deleteAction = async (action: IntakeAction) => {
-    setBusyKey(`action-${action.id}`);
-    try {
-      await endpoints.intake.deleteAction(action.id);
-      setActions((current) => current.filter((item) => item.id !== action.id));
-      showToast('Action deleted.');
-    } catch (error) {
-      showToast(errorMessage(error), 'error');
-    } finally {
-      setBusyKey('');
-    }
-  };
-
-  const addAction = async () => {
+  const addAction = async (draft: DocumentActionDraft) => {
     if (!core) return;
     setBusyKey('new-action');
     try {
       const created = await endpoints.intake.createAction(core.document.id, {
-        ...actionMutation(newAction),
+        ...documentActionMutation(draft),
       }) as IntakeAction;
       setActions((current) => [...current, created]);
-      setNewAction(EMPTY_ACTION);
-      setNewActionOpen(false);
+      setSelectedActionId(created.id);
       showToast('Action added.');
     } catch (error) {
       showToast(errorMessage(error), 'error');
@@ -1262,6 +1002,11 @@ export default function IntakeReview() {
       setMetadata(refreshedMetadata);
       setBaseline(refreshedMetadata);
       setActions(response.actions.actions);
+      setSelectedActionId((current) => (
+        current && response.actions.actions.some((action) => action.id === current)
+          ? current
+          : response.actions.actions[0]?.id ?? null
+      ));
       setSuggestions(response.suggestions);
       setSuggestionSources(response.suggestion_sources);
       ocrSummary.reload();
@@ -1281,8 +1026,13 @@ export default function IntakeReview() {
   const title = metadata?.title || core?.document.title || selectedQueueItem?.title || 'Loading document…';
 
   return (
-    <div className={`intake-review-page${ocrFocus ? ' ocr-focus-mode' : ''}`}>
-      <aside className="intake-queue" aria-label="Inbox documents">
+    <DocumentWorkspaceFrame
+      collapsed={ocrFocus}
+      className={`intake-review-page${ocrFocus ? ' ocr-focus-mode' : ''}`}
+      railClassName="intake-queue"
+      mainClassName="intake-workspace"
+      rail={(
+        <>
         <div className="intake-queue-header">
           <div>
             <span className="intake-eyebrow">Paperless inbox</span>
@@ -1377,34 +1127,45 @@ export default function IntakeReview() {
             ) : null}
           </div>
         )}
-      </aside>
-
-      <main className="intake-workspace">
+        </>
+      )}
+    >
         {ocrFocus && selectedId ? (
           <OcrFocusInspector documentId={selectedId} contextLabel="Inbox review" onReturn={closeOcrFocus} />
         ) : !selectedId ? (
           <EmptyState title="Select a document" desc="Choose an Inbox document to review its metadata, actions, and OCR." />
         ) : (
           <>
-            <header className="intake-document-header">
-              <div className="intake-document-title"><span>Document #{selectedId}</span><h2>{title}</h2></div>
-              <dl className="intake-live-metadata">
-                <div><dt>Date</dt><dd>{metadata ? formatDate(metadata.created) : 'Loading…'}</dd></div>
-                <div><dt>Correspondent</dt><dd>{core && metadata ? optionName(core.taxonomies.correspondents, metadata.correspondent) : 'Loading…'}</dd></div>
-                <div><dt>Type</dt><dd>{core && metadata ? optionName(core.taxonomies.document_types, metadata.document_type) : 'Loading…'}</dd></div>
-              </dl>
-              <div className="intake-header-actions">
+            <DocumentWorkspaceHeader
+              className="intake-document-header"
+              titleClassName="intake-document-title"
+              metadataClassName="intake-live-metadata"
+              actionsClassName="intake-header-actions"
+              context={`Document #${selectedId}`}
+              title={title}
+              metadata={[
+                { label: 'Date', value: metadata ? formatDate(metadata.created) : 'Loading…' },
+                { label: 'Correspondent', value: core && metadata ? optionName(core.taxonomies.correspondents, metadata.correspondent) : 'Loading…' },
+                { label: 'Type', value: core && metadata ? optionName(core.taxonomies.document_types, metadata.document_type) : 'Loading…' },
+              ]}
+              actions={(
+                <>
                 {core?.paperless_url ? (
                   <a className="btn ghost" href={core.paperless_url} target="_blank" rel="noopener noreferrer">
                     <ExternalLink size={16} /> Open in Paperless
                   </a>
                 ) : null}
                 <Button disabled={busyKey === 'refresh' || !core} onClick={() => void refreshAnalysis()}><RefreshCw size={16} /> {busyKey === 'refresh' ? 'Refreshing…' : 'Refresh analysis'}</Button>
-              </div>
-            </header>
+                </>
+              )}
+            />
 
-            <div className="intake-workspace-grid">
-              <section className="intake-preview" aria-label="Document preview">
+            <DocumentWorkspaceBody
+              className="intake-workspace-grid"
+              previewClassName="intake-preview"
+              panelClassName="intake-review-panel"
+              preview={(
+                <>
                 <iframe title={`Preview of ${title}`} src={previewUrl} />
                 <div className="intake-preview-tools">
                   <button type="button" onClick={() => setPreviewExpanded(true)}>
@@ -1414,23 +1175,29 @@ export default function IntakeReview() {
                     <ExternalLink size={16} /> New tab
                   </a>
                 </div>
-              </section>
-
-              <section className="intake-review-panel">
-                <div className="intake-tabs" role="tablist" aria-label="Document review sections">
-                  <button role="tab" aria-selected={tab === 'metadata'} className={tab === 'metadata' ? 'active' : ''} onClick={() => chooseTab('metadata')}>Metadata</button>
-                  <button role="tab" aria-selected={tab === 'actions'} className={`${tab === 'actions' ? 'active ' : ''}${pendingActions.length ? 'needs-attention' : ''}`} onClick={() => chooseTab('actions')}>
-                    Actions <span>{loadingActions ? '…' : pendingActions.length}</span>
-                  </button>
-                  <button role="tab" aria-selected={tab === 'related'} className={tab === 'related' ? 'active' : ''} onClick={() => chooseTab('related')}>
-                    Related
-                  </button>
-                  <button role="tab" aria-selected={tab === 'ocr'} aria-label={ocrNeedsAttention(ocrSummary.assessment) ? 'OCR, needs review' : 'OCR'} className={tab === 'ocr' ? 'active' : ''} onClick={() => chooseTab('ocr')}>
-                    OCR {ocrNeedsAttention(ocrSummary.assessment) ? <span className="intake-tab-alert" aria-label="OCR needs review"><CircleAlert size={13} /> Review</span> : null}
-                  </button>
-                </div>
-
-                <div className="intake-tab-content">
+                </>
+              )}
+            >
+                <DocumentWorkspaceTabs
+                  contentClassName="intake-tab-content"
+                  ariaLabel="Document review sections"
+                  tabs={[
+                    { key: 'metadata', label: 'Metadata' },
+                    {
+                      key: 'actions',
+                      className: pendingActions.length ? 'needs-attention' : '',
+                      label: <>Actions <span className="document-workspace-tab-count">{loadingActions ? '…' : pendingActions.length}</span></>,
+                    },
+                    { key: 'related', label: 'Related' },
+                    {
+                      key: 'ocr',
+                      ariaLabel: ocrNeedsAttention(ocrSummary.assessment) ? 'OCR, needs review' : 'OCR',
+                      label: <>OCR {ocrNeedsAttention(ocrSummary.assessment) ? <span className="intake-tab-alert" aria-label="OCR needs review"><CircleAlert size={13} /> Review</span> : null}</>,
+                    },
+                  ]}
+                  active={tab}
+                  onChange={(value) => chooseTab(value as ReviewTab)}
+                >
                   {coreError ? <ErrorState message={`Document metadata unavailable: ${coreError}`} onRetry={() => void loadDocument(selectedId)} /> : null}
                   {tab === 'metadata' && !coreError ? (
                     loadingCore || !core || !metadata ? <SkeletonLoader variant="detail-panel" /> : (
@@ -1546,24 +1313,19 @@ export default function IntakeReview() {
                   ) : null}
 
                   {tab === 'actions' ? (
-                    <div className="intake-actions-panel">
-                      <div className="intake-actions-summary">
-                        <div><h3>Document actions</h3><p>{pendingActions.length} pending · {actions.length - pendingActions.length} resolved</p></div>
-                        <Button size="sm" onClick={() => setNewActionOpen((open) => !open)}>{newActionOpen ? <X size={15} /> : <Plus size={15} />} {newActionOpen ? 'Cancel' : 'New action'}</Button>
-                      </div>
-                      {actionError ? <ErrorState message={`Actions unavailable: ${actionError}`} onRetry={() => void loadDocument(selectedId)} /> : null}
-                      {loadingActions ? <div className="intake-inline-state"><RefreshCw className="intake-spin" size={15} /> Loading action analysis…</div> : null}
-                      {newActionOpen ? (
-                        <div className="intake-new-action">
-                          <ActionFields draft={newAction} onChange={setNewAction} />
-                          <Button variant="primary" disabled={busyKey === 'new-action' || !actionDraftValid(newAction)} onClick={() => void addAction()}><FilePlus2 size={16} /> {busyKey === 'new-action' ? 'Adding…' : 'Add action'}</Button>
-                        </div>
-                      ) : null}
-                      {!loadingActions && !actionError && actions.length ? actions.map((action) => (
-                        <ActionEditor key={action.id} action={action} busy={busyKey === `action-${action.id}`} onSave={updateAction} onStatus={updateActionStatus} onDelete={deleteAction} />
-                      )) : null}
-                      {!loadingActions && !actionError && !actions.length ? <EmptyState title="No action analysis yet" desc="Refresh analysis or add an action manually." /> : null}
-                    </div>
+                    <DocumentActionsPanel
+                      actions={actions}
+                      selectedActionId={selectedActionId}
+                      onSelectAction={setSelectedActionId}
+                      busy={Boolean(busyKey)}
+                      error={actionError}
+                      loading={loadingActions}
+                      onDirtyChange={setActionPanelDirty}
+                      onRefresh={reloadCurrentDocument}
+                      onSave={updateAction}
+                      onCreate={addAction}
+                      onStatus={updateActionStatus}
+                    />
                   ) : null}
 
                   {tab === 'related' ? (
@@ -1586,31 +1348,29 @@ export default function IntakeReview() {
                       <OcrSummaryPanel documentId={selectedId} state={ocrSummary} onInspect={openOcrFocus} />
                     </div>
                   ) : null}
-                </div>
-              </section>
-            </div>
+                </DocumentWorkspaceTabs>
+            </DocumentWorkspaceBody>
 
             <footer className="intake-footer">
               <div className="intake-footer-left">
-                <Button disabled={!core || Boolean(busyKey)} onClick={() => void deferDocument()}><FileClock size={16} /> Defer & next</Button>
-                <span className={dirty ? 'intake-dirty' : ''}>{dirty ? 'Unsaved changes' : 'All changes saved'}</span>
+                <Button disabled={!core || Boolean(busyKey) || actionPanelDirty} onClick={() => void deferDocument()}><FileClock size={16} /> Defer & next</Button>
+                <span className={dirty || actionPanelDirty ? 'intake-dirty' : ''}>{dirty || actionPanelDirty ? 'Unsaved changes' : 'All changes saved'}</span>
                 {core && !core.write_enabled ? <span className="intake-write-warning">Paperless writes are disabled.</span> : null}
               </div>
               <div className="intake-footer-actions">
-                <Button disabled={!core?.write_enabled || Boolean(busyKey)} onClick={() => void save('save')}><Save size={16} /> Save changes</Button>
+                <Button disabled={!core?.write_enabled || Boolean(busyKey) || actionPanelDirty} onClick={() => void save('save')}><Save size={16} /> Save changes</Button>
                 {pendingActions.length ? (
                   <>
-                    <Button disabled={!core?.write_enabled || Boolean(busyKey)} onClick={() => void save('file_only')}><FileCheck2 size={16} /> File only</Button>
-                    <Button variant="primary" disabled={!core?.write_enabled || Boolean(busyKey)} onClick={() => void save('confirm_and_file')}><CheckCircle2 size={16} /> Confirm action{pendingActions.length === 1 ? '' : 's'} & file</Button>
+                    <Button disabled={!core?.write_enabled || Boolean(busyKey) || actionPanelDirty} onClick={() => void save('file_only')}><FileCheck2 size={16} /> File only</Button>
+                    <Button variant="primary" disabled={!core?.write_enabled || Boolean(busyKey) || actionPanelDirty} onClick={() => void save('confirm_and_file')}><CheckCircle2 size={16} /> Confirm action{pendingActions.length === 1 ? '' : 's'} & file</Button>
                   </>
                 ) : (
-                  <Button variant="primary" disabled={!core?.write_enabled || Boolean(busyKey)} onClick={() => void save('file_only')}><FileCheck2 size={16} /> Save & file</Button>
+                  <Button variant="primary" disabled={!core?.write_enabled || Boolean(busyKey) || actionPanelDirty} onClick={() => void save('file_only')}><FileCheck2 size={16} /> Save & file</Button>
                 )}
               </div>
             </footer>
           </>
         )}
-      </main>
       {previewExpanded && selectedId ? (
         <div className="intake-preview-overlay" role="dialog" aria-modal="true" aria-label={`Expanded preview of ${title}`}>
           <div className="intake-preview-overlay-header">
@@ -1648,6 +1408,6 @@ export default function IntakeReview() {
           onDismiss={() => setToast(null)}
         />
       ) : null}
-    </div>
+    </DocumentWorkspaceFrame>
   );
 }

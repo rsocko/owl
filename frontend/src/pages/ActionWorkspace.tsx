@@ -6,16 +6,24 @@ import {
   ChevronRight,
   ExternalLink,
   FileText,
-  History,
   Maximize2,
-  MoreHorizontal,
-  Plus,
-  RefreshCw,
   Search,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../components/ui';
+import {
+  DocumentWorkspaceBody,
+  DocumentWorkspaceFrame,
+  DocumentWorkspaceHeader,
+  DocumentWorkspaceTabs,
+} from '../components/DocumentWorkspace';
+import DocumentActionsPanel from '../components/DocumentActionsPanel';
+import {
+  documentActionMutation,
+  type DocumentActionDraft,
+  type DocumentActionStatus,
+} from '../lib/documentActions';
 import OcrSummaryPanel from '../components/OcrSummaryPanel';
 import OcrFocusInspector from '../components/OcrFocusInspector';
 import { useOcrSummary } from '../hooks/useOcrSummary';
@@ -95,56 +103,6 @@ interface ActionItem {
   obligation_id?: string | null;
 }
 
-type PaymentCheckState =
-  | 'unchecked'
-  | 'checking'
-  | 'posted_match'
-  | 'pending_match'
-  | 'multiple_matches'
-  | 'no_match'
-  | 'partial_payment'
-  | 'source_unavailable'
-  | 'stale'
-  | 'conflict'
-  | 'possible_double_payment'
-  | 'confirmed';
-
-interface PaymentCandidate {
-  id: string;
-  payee?: string | null;
-  amount?: number | null;
-  currency?: string | null;
-  transaction_date?: string | null;
-  status?: 'posted' | 'pending' | null;
-  account_display_name?: string | null;
-  account_last_four?: string | null;
-  confidence?: string | null;
-  score?: number | null;
-  rank?: number | null;
-  score_gap_basis_points?: number | null;
-  match_reasons?: string[];
-}
-
-interface PaymentSearchContext {
-  window_start?: string | null;
-  window_end?: string | null;
-  amount_tolerance?: number | null;
-  date_tolerance_days?: number | null;
-  eligible_account_count?: number | null;
-  candidate_pool_size?: number | null;
-}
-
-interface PaymentCheck {
-  state: PaymentCheckState;
-  checked_at?: string | null;
-  stale_after?: string | null;
-  source: string;
-  revision: string;
-  message?: string | null;
-  candidates: PaymentCandidate[];
-  search_context?: PaymentSearchContext | null;
-}
-
 interface ActionListResponse {
   actions?: ActionItem[];
   total?: number;
@@ -162,16 +120,6 @@ interface QueueStatus {
   read_only?: boolean;
 }
 
-interface ActionDraft {
-  action_type: ActionType;
-  title: string;
-  summary: string;
-  payee_or_owner: string;
-  amount: string;
-  due_date: string;
-  reference: string;
-}
-
 interface DocumentGroup {
   documentId: number;
   actions: ActionItem[];
@@ -184,21 +132,6 @@ type ToastState = { message: string; tone?: 'success' | 'error' } | null;
 const ACTION_TYPES: ActionType[] = ['PAY', 'RESPOND', 'REVIEW', 'SCHEDULE', 'SHARE', 'SIGN', 'TASK'];
 const RESOLVED_STATUSES = new Set(['completed', 'dismissed', 'not_an_action']);
 
-const FIELD_SCHEMA: Record<ActionType, {
-  owner?: string;
-  due: string;
-  reference?: string;
-  amount: boolean;
-}> = {
-  PAY: { owner: 'Payee', due: 'Pay by', reference: 'Invoice or reference', amount: true },
-  RESPOND: { owner: 'Recipient', due: 'Respond by', reference: 'Case or reference', amount: false },
-  REVIEW: { due: 'Review by', amount: false },
-  SCHEDULE: { owner: 'With or provider', due: 'Event date', reference: 'Confirmation or reference', amount: false },
-  SHARE: { owner: 'Recipient', due: 'Share by', amount: false },
-  SIGN: { owner: 'Counterparty or recipient', due: 'Sign by', reference: 'Agreement or reference', amount: false },
-  TASK: { owner: 'Owner', due: 'Due date', reference: 'Reference', amount: false },
-};
-
 function normalizedType(value?: string | null): ActionType {
   const normalized = (value || 'TASK').toUpperCase();
   return ACTION_TYPES.includes(normalized as ActionType) ? normalized as ActionType : 'TASK';
@@ -206,18 +139,6 @@ function normalizedType(value?: string | null): ActionType {
 
 function normalizedStatus(value?: string | null) {
   return (value || 'pending').toLowerCase();
-}
-
-function draftFromAction(action: ActionItem): ActionDraft {
-  return {
-    action_type: normalizedType(action.action_type),
-    title: action.title || '',
-    summary: action.summary || '',
-    payee_or_owner: action.payee_or_owner || action.correspondent || '',
-    amount: action.amount == null ? '' : String(action.amount),
-    due_date: action.due_date?.slice(0, 10) || '',
-    reference: action.reference || action.extracted_data?.reference_number || '',
-  };
 }
 
 function formatDate(value?: string | null) {
@@ -231,25 +152,6 @@ function formatCurrency(value?: number | null, currency = 'USD') {
   return value == null
     ? '—'
     : value.toLocaleString(undefined, { style: 'currency', currency });
-}
-
-function formatMatchReason(reason: string) {
-  const [kind, ...strengthParts] = reason.split('_');
-  const labels: Record<string, string> = {
-    amount: 'Amount',
-    date: 'Date',
-    payee: 'Vendor',
-    account: 'Account',
-  };
-  const strengths: Record<string, string> = {
-    exact: 'exact',
-    strong: 'strong',
-    partial: 'partial',
-    none: 'no match',
-    notprovided: 'not used',
-  };
-  const strength = strengthParts.join('');
-  return `${labels[kind] || kind}: ${strengths[strength] || strengthParts.join(' ')}`;
 }
 
 function isOverdue(action: ActionItem) {
@@ -331,24 +233,9 @@ export default function ActionWorkspace() {
   const [selectedActionId, setSelectedActionId] = useState<number | null>(linkedActionId);
   const [tab, setTab] = useState<WorkspaceTab>('actions');
   const [railCollapsed, setRailCollapsed] = useState(false);
-  const [draft, setDraft] = useState<ActionDraft | null>(null);
-  const [savedDraft, setSavedDraft] = useState<ActionDraft | null>(null);
-  const [newActionOpen, setNewActionOpen] = useState(false);
-  const [newAction, setNewAction] = useState<ActionDraft>({
-    action_type: 'TASK',
-    title: '',
-    summary: '',
-    payee_or_owner: '',
-    amount: '',
-    due_date: '',
-    reference: '',
-  });
+  const [actionPanelDirty, setActionPanelDirty] = useState(false);
   const [confirmNotAction, setConfirmNotAction] = useState<number | null>(null);
   const [confirmAllDone, setConfirmAllDone] = useState(false);
-  const [paymentCheck, setPaymentCheck] = useState<PaymentCheck | null>(null);
-  const [paymentLoading, setPaymentLoading] = useState(false);
-  const [paymentError, setPaymentError] = useState<string | null>(null);
-  const [confirmPayment, setConfirmPayment] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -427,85 +314,6 @@ export default function ActionWorkspace() {
   const selectedGroupIndex = selectedGroup
     ? groups.findIndex((group) => group.documentId === selectedGroup.documentId)
     : -1;
-  const dirty = JSON.stringify(draft) !== JSON.stringify(savedDraft);
-
-  const fetchPaymentCheck = useCallback(async (actionId: number) => {
-    const response = await endpoints.actionQueue.paymentCheck(String(actionId)) as {
-      payment_check: PaymentCheck;
-    };
-    return response.payment_check;
-  }, []);
-
-  useEffect(() => {
-    if (!selectedAction) {
-      setDraft(null);
-      setSavedDraft(null);
-      return;
-    }
-    const nextDraft = draftFromAction(selectedAction);
-    setDraft(nextDraft);
-    setSavedDraft(nextDraft);
-    setNewActionOpen(false);
-  }, [selectedAction]);
-
-  useEffect(() => {
-    if (!selectedAction || paymentCheck?.state !== 'checking') return;
-    let active = true;
-    const poll = window.setInterval(() => {
-      void fetchPaymentCheck(selectedAction.id)
-        .then((nextPaymentCheck) => {
-          if (active) {
-            setPaymentCheck(nextPaymentCheck);
-            setPaymentError(null);
-          }
-        })
-        .catch((pollError) => {
-          if (active) {
-            setPaymentError(
-              pollError instanceof Error ? pollError.message : 'Could not refresh payment status.',
-            );
-          }
-        });
-    }, 5_000);
-    return () => {
-      active = false;
-      window.clearInterval(poll);
-    };
-  }, [fetchPaymentCheck, selectedAction, paymentCheck?.state]);
-
-  useEffect(() => {
-    if (!selectedAction || normalizedType(selectedAction.action_type) !== 'PAY' || !selectedAction.obligation_id) {
-      setPaymentCheck(null);
-      setPaymentError(null);
-      setPaymentLoading(false);
-      return;
-    }
-    let active = true;
-    setPaymentCheck(null);
-    setPaymentError(null);
-    setPaymentLoading(true);
-    void fetchPaymentCheck(selectedAction.id)
-      .then((nextPaymentCheck) => {
-        if (active) {
-          setPaymentCheck(nextPaymentCheck);
-          setPaymentError(null);
-        }
-      })
-      .catch((loadError) => {
-        if (active) {
-          setPaymentCheck(null);
-          setPaymentError(
-            loadError instanceof Error ? loadError.message : 'Could not load payment status.',
-          );
-        }
-      })
-      .finally(() => {
-        if (active) setPaymentLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [fetchPaymentCheck, selectedAction]);
 
   useEffect(() => {
     if (!selectedAction) return;
@@ -525,8 +333,8 @@ export default function ActionWorkspace() {
   }, [groups, selectedAction?.document_id]);
 
   const selectAction = (actionId: number) => {
-    if (dirty) {
-      setToast({ message: 'Save or discard the selected action changes before switching.', tone: 'error' });
+    if (actionPanelDirty) {
+      setToast({ message: 'Save the selected action before switching.', tone: 'error' });
       return;
     }
     setSelectedActionId(actionId);
@@ -573,8 +381,8 @@ export default function ActionWorkspace() {
   };
 
   const changeStatus = async (action: ActionItem, status: ActionStatus, snoozedUntil?: string) => {
-    if (dirty && action.id === selectedActionId) {
-      setToast({ message: 'Save action changes before choosing an outcome.', tone: 'error' });
+    if (actionPanelDirty && action.id === selectedActionId) {
+      setToast({ message: 'Save the selected action before choosing an outcome.', tone: 'error' });
       return;
     }
     if (status === 'not_an_action') {
@@ -614,62 +422,6 @@ export default function ActionWorkspace() {
     }
   };
 
-  const saveAction = async () => {
-    if (!selectedAction || !draft) return;
-    if (!draft.title.trim()) {
-      setToast({ message: 'Enter an action title before saving.', tone: 'error' });
-      return;
-    }
-    const payload: Record<string, unknown> = {
-      version: selectedAction.version,
-      action_type: draft.action_type,
-      title: draft.title.trim(),
-      summary: draft.summary.trim() || null,
-      payee_or_owner: draft.payee_or_owner.trim() || null,
-      amount: draft.amount === '' ? null : Number(draft.amount),
-      due_date: draft.due_date || null,
-      reference: draft.reference.trim() || null,
-    };
-    await patchAction(selectedAction.id, payload, 'Action changes saved.');
-  };
-
-  const addAction = async () => {
-    if (!selectedAction || !newAction.title.trim()) return;
-    setBusy('new-action');
-    try {
-      const created = await endpoints.actionQueue.splitAction(String(selectedAction.id), {
-        action_type: newAction.action_type,
-        title: newAction.title.trim(),
-        summary: newAction.summary.trim() || null,
-        payee_or_owner: newAction.payee_or_owner.trim() || null,
-        amount: newAction.amount === '' ? null : Number(newAction.amount),
-        due_date: newAction.due_date || null,
-        reference: newAction.reference.trim() || null,
-        urgency: 'LOW',
-      }) as ActionItem;
-      setNewActionOpen(false);
-      setNewAction({
-        action_type: 'TASK',
-        title: '',
-        summary: '',
-        payee_or_owner: '',
-        amount: '',
-        due_date: '',
-        reference: '',
-      });
-      await loadData();
-      setSelectedActionId(created.id);
-      setToast({ message: 'Action added to this document.', tone: 'success' });
-    } catch (createError) {
-      setToast({
-        message: createError instanceof Error ? createError.message : 'Could not add action.',
-        tone: 'error',
-      });
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const markAllDone = async () => {
     if (!selectedGroup) return;
     const ids = selectedGroup.actions
@@ -691,64 +443,9 @@ export default function ActionWorkspace() {
     }
   };
 
-  const checkForPayment = async () => {
-    if (!selectedAction) return;
-    setBusy(`payment-${selectedAction.id}`);
-    setPaymentError(null);
-    try {
-      const currentPaymentCheck = paymentCheck ?? await fetchPaymentCheck(selectedAction.id);
-      setPaymentCheck(currentPaymentCheck);
-      const response = await endpoints.actionQueue.checkPayment(String(selectedAction.id), {
-        revision: currentPaymentCheck.revision,
-        idempotency_key: `owl-check-payment:${selectedAction.id}:${currentPaymentCheck.revision}`,
-      }) as { payment: PaymentCheck };
-      setPaymentCheck(response.payment);
-      setToast({
-        message: response.payment.state === 'posted_match'
-          ? 'Posted payment candidate found. Confirm it before completing the action.'
-          : response.payment.message || 'Payment check completed.',
-        tone: 'success',
-      });
-    } catch (paymentError) {
-      const message = paymentError instanceof Error
-        ? paymentError.message
-        : 'Could not check for payment.';
-      setPaymentError(message);
-      setToast({
-        message,
-        tone: 'error',
-      });
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const confirmPaymentAndComplete = async () => {
-    if (!selectedAction || !paymentCheck) return;
-    setConfirmPayment(false);
-    setBusy(`payment-${selectedAction.id}`);
-    try {
-      await endpoints.actionQueue.confirmPaymentAndComplete(String(selectedAction.id), {
-        revision: paymentCheck.revision,
-        idempotency_key: `owl-confirm-payment:${selectedAction.id}:${paymentCheck.revision}`,
-      });
-      setToast({ message: 'Payment confirmed and action completed.', tone: 'success' });
-      await loadData();
-    } catch (paymentError) {
-      setToast({
-        message: paymentError instanceof Error
-          ? paymentError.message
-          : 'Could not confirm the payment.',
-        tone: 'error',
-      });
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const nextDocument = () => {
-    if (dirty) {
-      setToast({ message: 'Save or discard changes before moving to another document.', tone: 'error' });
+    if (actionPanelDirty) {
+      setToast({ message: 'Save the selected action before moving to the next document.', tone: 'error' });
       return;
     }
     const next = groups[selectedGroupIndex + 1];
@@ -779,8 +476,12 @@ export default function ActionWorkspace() {
   }));
 
   return (
-    <div className={`document-workspace-page${railCollapsed ? ' rail-collapsed' : ''}`}>
-      <aside className="document-workspace-rail" aria-label="Action documents">
+    <DocumentWorkspaceFrame
+      collapsed={railCollapsed}
+      className="action-document-workspace"
+      railClassName="document-workspace-rail"
+      rail={(
+        <>
         <header className="document-workspace-rail-header">
           <div>
             <h1>Actions</h1>
@@ -911,173 +612,85 @@ export default function ActionWorkspace() {
             </div>
           </>
         ) : null}
-      </aside>
-
-      <main className="document-workspace-main">
+        </>
+      )}
+    >
         {ocrFocus && selectedGroup ? (
           <OcrFocusInspector documentId={selectedGroup.documentId} contextLabel="Action review" onReturn={closeOcrFocus} />
         ) : !selectedAction || !selectedGroup ? (
           <EmptyState title="Select a document" desc="Choose a document to review its actions and source evidence." />
         ) : (
           <>
-            <header className="document-workspace-header">
-              <div>
-                <span>Document {selectedGroupIndex >= 0 ? selectedGroupIndex + 1 : '—'} of {groups.length} · Paperless #{selectedGroup.documentId}</span>
-                <h2>{selectedAction.document_title || `Document #${selectedGroup.documentId}`}</h2>
-              </div>
-              <dl>
-                <div><dt>Date</dt><dd>{formatDate(selectedAction.document_date)}</dd></div>
-                <div><dt>Correspondent</dt><dd>{selectedAction.correspondent || 'Not set'}</dd></div>
-                <div><dt>Type</dt><dd>{selectedAction.document_type || 'Not set'}</dd></div>
-              </dl>
-              <a className="btn ghost" href={selectedAction.preview_url || previewUrl} target="_blank" rel="noopener noreferrer">
-                <ExternalLink size={16} /> Paperless
-              </a>
-            </header>
+            <DocumentWorkspaceHeader
+              context={`Document ${selectedGroupIndex >= 0 ? selectedGroupIndex + 1 : '—'} of ${groups.length} · Paperless #${selectedGroup.documentId}`}
+              title={selectedAction.document_title || `Document #${selectedGroup.documentId}`}
+              metadata={[
+                { label: 'Date', value: formatDate(selectedAction.document_date) },
+                { label: 'Correspondent', value: selectedAction.correspondent || 'Not set' },
+                { label: 'Type', value: selectedAction.document_type || 'Not set' },
+              ]}
+              actions={(
+                <a className="btn ghost" href={selectedAction.preview_url || previewUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink size={16} /> Paperless
+                </a>
+              )}
+            />
 
-            <div className="document-workspace-content">
-              <section className="document-workspace-preview" aria-label="Source document">
+            <DocumentWorkspaceBody
+              previewClassName="document-workspace-preview"
+              panelClassName="document-workspace-panel"
+              preview={(
+                <>
                 {previewUrl ? <iframe title={`Preview of ${selectedAction.document_title || 'document'}`} src={previewUrl} /> : (
                   <div className="document-workspace-preview-empty"><FileText size={42} /><span>No document preview available</span></div>
                 )}
                 {previewUrl ? (
                   <a href={previewUrl} target="_blank" rel="noopener noreferrer"><Maximize2 size={15} /> Open preview</a>
                 ) : null}
-              </section>
-
-              <section className="document-workspace-panel">
-                <div className="document-workspace-tabs" role="tablist" aria-label="Document workspace sections">
-                  {([
-                    ['metadata', 'Metadata'],
-                    ['actions', `Actions ${selectedGroup.actions.length}`],
-                    ['related', `Related ${selectedAction.linked_document_count ?? selectedAction.linked_documents?.length ?? 0}`],
-                    ['ocr', 'OCR'],
-                  ] as const).map(([value, label]) => (
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={tab === value}
-                      className={tab === value ? 'active' : ''}
-                      key={value}
-                      onClick={() => setTab(value)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="document-workspace-tab-content">
+                </>
+              )}
+            >
+                <DocumentWorkspaceTabs
+                  tabs={[
+                    { key: 'metadata', label: 'Metadata' },
+                    { key: 'actions', label: `Actions ${selectedGroup.actions.length}` },
+                    { key: 'related', label: `Related ${selectedAction.linked_document_count ?? selectedAction.linked_documents?.length ?? 0}` },
+                    { key: 'ocr', label: 'OCR' },
+                  ]}
+                  active={tab}
+                  onChange={(value) => setTab(value as WorkspaceTab)}
+                >
                   {tab === 'actions' ? (
-                    <div className="action-workspace-tab">
-                      <div className="action-set-header">
-                        <div><strong>Actions on this document</strong><span>Each action has an independent lifecycle.</span></div>
-                        <Button size="sm" onClick={() => setNewActionOpen((current) => !current)}>
-                          <Plus size={15} /> {newActionOpen ? 'Cancel' : 'Add action'}
-                        </Button>
-                      </div>
-                      {newActionOpen ? (
-                        <ActionForm
-                          draft={newAction}
-                          onChange={setNewAction}
-                          footer={(
-                            <Button
-                              variant="primary"
-                              size="sm"
-                              disabled={!newAction.title.trim() || busy === 'new-action'}
-                              onClick={() => void addAction()}
-                            >
-                              Add action
-                            </Button>
-                          )}
-                        />
-                      ) : null}
-                      <div className="action-set-list">
-                        {selectedGroup.actions.map((action) => (
-                          <div className="action-set-row" key={action.id}>
-                            <button
-                              type="button"
-                              className={action.id === selectedAction.id ? 'active' : ''}
-                              onClick={() => selectAction(action.id)}
-                            >
-                              <span><strong>{normalizedType(action.action_type)} · {action.title || `Action #${action.id}`}</strong><small>{formatDate(action.due_date)}</small></span>
-                              <em>{normalizedStatus(action.status) === 'not_an_action' ? 'Not an action' : normalizedStatus(action.status)}</em>
-                            </button>
-                            <ActionOutcomeMenu
-                              action={action}
-                              disabled={busy !== null}
-                              onStatus={(status, until) => void changeStatus(action, status, until)}
-                              onHistory={() => {
-                                selectAction(action.id);
-                                document.querySelector<HTMLDetailsElement>('#selected-action-history')?.setAttribute('open', '');
-                              }}
-                            />
-                          </div>
-                        ))}
-                      </div>
-
-                      {draft ? (
-                        <>
-                          <div className="selected-action-context">
-                            <div>
-                              <span>{normalizedStatus(selectedAction.status) === 'not_an_action' ? 'Not an action' : normalizedStatus(selectedAction.status)}</span>
-                              <span>{selectedAction.is_primary === false ? 'Manual or split action' : 'Inferred'}</span>
-                              <span>{formatDate(selectedAction.due_date)}</span>
-                            </div>
-                            <strong>{Math.round(selectedAction.confidence ?? 0)}% confidence</strong>
-                          </div>
-                          <ActionForm
-                            draft={draft}
-                            onChange={setDraft}
-                            footer={(
-                              <div className="action-save-row">
-                                <Button
-                                  variant="primary"
-                                  size="sm"
-                                  disabled={!dirty || busy !== null}
-                                  onClick={() => void saveAction()}
-                                >
-                                  Save action
-                                </Button>
-                                <span>{dirty ? 'Unsaved changes' : 'Saved'}</span>
-                              </div>
-                            )}
-                          />
-                          {normalizedType(selectedAction.action_type) === 'PAY' && selectedAction.obligation_id ? (
-                            <PaymentCheckPanel
-                              paymentCheck={paymentCheck}
-                              error={paymentError}
-                              loading={paymentLoading}
-                              busy={busy === `payment-${selectedAction.id}`}
-                              eligible={Boolean(
-                                selectedAction.amount
-                                && (selectedAction.payee_or_owner || selectedAction.correspondent)
-                                && (selectedAction.due_date || selectedAction.document_date),
-                              )}
-                              onCheck={() => void checkForPayment()}
-                              onConfirm={() => setConfirmPayment(true)}
-                            />
-                          ) : null}
-                          <QuickWorkLinks action={selectedAction} />
-                          <details className="action-disclosure">
-                            <summary>Why OWL suggested this <ChevronDown size={16} /></summary>
-                            <p>{selectedAction.ai_reasoning || 'No classifier explanation was recorded.'}</p>
-                          </details>
-                          <details className="action-disclosure" id="selected-action-history">
-                            <summary><span><History size={15} /> Action history</span><ChevronDown size={16} /></summary>
-                            {selectedAction.history?.length ? (
-                              <ol>
-                                {selectedAction.history.map((event) => (
-                                  <li key={event.id}>
-                                    <time>{formatDate(event.created_at)}</time>
-                                    <span>{event.event_type || `${event.previous_status || 'unknown'} → ${event.new_status || 'unknown'}`}</span>
-                                  </li>
-                                ))}
-                              </ol>
-                            ) : <p>No lifecycle changes have been recorded.</p>}
-                          </details>
-                        </>
-                      ) : null}
-                    </div>
+                    <DocumentActionsPanel
+                      actions={selectedGroup.actions}
+                      selectedActionId={selectedAction.id}
+                      onSelectAction={selectAction}
+                      busy={busy !== null}
+                      onDirtyChange={setActionPanelDirty}
+                      onRefresh={loadData}
+                      onSave={async (action, nextDraft) => {
+                        setBusy(`action-${action.id}`);
+                        try {
+                          await endpoints.actionQueue.updateAction(String(action.id), {
+                            version: action.version,
+                            ...documentActionMutation(nextDraft),
+                          });
+                          await loadData();
+                        } finally {
+                          setBusy(null);
+                        }
+                      }}
+                      onCreate={async (nextDraft: DocumentActionDraft) => {
+                        setBusy('new-action');
+                        try {
+                          await endpoints.actionQueue.splitAction(String(selectedAction.id), documentActionMutation(nextDraft));
+                          await loadData();
+                        } finally {
+                          setBusy(null);
+                        }
+                      }}
+                      onStatus={(action, status: DocumentActionStatus, until) => changeStatus(action, status, until)}
+                    />
                   ) : null}
 
                   {tab === 'metadata' ? (
@@ -1119,9 +732,8 @@ export default function ActionWorkspace() {
                       <OcrSummaryPanel documentId={selectedGroup.documentId} state={ocrSummary} onInspect={openOcrFocus} />
                     </div>
                   ) : null}
-                </div>
-              </section>
-            </div>
+                </DocumentWorkspaceTabs>
+            </DocumentWorkspaceBody>
 
             <footer className="document-workspace-lifecycle">
               <div>
@@ -1134,15 +746,15 @@ export default function ActionWorkspace() {
                 <div className="lifecycle-buttons">
                   <Button
                     variant="ghost"
-                    disabled={busy !== null || dirty}
+                    disabled={busy !== null || actionPanelDirty}
                     onClick={() => setConfirmNotAction(selectedAction.id)}
                   >
                     Not an action
                   </Button>
-                  <Button variant="ghost" disabled={busy !== null || dirty} onClick={() => void changeStatus(selectedAction, 'dismissed')}>Won't do</Button>
+                  <Button variant="ghost" disabled={busy !== null || actionPanelDirty} onClick={() => void changeStatus(selectedAction, 'dismissed')}>Won't do</Button>
                   <Popover.Root>
                     <Popover.Trigger asChild>
-                      <Button disabled={busy !== null || dirty}>Remind me later</Button>
+                      <Button disabled={busy !== null || actionPanelDirty}>Remind me later</Button>
                     </Popover.Trigger>
                     <Popover.Portal>
                       <Popover.Content className="workspace-popover" sideOffset={6}>
@@ -1154,9 +766,9 @@ export default function ActionWorkspace() {
                       </Popover.Content>
                     </Popover.Portal>
                   </Popover.Root>
-                  <Button disabled={busy !== null} onClick={nextDocument}>Next doc</Button>
+                  <Button disabled={busy !== null || actionPanelDirty} onClick={nextDocument}>Next doc</Button>
                   <div className="done-split-production">
-                    <Button variant="primary" disabled={busy !== null || dirty} onClick={() => void changeStatus(selectedAction, 'completed')}>
+                    <Button variant="primary" disabled={busy !== null || actionPanelDirty} onClick={() => void changeStatus(selectedAction, 'completed')}>
                       <Check size={16} /> Done
                     </Button>
                     {selectedGroup.actions.filter((action) => !RESOLVED_STATUSES.has(normalizedStatus(action.status))).length > 1 ? (
@@ -1178,7 +790,6 @@ export default function ActionWorkspace() {
             </footer>
           </>
         )}
-      </main>
 
       {confirmNotAction != null ? (
         <div className="workspace-dialog-backdrop">
@@ -1201,250 +812,8 @@ export default function ActionWorkspace() {
         </div>
       ) : null}
 
-      {confirmPayment && selectedAction && paymentCheck ? (
-        <div className="workspace-dialog-backdrop">
-          <section role="dialog" aria-modal="true" aria-labelledby="confirm-payment-title" className="workspace-dialog">
-            <h2 id="confirm-payment-title">Confirm this posted payment?</h2>
-            <p>OWL will record your confirmation and complete the selected action and obligation in one operation.</p>
-            <div>
-              <Button onClick={() => setConfirmPayment(false)}>Cancel</Button>
-              <Button variant="primary" onClick={() => void confirmPaymentAndComplete()}>
-                Confirm payment and complete
-              </Button>
-            </div>
-          </section>
-        </div>
-      ) : null}
-
       {toast ? <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} /> : null}
       {queueStatus?.read_only ? <div className="workspace-read-only">Paperless writeback is currently read-only.</div> : null}
-    </div>
-  );
-}
-
-function PaymentCheckPanel({
-  paymentCheck,
-  error,
-  loading,
-  busy,
-  eligible,
-  onCheck,
-  onConfirm,
-}: {
-  paymentCheck: PaymentCheck | null;
-  error: string | null;
-  loading: boolean;
-  busy: boolean;
-  eligible: boolean;
-  onCheck: () => void;
-  onConfirm: () => void;
-}) {
-  const candidates = paymentCheck?.candidates || [];
-  const candidate = candidates[0];
-  const searchContext = paymentCheck?.search_context;
-  const checking = busy || paymentCheck?.state === 'checking';
-  const unavailable = !loading && !paymentCheck && Boolean(error);
-  const candidateHeading = paymentCheck?.state === 'multiple_matches'
-    ? 'Candidates requiring review'
-    : paymentCheck?.state === 'no_match'
-      ? 'Closest transactions'
-      : 'Matched transaction';
-  const stateLabel: Record<PaymentCheckState, string> = {
-    unchecked: 'Ready to check',
-    checking: 'Checking accounts',
-    posted_match: 'Posted payment found',
-    pending_match: 'Pending payment found',
-    multiple_matches: 'Multiple possible payments',
-    no_match: 'No payment found',
-    partial_payment: 'Partial payment found',
-    source_unavailable: 'Payment source unavailable',
-    stale: 'Payment result is stale',
-    conflict: 'Conflicting payment evidence',
-    possible_double_payment: 'Possible double payment',
-    confirmed: 'Payment confirmed',
-  };
-  return (
-    <section className={`payment-check-card state-${paymentCheck?.state || 'unchecked'}`} aria-label="Payment check">
-      <div className="payment-check-heading">
-        <div>
-          <span>Payment reconciliation</span>
-          <strong aria-live="polite">
-            {loading
-              ? 'Loading payment status…'
-              : unavailable
-                ? 'Payment status unavailable'
-                : stateLabel[paymentCheck?.state || 'unchecked']}
-          </strong>
-        </div>
-        <Button
-          size="sm"
-          disabled={!eligible || loading || checking}
-          onClick={onCheck}
-        >
-          <RefreshCw size={15} className={checking ? 'spin' : ''} />
-          {checking
-            ? 'Checking…'
-            : unavailable
-              ? 'Retry check'
-            : paymentCheck?.state === 'unchecked'
-              ? 'Check for payment'
-              : 'Check again'}
-        </Button>
-      </div>
-      <p>
-        {!eligible
-          ? 'Add a payee, amount, and due or bill date before checking for payment.'
-          : unavailable
-            ? error
-          : paymentCheck?.message || 'Search all financial accounts except any configured exclusions for a matching transaction.'}
-      </p>
-      {searchContext ? (
-        <dl className="payment-search-context" aria-label="Payment search scope">
-          {searchContext.eligible_account_count != null ? (
-            <div><dt>Accounts searched</dt><dd>{searchContext.eligible_account_count}</dd></div>
-          ) : null}
-          {searchContext.candidate_pool_size != null ? (
-            <div><dt>Transactions evaluated</dt><dd>{searchContext.candidate_pool_size}</dd></div>
-          ) : null}
-          {searchContext.window_start && searchContext.window_end ? (
-            <div><dt>Search period</dt><dd>{formatDate(searchContext.window_start)}–{formatDate(searchContext.window_end)}</dd></div>
-          ) : null}
-          {searchContext.amount_tolerance != null ? (
-            <div><dt>Amount tolerance</dt><dd>{formatCurrency(searchContext.amount_tolerance, candidate?.currency || 'USD')}</dd></div>
-          ) : null}
-        </dl>
-      ) : null}
-      {candidates.length ? (
-        <section className="payment-candidate-results" aria-label="Payment candidates">
-          <div className="payment-candidate-results-heading">
-            <strong>{candidateHeading}</strong>
-            <span>
-              {candidates.length} {candidates.length === 1 ? 'result' : 'ranked results'}
-            </span>
-          </div>
-          {paymentCheck?.state === 'no_match' ? (
-            <p>These are the closest results, but none met Tyrion&apos;s match threshold.</p>
-          ) : null}
-          <ol>
-            {candidates.map((item, index) => (
-              <li key={item.id}>
-                <div className="payment-candidate-heading">
-                  <span className="payment-candidate-rank" aria-label={`Rank ${item.rank || index + 1}`}>
-                    {item.rank || index + 1}
-                  </span>
-                  <div>
-                    <strong>{item.payee || 'Payee not provided'}</strong>
-                    <span>
-                      {item.confidence ? `${item.confidence} confidence` : 'Not scored'}
-                      {item.score == null ? '' : ` · ${item.score.toFixed(0)}% score`}
-                    </span>
-                  </div>
-                </div>
-                <dl className="payment-candidate">
-                  <div><dt>Amount</dt><dd>{item.amount == null ? 'Not provided' : formatCurrency(item.amount, item.currency || 'USD')}</dd></div>
-                  <div><dt>Transaction</dt><dd>{formatDate(item.transaction_date)} · {item.status || 'unknown'}</dd></div>
-                  <div><dt>Account</dt><dd>{item.account_display_name || 'Eligible account'}{item.account_last_four ? ` •••• ${item.account_last_four}` : ''}</dd></div>
-                </dl>
-                <ul className="payment-match-reasons" aria-label={`Match signals for ${item.payee || `candidate ${index + 1}`}`}>
-                  {(item.match_reasons || []).map((reason) => (
-                    <li key={reason}>{formatMatchReason(reason)}</li>
-                  ))}
-                </ul>
-              </li>
-            ))}
-          </ol>
-        </section>
-      ) : paymentCheck?.state === 'no_match' ? (
-        <p className="payment-no-candidates">No transaction had enough matching evidence to rank.</p>
-      ) : null}
-      {paymentCheck?.state === 'posted_match' ? (
-        <div className="payment-check-confirm">
-          <span>A posted match does not complete this obligation until you confirm it.</span>
-          <Button variant="primary" size="sm" disabled={busy} onClick={onConfirm}>
-            Confirm payment and complete
-          </Button>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function ActionForm({
-  draft,
-  onChange,
-  footer,
-}: {
-  draft: ActionDraft;
-  onChange: (draft: ActionDraft) => void;
-  footer: React.ReactNode;
-}) {
-  const schema = FIELD_SCHEMA[draft.action_type];
-  return (
-    <div className="action-workspace-form">
-      <label><span>Type</span><select value={draft.action_type} onChange={(event) => onChange({ ...draft, action_type: event.target.value as ActionType })}>{ACTION_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>
-      <label className="wide"><span>Title</span><input value={draft.title} onChange={(event) => onChange({ ...draft, title: event.target.value })} /></label>
-      {schema.owner ? <label><span>{schema.owner}</span><input value={draft.payee_or_owner} onChange={(event) => onChange({ ...draft, payee_or_owner: event.target.value })} /></label> : null}
-      {schema.amount ? <label><span>Amount</span><input type="number" min="0" step="0.01" value={draft.amount} onChange={(event) => onChange({ ...draft, amount: event.target.value })} /></label> : null}
-      <label><span>{schema.due}</span><input type="date" value={draft.due_date} onChange={(event) => onChange({ ...draft, due_date: event.target.value })} /></label>
-      {schema.reference ? <label><span>{schema.reference}</span><input value={draft.reference} onChange={(event) => onChange({ ...draft, reference: event.target.value })} /></label> : null}
-      <label className="wide"><span>Details</span><textarea rows={3} value={draft.summary} onChange={(event) => onChange({ ...draft, summary: event.target.value })} /></label>
-      <div className="wide">{footer}</div>
-    </div>
-  );
-}
-
-function ActionOutcomeMenu({
-  action,
-  disabled,
-  onStatus,
-  onHistory,
-}: {
-  action: ActionItem;
-  disabled: boolean;
-  onStatus: (status: ActionStatus, snoozedUntil?: string) => void;
-  onHistory: () => void;
-}) {
-  const resolved = RESOLVED_STATUSES.has(normalizedStatus(action.status));
-  return (
-    <Popover.Root>
-      <Popover.Trigger asChild>
-        <button type="button" className="action-set-menu-trigger" aria-label={`More outcomes for ${action.title || `action ${action.id}`}`} disabled={disabled}>
-          <MoreHorizontal size={18} />
-        </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content className="workspace-popover" sideOffset={5} align="end">
-          {resolved ? <button type="button" onClick={() => onStatus('pending')}>Move back to Pending</button> : (
-            <>
-              <button type="button" onClick={() => onStatus('completed')}>Mark done</button>
-              <button type="button" onClick={() => onStatus('snoozed', nextMondayAtNine())}>Remind later</button>
-              <button type="button" onClick={() => onStatus('not_an_action')}>Not an action</button>
-              <button type="button" onClick={() => onStatus('dismissed')}>Won't do</button>
-            </>
-          )}
-          <button type="button" onClick={onHistory}>View history</button>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
-  );
-}
-
-function QuickWorkLinks({ action }: { action: ActionItem }) {
-  const links: Array<{ label: string; href: string }> = [];
-  if (action.recommended_cta?.url) links.push({ label: action.recommended_cta.label || 'Open action link', href: action.recommended_cta.url });
-  if (action.extracted_data?.payment_url) links.push({ label: 'Pay online', href: action.extracted_data.payment_url });
-  if (action.extracted_data?.phone) links.push({ label: `Call ${action.extracted_data.phone}`, href: `tel:${action.extracted_data.phone}` });
-  if (action.extracted_data?.email) links.push({ label: `Email ${action.extracted_data.email}`, href: `mailto:${action.extracted_data.email}` });
-  for (const link of action.extracted_data?.links ?? []) {
-    if (!/^https?:\/\//i.test(link.url)) continue;
-    if (!links.some((candidate) => candidate.href === link.url)) links.push({ label: link.label || 'Open link', href: link.url });
-  }
-  if (!links.length) return null;
-  return (
-    <div className="action-work-links">
-      <strong>Do the work</strong>
-      <div>{links.map((link) => <a key={link.href} href={link.href} target={link.href.startsWith('http') ? '_blank' : undefined} rel="noopener noreferrer">{link.label}<ExternalLink size={14} /></a>)}</div>
-      <p>Links and contact details are extracted from this document.</p>
-    </div>
+    </DocumentWorkspaceFrame>
   );
 }
