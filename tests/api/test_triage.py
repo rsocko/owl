@@ -169,8 +169,7 @@ class TestTriageQueueList:
         )
 
         response = client.get(
-            "/api/triage/queue"
-            "?type=ocr_quality_review&ocr_review_status=FAILED&search=alignment"
+            "/api/triage/queue?type=ocr_quality_review&ocr_review_status=FAILED&search=alignment"
         )
 
         assert response.status_code == 200

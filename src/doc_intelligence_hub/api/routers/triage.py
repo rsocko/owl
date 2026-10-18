@@ -107,7 +107,9 @@ class BulkConfirmThresholdRequest(BaseModel):
 async def list_queue(
     type: str | None = Query(default=None, description="Filter by item type"),
     status: str | None = Query(default=None, description="Filter by status"),
-    search: str | None = Query(default=None, max_length=200, description="Search safe summary fields"),
+    search: str | None = Query(
+        default=None, max_length=200, description="Search safe summary fields"
+    ),
     ocr_review_status: str | None = Query(
         default=None, description="Filter OCR reviews by assessment status"
     ),
@@ -184,8 +186,7 @@ async def bulk_action(body: BulkActionRequest) -> dict[str, Any]:
     if not body.item_ids:
         raise HTTPException(status_code=400, detail="item_ids must not be empty")
     item_types = {
-        item_id: (get_queue_item(item_id) or {}).get("item_type")
-        for item_id in body.item_ids
+        item_id: (get_queue_item(item_id) or {}).get("item_type") for item_id in body.item_ids
     }
     if any(item_type == "ocr_quality_review" for item_type in item_types.values()):
         raise HTTPException(
@@ -201,9 +202,7 @@ async def bulk_action(body: BulkActionRequest) -> dict[str, Any]:
         if protected_ids:
             raise HTTPException(
                 status_code=422,
-                detail=(
-                    "Action classifications require item-specific resolution"
-                ),
+                detail=("Action classifications require item-specific resolution"),
             )
     if body.action in ("confirm", "reject"):
         affected = bulk_resolve_items(body.item_ids, body.action, body.payload)

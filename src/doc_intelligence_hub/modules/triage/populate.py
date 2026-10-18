@@ -149,9 +149,7 @@ def _flag_ocr_quality_reviews() -> int:
                 "candidate_state": candidate_state,
                 "candidate_resolved": resolved_candidate,
                 "assessment_id": assessment.id,
-                "assessed_at": assessment.updated_at.isoformat()
-                if assessment.updated_at
-                else None,
+                "assessed_at": assessment.updated_at.isoformat() if assessment.updated_at else None,
                 "quality_scorer_version": assessment.quality_scorer_version,
             }
             _, was_created = create_or_refresh_ocr_quality_review(
@@ -194,9 +192,7 @@ def _weakest_ocr_dimension(assessment: Any) -> tuple[str | None, float | None]:
 
 
 def _ocr_review_priority(review_status: str | None, weakest_score: float | None) -> int:
-    base = {"FAILED": 95, "REVIEW_RECOMMENDED": 80, "UNCERTAIN": 65}.get(
-        review_status or "", 50
-    )
+    base = {"FAILED": 95, "REVIEW_RECOMMENDED": 80, "UNCERTAIN": 65}.get(review_status or "", 50)
     if weakest_score is None:
         return base
     return max(base, min(100, round(100 - weakest_score)))

@@ -319,9 +319,7 @@ def list_queue_items(
         if ocr_review_status:
             query = query.filter(
                 TriageQueueItem.item_type == "ocr_quality_review",
-                TriageQueueItem.metadata_json.like(
-                    f'%"review_status": "{ocr_review_status}"%'
-                ),
+                TriageQueueItem.metadata_json.like(f'%"review_status": "{ocr_review_status}"%'),
             )
 
         if sort == "created_at":
@@ -539,9 +537,7 @@ def count_queue_items(
         if ocr_review_status:
             query = query.filter(
                 TriageQueueItem.item_type == "ocr_quality_review",
-                TriageQueueItem.metadata_json.like(
-                    f'%"review_status": "{ocr_review_status}"%'
-                ),
+                TriageQueueItem.metadata_json.like(f'%"review_status": "{ocr_review_status}"%'),
             )
         return int(query.scalar() or 0)
     finally:
@@ -607,10 +603,9 @@ def create_or_refresh_ocr_quality_review(
                     parsed = json.loads(latest.metadata_json)
                     if isinstance(parsed, dict):
                         latest_metadata = parsed
-            if (
-                latest_metadata.get("assessment_id") == metadata.get("assessment_id")
-                and latest_metadata.get("assessed_at") == metadata.get("assessed_at")
-            ):
+            if latest_metadata.get("assessment_id") == metadata.get(
+                "assessment_id"
+            ) and latest_metadata.get("assessed_at") == metadata.get("assessed_at"):
                 return _item_to_dict(latest), False
 
         item = latest if latest is not None and latest.status in {"pending", "deferred"} else None
