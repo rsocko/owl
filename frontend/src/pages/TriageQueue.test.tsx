@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import TriageQueue from './TriageQueue';
 
-const { queueMock, statsMock, resolveMock } = vi.hoisted(() => ({
+const { queueMock, statsMock, resolveMock, undoMock } = vi.hoisted(() => ({
   queueMock: vi.fn(),
   statsMock: vi.fn(),
   resolveMock: vi.fn(),
+  undoMock: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
@@ -17,7 +18,7 @@ vi.mock('../lib/api', () => ({
       resolve: resolveMock,
       defer: vi.fn(),
       dismiss: vi.fn(),
-      undo: vi.fn(),
+      undo: undoMock,
       bulk: vi.fn(),
       bulkConfirmThreshold: vi.fn(),
       populate: vi.fn(),
@@ -40,6 +41,7 @@ beforeEach(() => {
   queueMock.mockReset();
   statsMock.mockReset();
   resolveMock.mockReset();
+  undoMock.mockReset();
   vi.stubGlobal('ResizeObserver', ResizeObserverStub);
   queueMock.mockResolvedValue({
     items: [{
@@ -68,6 +70,7 @@ beforeEach(() => {
     pending: 1,
   });
   resolveMock.mockResolvedValue({ action_ready: true, review_state: 'ready' });
+  undoMock.mockResolvedValue({ status: 'pending' });
 });
 
 describe('Needs Review actions', () => {
@@ -159,9 +162,9 @@ describe('Needs Review actions', () => {
 
     const type = await screen.findByLabelText('Corrected action type');
     expect(screen.queryByRole('checkbox')).toBeNull();
-    fireEvent.change(type, { target: { value: 'FILE' } });
+    fireEvent.change(type, { target: { value: 'TASK' } });
     fireEvent.change(screen.getByLabelText('Corrected task name'), {
-      target: { value: 'File annual statement' },
+      target: { value: 'Review annual statement' },
     });
     fireEvent.change(screen.getByLabelText('Corrected amount'), { target: { value: '' } });
     expect(screen.getByRole('button', { name: 'Save corrections' })).toBeEnabled();
@@ -172,8 +175,8 @@ describe('Needs Review actions', () => {
       expect(resolveMock).toHaveBeenCalledWith('action-review-1', {
         action: 'correct',
         payload: {
-          action_type: 'FILE',
-          title: 'File annual statement',
+          action_type: 'TASK',
+          title: 'Review annual statement',
           summary: 'Original guess',
           due_date: null,
           amount: null,
@@ -227,6 +230,72 @@ describe('Needs Review actions', () => {
 
     expect(screen.getByRole('button', { name: 'Accept suggestion' })).toBeEnabled();
     expect(screen.getByLabelText('Corrected amount')).toHaveValue(25);
+  });
+
+  it('accepts multiple proposed actions as one document review', async () => {
+    queueMock.mockResolvedValue({
+      items: [{
+        id: 'action-review-1',
+        item_type: 'action_classification',
+        priority: 80,
+        status: 'pending',
+        source: 'action_queue',
+        target_type: 'action',
+        target_id: '42',
+        reason: 'Low-confidence action classification',
+        metadata: {
+          action_type: 'PAY',
+          title: 'Pay utility bill',
+          summary: 'Detected summary',
+          amount: 25,
+          document_id: 777,
+        },
+        deferred_until: null,
+        resolved_at: null,
+        resolved_action: null,
+        created_at: '2026-08-10T12:00:00Z',
+      }],
+      count: 1,
+      offset: 0,
+      limit: 200,
+    });
+
+    render(
+      <MemoryRouter>
+        <TriageQueue />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add action' }));
+    fireEvent.change(screen.getByLabelText('Corrected action type for action 2'), {
+      target: { value: 'SIGN' },
+    });
+    fireEvent.change(screen.getByLabelText('Corrected task name for action 2'), {
+      target: { value: 'Sign autopay authorization' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Accept 2 actions' }));
+
+    await waitFor(() => expect(resolveMock).toHaveBeenCalledWith('action-review-1', {
+      action: 'correct',
+      payload: {
+        actions: [
+          {
+            action_type: 'PAY',
+            title: 'Pay utility bill',
+            summary: 'Detected summary',
+            due_date: null,
+            amount: 25,
+          },
+          {
+            action_type: 'SIGN',
+            title: 'Sign autopay authorization',
+            summary: '',
+            due_date: null,
+            amount: null,
+          },
+        ],
+      },
+    }));
   });
 
   it('requires an amount for payment actions but not a due date', async () => {
@@ -311,6 +380,53 @@ describe('Needs Review actions', () => {
     );
     expect(screen.queryByLabelText('Corrected amount')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Save corrections' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'No action needed' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Not an action' })).toBeNull();
+  });
+
+  it('warns before reopening a resolved action review', async () => {
+    queueMock.mockResolvedValue({
+      items: [{
+        id: 'action-review-1',
+        item_type: 'action_classification',
+        priority: 80,
+        status: 'resolved',
+        source: 'action_queue',
+        target_type: 'action',
+        target_id: '42',
+        reason: 'Low-confidence action classification',
+        metadata: {
+          action_type: 'PAY',
+          title: 'Pay utility bill',
+          amount: 25,
+          document_id: 777,
+        },
+        deferred_until: null,
+        resolved_at: '2026-08-11T12:00:00Z',
+        resolved_action: 'confirm',
+        created_at: '2026-08-10T12:00:00Z',
+      }],
+      count: 1,
+      offset: 0,
+      limit: 200,
+    });
+    statsMock.mockResolvedValue({
+      total: 1,
+      by_type: { action_classification: 1 },
+      by_status: { resolved: 1 },
+      pending: 0,
+    });
+
+    render(
+      <MemoryRouter>
+        <TriageQueue />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Resolved 1' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Revise decision' }));
+    expect(screen.getByText(/completion history is preserved/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reopen review' }));
+
+    await waitFor(() => expect(undoMock).toHaveBeenCalledWith('action-review-1'));
   });
 });
