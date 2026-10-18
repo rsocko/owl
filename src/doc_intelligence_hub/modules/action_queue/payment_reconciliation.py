@@ -1265,6 +1265,7 @@ class PaymentReconciliationService:
         if run.status != "checking":
             return self.payment_projection(action.id)
         obligation = self.db.query(Obligation).filter_by(id=run.obligation_id).one()
+        amount_minor = round(action.amount * 100) if action.amount and action.amount > 0 else None
         run.status = "source_unavailable"
         run.error_code = error_code
         self.db.add(
@@ -1289,7 +1290,7 @@ class PaymentReconciliationService:
         snapshot = PaymentEvidenceSnapshot(
             source_system="tyrion_bill_match",
             connector_ref=connector_ref,
-            source_generation=run.id,
+            source_generation=f"{run.id}:source-unavailable",
             source_as_of=datetime.now(UTC),
             completeness="partial",
             obligation_id=obligation.id,
@@ -1299,8 +1300,8 @@ class PaymentReconciliationService:
                     canonical_document_ref=f"paperless:{action.document_id}",
                     kind="bill",
                     payee_hint=action.payee_or_owner or action.correspondent,
-                    amount_minor=round((action.amount or 0) * 100) or None,
-                    currency=obligation.currency if action.amount else None,
+                    amount_minor=amount_minor,
+                    currency=(obligation.currency or "USD") if amount_minor is not None else None,
                     source_state="source_unavailable",
                     match_state="source_unavailable",
                     payment_status="unknown",
