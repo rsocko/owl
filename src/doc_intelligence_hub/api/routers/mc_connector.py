@@ -275,9 +275,7 @@ def _serialize_mc_action(request: Request, db, action: Action) -> dict[str, Any]
         try:
             raw_payment_check = PaymentReconciliationService(db).payment_projection(action.id)
             payment_check = {
-                key: value
-                for key, value in raw_payment_check.items()
-                if not key.startswith("_")
+                key: value for key, value in raw_payment_check.items() if not key.startswith("_")
             }
         except (KeyError, ValueError):
             payment_check = None
@@ -318,16 +316,16 @@ def _serialize_mc_action(request: Request, db, action: Action) -> dict[str, Any]
                         "label": "Confirm payment and complete",
                         "method": "POST",
                         "url": (
-                            f"/api/action-queue/actions/{action.id}/"
-                            "confirm-payment-and-complete"
+                            f"/api/action-queue/actions/{action.id}/confirm-payment-and-complete"
                         ),
                         "revision": revision,
                         "idempotency_key": f"confirm-payment:{action.id}:{revision}",
                     }
                 )
-        if action_queue_settings.write_to_paperless and (
-            action.action_type or ""
-        ).upper() in {"FILE", "ARCHIVE"}:
+        if action_queue_settings.write_to_paperless and (action.action_type or "").upper() in {
+            "FILE",
+            "ARCHIVE",
+        }:
             source_actions.append(
                 {
                     "id": "file_document",
@@ -342,9 +340,7 @@ def _serialize_mc_action(request: Request, db, action: Action) -> dict[str, Any]
         "id": str(action.id),
         "document_id": action.document_id,
         "document_group_id": f"paperless:{action.document_id}",
-        "sibling_action_ids": [
-            str(sibling_id) for sibling_id in serialized["sibling_action_ids"]
-        ],
+        "sibling_action_ids": [str(sibling_id) for sibling_id in serialized["sibling_action_ids"]],
         "sibling_count": serialized["sibling_count"],
         "action_position": serialized["action_position"],
         "is_primary": serialized["is_primary"],

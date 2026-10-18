@@ -223,7 +223,10 @@ async def get_action_payment_check(action_id: int) -> dict:
     try:
         try:
             projection = PaymentReconciliationService(db).payment_projection(action_id)
-            return {"contract_version": "2.0", "payment_check": _public_payment_projection(projection)}
+            return {
+                "contract_version": "2.0",
+                "payment_check": _public_payment_projection(projection),
+            }
         except (KeyError, ValueError) as exc:
             _raise_service_error(exc)
     finally:
@@ -378,9 +381,7 @@ async def _confirm_payment(
             return {
                 "contract_version": "2.0",
                 "action": _serialize_mc_action(request, db, action),
-                "payment_check": _public_payment_projection(
-                    service.payment_projection(action_id)
-                ),
+                "payment_check": _public_payment_projection(service.payment_projection(action_id)),
                 "idempotent": result["idempotent"],
             }
         except (KeyError, ValueError) as exc:

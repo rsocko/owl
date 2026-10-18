@@ -1015,7 +1015,9 @@ class PaymentReconciliationService:
             "checked_at": checked_at,
             "stale_after": stale_after,
             "confirmed_at": (
-                action.completed_at.isoformat() if state == "confirmed" and action.completed_at else None
+                action.completed_at.isoformat()
+                if state == "confirmed" and action.completed_at
+                else None
             ),
             "source": "tyrion_bill_match",
             "revision": revision,
@@ -1023,9 +1025,7 @@ class PaymentReconciliationService:
             "candidates": candidates,
             "search_context": search_context,
             "_confirmation_case_id": confirmation_case.id if confirmable else None,
-            "_confirmation_case_revision": (
-                confirmation_case.revision if confirmable else None
-            ),
+            "_confirmation_case_revision": (confirmation_case.revision if confirmable else None),
         }
 
     def start_check(
@@ -1143,19 +1143,14 @@ class PaymentReconciliationService:
         evidence: list[NormalizedPaymentEvidence] = []
         for candidate in candidates:
             reason_codes = (
-                [
-                    f"{signal.kind}_{signal.strength}".lower()
-                    for signal in candidate.signals
-                ]
+                [f"{signal.kind}_{signal.strength}".lower() for signal in candidate.signals]
                 if candidate
                 else [f"bill_match_{match_state}"]
             )
             evidence.append(
                 NormalizedPaymentEvidence(
                     evidence_ref=(
-                        candidate.transaction_ref
-                        if candidate
-                        else f"{response.bill_ref}:{run.id}"
+                        candidate.transaction_ref if candidate else f"{response.bill_ref}:{run.id}"
                     ),
                     canonical_document_ref=f"paperless:{action.document_id}",
                     transaction_ref=candidate.transaction_ref if candidate else None,
@@ -1167,9 +1162,7 @@ class PaymentReconciliationService:
                         else "bill"
                     ),
                     payee_hint=candidate.payee if candidate else action.payee_or_owner,
-                    account_display_name=(
-                        candidate.account_display_name if candidate else None
-                    ),
+                    account_display_name=(candidate.account_display_name if candidate else None),
                     account_last_four=candidate.account_last_four if candidate else None,
                     score_basis_points=candidate.score_basis_points if candidate else None,
                     rank=candidate.rank if candidate else None,
@@ -1185,9 +1178,7 @@ class PaymentReconciliationService:
                         else None
                     ),
                     amount_minor=(
-                        candidate.amount_minor
-                        if candidate
-                        else round((action.amount or 0) * 100)
+                        candidate.amount_minor if candidate else round((action.amount or 0) * 100)
                     ),
                     currency=(
                         candidate.currency
@@ -1199,9 +1190,7 @@ class PaymentReconciliationService:
                         or "USD"
                     ),
                     evidence_date=candidate.transaction_date if candidate else None,
-                    source_state=(
-                        candidate.transaction_state if candidate else match_state
-                    ),
+                    source_state=(candidate.transaction_state if candidate else match_state),
                     match_state=match_state,
                     payment_status=response.payment_status,
                     confidence=candidate.confidence if candidate else None,
@@ -1420,9 +1409,7 @@ class PaymentReconciliationService:
             raise KeyError("payment_reconciliation_case_not_found")
         action_to_complete = None
         if complete_action_id is not None:
-            action_to_complete = (
-                self.db.query(Action).filter_by(id=complete_action_id).first()
-            )
+            action_to_complete = self.db.query(Action).filter_by(id=complete_action_id).first()
             if action_to_complete is None:
                 raise KeyError("action_not_found")
             if action_to_complete.obligation_id != case.obligation_id:
@@ -1676,9 +1663,7 @@ class PaymentReconciliationService:
                 idempotency_key=request.idempotency_key,
                 evidence_id=posted["id"],
                 allocated_amount_minor=(
-                    round(posted["amount"] * 100)
-                    if posted["amount"] is not None
-                    else None
+                    round(posted["amount"] * 100) if posted["amount"] is not None else None
                 ),
             ),
             actor=actor,
