@@ -33,6 +33,19 @@ Paperless's native Document Type remains the canonical taxonomy and is outside t
 custom-field migration. The tool does not create or migrate a separate OWL document-type
 field.
 
+## Operations UI
+
+**Admin → Action Queue Operations → Paperless metadata schema** uses the same typed
+registry as the CLI. **Check metadata schema** validates every active OWL-owned field,
+including required select options. **Set up complete metadata schema** creates missing
+fields, renames approved aliases such as `Action Amount`, and adds missing select options.
+It refuses to mutate duplicate or incompatibly typed definitions.
+
+The UI setup is intentionally one operation. The former Action Queue-only and relationship-
+only setup controls were removed because they could report success while durable EOB or
+statement metadata was still missing. Destructive alias backfill and field retirement remain
+CLI-only because they require protected audit artifacts and explicit single-writer gates.
+
 ## Field ownership and retirement
 
 The typed registry explicitly identifies what remains in Paperless and what can eventually

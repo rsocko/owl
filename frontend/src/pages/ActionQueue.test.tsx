@@ -57,7 +57,8 @@ vi.mock('../lib/api', () => ({
   endpoints: {
     actionQueue: {
       check: vi.fn(),
-      checkCustomFields: vi.fn(),
+      checkMetadataSchema: vi.fn(),
+      setupMetadataSchema: vi.fn(),
       run: vi.fn(),
       runStreamUrl: '/api/queue/run/stream',
       status: statusMock,

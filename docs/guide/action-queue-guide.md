@@ -290,6 +290,11 @@ curl -X PUT http://service-005.example.invalid/api/admin/schedules/action_queue 
 
 Set `WRITE_TO_PAPERLESS=true` to allow OWL to enrich documents with custom fields. When `false`, OWL operates read-only and actions exist only in OWL's database.
 
+Use **Action Queue Operations → Paperless metadata schema** to validate and provision the
+complete active OWL metadata registry. The check covers durable document fields, action
+status, generic relationships, and obligation projections; setup is offered only when the
+missing fields or select options can be added safely.
+
 The default document source and resolution behavior are durable settings under
 **Settings → Action Queue — Document Source**. The default source is the
 Paperless `Inbox` tag; ad-hoc Custom Run filters do not change that default.

@@ -5,7 +5,7 @@ Computes a 0–100 risk_score based on multiple factors:
 - Due date proximity (overdue actions score higher)
 - Financial amount (higher amounts = higher risk)
 - Confidence level (higher confidence = more trust in risk)
-- Action type weight (PAY/RESPOND weigh more than FILE/REVIEW)
+- Action type weight (PAY/RESPOND weigh more than lower-risk review work)
 
 The score is used to sort the Action Queue so highest-risk items surface first.
 """
@@ -61,7 +61,7 @@ def compute_risk_score(
         due_date: Due date as date object or ISO string.
         amount: Financial amount (dollars).
         confidence: AI confidence score (0–100).
-        action_type: Type of action (PAY, RESPOND, FILE, etc.).
+        action_type: Type of actionable work (PAY, RESPOND, REVIEW, TASK, etc.).
         as_of: Reference date for due-date calculations (defaults to today).
 
     Returns:

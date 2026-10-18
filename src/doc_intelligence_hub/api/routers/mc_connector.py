@@ -410,6 +410,7 @@ async def mc_list_actions(
                     Action.superseded_by_action_id.isnot(None),
                 )
             )
+            query = query.filter(func.upper(Action.action_type).not_in(("FILE", "ARCHIVE")))
         if status and status != "all":
             try:
                 normalized_filter = normalize_action_status(status)
