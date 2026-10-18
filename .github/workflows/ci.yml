@@ -15,8 +15,64 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Classify changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      frontend: ${{ steps.classify.outputs.frontend }}
+      python: ${{ steps.classify.outputs.python }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify changed paths
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          frontend=false
+          python=false
+
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ||
+                -z "${BASE_SHA}" ||
+                "${BASE_SHA}" =~ ^0+$ ]]; then
+            frontend=true
+            python=true
+          else
+            while IFS= read -r path; do
+              case "${path}" in
+                .github/workflows/*|Dockerfile|.dockerignore)
+                  frontend=true
+                  python=true
+                  ;;
+                frontend/*)
+                  frontend=true
+                  ;;
+                docs/*|*.md|LICENSE)
+                  ;;
+                *)
+                  python=true
+                  ;;
+              esac
+            done < <(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
+          fi
+
+          echo "frontend=${frontend}" >> "$GITHUB_OUTPUT"
+          echo "python=${python}" >> "$GITHUB_OUTPUT"
+
   python:
     name: Python lint and tests
+    needs:
+      - changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -34,10 +90,13 @@ jobs:
       - name: Check formatting
         run: ruff format --check src/ tests/
       - name: Test
-        run: pytest --tb=short -q
+        run: pytest --tb=short -q -n 4 --dist loadscope
 
   frontend:
     name: Frontend checks
+    needs:
+      - changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -61,4 +120,4 @@ jobs:
       - name: Lint
         run: npm run lint
       - name: Build
-        run: npm run build
+        run: npm run build:ci
