@@ -139,6 +139,11 @@ new OCR, return to Inbox Review and refresh analysis so metadata suggestions
 and inferred actions are evaluated against the new searchable text. OCR
 resolution never files the document or completes an action.
 
+Documents whose OCR assessment needs a dedicated daily decision also appear as
+the **OCR** review type in **Needs Review**. Selecting one opens this same focus
+inspector. The **OCR Quality** page is reserved for corpus analytics and
+administration rather than serving as a second operational queue.
+
 Hover the document preview to reveal **Expand** and **New tab** controls.
 Expanded preview uses the full browser viewport and closes with Escape. When a
 browser-facing Paperless URL is configured, **Open in Paperless** is also

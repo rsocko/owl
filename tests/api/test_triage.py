@@ -136,6 +136,67 @@ class TestTriageQueueList:
         assert data["limit"] == 1
         assert data["offset"] == 0
 
+    def test_filter_and_search_ocr_reviews_with_privacy_safe_summary(self, client):
+        create_queue_item(
+            item_type="ocr_quality_review",
+            source="ocr_quality_assessment",
+            target_type="document",
+            target_id="777",
+            reason="Overlay alignment is unreliable.",
+            priority=90,
+            metadata={
+                "document_id": 777,
+                "review_status": "FAILED",
+                "weakest_dimension": "overlay",
+                "weakest_score": 12,
+                "candidate_state": "ready",
+            },
+        )
+        create_queue_item(
+            item_type="ocr_quality_review",
+            source="ocr_quality_assessment",
+            target_type="document",
+            target_id="778",
+            reason="Machine extraction is uncertain.",
+            priority=65,
+            metadata={
+                "document_id": 778,
+                "review_status": "UNCERTAIN",
+                "weakest_dimension": "machine",
+                "weakest_score": 55,
+                "candidate_state": "none",
+            },
+        )
+
+        response = client.get(
+            "/api/triage/queue"
+            "?type=ocr_quality_review&ocr_review_status=FAILED&search=alignment"
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["count"] == 1
+        assert payload["total"] == 1
+        assert payload["items"][0]["target_id"] == "777"
+        assert "content" not in str(payload["items"][0]["metadata"]).lower()
+
+    def test_stats_include_type_counts_by_status(self, client):
+        item = create_queue_item(
+            item_type="ocr_quality_review",
+            source="ocr_quality_assessment",
+            target_type="document",
+            target_id="777",
+        )
+        client.post(
+            f"/api/triage/queue/{item['id']}/resolve",
+            json={"action": "mark_reviewed"},
+        )
+
+        response = client.get("/api/triage/stats")
+
+        assert response.status_code == 200
+        assert response.json()["by_type_status"]["ocr_quality_review"]["resolved"] == 1
+
 
 class TestTriageQueueItem:
     """Tests for GET /api/triage/queue/{id}."""
@@ -190,6 +251,48 @@ class TestTriageResolve:
             json={},
         )
         assert resp.status_code == 422
+
+    def test_ocr_review_resolution_only_resolves_the_review_item(self, client):
+        item = create_queue_item(
+            item_type="ocr_quality_review",
+            source="ocr_quality_assessment",
+            target_type="document",
+            target_id="777",
+            reason="OCR quality needs review",
+            metadata={"document_id": 777, "candidate_state": "ready"},
+        )
+
+        invalid = client.post(
+            f"/api/triage/queue/{item['id']}/resolve",
+            json={"action": "confirm"},
+        )
+        resolved = client.post(
+            f"/api/triage/queue/{item['id']}/resolve",
+            json={"action": "mark_reviewed"},
+        )
+
+        assert invalid.status_code == 422
+        assert resolved.status_code == 200
+        assert resolved.json()["status"] == "resolved"
+        assert resolved.json()["resolved_action"] == "mark_reviewed"
+        assert resolved.json()["metadata"]["candidate_state"] == "ready"
+
+    @pytest.mark.parametrize("action", ["confirm", "reject", "defer", "dismiss"])
+    def test_ocr_reviews_are_excluded_from_generic_bulk_actions(self, client, action):
+        item = create_queue_item(
+            item_type="ocr_quality_review",
+            source="ocr_quality_assessment",
+            target_type="document",
+            target_id="777",
+        )
+
+        response = client.post(
+            "/api/triage/queue/bulk",
+            json={"action": action, "item_ids": [item["id"]]},
+        )
+
+        assert response.status_code == 422
+        assert client.get(f"/api/triage/queue/{item['id']}").json()["status"] == "pending"
 
     def test_action_classification_confirm_makes_source_ready(self, client):
         from unittest.mock import AsyncMock, patch

@@ -292,6 +292,8 @@ def list_queue_items(
     *,
     item_type: str | None = None,
     status: str | None = None,
+    search: str | None = None,
+    ocr_review_status: str | None = None,
     sort: str = "priority",
     limit: int = 50,
     offset: int = 0,
@@ -307,6 +309,20 @@ def list_queue_items(
             query = query.filter(TriageQueueItem.status == status)
         else:
             query = query.filter(TriageQueueItem.status == "pending")
+        if search:
+            needle = f"%{search.strip()}%"
+            query = query.filter(
+                TriageQueueItem.reason.ilike(needle)
+                | TriageQueueItem.target_id.ilike(needle)
+                | TriageQueueItem.metadata_json.ilike(needle)
+            )
+        if ocr_review_status:
+            query = query.filter(
+                TriageQueueItem.item_type == "ocr_quality_review",
+                TriageQueueItem.metadata_json.like(
+                    f'%"review_status": "{ocr_review_status}"%'
+                ),
+            )
 
         if sort == "created_at":
             query = query.order_by(TriageQueueItem.created_at.asc())
@@ -478,24 +494,33 @@ def get_queue_stats() -> dict[str, Any]:
 
         by_type: dict[str, int] = {}
         by_status: dict[str, int] = {}
+        by_type_status: dict[str, dict[str, int]] = {}
         total = 0
 
         for item_type, status, count in rows:
             by_type[item_type] = by_type.get(item_type, 0) + count
             by_status[status] = by_status.get(status, 0) + count
+            by_type_status.setdefault(item_type, {})[status] = count
             total += count
 
         return {
             "total": total,
             "by_type": by_type,
             "by_status": by_status,
+            "by_type_status": by_type_status,
             "pending": by_status.get("pending", 0),
         }
     finally:
         session.close()
 
 
-def count_queue_items(*, item_type: str | None = None, status: str = "pending") -> int:
+def count_queue_items(
+    *,
+    item_type: str | None = None,
+    status: str = "pending",
+    search: str | None = None,
+    ocr_review_status: str | None = None,
+) -> int:
     """Count queue items matching one exact OWL-native view contract."""
     session = get_session()
     try:
@@ -504,6 +529,20 @@ def count_queue_items(*, item_type: str | None = None, status: str = "pending") 
         )
         if item_type is not None:
             query = query.filter(TriageQueueItem.item_type == item_type)
+        if search:
+            needle = f"%{search.strip()}%"
+            query = query.filter(
+                TriageQueueItem.reason.ilike(needle)
+                | TriageQueueItem.target_id.ilike(needle)
+                | TriageQueueItem.metadata_json.ilike(needle)
+            )
+        if ocr_review_status:
+            query = query.filter(
+                TriageQueueItem.item_type == "ocr_quality_review",
+                TriageQueueItem.metadata_json.like(
+                    f'%"review_status": "{ocr_review_status}"%'
+                ),
+            )
         return int(query.scalar() or 0)
     finally:
         session.close()
@@ -537,6 +576,64 @@ def create_queue_item(
         session.commit()
         session.refresh(item)
         return _item_to_dict(item)
+    finally:
+        session.close()
+
+
+def create_or_refresh_ocr_quality_review(
+    *,
+    document_id: int,
+    reason: str,
+    priority: int,
+    metadata: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    """Create or refresh the one open OCR review for a document assessment."""
+    session = get_session()
+    try:
+        latest = (
+            session.query(TriageQueueItem)
+            .filter(
+                TriageQueueItem.item_type == "ocr_quality_review",
+                TriageQueueItem.target_type == "document",
+                TriageQueueItem.target_id == str(document_id),
+            )
+            .order_by(TriageQueueItem.created_at.desc())
+            .first()
+        )
+        if latest is not None and latest.status in {"resolved", "dismissed"}:
+            latest_metadata: dict[str, Any] = {}
+            if latest.metadata_json:
+                with contextlib.suppress(json.JSONDecodeError, TypeError):
+                    parsed = json.loads(latest.metadata_json)
+                    if isinstance(parsed, dict):
+                        latest_metadata = parsed
+            if (
+                latest_metadata.get("assessment_id") == metadata.get("assessment_id")
+                and latest_metadata.get("assessed_at") == metadata.get("assessed_at")
+            ):
+                return _item_to_dict(latest), False
+
+        item = latest if latest is not None and latest.status in {"pending", "deferred"} else None
+        created = item is None
+        if item is None:
+            item = TriageQueueItem(
+                item_type="ocr_quality_review",
+                priority=priority,
+                status="pending",
+                source="ocr_quality_assessment",
+                target_type="document",
+                target_id=str(document_id),
+                reason=reason,
+                metadata_json=json.dumps(metadata),
+            )
+            session.add(item)
+        else:
+            item.priority = priority
+            item.reason = reason
+            item.metadata_json = json.dumps(metadata)
+        session.commit()
+        session.refresh(item)
+        return _item_to_dict(item), created
     finally:
         session.close()
 

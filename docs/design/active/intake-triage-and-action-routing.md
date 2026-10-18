@@ -140,6 +140,19 @@ Analysis may start automatically after OCR stabilizes. It should not wait for
 Inbox removal. To control cost and churn, OWL coalesces rapid metadata changes
 and re-runs only after the saved source fingerprint changes.
 
+### OCR quality review ownership
+
+Review-worthy OCR assessments are first-class, persisted Needs Review items.
+The OCR queue is selected with the `ocr_quality_review` review type and uses the
+same OCR summary and focus inspector as Inbox and Action Review. Resolving the
+review records trust for that OCR review item only; filing, action completion,
+and candidate acceptance remain separate explicit operations. OCR items are
+excluded from generic triage bulk acceptance.
+
+The OCR Quality page is not an operational queue. It remains the corpus
+analytics and administration surface for distributions, calibration,
+inventory/scoring runs, scorer versions, and assessment freshness.
+
 ## Source fingerprint and re-analysis
 
 OWL tracks a processing cursor for discovery and a separate source fingerprint

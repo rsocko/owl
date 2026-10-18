@@ -12,7 +12,7 @@ export default function OcrFocusInspectorPage() {
     <div style={{ height: 'calc(100dvh - var(--topnav-height))', margin: -20 }}>
       <OcrFocusInspector
         documentId={id}
-        onReturn={() => navigate('/ocr-quality/queue')}
+        onReturn={() => navigate('/needs-review?type=ocr_quality_review')}
       />
     </div>
   );

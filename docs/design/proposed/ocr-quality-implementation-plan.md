@@ -96,7 +96,7 @@ document profile.
 
 Add:
 
-- corpus distribution and review queue;
+- corpus distribution and OCR-filtered Needs Review queue;
 - metadata filters and Paperless deep links;
 - document assessment details;
 - synchronized current/candidate PDF views;
@@ -106,6 +106,18 @@ Add:
 
 At first, the UI can review current assessments before candidate generation is
 available.
+
+Operational ownership is intentionally split:
+
+- **Needs Review** owns daily OCR decisions as persisted, auditable
+  `ocr_quality_review` items.
+- **OCR Quality** owns corpus analytics and administration: distributions,
+  calibration, inventory/scoring runs, scorer versions, and freshness.
+- **Inbox**, **Action Review**, and **Needs Review** share the authoritative OCR
+  summary tab and expanded focus inspector.
+- `/ocr-quality/queue` is compatibility-only and redirects into Needs Review;
+  `/ocr-quality/documents/:documentId` remains a compatibility entry to the
+  shared focus inspector.
 
 **Exit gate:** Users can inspect and calibrate current-document quality entirely
 inside OWL.

@@ -65,7 +65,7 @@ interface RegionOverlayViewerProps {
    * Called with a freshly drawn box when the reviewer draws a region to
    * submit as a metadata correction (issue #172) rather than an OCR-quality
    * annotation. Rendering the field/value picker for the correction is left
-   * to the caller (e.g. `OcrQualityDocumentDetail`) — this viewer only
+   * to the caller (e.g. `OcrFocusInspector`) — this viewer only
    * reports the drawn geometry and shows the "Correct field" toggle when a
    * handler is supplied.
    */

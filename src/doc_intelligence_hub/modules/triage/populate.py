@@ -17,6 +17,7 @@ from typing import Any
 from doc_intelligence_hub.core.alerts import emit_alert
 from doc_intelligence_hub.modules.triage.database import (
     TriageQueueItem,
+    create_or_refresh_ocr_quality_review,
     create_queue_item,
 )
 from doc_intelligence_hub.modules.triage.database import (
@@ -43,6 +44,7 @@ def populate_queue() -> dict[str, Any]:
         "orphan_documents": 0,
         "orphan_reflagged": 0,
         "duplicate_documents": 0,
+        "ocr_quality_reviews": 0,
         "skipped_existing": 0,
     }
 
@@ -71,11 +73,17 @@ def populate_queue() -> dict[str, Any]:
     except Exception as exc:
         logger.warning("Could not flag duplicate documents: %s", exc)
 
+    try:
+        stats["ocr_quality_reviews"] = _flag_ocr_quality_reviews()
+    except Exception as exc:
+        logger.warning("Could not flag OCR quality reviews: %s", exc)
+
     total = (
         stats["eob_low_confidence"]
         + stats["eob_multi_candidate"]
         + stats["orphan_documents"]
         + stats.get("duplicate_documents", 0)
+        + stats.get("ocr_quality_reviews", 0)
     )
     logger.info(
         "Queue population complete: %d items created, %d re-flagged (%s)",
@@ -84,6 +92,114 @@ def populate_queue() -> dict[str, Any]:
         stats,
     )
     return {"items_created": total, "items_reflagged": stats["orphan_reflagged"], "details": stats}
+
+
+def _flag_ocr_quality_reviews() -> int:
+    """Project review-worthy OCR assessments into the persisted triage queue."""
+    from sqlalchemy import func
+
+    from doc_intelligence_hub.modules.ocr_quality.database import (
+        DocumentAssessment,
+        OcrQualityCandidate,
+    )
+    from doc_intelligence_hub.modules.ocr_quality.database import (
+        get_session as get_ocr_session,
+    )
+
+    review_statuses = {"UNCERTAIN", "REVIEW_RECOMMENDED", "FAILED"}
+    ocr_session = get_ocr_session()
+    created = 0
+    try:
+        latest_ids = (
+            ocr_session.query(func.max(DocumentAssessment.id).label("id"))
+            .group_by(DocumentAssessment.document_id)
+            .subquery()
+        )
+        assessments = (
+            ocr_session.query(DocumentAssessment)
+            .join(latest_ids, DocumentAssessment.id == latest_ids.c.id)
+            .filter(DocumentAssessment.review_status.in_(review_statuses))
+            .all()
+        )
+        for assessment in assessments:
+            candidate = (
+                ocr_session.query(OcrQualityCandidate)
+                .filter(OcrQualityCandidate.document_id == assessment.document_id)
+                .order_by(OcrQualityCandidate.created_at.desc())
+                .first()
+            )
+            reasons = assessment.reasons if isinstance(assessment.reasons, list) else []
+            top_reason = _top_ocr_reason(reasons, assessment.review_status)
+            weakest_dimension, weakest_score = _weakest_ocr_dimension(assessment)
+            candidate_state = candidate.state if candidate is not None else "none"
+            resolved_candidate = candidate_state in {
+                "accepted",
+                "accepted_pending_invalidation",
+                "rejected",
+            }
+            metadata = {
+                "document_id": assessment.document_id,
+                "document_type": assessment.document_type,
+                "correspondent": assessment.correspondent,
+                "document_created": assessment.document_created,
+                "review_status": assessment.review_status,
+                "weakest_dimension": weakest_dimension,
+                "weakest_score": weakest_score,
+                "top_reason": top_reason,
+                "candidate_state": candidate_state,
+                "candidate_resolved": resolved_candidate,
+                "assessment_id": assessment.id,
+                "assessed_at": assessment.updated_at.isoformat()
+                if assessment.updated_at
+                else None,
+                "quality_scorer_version": assessment.quality_scorer_version,
+            }
+            _, was_created = create_or_refresh_ocr_quality_review(
+                document_id=assessment.document_id,
+                reason=top_reason,
+                priority=_ocr_review_priority(assessment.review_status, weakest_score),
+                metadata=metadata,
+            )
+            created += int(was_created)
+    finally:
+        ocr_session.close()
+    return created
+
+
+def _top_ocr_reason(reasons: list[Any], review_status: str | None) -> str:
+    severity_rank = {"blocking": 0, "warning": 1, "info": 2}
+    safe_reasons = [
+        reason
+        for reason in reasons
+        if isinstance(reason, dict) and isinstance(reason.get("message"), str)
+    ]
+    safe_reasons.sort(key=lambda reason: severity_rank.get(str(reason.get("severity")), 3))
+    if safe_reasons:
+        return str(safe_reasons[0]["message"])
+    labels = {
+        "FAILED": "OCR assessment failed and needs human review.",
+        "REVIEW_RECOMMENDED": "OCR quality signals recommend human review.",
+        "UNCERTAIN": "OCR quality signals are uncertain.",
+    }
+    return labels.get(review_status or "", "OCR quality needs human review.")
+
+
+def _weakest_ocr_dimension(assessment: Any) -> tuple[str | None, float | None]:
+    scores = {
+        "overlay": assessment.overlay_score,
+        "machine": assessment.machine_score,
+    }
+    available = [(name, float(value)) for name, value in scores.items() if value is not None]
+    return min(available, key=lambda item: item[1]) if available else (None, None)
+
+
+def _ocr_review_priority(review_status: str | None, weakest_score: float | None) -> int:
+    base = {"FAILED": 95, "REVIEW_RECOMMENDED": 80, "UNCERTAIN": 65}.get(
+        review_status or "", 50
+    )
+    if weakest_score is None:
+        return base
+    return max(base, min(100, round(100 - weakest_score)))
 
 
 def _flag_low_confidence_matches() -> int:

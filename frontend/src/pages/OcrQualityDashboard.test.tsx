@@ -101,6 +101,8 @@ describe('OcrQualityDashboard', () => {
     expect(screen.getAllByText('GOOD').length).toBeGreaterThan(0);
     expect(screen.getByText('Overlay/readability score distribution')).toBeInTheDocument();
     expect(screen.getByText('Machine-extraction score distribution')).toBeInTheDocument();
+    expect(screen.getByText(/Daily document decisions happen in Needs Review/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open OCR in Needs Review' })).toBeInTheDocument();
   });
 });
 

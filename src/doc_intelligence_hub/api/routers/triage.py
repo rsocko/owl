@@ -28,6 +28,7 @@ from doc_intelligence_hub.modules.triage.database import (
     bulk_defer_items,
     bulk_dismiss_items,
     bulk_resolve_items,
+    count_queue_items,
     defer_queue_item,
     dismiss_queue_item,
     get_queue_item,
@@ -52,10 +53,12 @@ _VALID_ITEM_TYPES = {
     "duplicate_document",
     "eob_match_review",
     "grouping_anomaly",
+    "ocr_quality_review",
     "orphan_document",
 }
 _VALID_STATUSES = {"pending", "deferred", "resolved", "dismissed"}
 _VALID_SORTS = {"priority", "created_at", "type"}
+_VALID_OCR_REVIEW_STATUSES = {"UNCERTAIN", "REVIEW_RECOMMENDED", "FAILED"}
 
 # Orphan deferral period (days)
 _ORPHAN_DEFER_DAYS = 30
@@ -104,6 +107,10 @@ class BulkConfirmThresholdRequest(BaseModel):
 async def list_queue(
     type: str | None = Query(default=None, description="Filter by item type"),
     status: str | None = Query(default=None, description="Filter by status"),
+    search: str | None = Query(default=None, max_length=200, description="Search safe summary fields"),
+    ocr_review_status: str | None = Query(
+        default=None, description="Filter OCR reviews by assessment status"
+    ),
     sort: str = Query(default="priority", description="Sort field"),
     limit: int = Query(default=50, ge=1, le=200, description="Max items to return"),
     offset: int = Query(default=0, ge=0, description="Pagination offset"),
@@ -124,15 +131,38 @@ async def list_queue(
             status_code=400,
             detail=f"Invalid sort '{sort}'. Must be one of: {', '.join(sorted(_VALID_SORTS))}",
         )
+    if ocr_review_status and ocr_review_status not in _VALID_OCR_REVIEW_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid OCR review status '{ocr_review_status}'. Must be one of: "
+                f"{', '.join(sorted(_VALID_OCR_REVIEW_STATUSES))}"
+            ),
+        )
 
     items = list_queue_items(
         item_type=type,
         status=status,
+        search=search,
+        ocr_review_status=ocr_review_status,
         sort=sort,
         limit=limit,
         offset=offset,
     )
-    return {"items": items, "count": len(items), "offset": offset, "limit": limit}
+    effective_status = status or "pending"
+    total = count_queue_items(
+        item_type=type,
+        status=effective_status,
+        search=search,
+        ocr_review_status=ocr_review_status,
+    )
+    return {
+        "items": items,
+        "count": len(items),
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    }
 
 
 # NOTE: /queue/populate MUST be registered BEFORE /queue/{item_id} to avoid
@@ -153,18 +183,26 @@ async def bulk_action(body: BulkActionRequest) -> dict[str, Any]:
     """Apply an action to multiple triage queue items at once."""
     if not body.item_ids:
         raise HTTPException(status_code=400, detail="item_ids must not be empty")
+    item_types = {
+        item_id: (get_queue_item(item_id) or {}).get("item_type")
+        for item_id in body.item_ids
+    }
+    if any(item_type == "ocr_quality_review" for item_type in item_types.values()):
+        raise HTTPException(
+            status_code=422,
+            detail="OCR quality reviews are excluded from generic bulk actions",
+        )
     if body.action in {"confirm", "reject", "dismiss"}:
-        classification_ids = [
+        protected_ids = [
             item_id
-            for item_id in body.item_ids
-            if (get_queue_item(item_id) or {}).get("item_type") == "action_classification"
+            for item_id, item_type in item_types.items()
+            if item_type == "action_classification"
         ]
-        if classification_ids:
+        if protected_ids:
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    "Action classifications require an explicit confirm, correct, "
-                    "no_action, or re_evaluate resolution"
+                    "Action classifications require item-specific resolution"
                 ),
             )
     if body.action in ("confirm", "reject"):
@@ -215,6 +253,14 @@ async def resolve_item(item_id: str, body: ResolveRequest) -> dict[str, Any]:
                 detail="This action-classification review is already resolved",
             )
         return await _resolve_action_classification(current, body)
+    if current["item_type"] == "ocr_quality_review":
+        if current["status"] not in {"pending", "deferred"}:
+            raise HTTPException(status_code=409, detail="This OCR review is already resolved")
+        if body.action != "mark_reviewed":
+            raise HTTPException(
+                status_code=422,
+                detail="OCR quality reviews must be resolved with mark_reviewed",
+            )
     item = resolve_queue_item(item_id, body.action, body.payload)
     if not item:
         raise HTTPException(status_code=404, detail=f"Triage item {item_id} not found")
