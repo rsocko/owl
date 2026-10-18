@@ -7,6 +7,8 @@ without any network access.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from shutil import copyfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -193,35 +195,53 @@ def hub_settings(tmp_path) -> HubSettings:
     )
 
 
-@pytest.fixture()
-def app(hub_settings, mock_llm, tmp_path):
-    """Create a FastAPI app with mocked startup events and temp databases."""
-    # Action queue DB
-    aq_db_path = tmp_path / "test_actions.db"
+@pytest.fixture(scope="session")
+def api_database_templates(tmp_path_factory):
+    """Build the API database schemas once per pytest worker."""
+    template_dir = tmp_path_factory.mktemp("api-db-templates")
     original_aq_db_url = aq_settings.database_url
-    aq_settings.database_url = f"sqlite:///{aq_db_path}"
+    original_receipt_db_url = receipt_settings.database_url
+
+    aq_settings.database_url = f"sqlite:///{template_dir / 'actions.db'}"
     aq_init_db()
 
-    # EOB DB
-    eob_db_path = tmp_path / "test_eob.db"
-    eob_configure(f"sqlite:///{eob_db_path}")
+    eob_configure(f"sqlite:///{template_dir / 'eob.db'}")
     eob_init_db()
 
-    # Alerts DB
-    alerts_db_path = tmp_path / "test_alerts.db"
-    alerts_configure(f"sqlite:///{alerts_db_path}")
+    alerts_configure(f"sqlite:///{template_dir / 'alerts.db'}")
     alerts_init_db()
 
-    # Triage DB
-    triage_db_path = tmp_path / "test_triage.db"
-    triage_configure(f"sqlite:///{triage_db_path}")
+    triage_configure(f"sqlite:///{template_dir / 'triage.db'}")
     triage_init_db()
 
-    # Receipt intake DB
-    receipt_db_path = tmp_path / "test_receipt_intake.db"
-    original_receipt_db_url = receipt_settings.database_url
-    receipt_settings.database_url = f"sqlite:///{receipt_db_path}"
+    receipt_settings.database_url = f"sqlite:///{template_dir / 'receipt_intake.db'}"
     receipt_init_db()
+
+    aq_settings.database_url = original_aq_db_url
+    receipt_settings.database_url = original_receipt_db_url
+    return template_dir
+
+
+@pytest.fixture()
+def app(hub_settings, mock_llm, tmp_path, api_database_templates):
+    """Create a FastAPI app with isolated copies of prebuilt test databases."""
+    database_paths = {
+        "actions": tmp_path / "test_actions.db",
+        "eob": tmp_path / "test_eob.db",
+        "alerts": tmp_path / "test_alerts.db",
+        "triage": tmp_path / "test_triage.db",
+        "receipt_intake": tmp_path / "test_receipt_intake.db",
+    }
+    for name, destination in database_paths.items():
+        copyfile(Path(api_database_templates) / f"{name}.db", destination)
+
+    original_aq_db_url = aq_settings.database_url
+    original_receipt_db_url = receipt_settings.database_url
+    aq_settings.database_url = f"sqlite:///{database_paths['actions']}"
+    eob_configure(f"sqlite:///{database_paths['eob']}")
+    alerts_configure(f"sqlite:///{database_paths['alerts']}")
+    triage_configure(f"sqlite:///{database_paths['triage']}")
+    receipt_settings.database_url = f"sqlite:///{database_paths['receipt_intake']}"
 
     application = create_app(hub_settings)
 
