@@ -1223,6 +1223,11 @@ class TestPipelineFetchTimeout:
 
         monkeypatch.setattr(pipeline.paperless, "list_correspondents", fake_list_correspondents)
         monkeypatch.setattr(pipeline.paperless, "fetch_all_metadata", fake_fetch_all_metadata)
+        monkeypatch.setattr(
+            pipeline.paperless,
+            "list_custom_fields",
+            AsyncMock(return_value=[]),
+        )
         monkeypatch.setattr(pipeline.paperless, "list_documents", hanging_list_documents)
 
         start = time.monotonic()
