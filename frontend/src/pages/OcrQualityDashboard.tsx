@@ -84,6 +84,7 @@ export function runStatusTone(status: string): Tone {
 
 const STAGE_LABELS: Record<string, string> = {
   stage_1_corpus_scan: 'Stage 1: Corpus scan',
+  stage_1_manual_single_document: 'Stage 1: On-demand document assessment',
   stage_2_stratified_sample: 'Stage 2: Stratified sample',
 };
 

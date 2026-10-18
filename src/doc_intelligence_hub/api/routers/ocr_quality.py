@@ -21,6 +21,7 @@ Endpoints:
     GET  /api/ocr-quality/distribution            — Corpus-wide review-status/score snapshot
     GET  /api/ocr-quality/documents               — Filterable/paginated/sortable review queue
     GET  /api/ocr-quality/documents/{document_id} — Single document's full assessment detail
+    POST /api/ocr-quality/documents/{document_id}/assess — Ensure a text-only assessment exists
     POST /api/ocr-quality/documents/{document_id}/stage2 — Force Stage-2 for one document (inline)
     GET  /api/ocr-quality/downstream-outcomes     — Distinct downstream_outcome values (filter dropdown)
 
@@ -75,6 +76,7 @@ from doc_intelligence_hub.modules.ocr_quality.models import (
     RunTrigger,
 )
 from doc_intelligence_hub.modules.ocr_quality.service import (
+    ManualStage1AssessmentFailedError,
     ManualStage2DocumentNotFoundError,
     ManualStage2ProfilingFailedError,
     OcrQualityInventoryService,
@@ -99,6 +101,7 @@ _active_run_ids: set[str] = set()
 # (see ``force_stage2_analysis``) *in this process* — guards against a second
 # concurrent trigger for the same document while the first is still inline.
 _active_manual_stage2_document_ids: set[int] = set()
+_active_manual_stage1_document_ids: set[int] = set()
 
 
 def _service() -> OcrQualityInventoryService:
@@ -624,6 +627,71 @@ async def get_document(document_id: int) -> dict[str, Any]:
             },
         )
     return detail
+
+
+@router.post("/documents/{document_id}/assess")
+async def assess_document(
+    request: Request,
+    document_id: int,
+    actor: str = "system",
+    correlation_id: str | None = None,
+) -> dict[str, Any]:
+    """Ensure one document has the cheap Stage-1 text assessment.
+
+    The document workspace calls this idempotently when an assessment is
+    missing. It reads the existing Paperless document and OCR text, persists
+    only quality signals, and never modifies Paperless.
+    """
+    init_ocr_quality_db()
+    if document_id in _active_manual_stage1_document_ids:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "assessment_already_in_progress",
+                "message": f"An OCR assessment for document {document_id} is already running.",
+                "document_id": document_id,
+            },
+        )
+
+    client = make_paperless_client(request, timeout=30.0)
+    service = OcrQualityInventoryService(client, get_ocr_quality_session)
+    _active_manual_stage1_document_ids.add(document_id)
+    try:
+        return await service.run_manual_stage1(
+            document_id=document_id,
+            actor=actor,
+            trigger=RunTrigger.MANUAL,
+            correlation_id=correlation_id,
+        )
+    except RunConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "run_already_in_progress",
+                "message": f"An equivalent OCR assessment for document {document_id} is active.",
+                "run_id": exc.run_id,
+            },
+        ) from exc
+    except ManualStage1AssessmentFailedError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "assessment_failed",
+                "message": f"OCR assessment failed for document {document_id}.",
+            },
+        ) from exc
+    except Exception as exc:
+        logger.warning("Failed to load document %s for OCR assessment", document_id, exc_info=True)
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "paperless_fetch_failed",
+                "message": f"Could not load document {document_id} from Paperless.",
+            },
+        ) from exc
+    finally:
+        _active_manual_stage1_document_ids.discard(document_id)
+        await client.aclose()
 
 
 @router.post("/documents/{document_id}/stage2")

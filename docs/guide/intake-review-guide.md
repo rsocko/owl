@@ -36,8 +36,9 @@ visible above the preview. The right panel contains:
 - **Actions** — all inferred and user-added actions for the source document.
   Completed actions remain visible as history but are excluded from pending
   counts and confirmation.
-- **OCR** — the searchable text and quality score. Green is 90–100, amber is
-  75–89, and red is below 75. Poor OCR is flagged on the tab before it opens.
+- **OCR** — the multidimensional OCR assessment, candidate state, and a
+  collapsed preview of the current searchable text. Review-worthy assessments
+  are flagged on the tab before it opens.
 
 Arrow keys move focus through the document list without changing the active
 document. Press **Enter** or click a row to select it.
@@ -109,6 +110,12 @@ and machine-extraction scores, scorer freshness, candidate state, top reasons,
 page profile, and searchable text. The older action-pipeline text-quality
 score is not presented as the overall OCR score.
 
+If the corpus inventory has not reached the selected document yet, opening the
+OCR tab automatically creates the inexpensive text-only assessment from the
+searchable OCR already stored in Paperless. Deeper PDF geometry and overlay
+analysis remain explicit through **Inspect OCR**. The searchable-text preview
+is collapsed by default so assessment evidence and actions stay above the fold.
+
 Suggestions are cached by document ID and Paperless `modified` revision for up
 to six hours. Changing the source revision or choosing **Refresh analysis**
 bypasses the snapshot.
@@ -160,6 +167,7 @@ available in the document header and expanded viewer.
 | `GET /api/intake/documents/{id}/actions` | Load actions and analysis state |
 | `GET /api/intake/documents/{id}/ocr` | Load current searchable text (legacy quality fields remain compatibility-only) |
 | `GET /api/ocr-quality/documents/{id}` | Load the authoritative multidimensional OCR assessment |
+| `POST /api/ocr-quality/documents/{id}/assess` | Idempotently create a missing text-only assessment for one document |
 | `GET /api/ocr-quality/candidates?document_id={id}` | Load OCR candidate and resolution state |
 | `PUT /api/intake/documents/{id}` | Save metadata and disposition |
 | `POST /api/intake/documents/{id}/refresh` | Refresh suggestions and analysis |

@@ -69,6 +69,14 @@ class ManualStage2DocumentNotFoundError(Exception):
         super().__init__(f"No OCR quality assessment for document {document_id}")
 
 
+class ManualStage1AssessmentFailedError(Exception):
+    """Raised when an on-demand text assessment could not be persisted."""
+
+    def __init__(self, document_id: int) -> None:
+        self.document_id = document_id
+        super().__init__(f"OCR quality assessment failed for document {document_id}")
+
+
 class ManualStage2ProfilingFailedError(Exception):
     """Raised by ``run_manual_stage2`` when PDF fetch/profiling failed for the document."""
 
@@ -245,6 +253,112 @@ class OcrQualityInventoryService:
     # ------------------------------------------------------------------
     # Stage 1 — full-corpus text/metadata scan
     # ------------------------------------------------------------------
+
+    async def run_manual_stage1(
+        self,
+        *,
+        document_id: int,
+        run_id: str | None = None,
+        actor: str = "system",
+        trigger: RunTrigger | str = RunTrigger.MANUAL,
+        correlation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create the cheap text-only assessment for one document on demand.
+
+        This is the single-document counterpart to ``run_corpus_scan``. It is
+        used by the document workspace so a user does not have to wait for or
+        manually start a full inventory before seeing the machine-extraction
+        assessment for a document whose Paperless OCR text already exists.
+        """
+        document = await self.client.get_document(document_id)
+        version_key = _document_version_key(document)
+        db = self.session_factory()
+        try:
+            existing = (
+                db.query(DocumentAssessment)
+                .filter_by(
+                    document_id=document_id,
+                    document_version_key=version_key,
+                    scorer_version=INVENTORY_SIGNAL_VERSION,
+                )
+                .one_or_none()
+            )
+            if existing is not None:
+                return _assessment_detail(
+                    existing,
+                    has_stage2_analysis=_has_stage2_analysis(db, document_id),
+                    accepted_info=self._accepted_candidate_info(db, [document_id]).get(document_id),
+                )
+
+            scope_digest = _digest({"document_id": document_id})
+            config_digest = _digest({"signal_version": INVENTORY_SIGNAL_VERSION})
+            idempotency_key = _compute_idempotency_key(
+                RunStage.STAGE_1_MANUAL_SINGLE_DOCUMENT.value,
+                scope_digest=scope_digest,
+                config_digest=config_digest,
+                extra={"document_version_key": version_key},
+            )
+            conflicting = (
+                db.query(InventoryRun)
+                .filter(
+                    InventoryRun.idempotency_key == idempotency_key,
+                    InventoryRun.status == RunStatus.RUNNING.value,
+                )
+                .one_or_none()
+            )
+            if conflicting is not None:
+                raise RunConflictError(conflicting.run_id)
+
+            trigger_value = trigger.value if isinstance(trigger, RunTrigger) else trigger
+            manual_run_id = run_id or str(uuid4())
+            manual_run = InventoryRun(
+                run_id=manual_run_id,
+                stage=RunStage.STAGE_1_MANUAL_SINGLE_DOCUMENT.value,
+                scope_digest=scope_digest,
+                config_digest=config_digest,
+                instance_digest=_digest(self.client.base_url),
+                signal_version=INVENTORY_SIGNAL_VERSION,
+                status=RunStatus.RUNNING.value,
+                counts={},
+                started_at=datetime.utcnow(),
+                actor=actor,
+                trigger=trigger_value,
+                correlation_id=correlation_id or str(uuid4()),
+                idempotency_key=idempotency_key,
+                max_retries=ocr_quality_settings.run_max_retries,
+            )
+            db.add(manual_run)
+            db.commit()
+
+            disposition = self._assess_document(db, manual_run_id, document)
+            manual_run.status = (
+                RunStatus.COMPLETED.value
+                if disposition == Disposition.ASSESSED
+                else RunStatus.FAILED.value
+            )
+            manual_run.finished_at = datetime.utcnow()
+            manual_run.counts = {disposition.value: 1}
+            db.commit()
+
+            if disposition != Disposition.ASSESSED:
+                emit_run_alert(manual_run, reason="failed")
+                raise ManualStage1AssessmentFailedError(document_id)
+
+            refreshed = (
+                db.query(DocumentAssessment)
+                .filter(DocumentAssessment.document_id == document_id)
+                .order_by(DocumentAssessment.id.desc())
+                .first()
+            )
+            if refreshed is None:
+                raise ManualStage1AssessmentFailedError(document_id)
+            return _assessment_detail(
+                refreshed,
+                has_stage2_analysis=_has_stage2_analysis(db, document_id),
+                accepted_info=self._accepted_candidate_info(db, [document_id]).get(document_id),
+            )
+        finally:
+            db.close()
 
     async def run_corpus_scan(
         self,

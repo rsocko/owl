@@ -69,6 +69,15 @@ function isNotFound(error: unknown): boolean {
   return error instanceof Error && 'status' in error && (error as { status?: number }).status === 404;
 }
 
+async function loadOrCreateAssessment(documentId: number): Promise<unknown> {
+  try {
+    return await endpoints.ocrQuality.documentDetail(documentId);
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+    return endpoints.ocrQuality.assessDocument(documentId);
+  }
+}
+
 function dateValue(value?: string | null): number | null {
   if (!value) return null;
   const parsed = new Date(value).getTime();
@@ -124,7 +133,7 @@ export function useOcrSummary(documentId: number | null): OcrSummaryState {
     setTextError(null);
 
     void Promise.allSettled([
-      endpoints.ocrQuality.documentDetail(documentId),
+      loadOrCreateAssessment(documentId),
       endpoints.ocrQuality.candidates.list({ document_id: documentId }),
       endpoints.intake.documentOcr(documentId),
     ]).then(([assessmentResult, candidatesResult, textResult]) => {
