@@ -34,4 +34,5 @@ class Settings(BaseSettings):
         "env_prefix": "OWL_MONARCH_DELIVERY_",
     }
 
+
 settings = Settings()
