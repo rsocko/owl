@@ -6,9 +6,9 @@ without any network access.
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from shutil import copyfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -127,6 +127,12 @@ def _make_mock_paperless() -> AsyncMock:
 # ---------------------------------------------------------------------------
 
 
+def _copy_sqlite_database(source: Path, destination: Path) -> None:
+    with sqlite3.connect(source) as source_connection:
+        with sqlite3.connect(destination) as destination_connection:
+            source_connection.backup(destination_connection)
+
+
 @pytest.fixture()
 def mock_paperless():
     """Provide a mock PaperlessClient and patch make_paperless_client everywhere it's imported."""
@@ -233,7 +239,7 @@ def app(hub_settings, mock_llm, tmp_path, api_database_templates):
         "receipt_intake": tmp_path / "test_receipt_intake.db",
     }
     for name, destination in database_paths.items():
-        copyfile(Path(api_database_templates) / f"{name}.db", destination)
+        _copy_sqlite_database(Path(api_database_templates) / f"{name}.db", destination)
 
     original_aq_db_url = aq_settings.database_url
     original_receipt_db_url = receipt_settings.database_url
@@ -263,7 +269,7 @@ def client(app, mock_paperless) -> TestClient:
 
 
 @pytest.fixture()
-def seed_actions():
+def seed_actions(app):
     """Seed the action queue database with sample actions."""
     db = get_aq_session()
     try:
@@ -308,7 +314,7 @@ def seed_actions():
 
 
 @pytest.fixture()
-def seed_eob():
+def seed_eob(app):
     """Seed the EOB matching database with sample data."""
     db = get_eob_session()
     try:
@@ -398,7 +404,7 @@ def seed_eob():
 
 
 @pytest.fixture()
-def seed_alerts():
+def seed_alerts(app):
     """Seed the alerts database with sample alerts."""
     db = get_alerts_session()
     try:
