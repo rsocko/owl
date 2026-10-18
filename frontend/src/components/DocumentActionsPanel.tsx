@@ -25,7 +25,18 @@ interface PaymentCandidate {
   account_last_four?: string | null;
   confidence?: string | null;
   score?: number | null;
+  rank?: number | null;
+  score_gap_basis_points?: number | null;
   match_reasons?: string[];
+}
+
+interface PaymentSearchContext {
+  window_start?: string | null;
+  window_end?: string | null;
+  amount_tolerance?: number | null;
+  date_tolerance_days?: number | null;
+  eligible_account_count?: number | null;
+  candidate_pool_size?: number | null;
 }
 
 type PaymentCheckState =
@@ -47,6 +58,7 @@ interface PaymentCheck {
   message?: string | null;
   revision: string;
   candidates: PaymentCandidate[];
+  search_context?: PaymentSearchContext | null;
 }
 
 const RESOLVED_STATUSES = new Set(['completed', 'dismissed', 'not_an_action']);
@@ -60,6 +72,25 @@ function formatDate(value?: string | null) {
 
 function formatCurrency(value?: number | null, currency = 'USD') {
   return value == null ? '—' : value.toLocaleString(undefined, { style: 'currency', currency });
+}
+
+function formatMatchReason(reason: string) {
+  const [kind, ...strengthParts] = reason.split('_');
+  const labels: Record<string, string> = {
+    amount: 'Amount',
+    date: 'Date',
+    payee: 'Vendor',
+    account: 'Account',
+  };
+  const strengths: Record<string, string> = {
+    exact: 'exact',
+    strong: 'strong',
+    partial: 'partial',
+    none: 'no match',
+    notprovided: 'not used',
+  };
+  const strength = strengthParts.join('');
+  return `${labels[kind] || kind}: ${strengths[strength] || strengthParts.join(' ')}`;
 }
 
 function nextMondayAtNine() {
@@ -453,9 +484,16 @@ function PaymentCheckPanel({
   onCheck: () => void;
   onConfirm: () => void;
 }) {
-  const candidate = paymentCheck?.candidates[0];
+  const candidates = paymentCheck?.candidates || [];
+  const candidate = candidates[0];
+  const searchContext = paymentCheck?.search_context;
   const checking = busy || paymentCheck?.state === 'checking';
   const unavailable = !loading && !paymentCheck && Boolean(error);
+  const candidateHeading = paymentCheck?.state === 'multiple_matches'
+    ? 'Candidates requiring review'
+    : paymentCheck?.state === 'no_match'
+      ? 'Closest transactions'
+      : 'Matched transaction';
   const stateLabel: Record<PaymentCheckState, string> = {
     unchecked: 'Ready to check',
     checking: 'Checking accounts',
@@ -479,15 +517,62 @@ function PaymentCheckPanel({
         </Button>
       </div>
       <p>{error || paymentCheck?.message || 'Search eligible financial accounts for a matching transaction.'}</p>
-      {candidate ? (
-        <dl className="payment-candidate">
-          <div><dt>Payee</dt><dd>{candidate.payee || 'Not provided'}</dd></div>
-          <div><dt>Amount</dt><dd>{formatCurrency(candidate.amount, candidate.currency || 'USD')}</dd></div>
-          <div><dt>Transaction</dt><dd>{formatDate(candidate.transaction_date)} · {candidate.status || 'unknown'}</dd></div>
-          <div><dt>Account</dt><dd>{candidate.account_display_name || 'Eligible account'}{candidate.account_last_four ? ` •••• ${candidate.account_last_four}` : ''}</dd></div>
-          <div><dt>Confidence</dt><dd>{candidate.confidence || 'Not scored'}{candidate.score == null ? '' : ` · ${candidate.score.toFixed(0)}%`}</dd></div>
-          <div><dt>Match reasons</dt><dd>{candidate.match_reasons?.join(', ') || 'Not provided'}</dd></div>
+      {searchContext ? (
+        <dl className="payment-search-context" aria-label="Payment search scope">
+          {searchContext.eligible_account_count != null ? (
+            <div><dt>Accounts searched</dt><dd>{searchContext.eligible_account_count}</dd></div>
+          ) : null}
+          {searchContext.candidate_pool_size != null ? (
+            <div><dt>Transactions evaluated</dt><dd>{searchContext.candidate_pool_size}</dd></div>
+          ) : null}
+          {searchContext.window_start && searchContext.window_end ? (
+            <div><dt>Search period</dt><dd>{formatDate(searchContext.window_start)}–{formatDate(searchContext.window_end)}</dd></div>
+          ) : null}
+          {searchContext.amount_tolerance != null ? (
+            <div><dt>Amount tolerance</dt><dd>{formatCurrency(searchContext.amount_tolerance, candidate?.currency || 'USD')}</dd></div>
+          ) : null}
         </dl>
+      ) : null}
+      {candidates.length ? (
+        <section className="payment-candidate-results" aria-label="Payment candidates">
+          <div className="payment-candidate-results-heading">
+            <strong>{candidateHeading}</strong>
+            <span>{candidates.length} {candidates.length === 1 ? 'result' : 'ranked results'}</span>
+          </div>
+          {paymentCheck?.state === 'no_match' ? (
+            <p>These are the closest results, but none met Tyrion&apos;s match threshold.</p>
+          ) : null}
+          <ol>
+            {candidates.map((item, index) => (
+              <li key={item.id}>
+                <div className="payment-candidate-heading">
+                  <span className="payment-candidate-rank" aria-label={`Rank ${item.rank || index + 1}`}>
+                    {item.rank || index + 1}
+                  </span>
+                  <div>
+                    <strong>{item.payee || 'Payee not provided'}</strong>
+                    <span>
+                      {item.confidence ? `${item.confidence} confidence` : 'Not scored'}
+                      {item.score == null ? '' : ` · ${item.score.toFixed(0)}% score`}
+                    </span>
+                  </div>
+                </div>
+                <dl className="payment-candidate">
+                  <div><dt>Amount</dt><dd>{item.amount == null ? 'Not provided' : formatCurrency(item.amount, item.currency || 'USD')}</dd></div>
+                  <div><dt>Transaction</dt><dd>{formatDate(item.transaction_date)} · {item.status || 'unknown'}</dd></div>
+                  <div><dt>Account</dt><dd>{item.account_display_name || 'Eligible account'}{item.account_last_four ? ` •••• ${item.account_last_four}` : ''}</dd></div>
+                </dl>
+                <ul className="payment-match-reasons" aria-label={`Match signals for ${item.payee || `candidate ${index + 1}`}`}>
+                  {(item.match_reasons || []).map((reason) => (
+                    <li key={reason}>{formatMatchReason(reason)}</li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : paymentCheck?.state === 'no_match' ? (
+        <p className="payment-no-candidates">No transaction had enough matching evidence to rank.</p>
       ) : null}
       {paymentCheck?.state === 'posted_match' ? (
         <div className="payment-check-confirm">

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime, timedelta
 
+import httpx
 import pytest
 from pydantic import ValidationError
 
@@ -28,8 +30,11 @@ from doc_intelligence_hub.modules.action_queue.payment_reconciliation import (
     PaymentReconciliationService,
     PaymentReviewAction,
     RevisionConflictError,
+    TyrionBillCheckRequestV2,
+    TyrionBillMatchingClient,
     TyrionBillMatchIngestRequest,
     TyrionBillMatchResponseV2,
+    TyrionInvalidResponseError,
     TyrionReceiptEvidenceIngestRequest,
 )
 
@@ -140,6 +145,268 @@ def _no_match_response(run_id: str, document_id: int) -> TyrionBillMatchResponse
             },
         }
     )
+
+
+def _matched_response_with_alternatives(
+    run_id: str,
+    document_id: int,
+) -> TyrionBillMatchResponseV2:
+    def candidate(
+        rank: int,
+        transaction_ref: str,
+        payee: str,
+        score: int,
+        score_gap: int | None,
+    ) -> dict:
+        return {
+            "rank": rank,
+            "transactionRef": transaction_ref,
+            "transactionDate": "2026-10-18",
+            "transactionState": "posted",
+            "payee": payee,
+            "amountMinor": 10_000,
+            "currency": "USD",
+            "accountDisplayName": "Household checking",
+            "accountLastFour": None,
+            "scoreBasisPoints": score,
+            "confidence": "high" if rank == 1 else "medium",
+            "scoreGapBasisPoints": score_gap,
+            "signals": [
+                {
+                    "kind": "amount",
+                    "strength": "exact",
+                    "contributionBasisPoints": 5500,
+                },
+                {
+                    "kind": "date",
+                    "strength": "strong",
+                    "contributionBasisPoints": 2200,
+                },
+                {
+                    "kind": "payee",
+                    "strength": "strong" if rank == 1 else "partial",
+                    "contributionBasisPoints": 1400 if rank == 1 else 900,
+                },
+                {
+                    "kind": "account",
+                    "strength": "notProvided",
+                    "contributionBasisPoints": 500,
+                },
+            ],
+        }
+
+    return TyrionBillMatchResponseV2.model_validate(
+        {
+            "contractVersion": "2.0",
+            "requestRef": run_id,
+            "billRef": f"paperless:{document_id}",
+            "matchStatus": "matched",
+            "paymentStatus": "paid",
+            "selectedTransactionRef": "transaction-selected",
+            "candidates": [
+                candidate(1, "transaction-selected", "City Utilities", 9600, 900),
+                candidate(2, "transaction-alternative", "City Services", 8700, None),
+            ],
+            "searchContext": {
+                "anchorDate": "2026-10-20",
+                "windowStart": "2026-10-11",
+                "windowEnd": "2026-10-18",
+                "dateWindowDays": 7,
+                "amountToleranceMinor": 200,
+                "sourceAsOf": "2026-10-18T12:00:00Z",
+                "searchedAt": "2026-10-18T12:01:00Z",
+                "eligibleAccountCount": 3,
+                "candidatePoolSize": 18,
+            },
+        }
+    )
+
+
+def test_tyrion_v2_response_accepts_nullable_candidate_metadata() -> None:
+    response = TyrionBillMatchResponseV2.model_validate(
+        {
+            "contractVersion": "2.0",
+            "requestRef": "payment-check-response-contract",
+            "billRef": "paperless:101",
+            "matchStatus": "matched",
+            "paymentStatus": "paid",
+            "selectedTransactionRef": "transaction-posted-1",
+            "candidates": [
+                {
+                    "rank": 1,
+                    "transactionRef": "transaction-posted-1",
+                    "transactionDate": "2026-10-18",
+                    "transactionState": "posted",
+                    "payee": "City Utilities",
+                    "amountMinor": 10_000,
+                    "currency": "USD",
+                    "accountDisplayName": "Household checking",
+                    "accountLastFour": None,
+                    "scoreBasisPoints": 9600,
+                    "confidence": "high",
+                    "scoreGapBasisPoints": None,
+                    "signals": [
+                        {
+                            "kind": "amount",
+                            "strength": "exact",
+                            "contributionBasisPoints": 5500,
+                        },
+                        {
+                            "kind": "date",
+                            "strength": "strong",
+                            "contributionBasisPoints": 2200,
+                        },
+                        {
+                            "kind": "payee",
+                            "strength": "strong",
+                            "contributionBasisPoints": 1400,
+                        },
+                        {
+                            "kind": "account",
+                            "strength": "partial",
+                            "contributionBasisPoints": 500,
+                        },
+                    ],
+                }
+            ],
+            "searchContext": {
+                "anchorDate": "2026-10-20",
+                "windowStart": "2026-10-20",
+                "windowEnd": "2026-10-20",
+                "dateWindowDays": 0,
+                "amountToleranceMinor": 100,
+                "sourceAsOf": "2026-10-18T12:00:00Z",
+                "searchedAt": "2026-10-18T12:01:00Z",
+                "eligibleAccountCount": 3,
+                "candidatePoolSize": 1,
+            },
+        }
+    )
+
+    assert response.candidates[0].account_last_four is None
+    assert response.candidates[0].score_gap_basis_points is None
+    assert response.search_context.date_window_days == 0
+
+
+@pytest.mark.asyncio
+async def test_tyrion_client_exchanges_the_published_v2_contract() -> None:
+    captured: dict = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["authorization"] = request.headers.get("Authorization")
+        captured["payload"] = request.read().decode()
+        payload = json.loads(captured["payload"])
+        return httpx.Response(
+            200,
+            json={
+                "contractVersion": "2.0",
+                "requestRef": payload["requestRef"],
+                "billRef": payload["billRef"],
+                "matchStatus": "matched",
+                "paymentStatus": "paid",
+                "selectedTransactionRef": "transaction-posted-1",
+                "candidates": [
+                    {
+                        "rank": 1,
+                        "transactionRef": "transaction-posted-1",
+                        "transactionDate": "2026-10-18",
+                        "transactionState": "posted",
+                        "payee": "City Utilities",
+                        "amountMinor": 10_000,
+                        "currency": "USD",
+                        "accountDisplayName": "Household checking",
+                        "accountLastFour": None,
+                        "scoreBasisPoints": 9600,
+                        "confidence": "high",
+                        "scoreGapBasisPoints": None,
+                        "signals": [
+                            {
+                                "kind": "amount",
+                                "strength": "exact",
+                                "contributionBasisPoints": 5500,
+                            },
+                            {
+                                "kind": "date",
+                                "strength": "strong",
+                                "contributionBasisPoints": 2200,
+                            },
+                            {
+                                "kind": "payee",
+                                "strength": "strong",
+                                "contributionBasisPoints": 1400,
+                            },
+                            {
+                                "kind": "account",
+                                "strength": "partial",
+                                "contributionBasisPoints": 500,
+                            },
+                        ],
+                    }
+                ],
+                "searchContext": {
+                    "anchorDate": "2026-10-20",
+                    "windowStart": "2026-10-10",
+                    "windowEnd": "2026-10-18",
+                    "dateWindowDays": 30,
+                    "amountToleranceMinor": 100,
+                    "sourceAsOf": "2026-10-18T12:00:00Z",
+                    "searchedAt": "2026-10-18T12:01:00Z",
+                    "eligibleAccountCount": 3,
+                    "candidatePoolSize": 1,
+                },
+            },
+        )
+
+    request = TyrionBillCheckRequestV2(
+        requestRef="payment-check-client-contract",
+        billRef="paperless:101",
+        payee="City Utilities",
+        expectedAmountMinor=10_000,
+        currency="USD",
+        dueDate=date(2026, 10, 20),
+    )
+    response = await TyrionBillMatchingClient(
+        url="https://tyrion.test/api/connector/v1/bill-matches",
+        api_token="bridge-token",
+        transport=httpx.MockTransport(handler),
+    ).check(request)
+
+    payload = json.loads(captured["payload"])
+    assert captured["authorization"] == "Bearer " + "bridge-token"
+    assert payload == {
+        "contractVersion": "2.0",
+        "requestRef": "payment-check-client-contract",
+        "billRef": "paperless:101",
+        "payee": "City Utilities",
+        "expectedAmountMinor": 10_000,
+        "currency": "USD",
+        "dueDate": "2026-10-20",
+        "accountScope": "configuredEligible",
+        "candidateLimit": 10,
+    }
+    assert response.candidates[0].account_last_four is None
+    assert response.candidates[0].score_gap_basis_points is None
+
+
+@pytest.mark.asyncio
+async def test_tyrion_client_rejects_a_response_outside_the_v2_contract() -> None:
+    request = TyrionBillCheckRequestV2(
+        requestRef="payment-check-invalid-response",
+        billRef="paperless:101",
+        payee="City Utilities",
+        expectedAmountMinor=10_000,
+        currency="USD",
+        dueDate=date(2026, 10, 20),
+    )
+    client = TyrionBillMatchingClient(
+        url="https://tyrion.test/api/connector/v1/bill-matches",
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, json={"contractVersion": "2.0"})
+        ),
+    )
+
+    with pytest.raises(TyrionInvalidResponseError, match="tyrion_response_invalid"):
+        await client.check(request)
 
 
 def test_tyrion_receipt_contract_is_exact_and_never_claims_payment_status() -> None:
@@ -533,6 +800,35 @@ def test_completion_status_is_committed_before_projection_build(db, monkeypatch)
     stored = db.query(PaymentCheckRun).filter_by(id=run.id).one()
     assert stored.status == "completed"
     assert stored.response_payload is not None
+
+
+def test_projection_reports_ranked_alternatives_without_persisting_them_as_payments(db) -> None:
+    obligation = _obligation(db)
+    action = _pay_action(db, obligation)
+    service = PaymentReconciliationService(db)
+    run, _request, _replay = service.start_check(
+        action.id,
+        PaymentCheckRequest(
+            revision="v1:1:1",
+            idempotency_key="payment-check-ranked-alternatives",
+        ),
+    )
+
+    projection = service.finish_check(
+        run.id,
+        _matched_response_with_alternatives(run.id, action.document_id),
+        connector_ref="tyrion-bill-matching-v2",
+    )
+
+    assert projection["state"] == "posted_match"
+    assert [candidate["payee"] for candidate in projection["candidates"]] == [
+        "City Utilities",
+        "City Services",
+    ]
+    assert projection["search_context"]["eligible_account_count"] == 3
+    assert projection["search_context"]["candidate_pool_size"] == 18
+    assert db.query(PaymentEvidence).count() == 1
+    assert db.query(PaymentEvidence).one().transaction_ref == "transaction-selected"
 
 
 def test_manual_rejection_survives_newer_generation(db) -> None:

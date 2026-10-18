@@ -186,6 +186,14 @@ describe('ActionWorkspace', () => {
         source: 'tyrion_bill_match',
         revision: 'v1:2:3',
         message: 'A posted payment candidate requires confirmation.',
+        search_context: {
+          window_start: '2026-10-11',
+          window_end: '2026-10-18',
+          amount_tolerance: 1.65,
+          date_tolerance_days: 7,
+          eligible_account_count: 3,
+          candidate_pool_size: 18,
+        },
         candidates: [{
           id: 'evidence-1',
           payee: 'City Utilities',
@@ -334,6 +342,77 @@ describe('ActionWorkspace', () => {
       revision: 'v1:2:3',
       idempotency_key: 'owl-confirm-payment:1:v1:2:3',
     }));
+  });
+
+  it('explains the full ranked result set when no candidate meets the threshold', async () => {
+    actionsMock.mockResolvedValue({
+      actions: actions.map((action) => (
+        action.id === 1 ? { ...action, obligation_id: 'obligation-1' } : { ...action }
+      )),
+      total: actions.length,
+    });
+    paymentCheckMock.mockResolvedValue({
+      payment_check: {
+        state: 'no_match',
+        checked_at: '2026-10-18T12:01:00Z',
+        stale_after: '2026-10-25T12:00:00Z',
+        source: 'tyrion_bill_match',
+        revision: 'v1:2:3',
+        message: 'No matching transaction was found.',
+        search_context: {
+          window_start: '2026-10-11',
+          window_end: '2026-10-18',
+          amount_tolerance: 1.65,
+          date_tolerance_days: 7,
+          eligible_account_count: 3,
+          candidate_pool_size: 18,
+        },
+        candidates: [
+          {
+            id: 'evidence-near-1',
+            rank: 1,
+            payee: 'Utility Payment Processor',
+            amount: 82.45,
+            currency: 'USD',
+            transaction_date: '2026-10-18',
+            status: 'posted',
+            account_display_name: 'Household checking',
+            confidence: 'low',
+            score: 60,
+            match_reasons: ['amount_exact', 'date_none', 'payee_none', 'account_notprovided'],
+          },
+          {
+            id: 'evidence-near-2',
+            rank: 2,
+            payee: 'City Services',
+            amount: 80.95,
+            currency: 'USD',
+            transaction_date: '2026-10-16',
+            status: 'posted',
+            account_display_name: 'Rewards card',
+            account_last_four: '9876',
+            confidence: 'low',
+            score: 54,
+            match_reasons: ['amount_partial', 'date_strong', 'payee_partial', 'account_notprovided'],
+          },
+        ],
+      },
+    });
+
+    renderWorkspace();
+
+    expect(await screen.findByText('No payment found')).toBeInTheDocument();
+    expect(screen.getByText('3', { selector: '.payment-search-context dd' })).toBeInTheDocument();
+    expect(screen.getByText('18', { selector: '.payment-search-context dd' })).toBeInTheDocument();
+    expect(screen.getByText('Closest transactions')).toBeInTheDocument();
+    expect(screen.getByText('2 ranked results')).toBeInTheDocument();
+    expect(screen.getByText('Utility Payment Processor')).toBeInTheDocument();
+    expect(screen.getByText('City Services')).toBeInTheDocument();
+    expect(screen.getByText('Amount: exact')).toBeInTheDocument();
+    expect(screen.getByText('Vendor: no match')).toBeInTheDocument();
+    expect(screen.getByText('Date: strong')).toBeInTheDocument();
+    expect(screen.getAllByText('Account: not used')).toHaveLength(2);
+    expect(screen.getByText("These are the closest results, but none met Tyrion's match threshold.")).toBeInTheDocument();
   });
 
   it('animates a restored in-progress payment check', async () => {
