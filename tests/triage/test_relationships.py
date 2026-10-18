@@ -18,7 +18,10 @@ from doc_intelligence_hub.modules.triage.relationships import (
     classify_related_notice,
     create_document_relationship,
     list_document_relationships,
+    list_pending_projection_relationships,
     remove_document_relationship,
+    requeue_active_relationship_projections,
+    set_projection_result,
 )
 
 
@@ -199,6 +202,25 @@ def test_create_is_idempotent_and_queryable_in_both_directions(db):
     assert repeated["id"] == created["id"]
     assert list_document_relationships(20, "outgoing")[0]["target_document_id"] == 10
     assert list_document_relationships(10, "incoming")[0]["source_document_id"] == 20
+
+
+def test_requeue_active_relationship_projections_rebuilds_synced_links(db):
+    relationship, _ = create_document_relationship(
+        source_document_id=10,
+        target_document_id=20,
+        relationship_type="supports",
+        provenance="automatic",
+        confidence=0.95,
+        reason_codes=("payment_evidence",),
+    )
+    set_projection_result(relationship["id"], synced=True, error=None)
+
+    assert list_pending_projection_relationships() == []
+    assert requeue_active_relationship_projections() == 1
+
+    pending = list_pending_projection_relationships()
+    assert [item["id"] for item in pending] == [relationship["id"]]
+    assert pending[0]["projection_error"] is None
 
 
 def test_symmetric_reverse_creation_is_idempotent(db):

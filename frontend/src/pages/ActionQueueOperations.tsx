@@ -346,6 +346,7 @@ export default function ActionQueueOperations() {
                   async () => {
                     const readiness = await endpoints.actionQueue.setupMetadataSchema();
                     setMetadataReadiness(readiness as MetadataSchemaReadiness);
+                    await loadProjectionHealth();
                   },
                   'Complete Paperless metadata schema is ready.',
                 )}

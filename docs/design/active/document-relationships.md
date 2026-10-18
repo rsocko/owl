@@ -140,6 +140,11 @@ When the legacy OWL-owned **Related Document IDs** text field exists, successful
 projection clears its stale value after writing the native links. OWL does not delete the
 field or modify any user-owned document-link field.
 
+When Admin Setup creates **OWL Related Documents** for the first time, OWL marks every
+active relationship projection pending so the existing relationship-sync repair action
+can repopulate native links and clear legacy text values. Already-compatible deployments
+are not requeued on every setup check.
+
 When **automatic duplicate detection** is enabled, Paperless post-consumption automation
 calls `POST /api/duplicates/document-ingested` with `{"document_id": 123}` after metadata
 extraction completes. Delivery retries are idempotent: an existing relationship or

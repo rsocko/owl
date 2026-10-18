@@ -372,6 +372,34 @@ def list_pending_projection_relationships(limit: int = 100) -> list[dict[str, An
         session.close()
 
 
+def requeue_active_relationship_projections() -> int:
+    """Mark active Paperless relationship projections for a full schema rebuild."""
+    session = get_session()
+    try:
+        updated = (
+            session.query(DocumentRelationship)
+            .filter(
+                DocumentRelationship.removed_at.is_(None),
+                DocumentRelationship.paperless_projection_enabled == 1,
+            )
+            .update(
+                {
+                    DocumentRelationship.paperless_synced: 0,
+                    DocumentRelationship.projection_error: None,
+                    DocumentRelationship.projection_error_code: None,
+                },
+                synchronize_session=False,
+            )
+        )
+        session.commit()
+        return int(updated)
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def get_projection_health() -> dict[str, Any]:
     """Return privacy-bounded Paperless projection health aggregates."""
     session = get_session()

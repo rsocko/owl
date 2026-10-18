@@ -188,6 +188,7 @@ class TestListActions:
         assert response.status_code == 200
         assert response.json()["status"] == "ready"
         assert len(response.json()["fields"]) == len(provisioned_metadata_field_keys())
+        assert response.json()["requeued_relationships"] == 0
         assert tuple(resolver.ensure.await_args.args[0]) == provisioned_metadata_field_keys()
 
     def test_list_actions_returns_preview_url(self, seeded_client):
