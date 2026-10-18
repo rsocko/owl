@@ -145,6 +145,8 @@ class TestListActions:
         assert {field["name"] for field in response.json()["fields"]} >= {
             "Patient Name",
             "Action Status",
+            "OWL Related Documents",
+            "Relationship Summary",
             "Related Documents",
         }
         paperless.aclose.assert_awaited_once()

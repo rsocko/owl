@@ -122,6 +122,93 @@ def test_propose_second_notice(client):
     assert proposal["priority_adjustment"] == 12
 
 
+def test_manual_payment_evidence_link_offers_obligation_completion(client, mock_paperless):
+    db = get_action_queue_session()
+    try:
+        db.add(
+            Action(
+                document_id=10,
+                document_title="Invoice 4826",
+                action_type="PAY",
+                title="Pay invoice 4826",
+                status="pending",
+                version=1,
+                action_ready=True,
+                review_state="ready",
+                is_primary=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    documents = {
+        10: {
+            "id": 10,
+            "title": "Invoice 4826",
+            "correspondent": 1,
+            "document_type": 1,
+            "created": "2026-01-06",
+        },
+        20: {
+            "id": 20,
+            "title": "Payment receipt 4826",
+            "correspondent": 1,
+            "document_type": 2,
+            "created": "2026-02-05",
+        },
+    }
+    mock_paperless.get_document.side_effect = lambda document_id: documents[document_id]
+    mock_paperless.get_document_content.side_effect = lambda document_id: (
+        "Invoice 4826 amount due $1,913.00"
+        if document_id == 10
+        else "Payment received for invoice 4826. Total $1,913.00"
+    )
+    mock_paperless.fetch_all_metadata.return_value = (
+        {1: "Reliable Fence"},
+        {},
+        {1: "Bill", 2: "Receipt"},
+    )
+    projection = {
+        "synced": True,
+        "status": "synced",
+        "error": None,
+        "error_code": None,
+    }
+    with (
+        patch(
+            "doc_intelligence_hub.api.routers.relationships.project_relationships_to_paperless",
+            new=AsyncMock(return_value=projection),
+        ),
+        patch(
+            "doc_intelligence_hub.api.routers.relationships.make_paperless_client",
+            return_value=mock_paperless,
+        ),
+    ):
+        response = client.post(
+            "/api/relationships/payment-evidence",
+            json={"left_document_id": 10, "right_document_id": 20},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["relationship"]["relationship_type"] == "supports"
+    assert body["relationship"]["source_document_id"] == 20
+    assert body["relationship"]["target_document_id"] == 10
+    assert body["completion_offer"]["action_title"] == "Pay invoice 4826"
+    assert body["completion_offer"]["action_version"] == 2
+
+    db = get_action_queue_session()
+    try:
+        obligation = db.query(Obligation).one()
+        receipt = db.query(ObligationDocument).filter_by(document_id=20).one()
+        assert obligation.status == "payment_detected"
+        assert obligation.completion_suggested is True
+        assert receipt.role == "receipt"
+    finally:
+        db.close()
+
+
 def test_projection_failure_is_reported_without_losing_relationship(client):
     projection = AsyncMock(side_effect=RuntimeError("Paperless unavailable"))
     with patch(

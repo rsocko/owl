@@ -42,6 +42,7 @@ from doc_intelligence_hub.modules.triage.database import (
 )
 from doc_intelligence_hub.modules.triage.relationships import (
     create_document_relationship,
+    list_document_relationships,
     remove_document_relationship,
 )
 
@@ -610,6 +611,10 @@ def test_receipt_suggests_completion_without_closing_action(db):
     suggestion = completion_suggestion(db, action)
     assert suggestion is not None
     assert suggestion["receipt_document_id"] == 9
+    relationship = list_document_relationships(9, direction="outgoing")[0]
+    assert relationship["target_document_id"] == 1
+    assert relationship["relationship_type"] == "supports"
+    assert relationship["provenance"] == "automatic"
 
 
 def test_explicit_completion_settles_obligation_and_reopen_preserves_receipt(db):

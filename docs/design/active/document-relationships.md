@@ -44,9 +44,11 @@ Duplicate classification remains in `document_duplicates`; relationships remain 
 
 Automatic proposals use structured evidence only. The classifier:
 
-1. requires a provider/correspondent match;
-2. requires at least one obligation identity signal: exact invoice/claim number, exact
-   masked account identifier plus close amount, or same service date plus close amount;
+1. requires a provider/correspondent match unless both documents contain the same
+   conservatively resolved explicit reference;
+2. requires at least one identity signal: exact invoice/claim number, a shared bounded
+   title or OCR reference, exact masked account identifier plus close amount, or same
+   service date plus close amount;
 3. determines chronological direction from document/notice dates;
 4. detects notice stage from bounded phrases: original bill, reminder, second notice,
    past due, final notice, collections, or disconnect;
@@ -55,8 +57,17 @@ Automatic proposals use structured evidence only. The classifier:
 6. proposes automatic creation at confidence `>= 0.85`; lower-confidence results are
    review proposals and never mutate relationship state.
 
-Reason codes and confidence components are returned and stored. Missing provider or
-obligation identity evidence produces no proposal rather than a guessed link.
+Reason codes and confidence components are returned and stored. Missing provider and
+explicit reference evidence, or missing obligation identity evidence within one
+provider, produces no proposal rather than a guessed link.
+
+A receipt or explicit payment confirmation with matching obligation identity is a
+directional `supports` relationship from the receipt to the invoice. Strong matches
+are created during Action Queue analysis, attach the receipt to the existing obligation
+as payment evidence, set payment-detected state, and suggest completion without settling
+the obligation. Ambiguous matches remain review proposals. Manual relationship controls
+offer **Payment receipt / evidence** as an explicit type; after a successful match, OWL
+offers to mark the payable obligation done as a separate user-confirmed action.
 
 ## Priority rules
 
@@ -104,16 +115,30 @@ records before/after audit events, including the triggering relationship ID.
 
 The metadata registry defines two operational fields:
 
-- **Related Document IDs** (`string`) contains all currently related Paperless IDs. A
-  text projection is used because a Paperless document-link custom field stores one
-  target, while an OWL relationship graph can contain many.
+- **OWL Related Documents** (`documentlink`) contains all currently related Paperless
+  documents. Paperless renders these links bidirectionally, while OWL remains
+  authoritative for relationship type and direction. The dedicated OWL-owned field can
+  be rebuilt without replacing links maintained by users or other automation.
 - **Relationship Summary** (`string`) contains a compact generated summary such as
   `follows #123; supports #456`.
+
+Candidate discovery also extracts explicitly labeled invoice, claim, order, contract,
+case, policy, account, and reference numbers from OCR text. Deterministic extraction is
+augmented by the configured LLM, but identifiers are always resolved in code through a
+bounded Paperless OCR substring search followed by case-insensitive whole-token
+verification. References shorter than four characters, year-like values, ambiguous
+references matching more than three documents, and searches exceeding 200 substring
+matches fail closed. A resolved reference creates candidate evidence; it does not by
+itself create a typed relationship.
 
 Each successful create or removal rebuilds both fields for both affected documents from
 OWL's active graph. Projection failure is explicit in the API response and audit state;
 it does not roll back the authoritative OWL relationship. The next sync can safely retry
 because projection is rebuilt, not incrementally appended.
+
+When the legacy OWL-owned **Related Document IDs** text field exists, successful
+projection clears its stale value after writing the native links. OWL does not delete the
+field or modify any user-owned document-link field.
 
 When **automatic duplicate detection** is enabled, Paperless post-consumption automation
 calls `POST /api/duplicates/document-ingested` with `{"document_id": 123}` after metadata
@@ -169,8 +194,8 @@ missing runtime configuration, incompatible custom-field schema, document update
 obligation projection failures; detailed exceptions remain in server logs. OWL remains
 authoritative when any Paperless retry fails.
 
-Action Queue Operations validates the full projection schema: **Related Document IDs**
-(`string`), **Relationship Summary** (`string`), **Related Documents**
+Action Queue Operations validates the full projection schema: **OWL Related Documents**
+(`documentlink`), **Relationship Summary** (`string`), **Related Documents**
 (`documentlink`), **Obligation ID** (`string`), and **Obligation Role** (`select`) with
 the required invoice, receipt, reminder, revision, and supporting options. Missing
 fields/options can be provisioned when Paperless writes are enabled. Incompatible

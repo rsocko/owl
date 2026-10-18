@@ -987,6 +987,20 @@ def manually_link_document(
             confidence=linked.confidence,
             manual=True,
         )
+        from doc_intelligence_hub.modules.triage.relationships import (
+            create_document_relationship,
+        )
+
+        create_document_relationship(
+            source_document_id=document_id,
+            target_document_id=action.document_id,
+            relationship_type="supports",
+            provenance="user",
+            confidence=1.0,
+            reason_codes=["payment_evidence", "manual_receipt_match"],
+            priority_explanation="No relationship priority adjustment",
+            reconcile_action_queue=False,
+        )
     db.flush()
     return linked
 
@@ -1261,6 +1275,18 @@ def associate_receipt(
         evidence_date=_document_date(document),
         confidence=best_score,
         manual=False,
+    )
+    from doc_intelligence_hub.modules.triage.relationships import create_document_relationship
+
+    create_document_relationship(
+        source_document_id=document_id,
+        target_document_id=action.document_id,
+        relationship_type="supports",
+        provenance="automatic",
+        confidence=best_score,
+        reason_codes=["payment_evidence", "receipt_match"],
+        priority_explanation="No relationship priority adjustment",
+        reconcile_action_queue=False,
     )
     obligation.status = "payment_detected"
     obligation.completion_suggested = True

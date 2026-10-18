@@ -8,6 +8,8 @@ from collections import Counter, defaultdict
 from datetime import date
 from typing import Any, Iterable
 
+from doc_intelligence_hub.modules.triage.reference_discovery import extract_title_references
+
 PAPERLESS_PAGE_SIZE = 200
 MAX_EXCLUSION_REASONS = 10
 MAX_CANDIDATES_PER_DOCUMENT = 8
@@ -61,6 +63,7 @@ def normalize_paperless_document(
     *,
     correspondents: dict[int, str],
     field_names: dict[int, str],
+    document_types: dict[int, str] | None = None,
 ) -> dict[str, Any] | None:
     """Return only the structured metadata used by relationship classification."""
     document_id = document.get("id")
@@ -68,12 +71,18 @@ def normalize_paperless_document(
         return None
     custom = _custom_field_values(document, field_names)
     correspondent = document.get("correspondent")
+    document_type = document.get("document_type")
     provider = (
         correspondents.get(correspondent) if isinstance(correspondent, int) else correspondent
     ) or _first_value(custom, _FIELD_ALIASES["provider"])
     normalized = {
         "document_id": document_id,
         "title": document.get("title"),
+        "document_type_name": (
+            (document_types or {}).get(document_type)
+            if isinstance(document_type, int)
+            else document_type
+        ),
         "provider": provider,
         "correspondent": provider,
         "invoice_number": _first_value(custom, _FIELD_ALIASES["invoice_number"]),
@@ -86,6 +95,10 @@ def normalize_paperless_document(
             or document.get("created_date")
             or document.get("created")
         ),
+        "explicit_references": [
+            reference.value
+            for reference in extract_title_references(str(document.get("title") or ""))
+        ],
     }
     return normalized
 
@@ -137,7 +150,7 @@ async def discover_paperless_documents(
     documents = await client.list_documents(
         **{key: value for key, value in query.items() if value is not None}
     )
-    correspondents, _, _ = await client.fetch_all_metadata()
+    correspondents, _, document_types = await client.fetch_all_metadata()
     fields = await client.list_custom_fields()
     field_names = {
         item["id"]: item["name"]
@@ -154,6 +167,7 @@ async def discover_paperless_documents(
                 document,
                 correspondents=correspondents,
                 field_names=field_names,
+                document_types=document_types,
             )
         )
         is not None
@@ -234,6 +248,7 @@ def build_relationship_candidate_pairs(
 ) -> tuple[list[tuple[int, int]], int, dict[str, int]]:
     """Build deterministic compatible buckets without an all-pairs comparison."""
     exact: dict[tuple[str, str, str], list[int]] = defaultdict(list)
+    explicit_references: dict[str, list[int]] = defaultdict(list)
     amount_groups: dict[tuple[str, str, str], list[tuple[int, float]]] = defaultdict(list)
     exclusions: Counter[str] = Counter()
 
@@ -247,6 +262,11 @@ def build_relationship_candidate_pairs(
             exclusions["missing_provider"] += 1
             continue
         indexed = False
+        for reference in metadata.get("explicit_references") or []:
+            identity = _normalized(reference)
+            if identity:
+                explicit_references[identity].append(document_id)
+                indexed = True
         for field in ("invoice_number", "claim_number"):
             identity = _normalized(metadata.get(field))
             if identity:
@@ -276,6 +296,15 @@ def build_relationship_candidate_pairs(
         if group_pairs:
             candidate_groups += 1
             pairs.update(group_pairs)
+    for document_ids in explicit_references.values():
+        unique_ids = sorted(set(document_ids))
+        if 1 < len(unique_ids) <= 3:
+            group_pairs = _bounded_exact_pairs(unique_ids, documents)
+            if group_pairs:
+                candidate_groups += 1
+                pairs.update(group_pairs)
+        elif len(unique_ids) > 3:
+            exclusions["ambiguous_explicit_reference"] += len(unique_ids)
     for grouped_documents in amount_groups.values():
         group_pairs = set(_amount_pairs(grouped_documents))
         if group_pairs:

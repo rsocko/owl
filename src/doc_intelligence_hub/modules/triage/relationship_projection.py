@@ -32,6 +32,7 @@ _PROJECTION_FIELDS = (
     MetadataFieldKey.RELATED_DOCUMENTS,
     MetadataFieldKey.RELATIONSHIP_SUMMARY,
 )
+_LEGACY_RELATED_DOCUMENT_IDS_FIELD = "Related Document IDs"
 
 
 def _projection_values(document_id: int) -> tuple[list[int], str]:
@@ -88,6 +89,25 @@ async def project_relationships_to_paperless(
             "obligation_projection": None,
         }
 
+    legacy_field_id: int | None = None
+    try:
+        field_definitions = await client.list_custom_fields()
+        legacy_definition = next(
+            (
+                definition
+                for definition in field_definitions
+                if isinstance(definition, dict)
+                and definition.get("name") == _LEGACY_RELATED_DOCUMENT_IDS_FIELD
+            ),
+            None,
+        )
+        if legacy_definition is not None:
+            legacy_field_id = int(legacy_definition["id"])
+    except (KeyError, TypeError, ValueError):
+        logger.warning("Ignoring malformed legacy relationship field definition")
+    except Exception:
+        logger.exception("Failed to inspect the legacy relationship projection field")
+
     succeeded_documents: set[int] = set()
     errors: list[dict[str, Any]] = []
     for document_id in targets:
@@ -96,11 +116,13 @@ async def project_relationships_to_paperless(
             updates = [
                 build_metadata_update(
                     MetadataFieldKey.RELATED_DOCUMENTS,
-                    ", ".join(str(related_id) for related_id in related_ids),
+                    related_ids,
                     schema,
                 ),
                 build_metadata_update(MetadataFieldKey.RELATIONSHIP_SUMMARY, summary, schema),
             ]
+            if legacy_field_id is not None:
+                updates.append({"field": legacy_field_id, "value": None})
             await client.update_custom_fields_verified(document_id, updates)
             succeeded_documents.add(document_id)
         except Exception:
