@@ -11,6 +11,8 @@ const {
   bulkMock,
   feedbackMock,
   documentOcrMock,
+  ocrDocumentDetailMock,
+  ocrCandidatesMock,
   paymentCheckMock,
   checkPaymentMock,
   confirmPaymentAndCompleteMock,
@@ -22,6 +24,8 @@ const {
   bulkMock: vi.fn(),
   feedbackMock: vi.fn(),
   documentOcrMock: vi.fn(),
+  ocrDocumentDetailMock: vi.fn(),
+  ocrCandidatesMock: vi.fn(),
   paymentCheckMock: vi.fn(),
   checkPaymentMock: vi.fn(),
   confirmPaymentAndCompleteMock: vi.fn(),
@@ -42,6 +46,12 @@ vi.mock('../lib/api', () => ({
     },
     intake: {
       documentOcr: documentOcrMock,
+    },
+    ocrQuality: {
+      documentDetail: ocrDocumentDetailMock,
+      candidates: {
+        list: ocrCandidatesMock,
+      },
     },
     statements: {
       documentThumb: (id: string) => `/thumb/${id}`,
@@ -133,6 +143,17 @@ describe('ActionWorkspace', () => {
     });
     actionsMock.mockResolvedValue({ actions: actions.map((action) => ({ ...action })), total: actions.length });
     documentOcrMock.mockResolvedValue({ text: 'Extracted document text', quality_score: 86 });
+    ocrDocumentDetailMock.mockImplementation((documentId: number) => Promise.resolve({
+      document_id: documentId,
+      overlay_score: 86,
+      machine_score: 82,
+      review_status: 'GOOD',
+      quality_scorer_version: '2.0.0',
+      assessed_at: '2026-10-17T10:00:00Z',
+      reasons: [],
+      document_profile: { page_count: 1 },
+    }));
+    ocrCandidatesMock.mockResolvedValue({ candidates: [] });
     updateActionMock.mockResolvedValue({});
     splitActionMock.mockResolvedValue({ ...actions[1], id: 4 });
     bulkMock.mockResolvedValue({ affected: 2, action: 'complete' });
@@ -211,6 +232,20 @@ describe('ActionWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next doc' }));
 
     expect(await screen.findByRole('heading', { name: 'Insurance renewal' })).toBeInTheDocument();
+    expect(updateActionMock).not.toHaveBeenCalled();
+    expect(feedbackMock).not.toHaveBeenCalled();
+  });
+
+  it('uses the shared authoritative OCR summary without changing action lifecycle', async () => {
+    renderWorkspace();
+
+    await screen.findByRole('heading', { name: 'Utility bill' });
+    fireEvent.click(screen.getByRole('tab', { name: 'OCR' }));
+
+    expect(await screen.findByRole('heading', { name: 'OCR assessment' })).toBeInTheDocument();
+    expect(screen.getByText('Good')).toBeInTheDocument();
+    expect(screen.getByText('Overlay / readability')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Extracted document text')).toBeInTheDocument();
     expect(updateActionMock).not.toHaveBeenCalled();
     expect(feedbackMock).not.toHaveBeenCalled();
   });

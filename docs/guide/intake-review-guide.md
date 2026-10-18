@@ -102,19 +102,28 @@ the Actions tab rather than maintaining a second document editor.
 ## Analysis and OCR freshness
 
 The preview and core Paperless metadata load first. Suggestions, actions, and
-OCR text then load independently with local progress and error states, so a
-slow analysis service does not blank the entire workspace. Suggestions are
-cached by document ID and Paperless `modified` revision for up to six hours.
-Changing the source revision or choosing **Refresh analysis** bypasses the
-snapshot.
+OCR data then load independently with local progress and error states, so a
+slow analysis service does not blank the entire workspace. The OCR tab uses
+OWL's multidimensional assessment as the authority: overall status, overlay
+and machine-extraction scores, scorer freshness, candidate state, top reasons,
+page profile, and searchable text. The older action-pipeline text-quality
+score is not presented as the overall OCR score.
+
+Suggestions are cached by document ID and Paperless `modified` revision for up
+to six hours. Changing the source revision or choosing **Refresh analysis**
+bypasses the snapshot.
 
 **Refresh analysis** reloads Paperless suggestions and forces action analysis
 for the current source revision. It is blocked while metadata edits are
 unsaved, and a changed Paperless revision returns a conflict.
 
-OCR remediation continues through OWL's OCR Quality workflow. After accepting
+**Inspect OCR** opens the detailed OCR Quality workflow for page inspection,
+candidate generation, comparison, acceptance, rollback, and deep analysis.
+The summary calls out accepted candidates whose downstream invalidation is
+still pending and assessments that predate the accepted OCR. After accepting
 new OCR, return to Inbox Review and refresh analysis so metadata suggestions
-and inferred actions are evaluated against the new searchable text.
+and inferred actions are evaluated against the new searchable text. OCR
+resolution never files the document or completes an action.
 
 Hover the document preview to reveal **Expand** and **New tab** controls.
 Expanded preview uses the full browser viewport and closes with Escape. When a
@@ -130,7 +139,9 @@ available in the document header and expanded viewer.
 | `GET /api/intake/documents/{id}/core` | Load source metadata and taxonomies |
 | `GET /api/intake/documents/{id}/suggestions` | Load revision-cached suggestions |
 | `GET /api/intake/documents/{id}/actions` | Load actions and analysis state |
-| `GET /api/intake/documents/{id}/ocr` | Load searchable text and OCR quality |
+| `GET /api/intake/documents/{id}/ocr` | Load current searchable text (legacy quality fields remain compatibility-only) |
+| `GET /api/ocr-quality/documents/{id}` | Load the authoritative multidimensional OCR assessment |
+| `GET /api/ocr-quality/candidates?document_id={id}` | Load OCR candidate and resolution state |
 | `PUT /api/intake/documents/{id}` | Save metadata and disposition |
 | `POST /api/intake/documents/{id}/refresh` | Refresh suggestions and analysis |
 | `POST /api/intake/taxonomies/{kind}` | Create a Paperless taxonomy value |

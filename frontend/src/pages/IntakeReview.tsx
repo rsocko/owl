@@ -21,6 +21,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../components/ui';
 import DocumentRelationshipsPanel from '../components/DocumentRelationshipsPanel';
+import OcrSummaryPanel from '../components/OcrSummaryPanel';
+import { ocrNeedsAttention, useOcrSummary } from '../hooks/useOcrSummary';
 import { endpoints } from '../lib/api';
 import {
   ACCOUNT_IDENTIFIER_CLASSES,
@@ -125,13 +127,6 @@ interface IntakeCore {
   preview_url: string;
   paperless_url?: string | null;
   write_enabled: boolean;
-}
-
-interface OcrState {
-  quality_score?: number | null;
-  quality_band: 'green' | 'amber' | 'red' | 'unknown';
-  poor_quality: boolean;
-  text: string;
 }
 
 interface MetadataDraft {
@@ -792,21 +787,19 @@ export default function IntakeReview() {
   const [suggestionSources, setSuggestionSources] = useState<Record<string, { available: boolean; error?: string | null }>>({});
   const [suggestionsCached, setSuggestionsCached] = useState(false);
   const [actions, setActions] = useState<IntakeAction[]>([]);
-  const [ocr, setOcr] = useState<OcrState | null>(null);
   const [loadingQueue, setLoadingQueue] = useState(true);
   const [loadingMoreQueue, setLoadingMoreQueue] = useState(false);
   const [loadingCore, setLoadingCore] = useState(false);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [loadingActions, setLoadingActions] = useState(false);
-  const [loadingOcr, setLoadingOcr] = useState(false);
   const [queueError, setQueueError] = useState('');
   const [queueMoreError, setQueueMoreError] = useState('');
   const [coreError, setCoreError] = useState('');
   const [suggestionError, setSuggestionError] = useState('');
   const [actionError, setActionError] = useState('');
-  const [ocrError, setOcrError] = useState('');
   const [busyKey, setBusyKey] = useState('');
   const [relationshipRefreshKey, setRelationshipRefreshKey] = useState(0);
+  const ocrSummary = useOcrSummary(selectedId);
   const [toast, setToast] = useState<{
     message: string;
     tone?: 'success' | 'error';
@@ -907,15 +900,12 @@ export default function IntakeReview() {
     setAccountIdentifierClass('service_account');
     setSuggestions([]);
     setActions([]);
-    setOcr(null);
     setCoreError('');
     setSuggestionError('');
     setActionError('');
-    setOcrError('');
     setLoadingCore(true);
     setLoadingSuggestions(true);
     setLoadingActions(true);
-    setLoadingOcr(true);
 
     const coreRequest = endpoints.intake.documentCore(id)
       .then((response) => {
@@ -953,9 +943,8 @@ export default function IntakeReview() {
     const actionsRequest = endpoints.intake.documentActions(id)
       .then((response) => {
         if (requestId.current !== currentRequest) return;
-        const result = response as { actions: IntakeAction[]; ocr_quality: Omit<OcrState, 'text'> };
+        const result = response as { actions: IntakeAction[] };
         setActions(result.actions);
-        setOcr((current) => ({ text: current?.text || '', ...result.ocr_quality }));
       })
       .catch((error) => {
         if (requestId.current === currentRequest) setActionError(errorMessage(error));
@@ -963,18 +952,7 @@ export default function IntakeReview() {
       .finally(() => {
         if (requestId.current === currentRequest) setLoadingActions(false);
       });
-    const ocrRequest = endpoints.intake.documentOcr(id)
-      .then((response) => {
-        if (requestId.current === currentRequest) setOcr(response as OcrState);
-      })
-      .catch((error) => {
-        if (requestId.current === currentRequest) setOcrError(errorMessage(error));
-      })
-      .finally(() => {
-        if (requestId.current === currentRequest) setLoadingOcr(false);
-      });
-
-    await Promise.all([coreRequest, suggestionsRequest, actionsRequest, ocrRequest]);
+    await Promise.all([coreRequest, suggestionsRequest, actionsRequest]);
   }, []);
 
   useEffect(() => {
@@ -1257,7 +1235,7 @@ export default function IntakeReview() {
     try {
       const response = await endpoints.intake.refresh(core.document.id, core.document.modified) as {
         core: IntakeCore;
-        actions: { actions: IntakeAction[]; ocr_quality: Omit<OcrState, 'text'> };
+        actions: { actions: IntakeAction[] };
         suggestions: Suggestion[];
         suggestion_sources: Record<string, { available: boolean; error?: string | null }>;
       };
@@ -1266,9 +1244,9 @@ export default function IntakeReview() {
       setMetadata(refreshedMetadata);
       setBaseline(refreshedMetadata);
       setActions(response.actions.actions);
-      setOcr((current) => ({ text: current?.text || '', ...response.actions.ocr_quality }));
       setSuggestions(response.suggestions);
       setSuggestionSources(response.suggestion_sources);
+      ocrSummary.reload();
       setSuggestionsCached(false);
       setRelationshipRefreshKey((current) => current + 1);
       showToast('Metadata, suggestions, actions, and relationships refreshed.');
@@ -1427,8 +1405,8 @@ export default function IntakeReview() {
                   <button role="tab" aria-selected={tab === 'related'} className={tab === 'related' ? 'active' : ''} onClick={() => chooseTab('related')}>
                     Related
                   </button>
-                  <button role="tab" aria-selected={tab === 'ocr'} aria-label={ocr?.poor_quality ? 'OCR, needs review' : 'OCR'} className={tab === 'ocr' ? 'active' : ''} onClick={() => chooseTab('ocr')}>
-                    OCR {ocr?.poor_quality ? <span className="intake-tab-alert" aria-label="Poor OCR quality"><CircleAlert size={13} /> Review</span> : null}
+                  <button role="tab" aria-selected={tab === 'ocr'} aria-label={ocrNeedsAttention(ocrSummary.assessment) ? 'OCR, needs review' : 'OCR'} className={tab === 'ocr' ? 'active' : ''} onClick={() => chooseTab('ocr')}>
+                    OCR {ocrNeedsAttention(ocrSummary.assessment) ? <span className="intake-tab-alert" aria-label="OCR needs review"><CircleAlert size={13} /> Review</span> : null}
                   </button>
                 </div>
 
@@ -1585,22 +1563,7 @@ export default function IntakeReview() {
 
                   {tab === 'ocr' ? (
                     <div className="intake-ocr-panel">
-                      {ocrError ? <ErrorState message={`OCR unavailable: ${ocrError}`} onRetry={() => void loadDocument(selectedId)} /> : null}
-                      {loadingOcr && !ocr ? <div className="intake-inline-state"><RefreshCw className="intake-spin" size={15} /> Loading searchable text…</div> : null}
-                      {ocr ? (
-                        <>
-                          <div className={`intake-ocr-score ${ocr.quality_band}`}>
-                            <div><strong>{ocr.quality_score ?? '—'}</strong><span>OCR quality</span></div>
-                            <p>Green 90–100 · Amber 75–89 · Red below 75.{ocr.poor_quality ? ' This document needs OCR review.' : ''}</p>
-                          </div>
-                          {ocr.poor_quality ? <div className="intake-ocr-alert" role="alert"><CircleAlert size={17} /> Poor OCR can make metadata and action analysis stale or incomplete.</div> : null}
-                          <div className="intake-ocr-actions">
-                            <Button onClick={() => { window.location.hash = `#/ocr-quality/documents/${selectedId}`; }}>Review or re-run OCR</Button>
-                            <span>After accepting new OCR, return here and refresh analysis.</span>
-                          </div>
-                          <label className="intake-ocr-text"><span>Searchable text</span><textarea readOnly value={ocr.text || 'No searchable text is available.'} /></label>
-                        </>
-                      ) : null}
+                      <OcrSummaryPanel documentId={selectedId} state={ocrSummary} />
                     </div>
                   ) : null}
                 </div>

@@ -16,6 +16,8 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../components/ui';
+import OcrSummaryPanel from '../components/OcrSummaryPanel';
+import { useOcrSummary } from '../hooks/useOcrSummary';
 import { endpoints, type DocumentSummaryModel } from '../lib/api';
 import { getToastDuration } from '../lib/toast';
 import '../styles/document-workspace.css';
@@ -308,7 +310,6 @@ export default function ActionWorkspace() {
     due_date: '',
     reference: '',
   });
-  const [ocr, setOcr] = useState<{ text?: string; quality_score?: number | null } | null>(null);
   const [confirmNotAction, setConfirmNotAction] = useState<number | null>(null);
   const [confirmAllDone, setConfirmAllDone] = useState(false);
   const [paymentCheck, setPaymentCheck] = useState<PaymentCheck | null>(null);
@@ -380,6 +381,7 @@ export default function ActionWorkspace() {
     () => actions.find((action) => action.id === selectedActionId) ?? null,
     [actions, selectedActionId],
   );
+  const ocrSummary = useOcrSummary(selectedAction?.document_id ?? null);
   const selectedGroup = useMemo(
     () => selectedAction?.document_id == null
       ? null
@@ -403,11 +405,6 @@ export default function ActionWorkspace() {
     setDraft(nextDraft);
     setSavedDraft(nextDraft);
     setNewActionOpen(false);
-    if (selectedAction.document_id != null) {
-      void endpoints.intake.documentOcr(selectedAction.document_id)
-        .then((response) => setOcr(response as { text?: string; quality_score?: number | null }))
-        .catch(() => setOcr(null));
-    }
   }, [selectedAction]);
 
   useEffect(() => {
@@ -1013,8 +1010,7 @@ export default function ActionWorkspace() {
 
                   {tab === 'ocr' ? (
                     <div className="workspace-ocr">
-                      <div><strong>{ocr?.quality_score == null ? '—' : Math.round(ocr.quality_score)}</strong><span>OCR quality</span></div>
-                      <textarea readOnly value={ocr?.text || 'OCR text is unavailable for this document.'} />
+                      <OcrSummaryPanel documentId={selectedGroup.documentId} state={ocrSummary} />
                     </div>
                   ) : null}
                 </div>
