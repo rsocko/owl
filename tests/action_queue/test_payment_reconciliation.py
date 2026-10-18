@@ -368,8 +368,68 @@ def test_orphaned_check_uses_the_configured_connector_reference(db) -> None:
 
     service.payment_projection(action.id)
 
-    generation = db.query(PaymentEvidenceGeneration).filter_by(source_generation=run.id).one()
+    generation = (
+        db.query(PaymentEvidenceGeneration)
+        .filter_by(source_generation=f"{run.id}:source-unavailable")
+        .one()
+    )
     assert generation.connector_ref == "custom-bill-matching"
+
+
+def test_orphaned_check_recovers_from_legacy_partial_failure_generation(db) -> None:
+    obligation = _obligation(db)
+    action = _pay_action(db, obligation)
+    service = PaymentReconciliationService(db)
+    run, _request, _replay = service.start_check(
+        action.id,
+        PaymentCheckRequest(
+            revision="v1:1:1",
+            idempotency_key="payment-check-partial-failure",
+        ),
+    )
+    service.ingest_snapshot(
+        PaymentEvidenceSnapshot.model_validate(
+            {
+                "source_system": "tyrion_bill_match",
+                "connector_ref": "tyrion-bill-matching-v2",
+                "source_generation": run.id,
+                "source_as_of": "2026-10-18T16:20:00Z",
+                "completeness": "partial",
+                "obligation_id": obligation.id,
+                "evidence": [
+                    {
+                        "evidence_ref": f"{run.id}:source-unavailable",
+                        "canonical_document_ref": f"paperless:{action.document_id}",
+                        "kind": "bill",
+                        "payee_hint": action.payee_or_owner,
+                        "amount_minor": 10_000,
+                        "currency": "USD",
+                        "source_state": "source_unavailable",
+                        "match_state": "source_unavailable",
+                        "payment_status": "unknown",
+                        "reason_codes": ["tyrion_check_expired"],
+                    }
+                ],
+            }
+        )
+    )
+    run = db.query(PaymentCheckRun).filter_by(id=run.id).one()
+    run.updated_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=1)
+    db.commit()
+
+    projection = service.payment_projection(action.id)
+
+    db.refresh(run)
+    assert projection["state"] == "source_unavailable"
+    assert run.status == "source_unavailable"
+    assert run.error_code == "tyrion_check_expired"
+    generations = {
+        row.source_generation
+        for row in db.query(PaymentEvidenceGeneration)
+        .filter_by(obligation_id=obligation.id)
+        .all()
+    }
+    assert generations == {run.id, f"{run.id}:source-unavailable"}
 
 
 def test_active_check_rejects_a_different_idempotency_key(db) -> None:

@@ -1289,7 +1289,7 @@ class PaymentReconciliationService:
         snapshot = PaymentEvidenceSnapshot(
             source_system="tyrion_bill_match",
             connector_ref=connector_ref,
-            source_generation=run.id,
+            source_generation=f"{run.id}:source-unavailable",
             source_as_of=datetime.now(UTC),
             completeness="partial",
             obligation_id=obligation.id,
