@@ -404,19 +404,17 @@ def _metadata_spec_by_name(name: str) -> tuple[MetadataFieldKey, Any] | None:
 def _review_custom_fields(
     document: dict[str, Any], definitions: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    definitions_by_id = {
-        definition.get("id"): definition
-        for definition in definitions
-        if isinstance(definition, dict)
+    values_by_id = {
+        item.get("field"): item.get("value")
+        for item in document.get("custom_fields") or []
+        if isinstance(item, dict) and item.get("field")
     }
     fields: list[dict[str, Any]] = []
-    for item in document.get("custom_fields") or []:
-        if not isinstance(item, dict):
+    for definition in definitions:
+        if not isinstance(definition, dict) or not definition.get("id"):
             continue
-        definition = definitions_by_id.get(item.get("field"))
-        if not definition:
-            continue
-        name = str(definition.get("name") or f"Field {item.get('field')}")
+        field_id = definition["id"]
+        name = str(definition.get("name") or f"Field {field_id}")
         if name in _HIDDEN_CUSTOM_FIELD_NAMES:
             continue
         matched = _metadata_spec_by_name(name)
@@ -427,18 +425,36 @@ def _review_custom_fields(
         ):
             continue
         key = matched[0] if matched else None
+        if field_id not in values_by_id and key not in _EDITABLE_CUSTOM_FIELD_KEYS:
+            continue
         fields.append(
             {
-                "field": item.get("field"),
+                "field": field_id,
                 "field_key": key.value if key else None,
                 "name": name,
-                "value": item.get("value"),
+                "value": values_by_id.get(field_id),
                 "data_type": definition.get("data_type"),
                 "editable": key in _EDITABLE_CUSTOM_FIELD_KEYS,
                 "audit": False,
             }
         )
     return fields
+
+
+def _intake_core_payload(
+    request: Request,
+    document_id: int,
+    document: dict[str, Any],
+    taxonomies: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    return {
+        "document": _native_document_payload(document, taxonomies),
+        "taxonomies": taxonomies,
+        "preview_url": f"/api/statements/documents/{document_id}/preview",
+        "download_url": f"/api/documents/{document_id}/download",
+        "paperless_url": _paperless_document_url(request, document_id),
+        "write_enabled": bool(request.app.state.hub_settings.write_to_paperless),
+    }
 
 
 def _native_document_payload(
@@ -864,14 +880,7 @@ async def get_intake_document_core(request: Request, document_id: int) -> dict[s
             )
         except Exception as exc:
             _raise_paperless_error(exc, "loading the intake document")
-        return {
-            "document": _native_document_payload(document, taxonomies),
-            "taxonomies": taxonomies,
-            "preview_url": f"/api/statements/documents/{document_id}/preview",
-            "download_url": f"/api/documents/{document_id}/download",
-            "paperless_url": _paperless_document_url(request, document_id),
-            "write_enabled": bool(request.app.state.hub_settings.write_to_paperless),
-        }
+        return _intake_core_payload(request, document_id, document, taxonomies)
     finally:
         await client.aclose()
 
@@ -1353,6 +1362,7 @@ async def refresh_intake_analysis(
         await client.aclose()
     return {
         "result": result,
+        "core": _intake_core_payload(request, document_id, document, taxonomies),
         "actions": _action_and_quality_payload(document_id),
         "suggestions": suggestions,
         "suggestion_sources": sources,

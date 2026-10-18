@@ -413,6 +413,50 @@ describe('IntakeReview', () => {
     expect(await screen.findByLabelText('Document Amount')).toHaveValue('1,234.50');
   });
 
+  it('updates extracted metadata and the source revision after refreshing analysis', async () => {
+    const refreshedCore = {
+      ...core(1),
+      document: {
+        ...core(1).document,
+        modified: 'revision-1-refreshed',
+        review_fields: [{
+          field: 10,
+          field_key: 'document_amount',
+          name: 'Document Amount',
+          value: 520,
+          data_type: 'float',
+          editable: true,
+          audit: false,
+        }],
+      },
+    };
+    refreshMock.mockResolvedValue({
+      core: refreshedCore,
+      actions: {
+        actions: [],
+        ocr_quality: { quality_score: 90, quality_band: 'green', poor_quality: false },
+      },
+      suggestions: [],
+      suggestion_sources: {
+        paperless_ml: { available: true },
+        paperless_ai: { available: true },
+      },
+    });
+    renderPage();
+
+    const refresh = await screen.findByRole('button', { name: 'Refresh analysis' });
+    await waitFor(() => expect(refresh).toBeEnabled());
+    fireEvent.click(refresh);
+
+    expect(await screen.findByLabelText('Document Amount')).toHaveValue('520.00');
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Updated title' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(saveDocumentMock).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ expected_modified: 'revision-1-refreshed' }),
+    ));
+  });
+
   it('shows and saves the full editable account identifier with its type', async () => {
     documentCoreMock.mockResolvedValue({
       ...core(1),

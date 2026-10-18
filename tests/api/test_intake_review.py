@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 from doc_intelligence_hub.api.routers import intake_review
 from doc_intelligence_hub.core.paperless.client import PaperlessPage
 
@@ -253,6 +255,80 @@ def test_core_hides_operational_fields_and_exposes_editable_document_fields(clie
     ]
     assert fields[0]["value"] == "A-123"
     assert fields[0]["audit"] is False
+
+
+def test_core_exposes_unset_editable_document_fields(client, mock_paperless):
+    intake_review._taxonomy_cache = None
+    mock_paperless.get_document.return_value = _document(custom_fields=[])
+    mock_paperless.list_custom_fields.return_value = [
+        {"id": 9, "name": "Account Identifier", "data_type": "string"},
+        {"id": 10, "name": "Document Amount", "data_type": "monetary"},
+        {"id": 11, "name": "Document Due Date", "data_type": "date"},
+        {"id": 12, "name": "Action Status", "data_type": "string"},
+        {"id": 13, "name": "Household Note", "data_type": "string"},
+    ]
+
+    response = client.get("/api/intake/documents/42/core")
+
+    assert response.status_code == 200
+    fields = response.json()["document"]["review_fields"]
+    assert [(field["name"], field["value"], field["editable"]) for field in fields] == [
+        ("Account Identifier", None, True),
+        ("Document Amount", None, True),
+        ("Document Due Date", None, True),
+    ]
+
+
+def test_refresh_returns_updated_document_metadata(client, mock_paperless, monkeypatch):
+    intake_review._taxonomy_cache = None
+    mock_paperless.get_document.side_effect = [
+        _document(),
+        _document(
+            modified="2026-10-17T08:00:00Z",
+            custom_fields=[
+                {"field": 9, "value": "A-123"},
+                {"field": 10, "value": 520.0},
+            ],
+        ),
+    ]
+    mock_paperless.list_custom_fields.return_value = [
+        {"id": 9, "name": "Account Identifier", "data_type": "string"},
+        {"id": 10, "name": "Document Amount", "data_type": "monetary"},
+    ]
+    monkeypatch.setattr(
+        intake_review,
+        "run_pipeline",
+        AsyncMock(return_value={"status": "completed"}),
+    )
+    monkeypatch.setattr(
+        intake_review,
+        "_suggestions_for_document",
+        AsyncMock(return_value=([], {}, False)),
+    )
+    monkeypatch.setattr(
+        intake_review,
+        "_action_and_quality_payload",
+        lambda document_id: {
+            "actions": [],
+            "analysis": {"available": True},
+            "ocr_quality": {
+                "quality_score": None,
+                "quality_band": "unknown",
+                "poor_quality": False,
+            },
+        },
+    )
+
+    response = client.post(
+        "/api/intake/documents/42/refresh",
+        params={"expected_modified": "2026-10-16T12:00:00Z"},
+    )
+
+    assert response.status_code == 200
+    refreshed = response.json()["core"]["document"]
+    assert refreshed["modified"] == "2026-10-17T08:00:00Z"
+    assert refreshed["review_fields"][1]["name"] == "Document Amount"
+    assert refreshed["review_fields"][1]["value"] == 520.0
 
 
 def test_save_rejects_external_edit_conflict(client, mock_paperless):
