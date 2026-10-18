@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -11,14 +11,18 @@ from doc_intelligence_hub.modules.action_queue.database import (
     Obligation,
     ObligationDocument,
     ObligationPaymentEdge,
+    PaymentCheckRun,
     PaymentEvidence,
     PaymentReconciliationCase,
+    PaymentRelationshipEvent,
     get_session,
     init_db,
 )
 from doc_intelligence_hub.modules.action_queue.obligations import sync_obligation_status
 from doc_intelligence_hub.modules.action_queue.payment_reconciliation import (
     IdempotencyConflictError,
+    PaymentCheckInProgressError,
+    PaymentCheckRequest,
     PaymentEvidenceSnapshot,
     PaymentReconciliationService,
     PaymentReviewAction,
@@ -51,6 +55,26 @@ def _obligation(db, *, expected: int | None = 10_000, status: str = "open") -> O
     db.add(obligation)
     db.commit()
     return obligation
+
+
+def _pay_action(db, obligation: Obligation, *, action_id: int = 1) -> Action:
+    action = Action(
+        id=action_id,
+        document_id=100 + action_id,
+        document_title="Utility bill",
+        action_type="PAY",
+        title="Pay utility bill",
+        amount=100.00,
+        due_date=date(2026, 10, 20),
+        document_date=date(2026, 10, 10),
+        payee_or_owner="City Utilities",
+        status="pending",
+        action_ready=True,
+        obligation_id=obligation.id,
+    )
+    db.add(action)
+    db.commit()
+    return action
 
 
 def _snapshot(
@@ -254,6 +278,72 @@ def test_posted_evidence_suggests_but_does_not_settle_obligation(db) -> None:
     assert obligation.status == "payment_detected"
     assert obligation.completion_suggested is True
     assert obligation.status != "settled"
+
+
+def test_orphaned_check_expires_with_audit_and_allows_retry(db) -> None:
+    obligation = _obligation(db)
+    action = _pay_action(db, obligation)
+    service = PaymentReconciliationService(db)
+    first, _request, replay = service.start_check(
+        action.id,
+        PaymentCheckRequest(
+            revision="v1:1:1",
+            idempotency_key="payment-check-first",
+        ),
+    )
+    first.updated_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=1)
+    db.commit()
+
+    projection = service.payment_projection(action.id)
+
+    db.refresh(first)
+    assert projection["state"] == "source_unavailable"
+    assert first.status == "source_unavailable"
+    assert first.error_code == "tyrion_check_expired"
+    assert replay is False
+    assert (
+        db.query(PaymentRelationshipEvent)
+        .filter_by(action_scope=f"payment_check:{first.id}", action="check_failed")
+        .one()
+        .new_state["error_code"]
+        == "tyrion_check_expired"
+    )
+
+    retry, _request, replay = service.start_check(
+        action.id,
+        PaymentCheckRequest(
+            revision=projection["revision"],
+            idempotency_key="payment-check-retry",
+        ),
+    )
+
+    assert retry.status == "checking"
+    assert retry.id != first.id
+    assert replay is False
+
+
+def test_active_check_rejects_a_different_idempotency_key(db) -> None:
+    obligation = _obligation(db)
+    action = _pay_action(db, obligation)
+    service = PaymentReconciliationService(db)
+    service.start_check(
+        action.id,
+        PaymentCheckRequest(
+            revision="v1:1:1",
+            idempotency_key="payment-check-first",
+        ),
+    )
+
+    with pytest.raises(PaymentCheckInProgressError, match="payment_check_in_progress"):
+        service.start_check(
+            action.id,
+            PaymentCheckRequest(
+                revision="v1:1:2",
+                idempotency_key="payment-check-overlap",
+            ),
+        )
+
+    assert db.query(PaymentCheckRun).filter_by(status="checking").count() == 1
 
 
 def test_manual_rejection_survives_newer_generation(db) -> None:

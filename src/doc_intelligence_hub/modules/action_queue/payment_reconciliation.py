@@ -67,6 +67,12 @@ _EXCEPTION_CASES = frozenset(
 )
 _SOURCE_REFERENCE_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"
 _RESERVED_SOURCE_REFERENCES = frozenset({"__proto__", "constructor", "prototype"})
+TYRION_BILL_MATCH_TIMEOUT_SECONDS = 30.0
+TYRION_CHECK_FINALIZATION_GRACE_SECONDS = 15.0
+TYRION_CHECK_STALE_AFTER = timedelta(
+    seconds=TYRION_BILL_MATCH_TIMEOUT_SECONDS + TYRION_CHECK_FINALIZATION_GRACE_SECONDS
+)
+TYRION_BILL_MATCH_CONNECTOR_REF = "tyrion-bill-matching-v2"
 
 
 def _utcnow() -> datetime:
@@ -807,6 +813,10 @@ class IdempotencyConflictError(ValueError):
     pass
 
 
+class PaymentCheckInProgressError(ValueError):
+    pass
+
+
 class TyrionBillMatchingClient:
     def __init__(self, *, url: str, api_token: str | None = None):
         self.url = url
@@ -816,7 +826,7 @@ class TyrionBillMatchingClient:
         headers = {"Accept": "application/json"}
         if self.api_token:
             headers["Authorization"] = f"Bearer {self.api_token}"
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=TYRION_BILL_MATCH_TIMEOUT_SECONDS) as client:
             response = await client.post(
                 self.url,
                 headers=headers,
@@ -848,6 +858,12 @@ class PaymentReconciliationService:
             .order_by(PaymentCheckRun.updated_at.desc(), PaymentCheckRun.created_at.desc())
             .first()
         )
+        if latest_run and self._is_stale_check(latest_run):
+            return self.fail_check(
+                latest_run.id,
+                connector_ref=TYRION_BILL_MATCH_CONNECTOR_REF,
+                error_code="tyrion_check_expired",
+            )
         cases = (
             self.db.query(PaymentReconciliationCase)
             .filter_by(obligation_id=obligation.id, active=True)
@@ -933,7 +949,7 @@ class PaymentReconciliationService:
         )
         messages = {
             "unchecked": "Payment has not been checked.",
-            "checking": "Checking configured eligible financial accounts.",
+            "checking": "Checking all financial accounts except any configured exclusions.",
             "posted_match": "A posted payment candidate requires confirmation.",
             "pending_match": "A matching transaction is still pending.",
             "multiple_matches": "Multiple plausible payment candidates require review.",
@@ -1070,6 +1086,21 @@ class PaymentReconciliationService:
             if existing.request_digest != request_digest:
                 raise IdempotencyConflictError("idempotency_key_payload_conflict")
             return existing, tyrion_request, True
+        active_run = (
+            self.db.query(PaymentCheckRun)
+            .filter_by(obligation_id=obligation.id, status="checking")
+            .order_by(PaymentCheckRun.updated_at.desc(), PaymentCheckRun.created_at.desc())
+            .first()
+        )
+        if active_run and self._is_stale_check(active_run):
+            self.fail_check(
+                active_run.id,
+                connector_ref=TYRION_BILL_MATCH_CONNECTOR_REF,
+                error_code="tyrion_check_expired",
+            )
+            active_run = None
+        if active_run:
+            raise PaymentCheckInProgressError("payment_check_in_progress")
         if request.revision != self._action_revision(action, obligation):
             raise RevisionConflictError("payment_check_revision_conflict")
         expected_obligation_revision = obligation.revision or 1
@@ -1225,6 +1256,8 @@ class PaymentReconciliationService:
     ) -> dict:
         run = self.db.query(PaymentCheckRun).filter_by(id=run_id).one()
         action = self.db.query(Action).filter_by(id=run.action_id).one()
+        if run.status != "checking":
+            return self.payment_projection(action.id)
         obligation = self.db.query(Obligation).filter_by(id=run.obligation_id).one()
         snapshot = PaymentEvidenceSnapshot(
             source_system="tyrion_bill_match",
@@ -1253,10 +1286,36 @@ class PaymentReconciliationService:
         run = self.db.query(PaymentCheckRun).filter_by(id=run_id).one()
         run.status = "source_unavailable"
         run.error_code = error_code
+        self.db.add(
+            PaymentRelationshipEvent(
+                id=_stable_id("event", run.id, "source_unavailable"),
+                action_scope=f"payment_check:{run.id}",
+                idempotency_key=f"{run.id}:source_unavailable",
+                obligation_id=run.obligation_id,
+                action="check_failed",
+                actor="system",
+                provenance="tyrion_bill_match",
+                previous_state={"state": "checking", "run_id": run.id},
+                new_state={
+                    "state": "source_unavailable",
+                    "run_id": run.id,
+                    "error_code": error_code,
+                },
+                source_generation=run.id,
+                expected_revision=run.expected_revision,
+            )
+        )
         projection = self.payment_projection(action.id)
         run.result = {key: value for key, value in projection.items() if not key.startswith("_")}
         self.db.commit()
         return projection
+
+    @staticmethod
+    def _is_stale_check(run: PaymentCheckRun) -> bool:
+        if run.status != "checking":
+            return False
+        last_updated = run.updated_at or run.created_at
+        return bool(last_updated and last_updated + TYRION_CHECK_STALE_AFTER <= _utcnow())
 
     def ingest_snapshot(self, snapshot: PaymentEvidenceSnapshot) -> PaymentSnapshotResult:
         obligation = self.db.query(Obligation).filter_by(id=snapshot.obligation_id).first()
