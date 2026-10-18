@@ -86,9 +86,10 @@ class TestQueueRunSettings:
             response = client.post("/api/queue/run", json={"dry_run": True})
 
         assert response.status_code == 200
-        assert mock_run.await_args.kwargs["added_after"] == (
-            date.today() - timedelta(days=90)
-        ).isoformat()
+        assert (
+            mock_run.await_args.kwargs["added_after"]
+            == (date.today() - timedelta(days=90)).isoformat()
+        )
 
     def test_all_documents_bypasses_persisted_saved_view(self, client, mock_paperless):
         from unittest.mock import AsyncMock, patch

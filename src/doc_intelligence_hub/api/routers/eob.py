@@ -499,8 +499,8 @@ async def run_matching_pipeline(request: Request, body: RunRequest) -> dict[str,
             }
         else:
             resolved_created_after = (
-                datetime.now(UTC) - timedelta(days=body.initial_lookback_days)
-            ).date().isoformat()
+                (datetime.now(UTC) - timedelta(days=body.initial_lookback_days)).date().isoformat()
+            )
             since_last_run_info = {
                 "resolved_from_run_id": None,
                 "resolved_created_after": resolved_created_after,

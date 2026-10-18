@@ -75,9 +75,7 @@ class IncrementalDiscoveryService:
         effective_now = normalize_utc_datetime(now or datetime.now(UTC))
         effective_page_size = page_size or settings.discovery_page_size
         effective_overlap = (
-            settings.discovery_overlap_seconds
-            if overlap_seconds is None
-            else overlap_seconds
+            settings.discovery_overlap_seconds if overlap_seconds is None else overlap_seconds
         )
         if effective_page_size < 1 or effective_page_size > 500:
             raise ValueError("page_size must be between 1 and 500")

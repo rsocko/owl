@@ -428,9 +428,10 @@ async def test_fetch_paperless_documents_allows_restricted_metadata_endpoints() 
     assert len(documents) == 1
     assert documents[0].correspondent_name == "Unknown"
     assert documents[0].tags == ["7"]
-    assert document_queries[0]["created__date__gte"] == (
-        date.today() - timedelta(days=548)
-    ).isoformat()
+    assert (
+        document_queries[0]["created__date__gte"]
+        == (date.today() - timedelta(days=548)).isoformat()
+    )
 
 
 @pytest.mark.asyncio

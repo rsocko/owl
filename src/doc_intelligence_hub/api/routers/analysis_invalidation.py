@@ -148,9 +148,7 @@ async def _matches_action_queue_scope(
             parsed_added_at = datetime.fromisoformat(added_at.replace("Z", "+00:00"))
             if parsed_added_at.tzinfo is None:
                 parsed_added_at = parsed_added_at.replace(tzinfo=UTC)
-            if parsed_added_at < (
-                datetime.now(UTC) - timedelta(days=lookback_days)
-            ):
+            if parsed_added_at < (datetime.now(UTC) - timedelta(days=lookback_days)):
                 return False
         except ValueError:
             pass
@@ -212,9 +210,7 @@ async def _analyze_document(
     )
     action_scope_matches = await _matches_action_queue_scope(request, client, document)
     rule_ids = [
-        rule.id
-        for rule in rules
-        if rule.id != "action-queue-trigger" or action_scope_matches
+        rule.id for rule in rules if rule.id != "action-queue-trigger" or action_scope_matches
     ]
 
     result = await execute_trigger(
@@ -224,9 +220,7 @@ async def _analyze_document(
         rule_ids=rule_ids,
         dry_run=False,
     )
-    failed_results = [
-        item for item in result.get("results", []) if item.get("success") is False
-    ]
+    failed_results = [item for item in result.get("results", []) if item.get("success") is False]
     if result.get("errors") or failed_results:
         raise RuntimeError("targeted analysis failed")
     return result
@@ -304,8 +298,7 @@ async def reconcile(request: Request, body: ReconcileRequest) -> dict[str, Any]:
         ignored_tag_ids = {
             int(tag["id"])
             for tag in tags
-            if tag.get("id")
-            and str(tag.get("name") or "").strip().casefold() == "inbox"
+            if tag.get("id") and str(tag.get("name") or "").strip().casefold() == "inbox"
         }
         governed_custom_field_ids = {
             int(field["id"])
@@ -366,8 +359,7 @@ async def backfill(request: Request, body: BackfillRequest) -> dict[str, Any]:
             ignored_tag_ids={
                 int(tag["id"])
                 for tag in tags
-                if tag.get("id")
-                and str(tag.get("name") or "").strip().casefold() == "inbox"
+                if tag.get("id") and str(tag.get("name") or "").strip().casefold() == "inbox"
             },
             dry_run=body.dry_run,
         )

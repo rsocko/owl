@@ -314,8 +314,7 @@ def _matches_trigger_filter(rule: RuleConfig, document: dict[str, Any] | None) -
             else [trigger_filter.document_type]
         )
         if actual_document_type not in {
-            str(document_type).strip().casefold()
-            for document_type in expected_document_types
+            str(document_type).strip().casefold() for document_type in expected_document_types
         }:
             return False
 

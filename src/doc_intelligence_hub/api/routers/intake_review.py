@@ -1509,7 +1509,9 @@ async def save_intake_document(
             patch["tags"] = [tag_id for tag_id in source_tags if tag_id != inbox_tag_id]
 
         try:
-            updated_response = await client.update_document(document_id, patch) if patch else current
+            updated_response = (
+                await client.update_document(document_id, patch) if patch else current
+            )
             updated = {**current, **updated_response}
         except Exception as exc:
             _raise_paperless_error(exc, "saving document metadata")
@@ -1521,8 +1523,8 @@ async def save_intake_document(
             except Exception as exc:
                 _raise_paperless_error(exc, "loading analysis inputs after saving")
             before_source_fingerprint, _, _ = _document_analysis_inputs(current, taxonomies)
-            after_source_fingerprint, content_identity, metadata_fields = (
-                _document_analysis_inputs(updated, taxonomies)
+            after_source_fingerprint, content_identity, metadata_fields = _document_analysis_inputs(
+                updated, taxonomies
             )
             if before_source_fingerprint != after_source_fingerprint:
                 init_invalidation_db()

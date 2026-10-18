@@ -216,6 +216,11 @@ class TestPipelineErrorIsolation:
         )
         monkeypatch.setattr(
             pipeline.paperless,
+            "list_custom_fields",
+            AsyncMock(return_value=[]),
+        )
+        monkeypatch.setattr(
+            pipeline.paperless,
             "list_documents",
             AsyncMock(return_value=_make_docs(1)),
         )
