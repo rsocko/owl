@@ -901,11 +901,7 @@ def test_ambiguous_candidates_can_be_discarded_and_selected(db) -> None:
     db.refresh(action)
     assert action.status == "completed"
     assert (
-        db.query(ObligationPaymentEdge)
-        .filter_by(evidence_id=rejected_id)
-        .one()
-        .state
-        == "rejected"
+        db.query(ObligationPaymentEdge).filter_by(evidence_id=rejected_id).one().state == "rejected"
     )
 
 

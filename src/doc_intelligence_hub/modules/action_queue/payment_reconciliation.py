@@ -1908,11 +1908,7 @@ class PaymentReconciliationService:
             target_ids = [request.evidence_id]
         if not target_ids:
             raise ValueError("payment_candidate_not_found")
-        review_ids = (
-            list(candidates)
-            if request.action in {"confirm", "reject_all"}
-            else target_ids
-        )
+        review_ids = list(candidates) if request.action in {"confirm", "reject_all"} else target_ids
 
         cases = (
             self.db.query(PaymentReconciliationCase)
