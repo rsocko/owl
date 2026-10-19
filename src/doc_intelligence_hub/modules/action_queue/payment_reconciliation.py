@@ -1453,7 +1453,7 @@ class PaymentReconciliationService:
         )
         existing_refs = {
             evidence_ref
-            for evidence_ref, in self.db.query(PaymentEvidence.evidence_ref)
+            for (evidence_ref,) in self.db.query(PaymentEvidence.evidence_ref)
             .filter_by(
                 source_system=snapshot.source_system,
                 connector_ref=snapshot.connector_ref,
