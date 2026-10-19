@@ -104,6 +104,9 @@ interface ReviewField {
   field_key?: string | null;
   name: string;
   value: unknown;
+  stored_value?: unknown;
+  identifier_class?: AccountIdentifierClass | null;
+  recovered_from_document?: boolean;
   data_type?: string | null;
   editable: boolean;
   audit: boolean;
@@ -205,7 +208,14 @@ interface PendingWriteConflict {
   choices: Record<string, ConflictChoice>;
 }
 
-function initialMetadata(core: IntakeCore): MetadataDraft {
+function reviewFieldValue(field: ReviewField, useStoredValue: boolean): string {
+  const value = useStoredValue && field.recovered_from_document
+    ? field.stored_value
+    : field.value;
+  return value == null ? '' : String(value);
+}
+
+function initialMetadata(core: IntakeCore, useStoredValues = false): MetadataDraft {
   return {
     title: core.document.title || '',
     created: core.document.created?.slice(0, 10) || '',
@@ -216,7 +226,7 @@ function initialMetadata(core: IntakeCore): MetadataDraft {
     customFields: Object.fromEntries(
       (core.document.review_fields || []).map((field) => [
         String(field.field),
-        field.value == null ? '' : String(field.value),
+        reviewFieldValue(field, useStoredValues),
       ]),
     ),
   };
@@ -783,9 +793,13 @@ export default function InboxWorkflow() {
         if (requestId.current !== currentRequest) return;
         const nextCore = response as IntakeCore;
         const nextMetadata = initialMetadata(nextCore);
+        const accountIdentifierField = nextCore.document.review_fields?.find(
+          (field) => field.field_key === 'account_identifier',
+        );
         setCore(nextCore);
         setMetadata(nextMetadata);
-        setBaseline(nextMetadata);
+        setBaseline(initialMetadata(nextCore, true));
+        setAccountIdentifierClass(accountIdentifierField?.identifier_class || 'service_account');
       })
       .catch((error) => {
         if (requestId.current === currentRequest) setCoreError(errorMessage(error));
@@ -1483,7 +1497,11 @@ export default function InboxWorkflow() {
                                       </option>
                                     ))}
                                   </select>
-                                  <small>The full value is stored exactly in Paperless.</small>
+                                  <small>
+                                    {field.recovered_from_document
+                                      ? 'Recovered from document text. Save changes to replace the masked Paperless value.'
+                                      : 'The full value is stored exactly in Paperless.'}
+                                  </small>
                                 </div>
                               ) : (
                                 <label className="intake-field" key={field.field}>
