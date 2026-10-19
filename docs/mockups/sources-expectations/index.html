@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OWL · Document Sources</title>
+  <link rel="stylesheet" href="workspace.css">
+  <script src="workspace.js" defer></script>
+</head>
+<body>
+  <!--
+  THESIS: Source review is an evidence-led policy decision, not a configuration page or a reconciliation dashboard.
+  OWN-WORLD: OWL's restrained blue-gray workspace, dense operational type, clear status color, and document-first evidence.
+  STORY: Choose a source, understand its document series, decide the durable expectation, then complete and advance.
+  FIRST VIEWPORT: Prioritized source rail left, series evidence and representative documents center, one focused policy decision right.
+  FORM: Three-lane source review workspace; surface seed 641ff8c5, grounded candidate 5.
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+  -->
+  <a class="skip-link" href="#source-workspace">Skip to Document Sources</a>
+  <div class="prototype-bar">
+    <a href="../index.html">← All OWL mockups</a>
+    <nav aria-label="Prototype screens">
+      <a class="active" href="index.html">Document Sources</a>
+      <a href="expectation-setup.html">Expectation setup</a>
+      <a href="document-coverage.html">Document Coverage</a>
+    </nav>
+    <span>Synthetic evidence · interaction study · no writes</span>
+  </div>
+  <header class="topnav">
+    <a class="brand" href="#source-workspace" aria-label="OWL home">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 9.5 7.5 5 12 8l4.5-3L20 9.5V15a8 8 0 0 1-16 0Z"/><circle cx="9" cy="13" r="1.5"/><circle cx="15" cy="13" r="1.5"/><path d="m10.5 16 1.5 1.2 1.5-1.2"/></svg></span>
+      <span>OWL <small>Organize. Watch. Learn.</small></span>
+    </a>
+    <nav aria-label="Workflow destinations">
+      <a href="../../../mockups/intake-review/index.html">Inbox</a>
+      <a href="../action-workspace/index.html">Review</a>
+      <a class="active" href="index.html">Sources <span class="nav-count">12</span></a>
+      <a href="document-coverage.html">Coverage <span class="nav-count">4</span></a>
+    </nav>
+    <span class="connection">Paperless and Tyrion connected</span>
+  </header>
+
+  <main id="source-workspace" class="workspace">
+    <aside class="source-rail" aria-label="Document sources and external signals">
+      <div class="rail-heading">
+        <div><h1>Document Sources</h1><p id="rail-summary"><strong>12 correspondents need review</strong></p></div>
+        <button class="icon-button" type="button" aria-label="Collapse source queue"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></button>
+      </div>
+      <div class="rail-tools">
+        <div class="source-mode-switch" role="group" aria-label="Document source queue type">
+          <button class="active" type="button" data-source-mode="review">Needs review <span>12</span></button>
+          <button type="button" data-source-mode="signals">External signals <span>4</span></button>
+          <button type="button" data-source-mode="directory">All correspondents <span>247</span></button>
+        </div>
+        <div class="search-filter-row">
+          <label class="search-box"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="source-search" type="search" placeholder="Find correspondent or series"></label>
+          <button id="source-filter-trigger" class="filter-trigger" type="button" aria-expanded="false" aria-controls="source-filter-popover" aria-label="Filter document sources">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+            <span>2</span>
+          </button>
+          <div id="source-filter-popover" class="filter-popover" hidden>
+            <div class="filter-popover-heading"><strong>Filter document sources</strong><button type="button" id="clear-source-filters">Clear</button></div>
+            <fieldset>
+              <legend>Review reason</legend>
+              <label><input type="checkbox" checked> New correspondent <span>5</span></label>
+              <label><input type="checkbox" checked> New series detected <span>4</span></label>
+              <label><input type="checkbox"> Evidence changed <span>2</span></label>
+              <label><input type="checkbox"> Revisit due <span>1</span></label>
+            </fieldset>
+            <fieldset>
+              <legend>Disposition</legend>
+              <label><input type="checkbox"> Needs review <span>12</span></label>
+              <label><input type="checkbox"> Expectations configured <span>46</span></label>
+              <label><input type="checkbox"> No series expected <span>174</span></label>
+              <label><input type="checkbox"> Waiting for history <span>14</span></label>
+              <label><input type="checkbox"> Ignored or retired <span>1</span></label>
+            </fieldset>
+            <fieldset>
+              <legend>Evidence</legend>
+              <label><input type="checkbox"> Single document <span>138</span></label>
+              <label><input type="checkbox"> Multiple documents, no pattern <span>27</span></label>
+              <label><input type="checkbox"> Unresolved series <span>9</span></label>
+              <label><input type="checkbox"> Stale analysis <span>3</span></label>
+            </fieldset>
+            <fieldset>
+              <legend>System relationship</legend>
+              <label><input type="checkbox"> Tyrion account linked <span>7</span></label>
+              <label><input type="checkbox"> Tyrion obligation linked <span>3</span></label>
+              <label><input type="checkbox"> Paperless only <span>237</span></label>
+            </fieldset>
+            <button class="primary filter-apply" type="button">Apply filters</button>
+          </div>
+        </div>
+      </div>
+      <div class="rail-label"><span id="rail-list-label">Correspondents needing review</span><span>↑ ↓ to navigate</span></div>
+      <div id="correspondent-list" class="source-list" tabindex="0">
+        <button class="source-item active" type="button" data-source data-name="Harbor Bank" data-meta="Paperless #41 · analyzed 2 hours ago">
+          <span class="source-copy"><strong>Harbor Bank</strong><span>New series detected · 18 documents</span><span>2 Tyrion accounts · 2 unresolved series</span></span>
+          <span class="source-state"><span class="count">2</span><small>High</small></span>
+        </button>
+        <button class="source-item" type="button" data-source data-name="Pine Mutual" data-meta="Paperless #88 · analyzed yesterday">
+          <span class="source-copy"><strong>Pine Mutual</strong><span>Evidence changed · 4 documents</span><span>1 Tyrion obligation · policy incomplete</span></span>
+          <span class="source-state"><span class="count">1</span><small>High</small></span>
+        </button>
+        <button class="source-item" type="button" data-source data-name="Cedar Dental" data-meta="Paperless #19 · analyzed 3 days ago">
+          <span class="source-copy"><strong>Cedar Dental</strong><span>New series detected · 27 documents</span><span>No financial relationship · 3 possible series</span></span>
+          <span class="source-state"><span class="count">3</span><small>Medium</small></span>
+        </button>
+        <button class="source-item" type="button" data-source data-name="Northline Energy" data-meta="Paperless #104 · analyzed 5 days ago">
+          <span class="source-copy"><strong>Northline Energy</strong><span>New correspondent · 11 documents</span><span>1 Tyrion obligation · monthly statement</span></span>
+          <span class="source-state"><span class="count info">1</span><small>Medium</small></span>
+        </button>
+        <button class="source-item" type="button" data-source data-name="County Tax Office" data-meta="Paperless #131 · analyzed 1 week ago">
+          <span class="source-copy"><strong>County Tax Office</strong><span>Annual tax notice · 3 documents</span><span>Expected month not defined</span></span>
+          <span class="source-state"><span class="count">1</span><small>Medium</small></span>
+        </button>
+        <button class="source-item" type="button" data-source data-name="Lakeview Heating" data-meta="Paperless #73 · analyzed 2 weeks ago">
+          <span class="source-copy"><strong>Lakeview Heating</strong><span>Service reminders · irregular history</span><span>No monitoring recommended</span></span>
+          <span class="source-state"><span class="count ok">1</span><small>Low</small></span>
+        </button>
+      </div>
+      <div id="signal-list" class="source-list" tabindex="0" hidden>
+        <button class="source-item active" type="button">
+          <span class="source-copy"><strong>Harbor Bank checking •••• 4821</strong><span>Tyrion account · high-confidence match</span><span>Suggested correspondent: Harbor Bank</span></span>
+          <span class="source-state"><span class="count info">1</span><small>Account</small></span>
+        </button>
+        <button class="source-item" type="button">
+          <span class="source-copy"><strong>Harbor Bank credit card •••• 7704</strong><span>Tyrion account · high-confidence match</span><span>Suggested correspondent: Harbor Bank</span></span>
+          <span class="source-state"><span class="count info">1</span><small>Account</small></span>
+        </button>
+        <button class="source-item" type="button">
+          <span class="source-copy"><strong>County Mortgage •••• 9031</strong><span>Tyrion account · no Paperless match</span><span>May require a new correspondent</span></span>
+          <span class="source-state"><span class="count">!</span><small>Account</small></span>
+        </button>
+        <button class="source-item" type="button">
+          <span class="source-copy"><strong>Northline Energy recurring payment</strong><span>Tyrion obligation · document uncertain</span><span>Could be a statement, bill, or documentless</span></span>
+          <span class="source-state"><span class="count">?</span><small>Obligation</small></span>
+        </button>
+      </div>
+      <div id="directory-list" class="source-list" tabindex="0" hidden>
+        <button class="source-item active" type="button">
+          <span class="source-copy"><strong>John Doe</strong><span>Paperless correspondent · 1 document</span><span>No series expected · reviewed Oct 18</span></span>
+          <span class="source-state"><span class="count ok">✓</span><small>One-off</small></span>
+        </button>
+        <button class="source-item" type="button">
+          <span class="source-copy"><strong>Harbor Bank</strong><span>Paperless correspondent · 18 documents</span><span>Expectations configured · 2 Tyrion accounts</span></span>
+          <span class="source-state"><span class="count ok">2</span><small>Monitored</small></span>
+        </button>
+        <button class="source-item" type="button">
+          <span class="source-copy"><strong>Northwood School</strong><span>Paperless correspondent · 2 documents</span><span>Waiting for more history · revisit Jan 15</span></span>
+          <span class="source-state"><span class="count info">…</span><small>Waiting</small></span>
+        </button>
+        <button class="source-item" type="button">
+          <span class="source-copy"><strong>Cedar Dental</strong><span>Paperless correspondent · 27 documents</span><span>Needs review · 3 candidate series</span></span>
+          <span class="source-state"><span class="count">3</span><small>Review</small></span>
+        </button>
+        <button class="source-item" type="button">
+          <span class="source-copy"><strong>Old Utility Provider</strong><span>Orphaned Paperless correspondent</span><span>Retired · retained for audit history</span></span>
+          <span class="source-state"><span class="count">—</span><small>Retired</small></span>
+        </button>
+      </div>
+      <div id="rail-footer" class="rail-footer">The review queue contains only new or materially changed correspondents, not the complete Paperless directory.</div>
+    </aside>
+
+    <section class="series-stage source-view" aria-label="Selected source evidence">
+      <header class="source-header">
+        <div class="source-title"><span id="source-meta">Paperless #41 · analyzed 2 hours ago</span><h2 id="source-name">Harbor Bank</h2></div>
+        <dl class="source-facts">
+          <div><dt>Documents</dt><dd>18 since 2025</dd></div>
+          <div><dt>Linked accounts</dt><dd>2 from Tyrion</dd></div>
+          <div><dt>Review</dt><dd>2 unresolved</dd></div>
+        </dl>
+        <div class="source-header-actions">
+          <button class="secondary" type="button">Complete source review</button>
+          <button class="secondary" type="button"><svg viewBox="0 0 24 24"><path d="M14 5h5v5M13 11l6-6M19 14v5H5V5h5"/></svg>Paperless</button>
+        </div>
+      </header>
+      <div class="evidence-scroll">
+        <div class="evidence-hero">
+          <div class="review-reason">
+            <svg viewBox="0 0 24 24"><path d="M12 3 2.5 20h19Z"/><path d="M12 9v4M12 17h.01"/></svg>
+            <div><strong>Why this source needs review</strong><p>OWL found two stable account series. Neither has a confirmed expectation, so missing documents cannot be evaluated yet.</p></div>
+          </div>
+          <dl class="evidence-summary">
+            <div><dt>Observed span</dt><dd>21 months</dd></div>
+            <div><dt>Typical arrival</dt><dd>Monthly</dd></div>
+            <div><dt>Metadata fit</dt><dd>16 of 18</dd></div>
+            <div><dt>External signals</dt><dd>2 accounts</dd></div>
+          </dl>
+        </div>
+
+        <section class="stage-section">
+          <div class="section-heading">
+            <div><h3>Linked accounts &amp; obligations</h3><p>Tyrion provides financial context. These links do not create document expectations automatically.</p></div>
+            <button class="secondary" type="button">Manage links</button>
+          </div>
+          <div class="relationship-list">
+            <div><span class="relationship-system">Tyrion account</span><strong>Checking •••• 4821</strong><small>Linked to the checking statement series below</small></div>
+            <div><span class="relationship-system">Tyrion account</span><strong>Credit card •••• 7704</strong><small>Linked to the credit-card statement series below</small></div>
+          </div>
+        </section>
+
+        <section class="stage-section">
+          <div class="section-heading">
+            <div><h3>Detected document series</h3><p>Series answers which documents belong together. Monitoring policy is configured separately.</p></div>
+            <a class="secondary" href="../../../mockups/triage-correction/statement-series-detail.html">Open series editor</a>
+          </div>
+          <div class="series-list">
+            <article class="series-card active">
+              <div>
+                <h4>Checking · account ending 4821</h4>
+                <p>9 monthly statements · Jan–Sep 2026 · 94% grouping confidence</p>
+                <div class="document-strip">
+                  <div class="document-sample"><time>Sep 28</time><strong>Checking statement</strong><span>•••• 4821 · 8 pages</span></div>
+                  <div class="document-sample"><time>Aug 29</time><strong>Checking statement</strong><span>•••• 4821 · 7 pages</span></div>
+                  <div class="document-sample"><time>Jul 28</time><strong>Checking statement</strong><span>•••• 4821 · 9 pages</span></div>
+                  <div class="document-sample"><time>Jun 29</time><strong>Checking statement</strong><span>•••• 4821 · 8 pages</span></div>
+                </div>
+              </div>
+              <div class="series-actions"><span class="status">Needs policy</span><a class="ghost" href="expectation-setup.html">Configure</a></div>
+            </article>
+            <article class="series-card">
+              <div>
+                <h4>Credit card · account ending 7704</h4>
+                <p>9 monthly statements · Jan–Sep 2026 · 91% grouping confidence</p>
+                <div class="document-strip">
+                  <div class="document-sample"><time>Sep 14</time><strong>Credit card statement</strong><span>•••• 7704 · 5 pages</span></div>
+                  <div class="document-sample"><time>Aug 14</time><strong>Credit card statement</strong><span>•••• 7704 · 6 pages</span></div>
+                  <div class="document-sample"><time>Jul 15</time><strong>Credit card statement</strong><span>•••• 7704 · 5 pages</span></div>
+                  <div class="document-sample"><time>Jun 14</time><strong>Credit card statement</strong><span>•••• 7704 · 6 pages</span></div>
+                </div>
+              </div>
+              <div class="series-actions"><span class="status">Needs policy</span><button class="ghost" type="button">Review</button></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="stage-section">
+          <div class="section-heading"><div><h3>Source history</h3><p>Important analysis, review, and synchronization events.</p></div></div>
+          <ol class="source-history">
+            <li><time>Today</time><span>Analysis refreshed after Paperless synchronization; no confirmed membership changed.</span></li>
+            <li><time>Oct 16</time><span>Tyrion supplied two advisory account-statement signals for Harbor Bank.</span></li>
+            <li><time>Sep 29</time><span>Latest checking statement arrived and matched the 4821 series.</span></li>
+          </ol>
+        </section>
+      </div>
+    </section>
+
+    <aside class="policy-panel source-view" aria-label="Expectation decision">
+      <div class="panel-tabs" role="tablist">
+        <button type="button">Overview</button>
+        <button class="active" type="button">Expectation <span class="nav-count">1</span></button>
+        <button type="button">Acquisition</button>
+        <button type="button">History</button>
+      </div>
+      <div class="panel-scroll">
+        <div class="panel-heading">
+          <div><h3>Checking · •••• 4821</h3><p>Decide whether OWL should monitor this document series. The suggested policy is based on nine consistent monthly statements.</p></div>
+          <span class="status info">94% evidence</span>
+        </div>
+        <div class="policy-summary">
+          <strong>Recommended: monitor monthly presence</strong>
+          <p>Expect one checking statement each month. Begin watching after the 28th and consider it missing after a 7-day grace period. This does not create a payment task.</p>
+        </div>
+        <div class="decision-group">
+          <span>Should OWL expect another document?</span>
+          <div class="choice-grid" data-choice-group>
+            <button class="choice active" type="button"><strong>Yes, monitor it</strong><span>Alert when an expected document is absent.</span></button>
+            <button class="choice" type="button"><strong>Recognize, don't monitor</strong><span>Keep filing policy; never alert on absence.</span></button>
+            <button class="choice" type="button"><strong>One known occurrence</strong><span>Track a specific document and due window.</span></button>
+            <button class="choice" type="button"><strong>Not expected</strong><span>Record that this signal should not imply a document.</span></button>
+          </div>
+        </div>
+        <div class="decision-group">
+          <span>Plain-language policy</span>
+          <div class="plain-fields">
+            <label>Document kind<select><option>Statement</option><option>Invoice</option><option>Tax document</option><option>Record</option></select></label>
+            <label>Importance<select><option>Routine</option><option>Important</option><option>Critical</option></select></label>
+            <label>Expected<select><option>Every month</option><option>Every quarter</option><option>Every year</option></select></label>
+            <label>Usually arrives<select><option>Near the end of the month</option><option>Near the start of the month</option><option>On a specific day</option></select></label>
+          </div>
+        </div>
+        <details class="advanced">
+          <summary>Advanced policy and filing rules</summary>
+          <p>Availability offsets, grace period, escalation, title convention, required tags, document type, and acquisition source remain editable without blocking the primary decision.</p>
+        </details>
+        <div class="evidence-note"><strong>Evidence:</strong> 9 of 9 documents recur monthly; arrival varies by 2 days; all carry the same masked account identifier and document type.</div>
+      </div>
+      <footer class="panel-footer">
+        <span>1 of 2 series resolved for Harbor Bank</span>
+        <div><button class="secondary" type="button">Dismiss suggestion</button><a class="primary" href="expectation-setup.html">Review details</a></div>
+      </footer>
+    </aside>
+
+    <section id="signal-workspace" class="signal-workspace" hidden>
+      <header class="signal-header">
+        <div><span>Tyrion account signal</span><h2>Harbor Bank checking •••• 4821</h2><p>This account may produce documents, but Tyrion does not establish document policy.</p></div>
+        <span class="status info">Unresolved</span>
+      </header>
+      <div class="signal-evidence">
+        <section>
+          <h3>Signal evidence</h3>
+          <dl class="signal-facts">
+            <div><dt>System of record</dt><dd>Tyrion / Monarch</dd></div>
+            <div><dt>Account type</dt><dd>Checking</dd></div>
+            <div><dt>Institution</dt><dd>Harbor Bank</dd></div>
+            <div><dt>Account display</dt><dd>•••• 4821</dd></div>
+          </dl>
+          <div class="evidence-note"><strong>What this means:</strong> the account exists and may have related documents. It does not prove that statements are available, monthly, or required.</div>
+        </section>
+        <section>
+          <h3>Suggested Paperless match</h3>
+          <article class="match-card">
+            <div><span>Paperless correspondent #41</span><strong>Harbor Bank</strong><p>18 documents · two detected account series · masked identifier 4821 appears in 9 documents</p></div>
+            <span class="status ok">Strong match</span>
+          </article>
+          <a class="secondary" href="../../../mockups/triage-correction/statement-series-detail.html">Inspect matching documents</a>
+        </section>
+      </div>
+      <aside class="signal-resolution">
+        <h3>Resolve account relationship</h3>
+        <p>First associate the account with a document source. Then decide whether it relates to one or more document expectations.</p>
+        <label>Document source<select><option>Harbor Bank · Paperless #41</option><option>Choose another correspondent…</option><option>No correspondent yet</option></select></label>
+        <div class="resolution-preview">
+          <span>After linking</span>
+          <strong>Harbor Bank will show “2 linked Tyrion accounts.”</strong>
+          <p>No expectation or missing-document alert will be created until a series is reviewed.</p>
+        </div>
+        <button class="primary" type="button">Link account and review series</button>
+        <button class="secondary" type="button">Documentless / not applicable</button>
+        <button class="ghost" type="button">Leave unresolved</button>
+      </aside>
+    </section>
+
+    <section id="directory-workspace" class="directory-workspace" hidden>
+      <header class="directory-header">
+        <div><span>Paperless correspondent #209</span><h2>John Doe</h2><p>One Venmo receipt · no linked account or recurring obligation</p></div>
+        <span class="status ok">No series expected</span>
+      </header>
+      <div class="directory-detail">
+        <section class="directory-summary">
+          <div class="section-heading"><div><h3>Source disposition</h3><p>A reviewed conclusion about whether this correspondent currently needs series or expectation policy.</p></div><button class="secondary" type="button">Reopen review</button></div>
+          <div class="disposition-banner">
+            <div><span>Current disposition</span><strong>No series expected</strong><p>This source normally produces isolated, one-off documents.</p></div>
+            <span class="status ok">Reviewed</span>
+          </div>
+          <dl class="directory-facts">
+            <div><dt>Reason</dt><dd>One-off person or payment receipt</dd></div>
+            <div><dt>Reviewed</dt><dd>October 18, 2026</dd></div>
+            <div><dt>Documents</dt><dd>1 Venmo receipt</dd></div>
+            <div><dt>Financial links</dt><dd>None</dd></div>
+          </dl>
+          <div class="reopen-rules">
+            <h3>Reopen review when</h3>
+            <label><input type="checkbox" checked disabled> Another document arrives from John Doe</label>
+            <label><input type="checkbox" checked disabled> OWL detects a repeatable pattern or series</label>
+            <label><input type="checkbox" checked disabled> A Tyrion account or obligation is associated</label>
+            <label><input type="checkbox" disabled> On a fixed calendar date</label>
+          </div>
+          <div class="document-strip">
+            <div class="document-sample"><time>Oct 17</time><strong>Venmo payment receipt</strong><span>$42.00 · Dinner reimbursement</span></div>
+          </div>
+        </section>
+        <aside class="disposition-editor">
+          <h3>Complete source review</h3>
+          <p>Choose the durable source-level outcome. Individual expectations remain separate.</p>
+          <div class="disposition-options">
+            <button type="button"><strong>Expectations configured</strong><span>One or more document series have active policy.</span></button>
+            <button class="active" type="button"><strong>No series expected</strong><span>Documents are normally isolated or one-off.</span></button>
+            <button type="button"><strong>Waiting for more history</strong><span>Revisit after more documents or a chosen date.</span></button>
+            <button type="button"><strong>Ignore or retire</strong><span>Remove from normal source analysis while preserving history.</span></button>
+          </div>
+          <label>Reason<select><option>One-off person or payment receipt</option><option>Miscellaneous merchant</option><option>Documents are unrelated</option><option>Other…</option></select></label>
+          <label>Optional note<textarea rows="3">Single Venmo receipt retained as payment evidence. No repeated document relationship is currently expected.</textarea></label>
+          <button class="primary" type="button">Save disposition</button>
+        </aside>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

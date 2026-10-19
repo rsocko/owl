@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OWL · Document Coverage</title>
+  <link rel="stylesheet" href="workspace.css">
+  <script src="workspace.js" defer></script>
+</head>
+<body>
+  <!--
+  THESIS: Coverage is the operational answer to what should exist now, not a statement-discovery dashboard.
+  OWN-WORLD: OWL's restrained blue-gray workspace, ranked exception ledger, compact status language, and source-linked evidence.
+  STORY: Scan what is missing or upcoming, filter by document kind, inspect the expectation, and return to its source policy when needed.
+  FIRST VIEWPORT: Coverage ledger dominates the page; summary and recent fulfillment stay secondary at right.
+  FORM: Exception-first coverage board with Statements as a filter; surface seed 641ff8c5, grounded candidate 5.
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+  -->
+  <a class="skip-link" href="#coverage">Skip to Document Coverage</a>
+  <div class="prototype-bar">
+    <a href="../index.html">← All OWL mockups</a>
+    <nav aria-label="Prototype screens">
+      <a href="index.html">Document Sources</a>
+      <a href="expectation-setup.html">Expectation setup</a>
+      <a class="active" href="document-coverage.html">Document Coverage</a>
+    </nav>
+    <span>Statements are one filter within generalized coverage</span>
+  </div>
+  <header class="topnav">
+    <a class="brand" href="index.html"><span class="brand-mark"><svg viewBox="0 0 24 24"><path d="M4 9.5 7.5 5 12 8l4.5-3L20 9.5V15a8 8 0 0 1-16 0Z"/><circle cx="9" cy="13" r="1.5"/><circle cx="15" cy="13" r="1.5"/><path d="m10.5 16 1.5 1.2 1.5-1.2"/></svg></span><span>OWL <small>Organize. Watch. Learn.</small></span></a>
+    <nav><a href="../intake-review/index.html">Inbox</a><a href="../action-workspace/index.html">Review</a><a href="index.html">Sources</a><a class="active" href="document-coverage.html">Coverage <span class="nav-count">4</span></a></nav>
+    <span class="connection">Coverage refreshed 8 minutes ago</span>
+  </header>
+
+  <main id="coverage" class="coverage-shell">
+    <header class="coverage-header">
+      <div><h1>Document Coverage</h1><p>Track expected documents across statements, invoices, tax forms, renewals, records, and one-off obligations. Coverage shows absence and timing; source policy remains editable in Document Sources.</p></div>
+      <div><button class="secondary" type="button">Refresh coverage</button><a class="primary" href="index.html">Manage sources</a></div>
+    </header>
+    <div class="coverage-controls">
+      <label class="search-box"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="coverage-search" type="search" placeholder="Find source, series, or document kind"></label>
+      <div id="coverage-filters" class="chip-row">
+        <button class="chip active" type="button" data-kind="all">All expected 50</button>
+        <button class="chip" type="button" data-kind="statement">Statements 31</button>
+        <button class="chip" type="button" data-kind="invoice">Invoices 7</button>
+        <button class="chip" type="button" data-kind="tax">Tax documents 5</button>
+        <button class="chip" type="button" data-kind="renewal">Renewals 4</button>
+        <button class="chip" type="button" data-kind="record">Records 3</button>
+      </div>
+    </div>
+
+    <div class="coverage-layout">
+      <section class="coverage-board" aria-label="Expected document coverage">
+        <div class="coverage-board-header"><span>Source and series</span><span>Expected</span><span>Last received</span><span>Coverage</span><span>Action</span></div>
+        <article class="coverage-row" data-coverage-kind="tax">
+          <div class="coverage-source"><strong>County Tax Office · 2026 property assessment</strong><span>Tax document · annual · critical</span></div>
+          <div class="coverage-cell">Feb 1–15<small>Overdue 22 days</small></div>
+          <div class="coverage-cell">Feb 8, 2025<small>Prior tax year</small></div>
+          <div><span class="status" style="background:var(--red-soft);color:var(--red)">Missing</span></div>
+          <a class="secondary" href="index.html">Investigate</a>
+        </article>
+        <article class="coverage-row" data-coverage-kind="statement">
+          <div class="coverage-source"><strong>Harbor Bank · checking •••• 4821</strong><span>Statement · monthly · routine</span></div>
+          <div class="coverage-cell">Oct 27–Nov 4<small>Grace ends in 3 days</small></div>
+          <div class="coverage-cell">Sep 28, 2026<small>Matched automatically</small></div>
+          <div><span class="status">Due soon</span></div>
+          <a class="secondary" href="index.html">View source</a>
+        </article>
+        <article class="coverage-row" data-coverage-kind="renewal">
+          <div class="coverage-source"><strong>Pine Mutual · homeowners renewal</strong><span>Renewal notice · annual · important</span></div>
+          <div class="coverage-cell">Oct 1–20<small>Expected window passed</small></div>
+          <div class="coverage-cell">Oct 8, 2026<small>Policy notice found</small></div>
+          <div><span class="status ok">Fulfilled</span></div>
+          <a class="secondary" href="index.html">View source</a>
+        </article>
+        <article class="coverage-row" data-coverage-kind="invoice">
+          <div class="coverage-source"><strong>Cedar Dental · patient invoice</strong><span>Invoice · irregular · important</span></div>
+          <div class="coverage-cell">Not scheduled<small>Recognized, not monitored</small></div>
+          <div class="coverage-cell">Oct 15, 2026<small>Action created</small></div>
+          <div><span class="status info">On arrival</span></div>
+          <a class="secondary" href="index.html">View source</a>
+        </article>
+        <article class="coverage-row" data-coverage-kind="statement">
+          <div class="coverage-source"><strong>Northline Energy · utility statement</strong><span>Statement · monthly · routine</span></div>
+          <div class="coverage-cell">Nov 3–10<small>Expected in 16 days</small></div>
+          <div class="coverage-cell">Oct 4, 2026<small>Matched automatically</small></div>
+          <div><span class="status info">Upcoming</span></div>
+          <a class="secondary" href="index.html">View source</a>
+        </article>
+        <article class="coverage-row" data-coverage-kind="record">
+          <div class="coverage-source"><strong>West Street Vet · annual vaccination record</strong><span>Medical record · annual · important</span></div>
+          <div class="coverage-cell">May 2027<small>No alert before May</small></div>
+          <div class="coverage-cell">May 12, 2026<small>Quinn · rabies vaccine</small></div>
+          <div><span class="status ok">Covered</span></div>
+          <a class="secondary" href="index.html">View source</a>
+        </article>
+      </section>
+
+      <aside class="coverage-side">
+        <section class="side-panel">
+          <h2>Coverage summary</h2>
+          <p>Only confirmed, active expectations appear here.</p>
+          <dl class="coverage-stat-list">
+            <div><dt>Missing</dt><dd style="color:var(--red)">1</dd></div>
+            <div><dt>Due soon</dt><dd style="color:var(--amber)">3</dd></div>
+            <div><dt>Covered</dt><dd style="color:var(--green)">42</dd></div>
+            <div><dt>On arrival</dt><dd style="color:var(--purple)">4</dd></div>
+          </dl>
+        </section>
+        <section class="side-panel">
+          <h2>Recently fulfilled</h2>
+          <p>Documents that satisfied an expectation.</p>
+          <ol class="event-list">
+            <li><time>Today</time><div><strong>Pine Mutual renewal</strong><span>Annual renewal notice matched</span></div></li>
+            <li><time>Oct 15</time><div><strong>Cedar Dental invoice</strong><span>Recognized on arrival; no absence monitoring</span></div></li>
+            <li><time>Oct 4</time><div><strong>Northline Energy statement</strong><span>October period fulfilled</span></div></li>
+          </ol>
+        </section>
+        <section class="side-panel">
+          <h2>Coverage principle</h2>
+          <p>Statements remain a useful category, but the operational question is broader: which expected documents exist, which are late, and which policies need attention?</p>
+          <a class="secondary" href="expectation-setup.html">Open example policy</a>
+        </section>
+      </aside>
+    </div>
+  </main>
+</body>
+</html>

@@ -10,11 +10,21 @@ sidebar_position: 6
 
 *Date: 2026-08-22*
 
+> **UX and replacement note (2026-10-19):**
+> [Document Sources, Expectations, and Coverage](./document-sources-expectations-and-coverage.md)
+> is authoritative for workspace structure, source dispositions, route intent,
+> external-signal presentation, and replacement of the prior Correspondent
+> Review and statement-only monitoring surfaces. This document remains
+> authoritative for detailed expectation, policy-preview, acquisition, and
+> Tyrion projection contracts unless the newer design explicitly supersedes a
+> point.
+
 ## Decision
 
 OWL will add an advisory correspondent-review layer around Paperless:
 
-1. an OWL-local **Correspondent Profile** records reviewed policy and observations;
+1. an OWL-local **Document Source profile**, anchored to a Paperless
+   correspondent, records reviewed policy and observations;
 2. each profile can own multiple **Document Expectations** for distinct accounts,
    document kinds, or series;
 3. Paperless history and optional Tyrion signals produce suggestions, not policy;
@@ -63,7 +73,7 @@ Tyrion provenance and must not add independently inferred candidates.
 
 ## Domain model
 
-### Correspondent Profile
+### Document Source profile
 
 A profile is keyed by Paperless deployment identity and correspondent ID, never by display
 name. Renaming preserves identity. If a correspondent is deleted or merged in Paperless,
@@ -72,7 +82,8 @@ OWL flags the profile as orphaned and requires an explicit relink or retirement 
 | Field | Purpose |
 |---|---|
 | `correspondent_id` | Stable Paperless identity within a deployment |
-| `review_status` | `unreviewed`, `reviewed`, or `ignored` |
+| `review_state` | Workflow state such as `needs_review` or `resolved`; not the durable source outcome |
+| `disposition` | `expectations_configured`, `no_series_expected`, `waiting_for_history`, or `ignored_retired` |
 | `aliases` | User-confirmed names used for matching external signals |
 | `notes` | User guidance that is not document metadata |
 | `profile_defaults` | Optional title and metadata defaults inherited by expectations |
@@ -81,6 +92,11 @@ OWL flags the profile as orphaned and requires an explicit relink or retirement 
 
 Profiles remain OWL-local. OWL must not create synthetic Paperless tags or document custom
 fields merely to serialize correspondent configuration.
+
+`needs_review` is reopened by material evidence changes or an explicit waiting
+date. It is not a durable disposition. Source-level `no_series_expected`
+applies to the Paperless correspondent as a whole and is distinct from an
+expectation-level `not_expected` decision for one specific candidate or signal.
 
 ### Document Expectation
 
@@ -342,25 +358,25 @@ These candidates do **not** prove:
 A recurring expense may be documentless, and recurring income is not a bill. A transaction
 may help reconcile an existing invoice or receipt but must not create an expected receipt.
 
-Reconciliation is account-first rather than correspondent-first. Each Tyrion signal appears once
-in a deployment-wide inbox. The user may assign it to zero or one Paperless correspondent, then
-relate zero or more document expectations owned by that correspondent. One mortgage account can
-therefore relate to a monthly statement expectation and a separate annual tax-form expectation
+Reconciliation begins in a separate deployment-wide **External signals**
+queue. Each Tyrion signal appears once. The user may assign it to zero or one
+existing Paperless-anchored Document Source, then relate zero or more document
+expectations owned by that source. One mortgage account can therefore relate
+to a monthly statement expectation and a separate annual tax-form expectation
 without duplicating either the Tyrion account or the Paperless correspondent.
+A source relationship provides context and never creates an expectation
+automatically.
 
 ```mermaid
 flowchart TD
-    T[Tyrion account signal] --> C{Paperless correspondent exists?}
-    C -->|No| P[Create correspondent in Paperless]
-    P --> S[Sync Paperless correspondents]
-    S --> M
-    C -->|Yes| M[Assign one correspondent]
-    C -->|Unclear| U[Leave globally unresolved]
-    M --> E{Related document series}
-    E -->|None yet| A[Analyze Paperless history]
+    T[Tyrion account or obligation signal] --> C{Existing Document Source match?}
+    C -->|Yes| M[Link source context]
+    C -->|No document relationship| N[Record durable scoped not-expected result]
+    C -->|Unclear| U[Leave unresolved or defer]
+    M --> E{Related expectation?}
+    E -->|None| S[Keep source link only]
     E -->|One| O[Link one expectation]
     E -->|Several| X[Link monthly, annual, or other expectations]
-    M -->|No document produced| N[Record durable not-expected policy]
 ```
 
 When Tyrion supplies `accountLastFour`, OWL may compare that suffix with an existing masked
@@ -427,8 +443,8 @@ token remains server-side in OWL's local application database and is never retur
 browser. Tyrion authenticates the request with the same bearer-token pattern as its other
 server-to-server connector routes and resolves the connector from that authentication. YAML and
 environment configuration under `external_signals` remains an advanced
-deployment alternative. In **Documents → Correspondent Review**, the user selects **Sync Tyrion
-candidates**. OWL requests the latest projection and stores its opaque source generation
+deployment alternative. In **Document Sources → External signals**, the user
+selects **Sync Tyrion signals**. OWL requests the latest projection and stores its opaque source generation
 internally. The generation-addressed endpoint remains available for replay and diagnostics, but
 the implementation detail is not exposed in the UI. OWL accepts at most 6,000 signals per
 response. A repeated generation is a no-op.
@@ -439,7 +455,8 @@ candidate ID to the browser and never uses `displayHint` as an identity or match
 
 ## Relationship to existing statement models
 
-This is a policy layer over the current statement implementation, not a parallel replacement:
+This is a generalized policy layer that reuses reviewed statement-series
+membership while replacing the statement-only overview and monitoring model:
 
 - `ProviderCandidate` remains discovery evidence and is not durable policy.
 - `StatementSeries` and its split/merge/reassign history remain the document grouping model.
@@ -447,8 +464,10 @@ This is a policy layer over the current statement implementation, not a parallel
   expectation, title, metadata, acquisition, and external-signal policy.
 - `series_discriminator` reuses the confirmed series name/account hint rather than introducing
   a second grouping mechanism.
-- Existing provider overrides migrate into the bound expectation where an unambiguous series
-  exists; ambiguous rows enter review rather than being copied automatically.
+- Existing provider overrides may migrate into the bound expectation where an
+  unambiguous series exists. Because the prior workspace was not fully
+  operational, a clean policy-data reset is also acceptable; ambiguous or
+  partial rows must never be copied as trusted policy.
 
 The current display-name-derived `provider_key` remains a compatibility identifier only.
 New webhook and dedup state should use `expectation_id` plus expected period. During migration,
@@ -457,27 +476,30 @@ expectation, and reject ambiguous resolution. Existing statement-series history 
 
 ## Review workflow
 
-1. **Inventory:** rank Paperless correspondents by unreviewed state, metadata inconsistency,
-   statement-like history, stale analysis, and unmatched external candidates.
+1. **Triage sources:** use Needs review for new or materially changed sources
+   and All correspondents for the complete Paperless directory.
 2. **Inspect:** show representative Paperless documents, observed title/tag/type patterns,
    candidate series, cadence evidence, and known acquisition sources.
-3. **Reconcile:** select a Tyrion signal once, assign zero or one Paperless correspondent, link
-   zero or more expectations under that correspondent, leave it unresolved, or mark it
+3. **Dispose:** record expectations configured, no series expected, waiting for
+   more history, or ignored/retired.
+4. **Reconcile signals:** from the separate External signals mode, select a
+   Tyrion signal once, assign zero or one existing Document Source, link zero or
+   more expectations under that source, leave it unresolved, or mark it
    documentless/not applicable.
-4. **Configure:** confirm expectation mode, cadence, title convention, metadata policy, and
+5. **Configure:** confirm expectation mode, cadence, title convention, metadata policy, and
    acquisition source.
-5. **Preview:** identify existing violations and display exact title/tag/type changes,
+6. **Preview:** identify existing violations and display exact title/tag/type changes,
    including representative title renders and missing template fields.
-6. **Apply:** explicitly selected changes are patched through the shared Paperless client.
-7. **Monitor:** only confirmed expectations with an applicable monitoring policy feed
-   missing-document analysis.
+7. **Apply:** explicitly selected changes are patched through the shared Paperless client.
+8. **Monitor:** only confirmed expectations with an applicable monitoring
+   policy feed Document Coverage.
 
 The workspace supports large inventories without making the browser document list the unit of
 work:
 
 - independently scrollable inventory and detail panes with sticky headers;
-- search and filters for review state, lifecycle, analysis freshness, candidate state, and
-  expectation importance;
+- search within the selected mode and a compact filter popover for review
+  reason, source disposition, evidence, and system relationship;
 - collapsed candidate summaries with expand-on-review detail;
 - candidate pagination or virtualization;
 - unresolved-candidate counts, next-unreviewed navigation, and progress;
@@ -486,10 +508,11 @@ work:
 - localized loading indicators that preserve the inventory, profile context, and prior
   analysis while refresh or reanalysis is in progress.
 
-Marking a profile reviewed must either require all current suggestions to be resolved or offer
-an explicit acknowledgement that unresolved suggestions remain. Profile `ignore` and
-`retire`, suggestion `dismiss`, expectation mode, and expectation `retire` must never be
-presented as interchangeable choices.
+Completing source review must either resolve current source-level evidence or
+offer an explicit acknowledgement that unresolved suggestions remain. Source
+`no_series_expected`, source `ignored_retired`, suggestion `dismiss`,
+expectation `not_expected`, and expectation `retire` must never be presented as
+interchangeable choices.
 
 The general document list opens in Paperless. OWL owns the profile and policy review because
 the workflow depends on cross-document and cross-system evidence.
@@ -620,6 +643,9 @@ shared connector contract and at least two real providers require browser automa
 ## Implementation validation
 
 - One correspondent can own multiple independent expectations and acquisition sources.
+- A one-off correspondent can be marked `no_series_expected` without creating
+  an expectation and remains resolved until material evidence changes.
+- A Tyrion relationship to a source does not create or select an expectation.
 - An `any_of` animal-tag rule distinguishes a valid child tag from a parent-only assignment.
 - Suggested and irregular expectations cannot emit missing-document alerts.
 - Two accounts at one institution remain separate candidate series.
@@ -632,9 +658,13 @@ shared connector contract and at least two real providers require browser automa
 - Acquisition retries cannot create duplicate Paperless documents or false success callbacks.
 - APIs, logs, and profiles contain no connector credentials or sensitive URLs.
 
-## Initial persistence contract
+## Legacy initial persistence contract
 
-The first implementation stores this policy in statement-tracker schema version 4:
+The first implementation stored this policy in statement-tracker schema version
+4. This section records that historical contract; it is not a requirement to
+preserve the prior data shape during the Document Sources and Coverage
+replacement. A clean local policy-data reset is acceptable, while stable
+Paperless identity and newly reviewed decisions remain required.
 
 - profile rows use a composite key of a non-reversible Paperless deployment fingerprint and
   numeric correspondent ID; the fingerprint is deployment scope and is not returned by APIs;

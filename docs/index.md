@@ -32,9 +32,9 @@ OWL transforms a passive document archive into an actionable intelligence layer 
 
 ## Interactive Mockups
 
-Open the [OWL Mockup Review index](../mockups/index.html) to browse all interactive
-prototypes by feature area. Every mockup includes a persistent link back to the index
-for faster review.
+Open the [persisted OWL design mockups](./mockups/index.html) for implementation-reference
+prototypes retained with the documentation. The broader [working mockup review index](../mockups/index.html)
+contains exploratory concepts that may not yet represent approved design direction.
 
 ## Status
 

@@ -419,17 +419,17 @@
       <dl class="summary" aria-label="Mockup inventory summary">
         <div>
           <dt>Mockups</dt>
-          <dd>14</dd>
+          <dd>16</dd>
         </div>
         <div>
           <dt>Feature areas</dt>
-          <dd>2</dd>
+          <dd>3</dd>
         </div>
       </dl>
     </section>
 
     <div class="toolbar">
-      <p id="result-count" aria-live="polite">Showing all 14 mockups</p>
+      <p id="result-count" aria-live="polite">Showing all 16 mockups</p>
       <label class="search">
         <span class="sr-only" hidden>Filter mockups</span>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -539,6 +539,39 @@
 
     <section class="mockup-group" data-group>
       <div class="group-header">
+        <h2>Sources &amp; coverage</h2>
+        <p>3 connected concepts for source review, expectation policy, and generalized recurring-document coverage.</p>
+      </div>
+      <div class="mockup-list">
+        <a class="mockup-link" href="sources-expectations/index.html" data-search="sources correspondents expectations review series policy tyrion paperless recurring documents">
+          <span>
+            <span class="mockup-title">Document Sources</span>
+            <span class="mockup-path">sources-expectations/index.html</span>
+          </span>
+          <p class="mockup-description">Paperless-correspondent review with a separate Tyrion signal queue, explicit account links, representative document series, and focused expectation decisions.</p>
+          <span class="open-label">Open <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></span>
+        </a>
+        <a class="mockup-link" href="sources-expectations/expectation-setup.html" data-search="expectation setup recurring periodic schedule monitoring grace period acquisition metadata policy">
+          <span>
+            <span class="mockup-title">Guided Expectation Setup</span>
+            <span class="mockup-path">sources-expectations/expectation-setup.html</span>
+          </span>
+          <p class="mockup-description">A plain-language policy sequence that progressively reveals schedule, filing, acquisition, and advanced monitoring settings.</p>
+          <span class="open-label">Open <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></span>
+        </a>
+        <a class="mockup-link" href="sources-expectations/document-coverage.html" data-search="document coverage statements missing upcoming recurring invoices tax renewals records">
+          <span>
+            <span class="mockup-title">Document Coverage</span>
+            <span class="mockup-path">sources-expectations/document-coverage.html</span>
+          </span>
+          <p class="mockup-description">Generalized expected-document monitoring where Statements becomes a filter alongside invoices, tax documents, renewals, and records.</p>
+          <span class="open-label">Open <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></span>
+        </a>
+      </div>
+    </section>
+
+    <section class="mockup-group" data-group>
+      <div class="group-header">
         <h2>Reconciliation</h2>
         <p>3 concepts for cross-document matching and lifecycle tracking.</p>
       </div>
@@ -603,7 +636,7 @@
 
       count.textContent = query
         ? `${visibleCount} mockup${visibleCount === 1 ? "" : "s"} found`
-        : "Showing all 12 mockups";
+        : "Showing all 16 mockups";
       emptyState.style.display = visibleCount === 0 ? "block" : "none";
     });
   </script>

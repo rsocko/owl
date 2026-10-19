@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OWL · Configure expectation</title>
+  <link rel="stylesheet" href="workspace.css">
+  <script src="workspace.js" defer></script>
+</head>
+<body>
+  <!--
+  THESIS: Expectation setup should read like a policy conversation, not a database editor.
+  OWN-WORLD: OWL's restrained blue-gray workspace, plain-language controls, progressive disclosure, and evidence-backed summaries.
+  STORY: Name the document, decide whether it returns, define when absence matters, then confirm the policy in one readable sheet.
+  FIRST VIEWPORT: Progress rail left, one decision step center, continuously updated policy summary right.
+  FORM: Guided policy sequence with persistent summary; surface seed 641ff8c5, grounded candidate 5.
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+  -->
+  <a class="skip-link" href="#expectation-setup">Skip to expectation setup</a>
+  <div class="prototype-bar">
+    <a href="../index.html">← All OWL mockups</a>
+    <nav aria-label="Prototype screens">
+      <a href="index.html">Document Sources</a>
+      <a class="active" href="expectation-setup.html">Expectation setup</a>
+      <a href="document-coverage.html">Document Coverage</a>
+    </nav>
+    <span>Guided setup · advanced policy remains available</span>
+  </div>
+  <header class="topnav">
+    <a class="brand" href="index.html"><span class="brand-mark"><svg viewBox="0 0 24 24"><path d="M4 9.5 7.5 5 12 8l4.5-3L20 9.5V15a8 8 0 0 1-16 0Z"/><circle cx="9" cy="13" r="1.5"/><circle cx="15" cy="13" r="1.5"/><path d="m10.5 16 1.5 1.2 1.5-1.2"/></svg></span><span>OWL <small>Organize. Watch. Learn.</small></span></a>
+    <nav><a href="../intake-review/index.html">Inbox</a><a href="../action-workspace/index.html">Review</a><a class="active" href="index.html">Sources</a><a href="document-coverage.html">Coverage</a></nav>
+    <span class="connection">Draft saved locally</span>
+  </header>
+
+  <main id="expectation-setup" class="setup-shell">
+    <aside class="setup-steps">
+      <h1>Configure expectation</h1>
+      <p>Harbor Bank · Checking •••• 4821</p>
+      <ol class="step-list">
+        <li class="complete" data-step="1">Identify the document</li>
+        <li class="complete" data-step="2">Decide whether it returns</li>
+        <li class="active" data-step="3">Define when it is missing</li>
+        <li data-step="4">Set filing policy</li>
+        <li data-step="5">Record acquisition</li>
+      </ol>
+      <a class="ghost" href="index.html">← Back to source evidence</a>
+    </aside>
+
+    <section class="setup-main">
+      <header>
+        <a href="index.html">Harbor Bank / Checking •••• 4821</a>
+        <h2>When should OWL consider this statement missing?</h2>
+        <p>History shows a reliable monthly pattern. Use the recommended window, or describe the real-world schedule directly. OWL will translate this into monitoring policy.</p>
+      </header>
+
+      <section class="form-section">
+        <h3>Related account or obligation</h3>
+        <p>This relationship provides context and disambiguates multiple series. It does not determine monitoring policy.</p>
+        <div class="plain-fields">
+          <label class="wide">Tyrion relationship<select><option>Harbor Bank Checking •••• 4821</option><option>No related financial entity</option><option>Choose another account or obligation…</option></select></label>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <h3>Expected schedule</h3>
+        <p>The calendar controls determine when monitoring begins. They do not change document dates in Paperless.</p>
+        <div class="choice-grid" data-choice-group>
+          <button class="choice active" type="button"><strong>Every month</strong><span>One document in each calendar month.</span></button>
+          <button class="choice" type="button"><strong>Every quarter</strong><span>One document for each quarter.</span></button>
+          <button class="choice" type="button"><strong>Every year</strong><span>One document in a selected month.</span></button>
+          <button class="choice" type="button"><strong>Custom period</strong><span>Use a less common calendar pattern.</span></button>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <h3>Arrival window</h3>
+        <p>The latest nine statements arrived between the 27th and 30th.</p>
+        <div class="plain-fields">
+          <label>Start watching<select><option>On the 27th of each month</option><option>On the 28th of each month</option><option>At month end</option></select></label>
+          <label>Consider missing after<select><option>7 days</option><option>3 days</option><option>14 days</option></select></label>
+          <label class="wide">What should the alert say?<input value="Harbor Bank checking statement has not arrived"></label>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <h3>Importance and escalation</h3>
+        <p>Importance affects ordering and reminders. It never changes whether a document satisfies the expectation.</p>
+        <div class="choice-grid" data-choice-group>
+          <button class="choice active" type="button"><strong>Routine</strong><span>Show in coverage; no pre-due reminder.</span></button>
+          <button class="choice" type="button"><strong>Important</strong><span>Prioritize and remind once.</span></button>
+          <button class="choice" type="button"><strong>Critical</strong><span>Escalate until resolved.</span></button>
+        </div>
+      </section>
+
+      <details class="advanced form-section">
+        <summary>Advanced calendar, fulfillment, and escalation settings</summary>
+        <p>Edit offsets, period matching, repeat reminders, and fulfillment rules when the plain-language schedule is not precise enough.</p>
+      </details>
+
+      <footer class="setup-actions">
+        <button class="secondary" type="button">Previous: recurrence</button>
+        <div><button class="ghost" type="button">Save draft</button> <button class="primary" type="button">Continue to filing policy</button></div>
+      </footer>
+    </section>
+
+    <aside class="setup-summary" aria-label="Expectation policy summary">
+      <h3>Policy summary</h3>
+      <p>This is the durable result OWL will store.</p>
+      <article class="summary-sheet">
+        <header><strong>Harbor Bank checking statement</strong><span>Account ending 4821 · Statement</span></header>
+        <ul class="summary-list">
+          <li><span>Expectation</span><strong>One statement every month</strong></li>
+          <li><span>Related account</span><strong>Harbor Bank Checking •••• 4821</strong></li>
+          <li><span>Monitoring</span><strong>Presence monitoring</strong></li>
+          <li><span>Arrival window</span><strong>Expected near the 28th</strong></li>
+          <li><span>Missing after</span><strong>7-day grace period</strong></li>
+          <li><span>Importance</span><strong>Routine</strong></li>
+          <li><span>Filing</span><strong>Statement · Financial / Harbor Bank</strong></li>
+          <li><span>Acquisition</span><strong>Portal · manual retrieval</strong></li>
+        </ul>
+      </article>
+      <div class="summary-warning"><strong>Not yet active.</strong> Finish all five steps and confirm the policy before OWL begins monitoring.</div>
+    </aside>
+  </main>
+</body>
+</html>

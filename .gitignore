@@ -34,6 +34,7 @@ logs/
 # ─── IDE ─────────────────────────────────────
 .idea/
 .vscode/
+.impeccable/hook.cache.json
 
 # ─── OS ──────────────────────────────────────
 .DS_Store
