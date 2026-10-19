@@ -2549,42 +2549,6 @@ class Database:
         if candidate is None:
             raise KeyError("external_candidate_not_found")
 
-        linked_expectation_ids = [
-            row["expectation_id"]
-            for row in conn.execute(
-                """SELECT expectation_id
-                   FROM external_candidate_expectations
-                   WHERE deployment_id = ? AND candidate_id = ?""",
-                (deployment_id, candidate_id),
-            ).fetchall()
-        ]
-        linked_expectations = [
-            expectation
-            for expectation_id in linked_expectation_ids
-            if (expectation := self.get_document_expectation(deployment_id, expectation_id))
-            is not None
-        ]
-        linked_not_expected = next(
-            (
-                expectation
-                for expectation in linked_expectations
-                if expectation.status == "confirmed"
-                and expectation.expectation_mode == "not_expected"
-            ),
-            None,
-        )
-        if candidate["outcome"] == "not_applicable" and linked_not_expected is not None:
-            if review.outcome == "not_applicable":
-                if review.correspondent_id != linked_not_expected.correspondent_id:
-                    raise ValueError(
-                        "The external signal already has not_expected policy for another "
-                        "correspondent"
-                    )
-                return
-            raise ValueError(
-                "Retire the confirmed not_expected policy before changing this candidate review"
-            )
-
         expectation_ids = list(review.expectation_ids)
         correspondent_id = review.correspondent_id
         if review.outcome == "mapped":
@@ -2638,60 +2602,13 @@ class Database:
         elif review.outcome == "suggested":
             assert review.correspondent_id is not None
             if review.expectation is not None:
-                if (
-                    candidate["kind"] == "accountStatementCandidate"
-                    and review.expectation.kind != "statement"
-                ):
-                    raise ValueError("Account candidates may only suggest statement expectations")
-                if candidate[
-                    "kind"
-                ] == "recurringDocumentCandidate" and review.expectation.kind in {
-                    "invoice",
-                    "bill",
-                    "receipt",
-                }:
-                    raise ValueError(
-                        "A recurring obligation alone cannot suggest an invoice, bill, or receipt"
-                    )
-                self._validate_expectation_references(
-                    deployment_id,
-                    review.correspondent_id,
-                    review.expectation,
+                raise ValueError(
+                    "External signals cannot create expectations; create the expectation "
+                    "explicitly, then link it"
                 )
-                expectation_id = uuid.uuid4().hex
-                self._insert_document_expectation(
-                    conn,
-                    deployment_id,
-                    review.correspondent_id,
-                    review.expectation,
-                    expectation_id=expectation_id,
-                )
-                expectation_ids = [expectation_id]
         elif review.outcome == "not_applicable":
             assert review.correspondent_id is not None
-            negative_policy = DocumentExpectationCreate(
-                kind=("statement" if candidate["kind"] == "accountStatementCandidate" else "other"),
-                expectation_mode="not_expected",
-                status="confirmed",
-                evidence=ExpectationEvidence(
-                    source="user",
-                    reason_codes=["external_signal_documentless"],
-                ),
-            )
-            self._validate_expectation_references(
-                deployment_id,
-                review.correspondent_id,
-                negative_policy,
-            )
-            expectation_id = uuid.uuid4().hex
-            self._insert_document_expectation(
-                conn,
-                deployment_id,
-                review.correspondent_id,
-                negative_policy,
-                expectation_id=expectation_id,
-            )
-            expectation_ids = [expectation_id]
+            expectation_ids = []
 
         conn.execute(
             """DELETE FROM external_candidate_expectations
