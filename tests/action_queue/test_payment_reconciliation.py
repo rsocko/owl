@@ -821,7 +821,7 @@ def test_completion_status_is_committed_before_projection_build(db, monkeypatch)
     assert stored.response_payload is not None
 
 
-def test_projection_reports_ranked_alternatives_without_persisting_them_as_payments(db) -> None:
+def test_ranked_alternatives_are_reviewable_without_overriding_the_selected_match(db) -> None:
     obligation = _obligation(db)
     action = _pay_action(db, obligation)
     service = PaymentReconciliationService(db)
@@ -846,8 +846,28 @@ def test_projection_reports_ranked_alternatives_without_persisting_them_as_payme
     ]
     assert projection["search_context"]["eligible_account_count"] == 3
     assert projection["search_context"]["candidate_pool_size"] == 18
-    assert db.query(PaymentEvidence).count() == 1
-    assert db.query(PaymentEvidence).one().transaction_ref == "transaction-selected"
+    evidence = db.query(PaymentEvidence).order_by(PaymentEvidence.rank).all()
+    assert [item.transaction_ref for item in evidence] == [
+        "transaction-selected",
+        "transaction-alternative",
+    ]
+    assert [item.match_state for item in evidence] == ["matched", "ambiguous"]
+
+    alternative_id = projection["candidates"][1]["id"]
+    confirmed = service.review_candidate(
+        action.id,
+        PaymentCandidateDecisionRequest(
+            action="confirm",
+            revision=projection["revision"],
+            idempotency_key="confirm-ranked-alternative",
+            evidence_id=alternative_id,
+        ),
+        actor="owl",
+    )
+
+    assert confirmed["payment_check"]["state"] == "confirmed"
+    db.refresh(action)
+    assert action.status == "completed"
 
 
 def test_ambiguous_candidates_can_be_discarded_and_selected(db) -> None:

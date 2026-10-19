@@ -958,13 +958,23 @@ class PaymentReconciliationService:
             if edge.state == "rejected" and evidence.transaction_ref
         }
         latest_evidence = evidence_rows[0][0] if evidence_rows else None
+        latest_response = latest_run.response_payload or {} if latest_run else {}
+        selected_transaction_ref = latest_response.get("selectedTransactionRef")
+        selected_evidence = next(
+            (
+                evidence
+                for evidence, edge in latest_generation_rows
+                if edge.state in {"active", "proposed"}
+                and evidence.transaction_ref == selected_transaction_ref
+            ),
+            None,
+        )
+        primary_evidence = selected_evidence or latest_evidence
         state = "unchecked"
         if latest_run and latest_run.status == "checking":
             state = "checking"
         else:
-            case_states = {
-                "ambiguous": "multiple_matches",
-                "unmatched": "no_match",
+            blocking_case_states = {
                 "partial_payment": "partial_payment",
                 "source_unavailable": "source_unavailable",
                 "projection_failed": "source_unavailable",
@@ -973,20 +983,26 @@ class PaymentReconciliationService:
                 "double_payment": "possible_double_payment",
             }
             exceptional = next(
-                (case_states[case.case_kind] for case in cases if case.case_kind in case_states),
+                (
+                    blocking_case_states[case.case_kind]
+                    for case in cases
+                    if case.case_kind in blocking_case_states
+                ),
                 None,
             )
             if exceptional:
                 state = exceptional
-            elif latest_evidence and latest_evidence.match_state == "matched":
+            elif primary_evidence and primary_evidence.match_state == "matched":
                 state = (
                     "posted_match"
-                    if latest_evidence.payment_status == "paid"
+                    if primary_evidence.payment_status == "paid"
                     else "pending_match"
-                    if latest_evidence.payment_status == "pending"
+                    if primary_evidence.payment_status == "pending"
                     else "no_match"
                 )
-            elif latest_evidence and latest_evidence.match_state == "no_match":
+            elif any(case.case_kind == "ambiguous" for case in cases):
+                state = "multiple_matches"
+            elif primary_evidence and primary_evidence.match_state == "no_match":
                 state = "no_match"
         if (
             action.status == "completed"
@@ -1298,19 +1314,28 @@ class PaymentReconciliationService:
             "noMatch": "no_match",
             "ambiguous": "ambiguous",
         }[response.match_status]
-        candidates = (
-            response.candidates[:1]
-            if response.match_status == "matched"
-            else response.candidates
-            if response.candidates
-            else [None]
-        )
+        candidates = response.candidates if response.candidates else [None]
         evidence: list[NormalizedPaymentEvidence] = []
         for candidate in candidates:
+            candidate_selected = bool(
+                candidate
+                and response.match_status == "matched"
+                and candidate.transaction_ref == response.selected_transaction_ref
+            )
+            candidate_match_state: MatchState = (
+                match_state
+                if response.match_status != "matched" or candidate_selected
+                else "ambiguous"
+            )
+            candidate_payment_status: PaymentStatus = (
+                response.payment_status
+                if response.match_status != "matched" or candidate_selected
+                else "ambiguous"
+            )
             reason_codes = (
                 [f"{signal.kind}_{signal.strength}".lower() for signal in candidate.signals]
                 if candidate
-                else [f"bill_match_{match_state}"]
+                else [f"bill_match_{candidate_match_state}"]
             )
             evidence.append(
                 NormalizedPaymentEvidence(
@@ -1355,9 +1380,11 @@ class PaymentReconciliationService:
                         or "USD"
                     ),
                     evidence_date=candidate.transaction_date if candidate else None,
-                    source_state=(candidate.transaction_state if candidate else match_state),
-                    match_state=match_state,
-                    payment_status=response.payment_status,
+                    source_state=(
+                        candidate.transaction_state if candidate else candidate_match_state
+                    ),
+                    match_state=candidate_match_state,
+                    payment_status=candidate_payment_status,
                     confidence=candidate.confidence if candidate else None,
                     reason_codes=reason_codes,
                 )

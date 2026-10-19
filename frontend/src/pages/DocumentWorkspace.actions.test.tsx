@@ -369,6 +369,70 @@ describe('DocumentWorkspace actions mode', () => {
     }));
   });
 
+  it('offers a confirmation action for each ranked posted transaction', async () => {
+    actionsMock.mockResolvedValue({
+      actions: actions.map((action) => (
+        action.id === 1 ? { ...action, obligation_id: 'obligation-1' } : { ...action }
+      )),
+      total: actions.length,
+    });
+    checkPaymentMock.mockResolvedValue({
+      payment: {
+        state: 'posted_match',
+        revision: 'v1:2:3',
+        message: 'A posted payment candidate requires confirmation.',
+        candidates: [
+          {
+            id: 'evidence-deposit',
+            rank: 1,
+            payee: 'Project Client',
+            amount: 5000,
+            currency: 'USD',
+            transaction_date: '2026-09-04',
+            status: 'posted',
+            account_display_name: 'Business checking',
+            account_last_four: '2468',
+            confidence: 'high',
+            score: 94,
+            match_reasons: ['amount_exact', 'date_strong'],
+          },
+          {
+            id: 'evidence-final',
+            rank: 2,
+            payee: 'Project Client',
+            amount: 5000,
+            currency: 'USD',
+            transaction_date: '2026-08-03',
+            status: 'posted',
+            account_display_name: 'Business checking',
+            account_last_four: '2468',
+            confidence: 'low',
+            score: 60,
+            match_reasons: ['amount_exact', 'date_partial'],
+          },
+        ],
+      },
+    });
+    renderWorkspace();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Check for payment' }));
+
+    expect(await screen.findByText('2 ranked results')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'This is the match' })).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Confirm payment and complete' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'This is the match' })[1]);
+    const dialog = screen.getByRole('dialog', { name: 'Confirm this transaction?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm and complete' }));
+
+    await waitFor(() => expect(reviewPaymentCandidateMock).toHaveBeenCalledWith('1', {
+      action: 'confirm',
+      revision: 'v1:2:3',
+      idempotency_key: 'owl-review-payment:confirm:1:v1:2:3:evidence-final',
+      evidence_id: 'evidence-final',
+    }));
+  });
+
   it('explains the full ranked result set when no candidate meets the threshold', async () => {
     actionsMock.mockResolvedValue({
       actions: actions.map((action) => (
