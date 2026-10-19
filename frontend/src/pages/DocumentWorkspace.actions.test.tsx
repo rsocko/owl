@@ -24,7 +24,6 @@ const {
   ocrCandidatesMock,
   paymentCheckMock,
   checkPaymentMock,
-  confirmPaymentAndCompleteMock,
   reviewPaymentCandidateMock,
 } = vi.hoisted(() => ({
   statusMock: vi.fn(),
@@ -38,7 +37,6 @@ const {
   ocrCandidatesMock: vi.fn(),
   paymentCheckMock: vi.fn(),
   checkPaymentMock: vi.fn(),
-  confirmPaymentAndCompleteMock: vi.fn(),
   reviewPaymentCandidateMock: vi.fn(),
 }));
 
@@ -53,7 +51,6 @@ vi.mock('../lib/api', () => ({
       feedback: feedbackMock,
       paymentCheck: paymentCheckMock,
       checkPayment: checkPaymentMock,
-      confirmPaymentAndComplete: confirmPaymentAndCompleteMock,
       reviewPaymentCandidate: reviewPaymentCandidateMock,
     },
     intake: {
@@ -212,7 +209,6 @@ describe('DocumentWorkspace actions mode', () => {
         }],
       },
     });
-    confirmPaymentAndCompleteMock.mockResolvedValue({});
     reviewPaymentCandidateMock.mockResolvedValue({
       payment_check: {
         state: 'no_match',
@@ -343,7 +339,7 @@ describe('DocumentWorkspace actions mode', () => {
     }));
   });
 
-  it('requires explicit confirmation before completing a posted payment match', async () => {
+  it('shows consistent review actions for a single posted payment match', async () => {
     actionsMock.mockResolvedValue({
       actions: actions.map((action) => (
         action.id === 1 ? { ...action, obligation_id: 'obligation-1' } : { ...action }
@@ -357,15 +353,42 @@ describe('DocumentWorkspace actions mode', () => {
 
     expect(await screen.findByText('Posted payment found')).toBeInTheDocument();
     expect(screen.getByText('Household checking •••• 1234')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not the match' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'This is the match' })).toBeInTheDocument();
     expect(updateActionMock).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm payment and complete' }));
-    const dialog = screen.getByRole('dialog', { name: 'Confirm this posted payment?' });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm payment and complete' }));
+    fireEvent.click(screen.getByRole('button', { name: 'This is the match' }));
+    const dialog = screen.getByRole('dialog', { name: 'Confirm this transaction?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm and complete' }));
 
-    await waitFor(() => expect(confirmPaymentAndCompleteMock).toHaveBeenCalledWith('1', {
+    await waitFor(() => expect(reviewPaymentCandidateMock).toHaveBeenCalledWith('1', {
+      action: 'confirm',
       revision: 'v1:2:3',
-      idempotency_key: 'owl-confirm-payment:1:v1:2:3',
+      idempotency_key: 'owl-review-payment:confirm:1:v1:2:3:evidence-1',
+      evidence_id: 'evidence-1',
+    }));
+  });
+
+  it('lets the user reject a single posted payment match', async () => {
+    actionsMock.mockResolvedValue({
+      actions: actions.map((action) => (
+        action.id === 1 ? { ...action, obligation_id: 'obligation-1' } : { ...action }
+      )),
+      total: actions.length,
+    });
+    renderWorkspace();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Check for payment' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Not the match' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Mark this as not the match?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Not the match' }));
+
+    await waitFor(() => expect(reviewPaymentCandidateMock).toHaveBeenCalledWith('1', {
+      action: 'reject',
+      revision: 'v1:2:3',
+      idempotency_key: 'owl-review-payment:reject:1:v1:2:3:evidence-1',
+      evidence_id: 'evidence-1',
     }));
   });
 
