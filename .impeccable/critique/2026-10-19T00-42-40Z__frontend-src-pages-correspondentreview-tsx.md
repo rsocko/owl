@@ -2,7 +2,7 @@
 target: Correspondent Review
 total_score: 21
 max_score: 40
-na_heuristics: 
+na_heuristics:
 p0_count: 0
 p1_count: 3
 timestamp: 2026-10-19T00-42-40Z
