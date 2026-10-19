@@ -7,7 +7,8 @@ import DashboardView from './pages/DashboardView';
 import CorrectionHistory from './pages/CorrectionHistory';
 import Statements from './pages/Statements';
 import StatementSeriesDetail from './pages/StatementSeriesDetail';
-import CorrespondentReview from './pages/CorrespondentReview';
+import DocumentSources from './pages/DocumentSources';
+import ExpectationSetup from './pages/ExpectationSetup';
 import EobWorkspace from './pages/EobWorkspace';
 import DocumentWorkspace from './pages/DocumentWorkspace';
 import ActionQueueOperations from './pages/ActionQueueOperations';
@@ -26,6 +27,7 @@ import OcrFocusInspectorPage from './pages/OcrFocusInspectorPage';
 import { endpoints } from './lib/api';
 import { canonicalActionTarget, type CanonicalActionLocation } from './lib/canonicalAction';
 import { legacyOcrQueueTarget } from './lib/ocrNavigation';
+import { legacySourceTarget } from './lib/routeTargets';
 
 /** Redirect legacy /eob/matches/:matchId to the unified workspace. */
 function EobMatchRedirect() {
@@ -36,6 +38,12 @@ function EobMatchRedirect() {
 function LegacyRouteRedirect({ to }: { to: string }) {
   const { search } = useLocation();
   return <Navigate to={`${to}${search}`} replace />;
+}
+
+function LegacySourceRedirect() {
+  const { correspondentId } = useParams();
+  const { search } = useLocation();
+  return <Navigate to={legacySourceTarget(correspondentId, search)} replace />;
 }
 
 function LegacyInboxRedirect() {
@@ -89,8 +97,11 @@ function App() {
             <Route path="/corrections" element={<CorrectionHistory />} />
             <Route path="/statements" element={<Statements />} />
             <Route path="/statements/:seriesId" element={<StatementSeriesDetail />} />
-            <Route path="/correspondents" element={<CorrespondentReview />} />
-            <Route path="/correspondents/:correspondentId" element={<CorrespondentReview />} />
+            <Route path="/sources" element={<DocumentSources />} />
+            <Route path="/sources/:correspondentId" element={<DocumentSources />} />
+            <Route path="/sources/:correspondentId/expectations/new" element={<ExpectationSetup />} />
+            <Route path="/correspondents" element={<LegacySourceRedirect />} />
+            <Route path="/correspondents/:correspondentId" element={<LegacySourceRedirect />} />
             <Route path="/eob" element={<EobWorkspace />} />
             {/* Legacy routes redirect into the unified workspace */}
             <Route path="/eob/matches/:matchId" element={<EobMatchRedirect />} />

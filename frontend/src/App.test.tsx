@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalActionTarget } from './lib/canonicalAction';
 import { legacyOcrQueueTarget } from './lib/ocrNavigation';
+import { legacySourceTarget } from './lib/routeTargets';
 
 describe('canonicalActionTarget', () => {
   it('routes actions needing review to their current review item', () => {
@@ -27,5 +28,10 @@ describe('canonicalActionTarget', () => {
       review_state: 'ready',
       needs_review_url: null,
     })).toBe('/actions?action=306&status=pending');
+  });
+
+  it('redirects legacy correspondent URLs to canonical Document Sources deep links', () => {
+    expect(legacySourceTarget('41', '?mode=review')).toBe('/sources/41?mode=review');
+    expect(legacySourceTarget(undefined, '?q=bank')).toBe('/sources?q=bank');
   });
 });
