@@ -72,52 +72,70 @@ jobs:
     name: Python lint and tests
     needs:
       - changes
-    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Skip unaffected Python checks
+        if: needs.changes.outputs.python != 'true'
+        run: echo "No Python-affecting changes detected."
       - name: Check out repository
+        if: needs.changes.outputs.python == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Set up Python
+        if: needs.changes.outputs.python == 'true'
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
           cache: pip
       - name: Install dependencies
+        if: needs.changes.outputs.python == 'true'
         run: python -m pip install --disable-pip-version-check -e ".[dev]"
       - name: Lint
+        if: needs.changes.outputs.python == 'true'
         run: ruff check src/ tests/
       - name: Check formatting
+        if: needs.changes.outputs.python == 'true'
         run: ruff format --check src/ tests/
       - name: Test
+        if: needs.changes.outputs.python == 'true'
         run: pytest --tb=short -q -n 4 --dist loadscope
 
   frontend:
     name: Frontend checks
     needs:
       - changes
-    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
     steps:
+      - name: Skip unaffected frontend checks
+        if: needs.changes.outputs.frontend != 'true'
+        working-directory: .
+        run: echo "No frontend-affecting changes detected."
       - name: Check out repository
+        if: needs.changes.outputs.frontend == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Set up Node.js
+        if: needs.changes.outputs.frontend == 'true'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Verify dependency sources
+        if: needs.changes.outputs.frontend == 'true'
         run: npm run check:lockfile-sources
       - name: Install dependencies
+        if: needs.changes.outputs.frontend == 'true'
         run: npm ci --ignore-scripts
       - name: Type-check
+        if: needs.changes.outputs.frontend == 'true'
         run: npm run typecheck
       - name: Lint
+        if: needs.changes.outputs.frontend == 'true'
         run: npm run lint
       - name: Build
+        if: needs.changes.outputs.frontend == 'true'
         run: npm run build:ci
