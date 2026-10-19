@@ -737,6 +737,56 @@ describe('DocumentWorkspace inbox mode', () => {
     ));
   });
 
+  it('restores a matching exact account identifier from document text and stages it for save', async () => {
+    documentCoreMock.mockResolvedValue({
+      ...core(1),
+      document: {
+        ...core(1).document,
+        review_fields: [{
+          field: 9,
+          field_key: 'account_identifier',
+          name: 'Account Identifier',
+          value: 'DEMOACCOUNTXYZ9',
+          stored_value: 'ending XYZ9',
+          identifier_class: 'provider_account',
+          recovered_from_document: true,
+          data_type: 'string',
+          editable: true,
+          audit: false,
+        }],
+      },
+    });
+    renderPage();
+
+    expect(await screen.findByLabelText('Account Identifier')).toHaveValue('DEMOACCOUNTXYZ9');
+    expect(screen.getByLabelText('Identifier type')).toHaveValue('provider_account');
+    expect(screen.getByText(
+      'Recovered from document text. Save changes to replace the masked Paperless value.',
+    )).toBeInTheDocument();
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(saveDocumentMock).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        metadata: {
+          custom_fields: [{
+            field: 9,
+            value: 'DEMOACCOUNTXYZ9',
+            identifier_class: 'provider_account',
+          }],
+        },
+        base_metadata: {
+          custom_fields: [{
+            field: 9,
+            value: 'ending XYZ9',
+          }],
+        },
+      }),
+    ));
+  });
+
   it('discards metadata changes and advances without saving when deferred', async () => {
     renderPage();
 
