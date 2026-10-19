@@ -64,6 +64,10 @@
   border-bottom: 1px solid var(--border);
 }
 
+.workspace-queue-controls {
+  position: relative;
+}
+
 .document-workspace-search {
   height: 2.35rem;
   padding: 0 .65rem;
@@ -83,6 +87,263 @@
   outline: 0;
   background: transparent;
   font-size: .76rem;
+}
+
+.workspace-control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: .4rem;
+  margin-top: .5rem;
+}
+
+.workspace-control-row.without-filters {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.workspace-control {
+  min-width: 0;
+  min-height: 2.15rem;
+  padding: 0 .65rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text-muted);
+  font-size: .68rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.workspace-control:hover,
+.workspace-control[data-state="open"] {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.workspace-primary-control {
+  justify-content: space-between;
+  color: var(--text);
+}
+
+.workspace-primary-control > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-control b {
+  min-width: 1.2rem;
+  margin-left: .25rem;
+  padding: .08rem .32rem;
+  border-radius: 999px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: .62rem;
+  text-align: center;
+}
+
+.workspace-sort-control {
+  width: 2.25rem;
+  padding: 0;
+}
+
+.workspace-active-filters {
+  display: flex;
+  gap: .3rem;
+  margin-top: .45rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.workspace-active-filters button {
+  min-height: 1.7rem;
+  padding: .18rem .48rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 999px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: .63rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.workspace-active-filters button:hover {
+  border-color: var(--accent);
+}
+
+.workspace-active-filters b {
+  color: var(--text-muted);
+  font-size: .6rem;
+}
+
+.workspace-queue-menu,
+.workspace-queue-filter-popover {
+  z-index: 60;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius-sm) + 2px);
+  background: var(--card);
+  box-shadow: 0 14px 34px rgb(25 38 61 / 18%);
+}
+
+.workspace-queue-menu {
+  min-width: 12.5rem;
+  padding: .35rem;
+}
+
+.workspace-queue-menu button {
+  width: 100%;
+  min-height: 2.1rem;
+  padding: .35rem .5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: .6rem;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--text);
+  font-size: .7rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-sort-menu button {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.workspace-queue-menu button:hover,
+.workspace-queue-menu button.selected {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.workspace-queue-menu button b {
+  color: var(--text-muted);
+  font-size: .63rem;
+}
+
+.workspace-queue-menu button svg {
+  opacity: 0;
+}
+
+.workspace-queue-menu button.selected svg {
+  opacity: 1;
+}
+
+.workspace-queue-filter-popover {
+  width: min(22rem, calc(100vw - 2rem));
+  max-height: min(34rem, calc(100vh - 3rem));
+  overflow-y: auto;
+}
+
+.workspace-filter-popover-heading {
+  min-height: 2.7rem;
+  padding: .65rem .8rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.workspace-filter-popover-heading strong {
+  font-size: .75rem;
+}
+
+.workspace-filter-popover-heading button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: .66rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.workspace-filter-popover-group {
+  padding: .65rem .8rem;
+}
+
+.workspace-filter-popover-group + .workspace-filter-popover-group {
+  border-top: 1px solid var(--border);
+}
+
+.workspace-filter-popover-group > span {
+  display: block;
+  margin-bottom: .35rem;
+  color: var(--text-muted);
+  font-size: .58rem;
+  font-weight: 800;
+  letter-spacing: .065em;
+  text-transform: uppercase;
+}
+
+.workspace-filter-popover-group button {
+  width: 100%;
+  min-height: 2rem;
+  padding: .25rem .1rem;
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .5rem;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: .7rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-filter-popover-group button:hover {
+  color: var(--accent);
+}
+
+.workspace-filter-popover-group button i {
+  width: 1rem;
+  height: 1rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: .25rem;
+  background: var(--card);
+  color: transparent;
+  font-style: normal;
+}
+
+.workspace-filter-popover-group [role="radio"] i {
+  border-radius: 50%;
+}
+
+.workspace-filter-popover-group button.selected i {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: white;
+}
+
+.workspace-filter-popover-group [role="radio"].selected i svg {
+  display: none;
+}
+
+.workspace-filter-popover-group [role="radio"].selected i::after {
+  width: .35rem;
+  height: .35rem;
+  border-radius: 50%;
+  background: white;
+  content: "";
+}
+
+.workspace-filter-popover-group button b {
+  color: var(--text-muted);
+  font-size: .63rem;
 }
 
 .workspace-filter-group {

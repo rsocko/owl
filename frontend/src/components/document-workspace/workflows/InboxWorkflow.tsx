@@ -31,6 +31,7 @@ import {
 } from '../../../lib/documentActions';
 import DocumentRelationshipsPanel from '../../DocumentRelationshipsPanel';
 import OcrFocusInspector from '../../OcrFocusInspector';
+import WorkspaceQueueControls from '../WorkspaceQueueControls';
 import { ocrNeedsAttention, useOcrSummary } from '../../../hooks/useOcrSummary';
 import { endpoints } from '../../../lib/api';
 import {
@@ -45,6 +46,7 @@ type ReviewTab = 'metadata' | 'actions' | 'related' | 'ocr';
 type Disposition = 'save' | 'file_only' | 'confirm_and_file';
 type TaxonomyKind = 'tag' | 'correspondent' | 'document_type' | 'storage_path';
 type QueueFilter = 'all' | 'actions' | 'missing_type';
+type QueueSort = 'newest' | 'oldest' | 'document_date' | 'title';
 
 interface TaxonomyValue {
   id: number;
@@ -501,6 +503,7 @@ export default function InboxWorkflow() {
   const [focusedId, setFocusedId] = useState<number | null>(selectedId);
   const [queueQuery, setQueueQuery] = useState('');
   const [queueFilter, setQueueFilter] = useState<QueueFilter>('all');
+  const [queueSort, setQueueSort] = useState<QueueSort>('newest');
   const [pinnedFilteredId, setPinnedFilteredId] = useState<number | null>(null);
   const [core, setCore] = useState<IntakeCore | null>(null);
   const [metadata, setMetadata] = useState<MetadataDraft | null>(null);
@@ -556,6 +559,7 @@ export default function InboxWorkflow() {
     pageCount = 1,
     search = '',
     filter: QueueFilter = 'all',
+    sort: QueueSort = 'newest',
   ): Promise<IntakeListItem[]> => {
     const currentRequest = ++queueRequestId.current;
     setLoadingQueue(true);
@@ -571,6 +575,7 @@ export default function InboxWorkflow() {
           cursor,
           search,
           filter,
+          ...(sort === 'newest' ? {} : { sort }),
         }) as IntakeQueueResponse;
         documents.push(...response.documents);
         total = response.total;
@@ -602,6 +607,7 @@ export default function InboxWorkflow() {
         cursor: nextQueueCursor,
         search: queueQuery,
         filter: queueFilter,
+        ...(queueSort === 'newest' ? {} : { sort: queueSort }),
       }) as IntakeQueueResponse;
       setQueue((current) => {
         const existingIds = new Set(current.map((item) => item.id));
@@ -614,7 +620,7 @@ export default function InboxWorkflow() {
     } finally {
       setLoadingMoreQueue(false);
     }
-  }, [loadingMoreQueue, nextQueueCursor, queueFilter, queueQuery]);
+  }, [loadingMoreQueue, nextQueueCursor, queueFilter, queueQuery, queueSort]);
 
   const loadDocument = useCallback(async (id: number) => {
     const currentRequest = ++requestId.current;
@@ -686,11 +692,11 @@ export default function InboxWorkflow() {
 
   useEffect(() => {
     const timeout = window.setTimeout(
-      () => void loadQueue(1, queueQuery, queueFilter),
+      () => void loadQueue(1, queueQuery, queueFilter, queueSort),
       queueQuery.trim() ? 250 : 0,
     );
     return () => window.clearTimeout(timeout);
-  }, [loadQueue, queueFilter, queueQuery]);
+  }, [loadQueue, queueFilter, queueQuery, queueSort]);
   useEffect(() => {
     if (selectedId != null) void loadDocument(selectedId);
   }, [loadDocument, selectedId]);
@@ -887,6 +893,7 @@ export default function InboxWorkflow() {
         Math.max(1, Math.ceil(queue.length / QUEUE_PAGE_SIZE)),
         queueQuery,
         queueFilter,
+        queueSort,
       );
       const matchingQueue = refreshedQueue;
       if (response.filed) {
@@ -1068,29 +1075,48 @@ export default function InboxWorkflow() {
               Math.max(1, Math.ceil(queue.length / QUEUE_PAGE_SIZE)),
               queueQuery,
               queueFilter,
+              queueSort,
             )}
           ><RefreshCw size={15} /></Button>
         </div>
         <div className="intake-queue-tools">
-          <label><Search size={16} /><input aria-label="Search intake documents" placeholder="Search documents…" value={queueQuery} onChange={(event) => {
-            setPinnedFilteredId(null);
-            setQueueQuery(event.target.value);
-          }} /></label>
-          <div className="intake-filter-chips" aria-label="Filter documents">
-            {([
-              ['all', 'All'],
-              ['actions', 'Action needed'],
-              ['missing_type', 'Missing type'],
-            ] as const).map(([value, label]) => (
-              <button key={value} type="button" className={queueFilter === value ? 'active' : ''} onClick={() => {
+          <WorkspaceQueueControls
+            search={{
+              value: queueQuery,
+              placeholder: 'Search documents…',
+              ariaLabel: 'Search intake documents',
+              onChange: (value) => {
                 setPinnedFilteredId(null);
-                setQueueFilter(value);
-              }}>{label}</button>
-            ))}
-          </div>
+                setQueueQuery(value);
+              },
+            }}
+            primary={{
+              value: queueFilter,
+              ariaLabel: 'Inbox view',
+              options: [
+                { value: 'all', label: 'All documents', count: queueFilter === 'all' ? queueTotal : undefined },
+                { value: 'actions', label: 'Action needed', count: queueFilter === 'actions' ? queueTotal : undefined },
+                { value: 'missing_type', label: 'Missing type', count: queueFilter === 'missing_type' ? queueTotal : undefined },
+              ],
+              onChange: (value) => {
+                setPinnedFilteredId(null);
+                setQueueFilter(value as QueueFilter);
+              },
+            }}
+            sort={{
+              value: queueSort,
+              options: [
+                { value: 'newest', label: 'Newest added first' },
+                { value: 'oldest', label: 'Oldest added first' },
+                { value: 'document_date', label: 'Newest document date' },
+                { value: 'title', label: 'Title A–Z' },
+              ],
+              onChange: (value) => setQueueSort(value as QueueSort),
+            }}
+          />
         </div>
         {loadingQueue ? <SkeletonLoader variant="default" /> : queueError ? (
-          <ErrorState message={`Inbox unavailable: ${queueError}`} onRetry={() => void loadQueue(1, queueQuery, queueFilter)} />
+          <ErrorState message={`Inbox unavailable: ${queueError}`} onRetry={() => void loadQueue(1, queueQuery, queueFilter, queueSort)} />
         ) : queue.length === 0 ? (
           <EmptyState title="Inbox is clear" desc="No documents match the configured intake tags." />
         ) : filteredQueue.length === 0 ? (
