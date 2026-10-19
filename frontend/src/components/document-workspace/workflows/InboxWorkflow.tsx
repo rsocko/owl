@@ -22,6 +22,7 @@ import DocumentActionsTab from '../tabs/DocumentActionsTab';
 import DocumentMetadataTab from '../tabs/DocumentMetadataTab';
 import DocumentOcrTab from '../tabs/DocumentOcrTab';
 import DocumentRelatedTab from '../tabs/DocumentRelatedTab';
+import CurrencyInput from '../../CurrencyInput';
 import {
   documentActionMutation,
   type DocumentAction,
@@ -226,38 +227,6 @@ function matchesQueueFilter(item: IntakeListItem, query: string, filter: QueueFi
   const needle = query.trim().toLocaleLowerCase();
   return !needle || [item.title, item.correspondent_name, item.document_type_name]
     .some((value) => value?.toLocaleLowerCase().includes(needle));
-}
-
-function CurrencyInput({
-  label,
-  value,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  disabled: boolean;
-  onChange: (value: string) => void;
-}) {
-  const [focused, setFocused] = useState(false);
-  const numericValue = Number(value.replaceAll(',', '').replaceAll('$', ''));
-  const displayValue = !focused && value && Number.isFinite(numericValue)
-    ? numericValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : value;
-  return (
-    <div className="intake-currency-input">
-      <span aria-hidden="true">$</span>
-      <input
-        aria-label={label}
-        inputMode="decimal"
-        value={displayValue}
-        disabled={disabled}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        onChange={(event) => onChange(event.target.value.replace(/[^0-9.,-]/g, '').replaceAll(',', ''))}
-      />
-    </div>
-  );
 }
 
 function SuggestionLinks({
@@ -1328,20 +1297,22 @@ export default function InboxWorkflow() {
                                 <label className="intake-field" key={field.field}>
                                   <span>{field.name}</span>
                                   {field.name === 'Document Amount' ? (
-                                  <CurrencyInput
-                                    label={field.name}
-                                    value={metadata.customFields[String(field.field)] || ''}
-                                    disabled={!core.write_enabled}
-                                    onChange={(value) => setMetadata({ ...metadata, customFields: { ...metadata.customFields, [String(field.field)]: value } })}
-                                  />
-                                ) : (
-                                  <input
-                                    type={field.data_type === 'date' ? 'date' : ['float', 'decimal', 'integer', 'monetary'].includes(field.data_type || '') ? 'number' : 'text'}
-                                    step={['float', 'decimal', 'monetary'].includes(field.data_type || '') ? '0.01' : undefined}
-                                    value={metadata.customFields[String(field.field)] || ''}
-                                    disabled={!core.write_enabled}
-                                    onChange={(event) => setMetadata({ ...metadata, customFields: { ...metadata.customFields, [String(field.field)]: event.target.value } })}
-                                  />
+                                    <CurrencyInput
+                                      label={field.name}
+                                      value={metadata.customFields[String(field.field)] || ''}
+                                      disabled={!core.write_enabled}
+                                      allowNegative
+                                      className="intake-currency-input"
+                                      onChange={(value) => setMetadata({ ...metadata, customFields: { ...metadata.customFields, [String(field.field)]: value } })}
+                                    />
+                                  ) : (
+                                    <input
+                                      type={field.data_type === 'date' ? 'date' : ['float', 'decimal', 'integer', 'monetary'].includes(field.data_type || '') ? 'number' : 'text'}
+                                      step={['float', 'decimal', 'monetary'].includes(field.data_type || '') ? '0.01' : undefined}
+                                      value={metadata.customFields[String(field.field)] || ''}
+                                      disabled={!core.write_enabled}
+                                      onChange={(event) => setMetadata({ ...metadata, customFields: { ...metadata.customFields, [String(field.field)]: event.target.value } })}
+                                    />
                                   )}
                                 </label>
                               )

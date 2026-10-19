@@ -240,6 +240,7 @@ describe('DocumentWorkspace actions mode', () => {
     renderWorkspace();
 
     const title = await screen.findByDisplayValue('Pay electric bill');
+    expect(screen.getByLabelText('Amount')).toHaveValue('$82.45');
     fireEvent.change(title, { target: { value: 'Pay utility balance' } });
 
     expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
