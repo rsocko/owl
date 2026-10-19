@@ -5,7 +5,11 @@ import json
 import httpx
 import pytest
 
-from doc_intelligence_hub.core.paperless import PaperlessClient, load_fixture
+from doc_intelligence_hub.core.paperless import (
+    PaperlessClient,
+    PaperlessRevisionConflict,
+    load_fixture,
+)
 from doc_intelligence_hub.core.resilience import (
     PaperlessError,
     reset_circuit_breakers,
@@ -93,6 +97,7 @@ def _mock_transport():
                     "content": "Hello world",
                     "custom_fields": [],
                     "tags": [1, 2],
+                    "modified": "revision-1",
                 },
             )
         if request.url.path == "/api/documents/1/download/":
@@ -148,6 +153,18 @@ async def test_list_documents(client):
     assert len(docs) == 2
     assert docs[0]["title"] == "Doc A"
     assert docs[1]["title"] == "Doc B"
+
+
+@pytest.mark.asyncio
+async def test_update_document_rejects_changed_revision_before_patch(client):
+    with pytest.raises(PaperlessRevisionConflict) as exc_info:
+        await client.update_document(
+            1,
+            {"title": "Updated title"},
+            expected_modified="stale-revision",
+        )
+
+    assert exc_info.value.current_document["modified"] == "revision-1"
 
 
 @pytest.mark.asyncio

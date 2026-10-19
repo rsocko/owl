@@ -3,6 +3,7 @@
 from doc_intelligence_hub.core.paperless.client import (
     PaperlessClient,
     PaperlessPage,
+    PaperlessRevisionConflict,
     ProgressCallback,
     load_fixture,
 )
@@ -59,6 +60,7 @@ __all__ = [
     "PaperlessFieldType",
     "PaperlessMetadataResolver",
     "PaperlessPage",
+    "PaperlessRevisionConflict",
     "ProgressCallback",
     "ResolvedMetadataField",
     "ResolvedMetadataSchema",

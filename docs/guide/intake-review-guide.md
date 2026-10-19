@@ -50,7 +50,14 @@ can be bookmarked or shared, for example
 ## Metadata and filing decisions
 
 Paperless remains authoritative. OWL loads the current `modified` revision and
-rejects a save if Paperless changed while the document was open.
+compares it again immediately before writeback. OWL sends only fields changed
+in the workspace, so unrelated Paperless edits are preserved.
+
+If the same field changed in both places, OWL shows the loaded, current
+Paperless, and reviewed OWL values. Choose **Keep Paperless** or **Apply OWL**
+for each conflict, or choose **Continue editing** without discarding the draft.
+If a prior request succeeded but its response was lost, matching values are
+treated as an idempotent replay rather than written again.
 
 | Control | Result |
 |---|---|

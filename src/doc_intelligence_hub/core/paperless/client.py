@@ -85,6 +85,22 @@ _CUSTOM_FIELD_QUERY_OPERATORS = frozenset(
         "range",
     }
 )
+
+
+class PaperlessRevisionConflict(PaperlessError):
+    """Raised when Paperless changed after the caller loaded a document."""
+
+    def __init__(
+        self,
+        *,
+        expected_modified: str | None,
+        current_document: dict[str, Any],
+    ) -> None:
+        super().__init__("Paperless document revision changed", status_code=409)
+        self.expected_modified = expected_modified
+        self.current_document = current_document
+
+
 _CUSTOM_FIELD_QUERY_DATE_COMPONENTS = frozenset(
     {
         "day",
@@ -873,8 +889,21 @@ class PaperlessClient:
     # Documents — write
     # ------------------------------------------------------------------
 
-    async def update_document(self, document_id: int, data: dict) -> dict:
+    async def update_document(
+        self,
+        document_id: int,
+        data: dict,
+        *,
+        expected_modified: str | None = None,
+    ) -> dict:
         """Patch document metadata (title, correspondent, tags, etc)."""
+        if expected_modified is not None:
+            current = await self.get_document(document_id)
+            if current.get("modified") != expected_modified:
+                raise PaperlessRevisionConflict(
+                    expected_modified=expected_modified,
+                    current_document=current,
+                )
         resp = await self._request("PATCH", f"/api/documents/{document_id}/", json=data)
         resp.raise_for_status()
         return resp.json()
@@ -903,7 +932,13 @@ class PaperlessClient:
         resp = await self._request("DELETE", f"/api/custom_fields/{field_id}/")
         resp.raise_for_status()
 
-    async def update_custom_fields(self, document_id: int, custom_fields: list[dict]) -> None:
+    async def update_custom_fields(
+        self,
+        document_id: int,
+        custom_fields: list[dict],
+        *,
+        expected_modified: str | None = None,
+    ) -> dict:
         """Update custom field values on a document (merge, not replace).
 
         Reads existing fields first to avoid overwriting unrelated ones.
@@ -912,6 +947,11 @@ class PaperlessClient:
         resp = await self._request("GET", f"/api/documents/{document_id}/")
         resp.raise_for_status()
         doc = resp.json()
+        if expected_modified is not None and doc.get("modified") != expected_modified:
+            raise PaperlessRevisionConflict(
+                expected_modified=expected_modified,
+                current_document=doc,
+            )
         existing = doc.get("custom_fields", [])
 
         # Merge: keep existing, update/add ours
@@ -924,6 +964,8 @@ class PaperlessClient:
             "PATCH", f"/api/documents/{document_id}/", json={"custom_fields": merged}
         )
         resp.raise_for_status()
+        payload = resp.json()
+        return payload if isinstance(payload, dict) else {**doc, "custom_fields": merged}
 
     async def update_custom_fields_verified(
         self,

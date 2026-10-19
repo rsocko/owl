@@ -318,6 +318,92 @@
   color: var(--muted, #6b7280);
 }
 
+.meta-conflict-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.meta-conflict-dialog > p {
+  max-width: 68ch;
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.meta-conflict-safe,
+.meta-conflict-loaded {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--muted-bg);
+  color: var(--text-muted);
+}
+
+.meta-conflict-field {
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 8px;
+}
+
+.meta-conflict-field legend {
+  padding-inline: 5px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.meta-conflict-loaded,
+.meta-conflict-field label {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(110px, 0.45fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.meta-conflict-loaded {
+  grid-template-columns: minmax(110px, 0.45fr) minmax(0, 1fr);
+  font-size: 12px;
+}
+
+.meta-conflict-field label {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.meta-conflict-field label:hover {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+}
+
+.meta-conflict-field label.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.meta-conflict-field label:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.meta-conflict-field label > span {
+  min-width: 0;
+  display: grid;
+}
+
+.meta-conflict-field small {
+  color: var(--text-muted);
+}
+
+.meta-conflict-field b,
+.meta-conflict-loaded strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* ── Document card ── */
 .meta-doc-card .card-body {
   padding: 12px;

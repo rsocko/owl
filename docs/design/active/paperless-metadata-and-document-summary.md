@@ -204,6 +204,14 @@ canonical and legacy fields because partial failures would create two apparent
 sources of truth. Legacy fields remain read-only until migration completion and
 an explicit, separately reviewed retirement decision.
 
+Every correction write carries the Paperless `modified` revision captured when
+the values were loaded. OWL compares that revision immediately before PATCH and
+returns field-level loaded, current Paperless, and proposed OWL values when both
+systems changed the same field. The reviewer explicitly keeps Paperless,
+applies OWL, or returns to editing. Matching newer values are idempotent
+replays. Write audits retain the initiating OWL surface and field names, never
+document text, values, or exact protected identifiers.
+
 ## 3. Account Identifier Extraction and Privacy
 
 ### Paperless Value

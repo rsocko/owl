@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { Button, EmptyState, ErrorState, SkeletonLoader, Toast } from '../../ui';
+import { Button, EmptyState, ErrorState, Modal, SkeletonLoader, Toast } from '../../ui';
 import { DocumentWorkspaceFrame } from '../../DocumentWorkspace';
 import DocumentWorkspaceDocumentView from '../DocumentWorkspaceDocumentView';
 import DocumentActionsTab from '../tabs/DocumentActionsTab';
@@ -158,6 +158,53 @@ interface MetadataDraft {
   customFields: Record<string, string>;
 }
 
+type ConflictChoice = 'paperless' | 'owl';
+
+interface WriteConflict {
+  field: string;
+  label: string;
+  loaded_value: unknown;
+  paperless_value: unknown;
+  owl_value: unknown;
+}
+
+interface SourceConflictDetails {
+  code: 'source_revision_conflict';
+  message: string;
+  expected_modified: string;
+  current_modified: string;
+  conflicts: WriteConflict[];
+}
+
+interface IntakeMetadataPatch {
+  title?: string;
+  created?: string | null;
+  correspondent?: number | null;
+  document_type?: number | null;
+  storage_path?: number | null;
+  tags?: number[];
+  custom_fields?: Array<{
+    field: number;
+    value: string | number | null;
+    identifier_class?: AccountIdentifierClass;
+  }>;
+}
+
+interface IntakeSavePayload {
+  expected_modified: string;
+  metadata: IntakeMetadataPatch;
+  base_metadata: IntakeMetadataPatch;
+  disposition: Disposition;
+  action_versions: Record<number, number>;
+  initiated_by: 'owl-intake-review';
+}
+
+interface PendingWriteConflict {
+  details: SourceConflictDetails;
+  payload: IntakeSavePayload;
+  choices: Record<string, ConflictChoice>;
+}
+
 function initialMetadata(core: IntakeCore): MetadataDraft {
   return {
     title: core.document.title || '',
@@ -189,15 +236,108 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'The operation failed.';
 }
 
-function errorCode(error: unknown): string | null {
+function sourceConflictDetails(error: unknown): SourceConflictDetails | null {
   if (!(error instanceof Error) || !('details' in error)) return null;
   const details = (error as {
     details?: {
-      detail?: { code?: string };
-      error?: { code?: string };
+      detail?: SourceConflictDetails;
+      error?: SourceConflictDetails;
     };
   }).details;
-  return details?.detail?.code || details?.error?.code || null;
+  const conflict = details?.detail || details?.error;
+  return conflict?.code === 'source_revision_conflict' ? conflict : null;
+}
+
+function equalDraftValue(left: unknown, right: unknown): boolean {
+  const normalize = (value: unknown) => (
+    Array.isArray(value) ? [...value].map(String).sort() : value
+  );
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+}
+
+function customFieldPatchValue(field: ReviewField, value: string): string | number | null {
+  if (!value) return null;
+  return ['float', 'decimal', 'integer', 'monetary'].includes(field.data_type || '')
+    ? Number(value)
+    : value;
+}
+
+function sparseMetadataPatch(
+  metadata: MetadataDraft,
+  baseline: MetadataDraft,
+  core: IntakeCore,
+  accountIdentifierClass: AccountIdentifierClass,
+): { metadata: IntakeMetadataPatch; base_metadata: IntakeMetadataPatch } {
+  const patch: IntakeMetadataPatch = {};
+  const base: IntakeMetadataPatch = {};
+  const nativeFields = [
+    ['title', metadata.title, baseline.title],
+    ['created', metadata.created || null, baseline.created || null],
+    ['correspondent', metadata.correspondent ? Number(metadata.correspondent) : null,
+      baseline.correspondent ? Number(baseline.correspondent) : null],
+    ['document_type', metadata.document_type ? Number(metadata.document_type) : null,
+      baseline.document_type ? Number(baseline.document_type) : null],
+    ['storage_path', metadata.storage_path ? Number(metadata.storage_path) : null,
+      baseline.storage_path ? Number(baseline.storage_path) : null],
+    ['tags', metadata.tags.map(Number), baseline.tags.map(Number)],
+  ] as const;
+  for (const [field, value, loadedValue] of nativeFields) {
+    if (!equalDraftValue(value, loadedValue)) {
+      (patch as Record<string, unknown>)[field] = value;
+      (base as Record<string, unknown>)[field] = loadedValue;
+    }
+  }
+
+  const changedCustomFields = (core.document.review_fields || [])
+    .filter((field) => field.editable)
+    .filter((field) => !equalDraftValue(
+      metadata.customFields[String(field.field)] || '',
+      baseline.customFields[String(field.field)] || '',
+    ));
+  if (changedCustomFields.length) {
+    patch.custom_fields = changedCustomFields.map((field) => ({
+      field: field.field,
+      value: customFieldPatchValue(field, metadata.customFields[String(field.field)] || ''),
+      ...(field.field_key === 'account_identifier'
+        ? { identifier_class: accountIdentifierClass }
+        : {}),
+    }));
+    base.custom_fields = changedCustomFields.map((field) => ({
+      field: field.field,
+      value: customFieldPatchValue(field, baseline.customFields[String(field.field)] || ''),
+    }));
+  }
+  return { metadata: patch, base_metadata: base };
+}
+
+function omitConflictField(patch: IntakeMetadataPatch, field: string): IntakeMetadataPatch {
+  const next = { ...patch };
+  if (field.startsWith('custom_fields.')) {
+    const fieldId = Number(field.split('.')[1]);
+    next.custom_fields = next.custom_fields?.filter((item) => item.field !== fieldId);
+    if (!next.custom_fields?.length) delete next.custom_fields;
+  } else {
+    delete (next as Record<string, unknown>)[field];
+  }
+  return next;
+}
+
+function formatConflictValue(field: string, value: unknown, core: IntakeCore | null): string {
+  if (value == null || value === '') return 'Not set';
+  if (!core) return String(value);
+  if (field === 'correspondent') {
+    return optionName(core.taxonomies.correspondents, String(value));
+  }
+  if (field === 'document_type') {
+    return optionName(core.taxonomies.document_types, String(value));
+  }
+  if (field === 'storage_path') {
+    return optionName(core.taxonomies.storage_paths, String(value));
+  }
+  if (field === 'tags' && Array.isArray(value)) {
+    return value.map((id) => optionName(core.taxonomies.tags, String(id))).join(', ') || 'No tags';
+  }
+  return String(value);
 }
 
 function tagHierarchy(name: string): { parents: string[]; leaf: string } {
@@ -535,6 +675,7 @@ export default function InboxWorkflow() {
     actionLabel?: string;
     onAction?: () => void;
   } | null>(null);
+  const [writeConflict, setWriteConflict] = useState<PendingWriteConflict | null>(null);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const queueButtonRefs = useRef(new Map<number, HTMLButtonElement>());
   const queueRequestId = useRef(0);
@@ -851,44 +992,22 @@ export default function InboxWorkflow() {
     });
   };
 
-  const save = async (disposition: Disposition) => {
-    if (!core || !metadata) return;
-    setBusyKey(disposition);
+  const performSave = async (payload: IntakeSavePayload) => {
+    if (!core) return;
     const currentIndex = queue.findIndex((item) => item.id === core.document.id);
     const nextDocument = queue[currentIndex + 1] || queue[currentIndex - 1];
     try {
-      const response = await endpoints.intake.saveDocument(core.document.id, {
-        expected_modified: core.document.modified,
-        metadata: {
-          title: metadata.title,
-          created: metadata.created || null,
-          correspondent: metadata.correspondent ? Number(metadata.correspondent) : null,
-          document_type: metadata.document_type ? Number(metadata.document_type) : null,
-          storage_path: metadata.storage_path ? Number(metadata.storage_path) : null,
-          tags: metadata.tags.map(Number),
-          ...((core.document.review_fields || []).some((field) => field.editable) ? {
-            custom_fields: (core.document.review_fields || [])
-              .filter((field) => field.editable)
-              .map((field) => {
-                const value = metadata.customFields[String(field.field)] || '';
-                return {
-                  field: field.field,
-                  value: ['float', 'decimal', 'integer', 'monetary'].includes(field.data_type || '')
-                    ? value ? Number(value) : null
-                    : value || null,
-                  ...(field.field_key === 'account_identifier'
-                    ? { identifier_class: accountIdentifierClass }
-                    : {}),
-                };
-              }),
-          } : {}),
-        },
-        disposition,
-        action_versions: disposition === 'confirm_and_file'
-          ? Object.fromEntries(pendingActions.map((action) => [action.id, action.version]))
-          : {},
-      }) as { filed: boolean };
-      showToast(response.filed ? 'Document filed.' : 'Changes saved.');
+      const response = await endpoints.intake.saveDocument(
+        core.document.id,
+        payload,
+      ) as { filed: boolean; warnings?: Array<{ message: string }> };
+      setWriteConflict(null);
+      showToast(
+        response.warnings?.length
+          ? `${response.filed ? 'Document filed' : 'Changes saved'}, but ${response.warnings[0].message.toLowerCase()}`
+          : response.filed ? 'Document filed.' : 'Changes saved.',
+        response.warnings?.length ? 'error' : 'success',
+      );
       const refreshedQueue = await loadQueue(
         Math.max(1, Math.ceil(queue.length / QUEUE_PAGE_SIZE)),
         queueQuery,
@@ -917,16 +1036,63 @@ export default function InboxWorkflow() {
         await loadDocument(core.document.id);
       }
     } catch (error) {
-      if (errorCode(error) === 'source_revision_conflict') {
-        setToast({
-          message: 'This document changed after it was opened. Reload it to review the latest version before saving.',
-          tone: 'error',
-          actionLabel: 'Reload',
-          onAction: () => void reloadCurrentDocument(),
+      const conflict = sourceConflictDetails(error);
+      if (conflict) {
+        setWriteConflict({
+          details: conflict,
+          payload,
+          choices: Object.fromEntries(
+            conflict.conflicts.map((item) => [item.field, 'paperless' as const]),
+          ),
         });
       } else {
         showToast(errorMessage(error), 'error');
       }
+    }
+  };
+
+  const save = async (disposition: Disposition) => {
+    if (!core || !metadata || !baseline) return;
+    setBusyKey(disposition);
+    const patches = sparseMetadataPatch(
+      metadata,
+      baseline,
+      core,
+      accountIdentifierClass,
+    );
+    try {
+      await performSave({
+        expected_modified: core.document.modified,
+        ...patches,
+        disposition,
+        action_versions: disposition === 'confirm_and_file'
+          ? Object.fromEntries(pendingActions.map((action) => [action.id, action.version]))
+          : {},
+        initiated_by: 'owl-intake-review',
+      });
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const resolveWriteConflict = async () => {
+    if (!writeConflict) return;
+    setBusyKey('resolve-conflict');
+    let metadataPatch = writeConflict.payload.metadata;
+    let basePatch = writeConflict.payload.base_metadata;
+    for (const conflict of writeConflict.details.conflicts) {
+      if (writeConflict.choices[conflict.field] === 'paperless') {
+        metadataPatch = omitConflictField(metadataPatch, conflict.field);
+        basePatch = omitConflictField(basePatch, conflict.field);
+      }
+    }
+    try {
+      await performSave({
+        ...writeConflict.payload,
+        expected_modified: writeConflict.details.current_modified,
+        metadata: metadataPatch,
+        base_metadata: basePatch,
+      });
     } finally {
       setBusyKey('');
     }
@@ -1427,6 +1593,79 @@ export default function InboxWorkflow() {
           </div>
           <iframe title={`Expanded preview of ${title}`} src={previewUrl} />
         </div>
+      ) : null}
+      {writeConflict ? (
+        <Modal
+          title="Paperless changed while you were reviewing"
+          onClose={() => setWriteConflict(null)}
+          footer={(
+            <>
+              <Button
+                variant="ghost"
+                disabled={busyKey === 'resolve-conflict'}
+                onClick={() => setWriteConflict(null)}
+              >
+                Continue editing
+              </Button>
+              <Button
+                variant="primary"
+                disabled={busyKey === 'resolve-conflict'}
+                onClick={() => void resolveWriteConflict()}
+              >
+                {busyKey === 'resolve-conflict'
+                  ? 'Resolving…'
+                  : writeConflict.details.conflicts.length
+                    ? 'Resolve & save'
+                    : 'Apply my changes'}
+              </Button>
+            </>
+          )}
+        >
+          <div className="intake-conflict-dialog">
+            <p>
+              {writeConflict.details.conflicts.length
+                ? 'Choose the value to keep for each field changed in both places. Unrelated Paperless edits will be preserved.'
+                : 'Paperless changed, but not in the fields you edited. Your changes can be applied without replacing the newer Paperless values.'}
+            </p>
+            {writeConflict.details.conflicts.map((conflict) => (
+              <fieldset className="intake-conflict-field" key={conflict.field}>
+                <legend>{conflict.label}</legend>
+                <div className="intake-conflict-history">
+                  <span>When opened</span>
+                  <strong>{formatConflictValue(conflict.field, conflict.loaded_value, core)}</strong>
+                </div>
+                <label className={`intake-conflict-choice${writeConflict.choices[conflict.field] === 'paperless' ? ' selected' : ''}`}>
+                  <input
+                    type="radio"
+                    name={`conflict-${conflict.field}`}
+                    value="paperless"
+                    checked={writeConflict.choices[conflict.field] === 'paperless'}
+                    onChange={() => setWriteConflict((current) => current ? {
+                      ...current,
+                      choices: { ...current.choices, [conflict.field]: 'paperless' },
+                    } : current)}
+                  />
+                  <span><strong>Keep Paperless</strong><small>Current external value</small></span>
+                  <b>{formatConflictValue(conflict.field, conflict.paperless_value, core)}</b>
+                </label>
+                <label className={`intake-conflict-choice${writeConflict.choices[conflict.field] === 'owl' ? ' selected' : ''}`}>
+                  <input
+                    type="radio"
+                    name={`conflict-${conflict.field}`}
+                    value="owl"
+                    checked={writeConflict.choices[conflict.field] === 'owl'}
+                    onChange={() => setWriteConflict((current) => current ? {
+                      ...current,
+                      choices: { ...current.choices, [conflict.field]: 'owl' },
+                    } : current)}
+                  />
+                  <span><strong>Apply OWL</strong><small>Your reviewed value</small></span>
+                  <b>{formatConflictValue(conflict.field, conflict.owl_value, core)}</b>
+                </label>
+              </fieldset>
+            ))}
+          </div>
+        </Modal>
       ) : null}
       {toast?.actionLabel && toast.onAction ? (
         <div className={`toast ${toast.tone || 'success'}`} role="alert" aria-live="assertive">

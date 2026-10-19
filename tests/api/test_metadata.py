@@ -41,10 +41,19 @@ async def test_get_document_metadata_reads_alias_and_reports_conflict(monkeypatc
 @pytest.mark.asyncio
 async def test_writeback_targets_canonical_field_only(monkeypatch) -> None:
     client = AsyncMock()
+    client.get_document.return_value = {
+        "id": 100,
+        "modified": "2026-10-18T10:00:00Z",
+        "custom_fields": [{"field": 10, "value": "OLD-100"}],
+    }
     client.list_custom_fields.return_value = [
         {"id": 10, "name": "Claim Number", "data_type": "string"},
         {"id": 11, "name": "di_claim_number", "data_type": "string"},
     ]
+    client.update_custom_fields.return_value = {
+        **client.get_document.return_value,
+        "modified": "2026-10-18T10:01:00Z",
+    }
     monkeypatch.setattr(metadata, "make_paperless_client", lambda request: client)
     monkeypatch.setattr(
         metadata,
@@ -57,11 +66,19 @@ async def test_writeback_targets_canonical_field_only(monkeypatch) -> None:
         ],
     )
 
-    result = await metadata.writeback_to_paperless(100, object())
+    result = await metadata.writeback_to_paperless(
+        100,
+        metadata.WritebackRequest(
+            expected_modified="2026-10-18T10:00:00Z",
+            base_values={"claim_number": "OLD-100"},
+        ),
+        object(),
+    )
 
     client.update_custom_fields.assert_awaited_once_with(
         100,
         [{"field": 10, "value": "SAMPLE-200"}],
+        expected_modified="2026-10-18T10:00:00Z",
     )
     assert result["written_fields"] == ["claim_number"]
 
@@ -94,6 +111,18 @@ async def test_document_amount_and_due_date_are_correctable(monkeypatch) -> None
         {"id": 30, "name": "Document Amount", "data_type": "float"},
         {"id": 31, "name": "Document Due Date", "data_type": "date"},
     ]
+    client.get_document.return_value = {
+        "id": 100,
+        "modified": "2026-10-18T11:00:00Z",
+        "custom_fields": [
+            {"field": 30, "value": 100.0},
+            {"field": 31, "value": "2026-08-01"},
+        ],
+    }
+    client.update_custom_fields.return_value = {
+        **client.get_document.return_value,
+        "modified": "2026-10-18T11:01:00Z",
+    }
     monkeypatch.setattr(
         metadata,
         "get_corrections_for_document",
@@ -103,7 +132,17 @@ async def test_document_amount_and_due_date_are_correctable(monkeypatch) -> None
         ],
     )
 
-    result = await metadata.writeback_to_paperless(100, object())
+    result = await metadata.writeback_to_paperless(
+        100,
+        metadata.WritebackRequest(
+            expected_modified="2026-10-18T11:00:00Z",
+            base_values={
+                "document_amount": 100.0,
+                "document_due_date": "2026-08-01",
+            },
+        ),
+        object(),
+    )
 
     client.update_custom_fields.assert_awaited_once()
     written = client.update_custom_fields.await_args.args[1]
@@ -111,6 +150,77 @@ async def test_document_amount_and_due_date_are_correctable(monkeypatch) -> None
     assert values[30] == 125.0
     assert values[31] == "2026-08-15"
     assert set(result["written_fields"]) == {"document_amount", "document_due_date"}
+
+
+def test_writeback_rejects_external_field_change_with_diff(
+    client, mock_paperless, monkeypatch
+) -> None:
+    mock_paperless.get_document.return_value = {
+        "id": 100,
+        "modified": "revision-2",
+        "custom_fields": [{"field": 10, "value": "PAPERLESS-200"}],
+    }
+    mock_paperless.list_custom_fields.return_value = [
+        {"id": 10, "name": "Claim Number", "data_type": "string"},
+    ]
+    monkeypatch.setattr(
+        metadata,
+        "get_corrections_for_document",
+        lambda document_id: [
+            {"field_name": "claim_number", "corrected_value": "OWL-200"},
+        ],
+    )
+
+    response = client.post(
+        "/api/metadata/100/writeback",
+        json={
+            "expected_modified": "revision-1",
+            "base_values": {"claim_number": "LOADED-100"},
+            "initiated_by": "owl-web:test",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["conflicts"] == [
+        {
+            "field": "claim_number",
+            "label": "Claim Number",
+            "loaded_value": "LOADED-100",
+            "paperless_value": "PAPERLESS-200",
+            "owl_value": "OWL-200",
+        }
+    ]
+    mock_paperless.update_custom_fields.assert_not_awaited()
+
+
+def test_writeback_matching_newer_value_is_idempotent(client, mock_paperless, monkeypatch) -> None:
+    mock_paperless.get_document.return_value = {
+        "id": 100,
+        "modified": "revision-2",
+        "custom_fields": [{"field": 10, "value": "OWL-200"}],
+    }
+    mock_paperless.list_custom_fields.return_value = [
+        {"id": 10, "name": "Claim Number", "data_type": "string"},
+    ]
+    monkeypatch.setattr(
+        metadata,
+        "get_corrections_for_document",
+        lambda document_id: [
+            {"field_name": "claim_number", "corrected_value": "OWL-200"},
+        ],
+    )
+
+    response = client.post(
+        "/api/metadata/100/writeback",
+        json={
+            "expected_modified": "revision-1",
+            "base_values": {"claim_number": "LOADED-100"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["idempotent_replay"] is True
+    mock_paperless.update_custom_fields.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -255,6 +365,8 @@ async def test_account_correction_writes_exact_only_to_paperless(monkeypatch) ->
         "id": 100,
         "correspondent": "Sample Provider",
         "content": "Member ID: MEMBER123456",
+        "modified": "2026-10-18T12:00:00Z",
+        "custom_fields": [{"field": 10, "value": "OLDMEMBER9876"}],
     }
     client.list_custom_fields.return_value = [
         {"id": 10, "name": "Account Identifier", "data_type": "string"}
@@ -273,6 +385,7 @@ async def test_account_correction_writes_exact_only_to_paperless(monkeypatch) ->
         original_value="OLDMEMBER9876",
         identifier_class="member",
         notes="must not persist exact values",
+        expected_modified="2026-10-18T12:00:00Z",
     )
 
     result = await metadata.correct_field(100, body, object())
@@ -280,8 +393,50 @@ async def test_account_correction_writes_exact_only_to_paperless(monkeypatch) ->
     client.update_custom_fields.assert_awaited_once_with(
         100,
         [{"field": 10, "value": "MEMBER123456"}],
+        expected_modified="2026-10-18T12:00:00Z",
     )
     assert persisted["corrected_value"] == "member ending 3456"
     assert persisted["original_value"] == "member ending 9876"
     assert persisted["notes"] is None
     assert result["written_to_paperless"] is True
+
+
+@pytest.mark.asyncio
+async def test_account_correction_matching_newer_value_is_idempotent(monkeypatch) -> None:
+    client = AsyncMock()
+    client.get_document.return_value = {
+        "id": 100,
+        "correspondent": "Sample Provider",
+        "content": "Member ID: MEMBER123456",
+        "modified": "revision-2",
+        "custom_fields": [{"field": 10, "value": "MEMBER123456"}],
+    }
+    client.list_custom_fields.return_value = [
+        {"id": 10, "name": "Account Identifier", "data_type": "string"}
+    ]
+    existing = {
+        "id": "existing-correction",
+        "field_name": "account_identifier",
+        "corrected_value": "member ending 3456",
+    }
+    create_correction = AsyncMock()
+    monkeypatch.setattr(metadata, "make_paperless_client", lambda request: client)
+    monkeypatch.setattr(metadata, "get_corrections_for_document", lambda document_id: [existing])
+    monkeypatch.setattr(metadata, "create_extraction_correction", create_correction)
+
+    result = await metadata.correct_field(
+        100,
+        metadata.CorrectFieldRequest(
+            field_name="account_identifier",
+            corrected_value="MEMBER123456",
+            original_value="OLDMEMBER9876",
+            identifier_class="member",
+            expected_modified="revision-1",
+        ),
+        object(),
+    )
+
+    assert result["idempotent_replay"] is True
+    assert result["correction"] == existing
+    client.update_custom_fields.assert_not_awaited()
+    create_correction.assert_not_awaited()

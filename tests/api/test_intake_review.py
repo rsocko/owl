@@ -5,7 +5,10 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 from doc_intelligence_hub.api.routers import intake_review
-from doc_intelligence_hub.core.paperless.client import PaperlessPage
+from doc_intelligence_hub.core.paperless.client import (
+    PaperlessPage,
+    PaperlessRevisionConflict,
+)
 from doc_intelligence_hub.modules.triage.reference_discovery import (
     ExplicitReference,
     ResolvedReference,
@@ -444,6 +447,111 @@ def test_save_rejects_external_edit_conflict(client, mock_paperless):
     mock_paperless.update_document.assert_not_awaited()
 
 
+def test_save_conflict_reports_field_level_values_without_logging_them(
+    client, mock_paperless, caplog
+):
+    caplog.set_level("INFO")
+    mock_paperless.get_document.return_value = _document(
+        title="Paperless title",
+        modified="2026-10-17T09:00:00Z",
+    )
+
+    response = client.put(
+        "/api/intake/documents/42",
+        json={
+            "expected_modified": "2026-10-16T12:00:00Z",
+            "metadata": {"title": "OWL private title"},
+            "base_metadata": {"title": "Loaded private title"},
+            "disposition": "save",
+            "initiated_by": "owl-web:test",
+        },
+    )
+
+    assert response.status_code == 409
+    detail = response.json()["error"]
+    assert detail["conflicts"] == [
+        {
+            "field": "title",
+            "label": "Title",
+            "loaded_value": "Loaded private title",
+            "paperless_value": "Paperless title",
+            "owl_value": "OWL private title",
+        }
+    ]
+    assert "initiator=owl-web:test" in caplog.text
+    assert "Loaded private title" not in caplog.text
+    assert "Paperless title" not in caplog.text
+    assert "OWL private title" not in caplog.text
+
+
+def test_save_treats_matching_newer_value_as_idempotent_replay(client, mock_paperless):
+    mock_paperless.get_document.return_value = _document(
+        title="Updated utility bill",
+        modified="2026-10-17T09:00:00Z",
+    )
+
+    response = client.put(
+        "/api/intake/documents/42",
+        json={
+            "expected_modified": "2026-10-16T12:00:00Z",
+            "metadata": {"title": "Updated utility bill"},
+            "base_metadata": {"title": "Utility bill"},
+            "disposition": "save",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["idempotent_replay"] is True
+    mock_paperless.update_document.assert_not_awaited()
+
+
+def test_save_rechecks_revision_immediately_before_patch(client, mock_paperless):
+    initial = _document()
+    raced = _document(title="External title", modified="2026-10-17T09:00:00Z")
+    mock_paperless.get_document.return_value = initial
+    mock_paperless.update_document.side_effect = PaperlessRevisionConflict(
+        expected_modified=initial["modified"],
+        current_document=raced,
+    )
+
+    response = client.put(
+        "/api/intake/documents/42",
+        json={
+            "expected_modified": initial["modified"],
+            "metadata": {"title": "OWL title"},
+            "base_metadata": {"title": "Utility bill"},
+            "disposition": "save",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["current_modified"] == raced["modified"]
+    assert response.json()["error"]["conflicts"][0]["paperless_value"] == "External title"
+
+
+def test_save_surfaces_post_write_reanalysis_failure_as_warning(
+    client, mock_paperless, monkeypatch
+):
+    intake_review._taxonomy_cache = None
+    mock_paperless.get_document.return_value = _document()
+    mock_paperless.list_tags.side_effect = RuntimeError("taxonomy unavailable")
+    monkeypatch.setattr(intake_review, "spawn_debounced_reanalysis", lambda **_kwargs: None)
+
+    response = client.put(
+        "/api/intake/documents/42",
+        json={
+            "expected_modified": "2026-10-16T12:00:00Z",
+            "metadata": {"title": "Updated utility bill"},
+            "base_metadata": {"title": "Utility bill"},
+            "disposition": "save",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["warnings"][0]["code"] == "reanalysis_not_scheduled"
+    mock_paperless.update_document.assert_awaited_once()
+
+
 def test_save_queues_targeted_reanalysis_for_material_metadata_change(
     client, mock_paperless, monkeypatch
 ):
@@ -501,7 +609,9 @@ def test_file_only_removes_inbox_without_resolving_actions(client, mock_paperles
     assert response.status_code == 200
     assert response.json()["filed"] is True
     mock_paperless.update_document.assert_awaited_once_with(
-        42, {"title": "Filed utility bill", "tags": [2]}
+        42,
+        {"title": "Filed utility bill", "tags": [2]},
+        expected_modified="2026-10-16T12:00:00Z",
     )
     mock_paperless.resolve_tag_ids.assert_awaited_once_with(["Inbox"])
     assert client.get("/api/queue/settings").json()["monitor_tags"] == ["Medical"]
@@ -555,6 +665,7 @@ def test_save_merges_editable_custom_fields(client, mock_paperless):
                 {"field": 10, "value": 84.2},
             ]
         },
+        expected_modified="2026-10-16T12:00:00Z",
     )
 
 
@@ -581,6 +692,7 @@ def test_save_updates_invoice_number(client, mock_paperless):
     mock_paperless.update_document.assert_awaited_once_with(
         42,
         {"custom_fields": [{"field": 12, "value": "INV-2026-1042"}]},
+        expected_modified="2026-10-16T12:00:00Z",
     )
 
 
@@ -613,6 +725,7 @@ def test_save_updates_exact_classified_account_identifier(client, mock_paperless
     mock_paperless.update_document.assert_awaited_once_with(
         42,
         {"custom_fields": [{"field": 9, "value": "ACCT-2025-8675309"}]},
+        expected_modified="2026-10-16T12:00:00Z",
     )
 
 
@@ -644,6 +757,7 @@ def test_file_only_clears_account_identifier(client, mock_paperless):
             "tags": [2],
             "custom_fields": [{"field": 9, "value": None}],
         },
+        expected_modified="2026-10-16T12:00:00Z",
     )
 
 
