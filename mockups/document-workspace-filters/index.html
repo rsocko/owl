@@ -946,6 +946,13 @@
       stage.className = `stage variant-${currentVariant} workflow-${currentWorkflow}`;
     }
 
+    function setStatusLabel(label, count) {
+      const countLabel = document.createElement('span');
+      countLabel.className = 'count';
+      countLabel.textContent = count;
+      document.querySelector('[data-status-label]').replaceChildren(`${label} `, countLabel);
+    }
+
     function renderWorkflow(key) {
       currentWorkflow = key;
       const workflow = workflows[key];
@@ -953,7 +960,7 @@
       document.querySelector('#rail-title').textContent = workflow.title;
       document.querySelector('#rail-count').textContent = workflow.count;
       document.querySelector('#workflow-search').placeholder = workflow.search;
-      document.querySelector('[data-status-label]').innerHTML = `${workflow.primary.label} <span class="count">${workflow.primary.count}</span>`;
+      setStatusLabel(workflow.primary.label, workflow.primary.count);
       document.querySelector('[data-filter-count]').textContent = workflow.activeFilters.length;
       document.querySelector('#filter-heading').textContent = workflow.filterHeading;
       document.querySelector('#active-filters').innerHTML = workflow.activeFilters
@@ -1047,7 +1054,7 @@
         document.querySelectorAll('.status-menu button').forEach((item) => item.classList.remove('active'));
         option.classList.add('active');
         const [label, count] = option.innerText.split('\n');
-        document.querySelector('[data-status-label]').innerHTML = `${label} <span class="count">${count}</span>`;
+        setStatusLabel(label, count);
         closeMenus();
       }
     });
