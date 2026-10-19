@@ -445,12 +445,12 @@ def test_external_candidate_poll_and_review_contract(client, app, tmp_path) -> N
     )
     assert documentless.status_code == 200
     assert documentless.json()["outcome"] == "not_applicable"
-    assert documentless.json()["expectation_id"]
+    assert documentless.json()["expectation_id"] is None
+    assert documentless.json()["expectation_ids"] == []
 
     expectations = client.get("/api/statements/correspondent-profiles/42/expectations")
     assert expectations.status_code == 200
-    assert expectations.json()[0]["expectation_mode"] == "not_expected"
-    assert expectations.json()[0]["status"] == "confirmed"
+    assert expectations.json() == []
 
 
 def test_saved_external_connection_drives_candidate_sync(client, app, tmp_path) -> None:

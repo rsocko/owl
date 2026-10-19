@@ -24,6 +24,7 @@ from doc_intelligence_hub.api.routers import (
     analysis,
     analysis_invalidation,
     dashboard,
+    document_sources,
     document_types,
     document_views,
     duplicates,
@@ -352,6 +353,13 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
                 "description": "Statement discovery, recommendations, and provider overrides.",
             },
             {
+                "name": "document-sources",
+                "description": (
+                    "Paperless-anchored document sources, reviewed series, expectations, "
+                    "external relationships, and cross-kind coverage."
+                ),
+            },
+            {
                 "name": "eob-matching",
                 "description": "EOB classification, extraction, matching, and Paperless linking.",
             },
@@ -450,8 +458,8 @@ def create_app(settings: HubSettings | None = None) -> FastAPI:
     _register_exception_handlers(app)
 
     app.include_router(system.router)
+    app.include_router(document_sources.router)
     app.include_router(statements.router, prefix="/api/statements")
-    app.include_router(statements.router, prefix="/api", include_in_schema=False)
     app.include_router(eob.router)
     app.include_router(action_queue.router)
     app.include_router(alerts.router)

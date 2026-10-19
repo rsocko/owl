@@ -18,7 +18,16 @@ from pydantic import (
 
 ProfileReviewStatus = Literal["unreviewed", "reviewed", "ignored"]
 ProfileLifecycleStatus = Literal["active", "orphaned", "retired"]
-DocumentKind = Literal["statement", "invoice", "bill", "receipt", "record", "other"]
+DocumentKind = Literal[
+    "statement",
+    "invoice",
+    "bill",
+    "receipt",
+    "tax_document",
+    "renewal",
+    "record",
+    "other",
+]
 ExpectationMode = Literal["recurring", "periodic", "one_off", "irregular", "not_expected"]
 ExpectationStatus = Literal["suggested", "confirmed", "dismissed", "retired"]
 ExpectationImportance = Literal["routine", "important", "critical"]
