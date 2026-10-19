@@ -54,11 +54,12 @@ def test_list_intake_documents_uses_inbox_tag_independent_of_action_queue_settin
     assert response.json()["total"] == 213
     assert response.json()["next_cursor"] == "2"
     mock_paperless.resolve_tag_ids.assert_awaited_once_with(["Inbox"])
-    mock_paperless.list_document_page.assert_awaited_once_with(
+    mock_paperless.list_document_page.assert_any_await(
         page_size=100,
         cursor=None,
         scope_params={"tags__id__in": "1", "ordering": "-id"},
     )
+    assert mock_paperless.list_document_page.await_count == 3
     assert client.get("/api/queue/settings").json()["monitor_tags"] == ["Medical"]
 
 
@@ -89,7 +90,7 @@ def test_list_intake_documents_applies_search_and_missing_type_to_paperless(clie
     response = client.get("/api/intake/documents?search=utility&queue_filter=missing_type")
 
     assert response.status_code == 200
-    mock_paperless.list_document_page.assert_awaited_once_with(
+    mock_paperless.list_document_page.assert_any_await(
         page_size=100,
         cursor=None,
         scope_params={
@@ -99,6 +100,11 @@ def test_list_intake_documents_applies_search_and_missing_type_to_paperless(clie
             "document_type__isnull": "true",
         },
     )
+    assert response.json()["filter_counts"] == {
+        "all": 0,
+        "actions": 0,
+        "missing_type": 0,
+    }
 
 
 def test_list_intake_documents_applies_requested_sort_to_paperless(client, mock_paperless):
@@ -112,7 +118,7 @@ def test_list_intake_documents_applies_requested_sort_to_paperless(client, mock_
     response = client.get("/api/intake/documents?sort=oldest")
 
     assert response.status_code == 200
-    mock_paperless.list_document_page.assert_awaited_once_with(
+    mock_paperless.list_document_page.assert_any_await(
         page_size=100,
         cursor=None,
         scope_params={
@@ -120,6 +126,30 @@ def test_list_intake_documents_applies_requested_sort_to_paperless(client, mock_
             "ordering": "id",
         },
     )
+
+
+def test_list_intake_documents_reports_counts_for_every_filter(client, mock_paperless):
+    mock_paperless.resolve_tag_ids.return_value = [1]
+
+    async def list_page(*, page_size, cursor, scope_params):
+        if scope_params.get("document_type__isnull") == "true":
+            total_count = 3
+        elif "id__in" in scope_params:
+            total_count = 0
+        else:
+            total_count = 9
+        return PaperlessPage(results=(), next_cursor=None, total_count=total_count)
+
+    mock_paperless.list_document_page.side_effect = list_page
+
+    response = client.get("/api/intake/documents?search=utility&queue_filter=missing_type")
+
+    assert response.status_code == 200
+    assert response.json()["filter_counts"] == {
+        "all": 9,
+        "actions": 0,
+        "missing_type": 3,
+    }
 
 
 def test_document_detail_combines_metadata_suggestions_actions_and_ocr(client, mock_paperless):
@@ -313,7 +343,7 @@ def test_queue_resolves_names_and_includes_action_state(client, mock_paperless):
     assert item["document_type_name"] == "Bill"
     assert item["thumbnail_url"].endswith("/42/thumb")
     assert item["pending_action_count"] == 1
-    mock_paperless.list_document_page.assert_awaited_once_with(
+    mock_paperless.list_document_page.assert_any_await(
         page_size=100,
         cursor=None,
         scope_params={
@@ -322,6 +352,7 @@ def test_queue_resolves_names_and_includes_action_state(client, mock_paperless):
             "id__in": "42",
         },
     )
+    assert mock_paperless.list_document_page.await_count == 3
 
 
 def test_core_hides_operational_fields_and_exposes_editable_document_fields(client, mock_paperless):

@@ -150,6 +150,11 @@ describe('DocumentWorkspace inbox mode', () => {
       ],
       total: 2,
       next_cursor: null,
+      filter_counts: {
+        all: 2,
+        actions: 1,
+        missing_type: 1,
+      },
     });
     documentCoreMock.mockImplementation((id: number) => Promise.resolve(core(id)));
     documentSuggestionsMock.mockResolvedValue({
@@ -391,7 +396,10 @@ describe('DocumentWorkspace inbox mode', () => {
     await screen.findByRole('button', { name: /Document 1/ });
 
     fireEvent.click(screen.getByRole('button', { name: 'Inbox view' }));
-    fireEvent.click(screen.getByRole('radio', { name: 'Action needed' }));
+    expect(screen.getByRole('radio', { name: 'All documents 2' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Action needed 1' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Missing type 1' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: /Action needed/ }));
     expect(screen.queryByRole('button', { name: /Document 1/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Document 2/ })).toBeInTheDocument();
   });
@@ -887,6 +895,7 @@ describe('DocumentWorkspace inbox mode', () => {
         ],
         total: 2,
         next_cursor: null,
+        filter_counts: { all: 2, actions: 0, missing_type: 2 },
       } : {
         documents: [
           { id: 1, title: 'Document 1', created: '2026-10-14', thumbnail_url: '/thumb/1', pending_action_count: 0, document_type_name: 'Bill' },
@@ -894,6 +903,7 @@ describe('DocumentWorkspace inbox mode', () => {
         ],
         total: 2,
         next_cursor: null,
+        filter_counts: { all: 2, actions: 0, missing_type: 1 },
       },
     ));
     documentCoreMock.mockImplementation((id: number) => Promise.resolve({
@@ -908,7 +918,7 @@ describe('DocumentWorkspace inbox mode', () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Inbox view' }));
-    fireEvent.click(await screen.findByRole('radio', { name: 'Missing type' }));
+    fireEvent.click(await screen.findByRole('radio', { name: /Missing type/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Bill' }));
     fireEvent.click(screen.getByRole('button', { name: /Save changes/ }));
 
@@ -926,6 +936,7 @@ describe('DocumentWorkspace inbox mode', () => {
         ],
         total: 213,
         next_cursor: '2',
+        filter_counts: { all: 213, actions: 12, missing_type: 21 },
       })
       .mockResolvedValueOnce({
         documents: [
@@ -933,6 +944,7 @@ describe('DocumentWorkspace inbox mode', () => {
         ],
         total: 213,
         next_cursor: '3',
+        filter_counts: { all: 213, actions: 12, missing_type: 21 },
       });
 
     renderPage();

@@ -1056,45 +1056,70 @@ async def list_intake_documents(
                 "document_date": "-created",
                 "title": "title",
             }[sort]
-            scope_params = {
+            base_scope_params = {
                 "tags__id__in": str(inbox_tag_id),
                 "ordering": ordering,
             }
             if search.strip():
-                scope_params["query"] = search.strip()
-            if queue_filter == "missing_type":
-                scope_params["document_type__isnull"] = "true"
-            elif queue_filter == "actions":
-                init_db()
-                db = get_session()
-                try:
-                    active_document_ids = [
-                        document_id
-                        for (document_id,) in (
-                            db.query(Action.document_id)
-                            .filter(
-                                Action.superseded_by_action_id.is_(None),
-                                Action.status.notin_({"completed", "dismissed", "not_an_action"}),
-                            )
-                            .distinct()
-                            .all()
+                base_scope_params["query"] = search.strip()
+            init_db()
+            db = get_session()
+            try:
+                active_document_ids = [
+                    document_id
+                    for (document_id,) in (
+                        db.query(Action.document_id)
+                        .filter(
+                            Action.superseded_by_action_id.is_(None),
+                            Action.status.notin_({"completed", "dismissed", "not_an_action"}),
                         )
-                    ]
-                finally:
-                    db.close()
-                scope_params["id__in"] = (
-                    ",".join(str(document_id) for document_id in active_document_ids)
-                    if active_document_ids
-                    else "0"
-                )
-            page, taxonomies = await asyncio.gather(
+                        .distinct()
+                        .all()
+                    )
+                ]
+            finally:
+                db.close()
+            filter_scope_params = {
+                "all": dict(base_scope_params),
+                "actions": {
+                    **base_scope_params,
+                    "id__in": (
+                        ",".join(str(document_id) for document_id in active_document_ids)
+                        if active_document_ids
+                        else "0"
+                    ),
+                },
+                "missing_type": {
+                    **base_scope_params,
+                    "document_type__isnull": "true",
+                },
+            }
+            count_filters = [
+                filter_name for filter_name in filter_scope_params if filter_name != queue_filter
+            ]
+            page, taxonomies, *count_pages = await asyncio.gather(
                 client.list_document_page(
                     page_size=page_size,
                     cursor=cursor,
-                    scope_params=scope_params,
+                    scope_params=filter_scope_params[queue_filter],
                 ),
                 _load_taxonomies(client),
+                *(
+                    client.list_document_page(
+                        page_size=1,
+                        cursor=None,
+                        scope_params=filter_scope_params[filter_name],
+                    )
+                    for filter_name in count_filters
+                ),
             )
+            filter_counts = {
+                queue_filter: page.total_count,
+                **{
+                    filter_name: count_page.total_count
+                    for filter_name, count_page in zip(count_filters, count_pages, strict=True)
+                },
+            }
             documents = list(page.results)
         except HTTPException:
             raise
@@ -1180,6 +1205,7 @@ async def list_intake_documents(
             ],
             "total": page.total_count,
             "next_cursor": page.next_cursor,
+            "filter_counts": filter_counts,
         }
     finally:
         await client.aclose()
