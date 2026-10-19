@@ -19,6 +19,7 @@ OWL transforms a passive document archive into an actionable intelligence layer 
 | [Getting Started](./getting-started/) | Installation, configuration, first run |
 | [Module Reference](./modules/) | Deep-dive design docs per module |
 | [Design](./design/) | Active and proposed design documents |
+| [Use Cases and Journeys](./design/active/use-case-catalog-and-user-journeys.md) | Canonical OWL outcomes, system ownership, and end-to-end journeys |
 | [Research](./research/) | Ecosystem analysis and competitive research |
 | [Development](./development/) | Contributing, testing, CI/CD |
 
