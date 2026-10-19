@@ -129,10 +129,31 @@ def test_ci_classifies_paths_and_parallelizes_python_tests() -> None:
     source = path.read_text(encoding="utf-8")
     workflow = load_workflow(path)
 
-    assert workflow["jobs"]["python"]["needs"] == ["changes"]
-    assert workflow["jobs"]["frontend"]["needs"] == ["changes"]
-    assert workflow["jobs"]["python"]["if"] == "needs.changes.outputs.python == 'true'"
-    assert workflow["jobs"]["frontend"]["if"] == "needs.changes.outputs.frontend == 'true'"
+    python_job = workflow["jobs"]["python"]
+    frontend_job = workflow["jobs"]["frontend"]
+    assert python_job["needs"] == ["changes"]
+    assert frontend_job["needs"] == ["changes"]
+    assert "if" not in python_job
+    assert "if" not in frontend_job
+    assert python_job["steps"][0] == {
+        "name": "Skip unaffected Python checks",
+        "if": "needs.changes.outputs.python != 'true'",
+        "run": 'echo "No Python-affecting changes detected."',
+    }
+    assert frontend_job["steps"][0] == {
+        "name": "Skip unaffected frontend checks",
+        "if": "needs.changes.outputs.frontend != 'true'",
+        "working-directory": ".",
+        "run": 'echo "No frontend-affecting changes detected."',
+    }
+    assert all(
+        step.get("if") == "needs.changes.outputs.python == 'true'"
+        for step in python_job["steps"][1:]
+    )
+    assert all(
+        step.get("if") == "needs.changes.outputs.frontend == 'true'"
+        for step in frontend_job["steps"][1:]
+    )
     assert "pytest --tb=short -q -n 4 --dist loadscope" in source
     assert "npm run build:ci" in source
 
