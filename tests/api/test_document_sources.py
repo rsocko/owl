@@ -224,7 +224,9 @@ def test_source_defined_expectation_does_not_require_existing_documents(
         "/api/coverage/evaluate",
         json={"as_of": "2026-10-20", "horizon_start": "2026-01-01"},
     ).json()
-    occurrence = next(item for item in coverage if item["expectation_id"] == expectation.json()["id"])
+    occurrence = next(
+        item for item in coverage if item["expectation_id"] == expectation.json()["id"]
+    )
     assert occurrence["state"] == "missing"
 
 

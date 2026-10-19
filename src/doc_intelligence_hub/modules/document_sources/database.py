@@ -900,9 +900,7 @@ class SourceDatabase:
             for period_key, due_start, due_end in periods:
                 fulfilled = member_periods.get(period_key)
                 if fulfilled is None and expectation.series_id is None:
-                    fulfilled = self._stored_occurrence_fulfillment(
-                        expectation.id, period_key
-                    )
+                    fulfilled = self._stored_occurrence_fulfillment(expectation.id, period_key)
                 occurrence_id = self._occurrence_id(expectation.id, period_key)
                 grace_extended_until = self._grace_extended_until(occurrence_id)
                 effective_due_end = max(
@@ -1150,11 +1148,11 @@ class SourceDatabase:
     def occurrence_assigned_document_ids(self) -> set[int]:
         conn = self.connect()
         rows = conn.execute(
-                """SELECT document_id FROM document_series_members_v2 members
+            """SELECT document_id FROM document_series_members_v2 members
                JOIN document_series_v2 series ON series.id = members.series_id
                WHERE series.deployment_id = ?""",
-                (self.deployment_id,),
-            ).fetchall()
+            (self.deployment_id,),
+        ).fetchall()
         occurrence_rows = conn.execute(
             """SELECT fulfilled_document_id FROM coverage_occurrences
                WHERE deployment_id = ? AND fulfilled_document_id IS NOT NULL""",
@@ -1191,9 +1189,7 @@ class SourceDatabase:
         assert source is not None
         fulfilled = self._member_periods(expectation.series_id).get(row["period_key"])
         if fulfilled is None and expectation.series_id is None:
-            fulfilled = self._stored_occurrence_fulfillment(
-                expectation.id, row["period_key"]
-            )
+            fulfilled = self._stored_occurrence_fulfillment(expectation.id, row["period_key"])
         due_start = date.fromisoformat(row["due_start"])
         due_end = date.fromisoformat(row["due_end"])
         grace_extended_until = self._grace_extended_until(occurrence_id)

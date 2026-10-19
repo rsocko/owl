@@ -211,7 +211,9 @@ class DocumentExpectationCreate(ContractModel):
         if self.monitoring_mode == "deadline" and self.calendar_rule is None:
             raise ValueError("deadline monitoring requires a calendar rule")
         if self.series_id is None and self.fulfillment_rule.match_series:
-            raise ValueError("expectations without a reviewed series cannot require series matching")
+            raise ValueError(
+                "expectations without a reviewed series cannot require series matching"
+            )
         return self
 
 
