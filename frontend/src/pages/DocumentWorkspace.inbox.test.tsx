@@ -633,7 +633,7 @@ describe('DocumentWorkspace inbox mode', () => {
     });
     renderPage();
 
-    expect(await screen.findByLabelText('Document Amount')).toHaveValue('1,234.50');
+    expect(await screen.findByLabelText('Document Amount')).toHaveValue('$1,234.50');
   });
 
   it('updates extracted metadata and the source revision after refreshing analysis', async () => {
@@ -671,7 +671,7 @@ describe('DocumentWorkspace inbox mode', () => {
     await waitFor(() => expect(refresh).toBeEnabled());
     fireEvent.click(refresh);
 
-    expect(await screen.findByLabelText('Document Amount')).toHaveValue('520.00');
+    expect(await screen.findByLabelText('Document Amount')).toHaveValue('$520.00');
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Updated title' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(saveDocumentMock).toHaveBeenCalledWith(

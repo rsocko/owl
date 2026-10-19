@@ -1076,32 +1076,22 @@
   border-top: 1px solid var(--border);
 }
 
+.intake-review-fields > .intake-field {
+  align-content: start;
+}
+
 .intake-currency-input {
   width: 100%;
   border: 1px solid color-mix(in srgb, var(--border) 84%, var(--text-muted) 16%);
   border-radius: var(--radius-sm);
   background: var(--bg);
-  display: flex;
-  align-items: center;
+  padding: 0.53rem 0.62rem;
+  font-size: 0.77rem;
 }
 
-.intake-currency-input:focus-within {
+.intake-currency-input:focus {
   border-color: var(--accent);
   outline: 2px solid var(--accent-bg);
-}
-
-.intake-currency-input > span {
-  padding-left: 0.62rem;
-  color: var(--text-muted);
-  font-size: 0.78rem;
-  font-weight: 750;
-}
-
-.intake-currency-input > input {
-  border: 0;
-  outline: 0;
-  background: transparent;
-  padding-left: 0.28rem;
 }
 
 .intake-readonly-field {

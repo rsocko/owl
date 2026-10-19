@@ -308,7 +308,7 @@ describe('Needs Review actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reset to suggested values' }));
 
     expect(screen.getByRole('button', { name: 'Accept suggestion' })).toBeEnabled();
-    expect(screen.getByLabelText('Corrected amount')).toHaveValue(25);
+    expect(screen.getByLabelText('Corrected amount')).toHaveValue('$25.00');
   });
 
   it('accepts multiple proposed actions as one document review', async () => {
@@ -452,7 +452,7 @@ describe('Needs Review actions', () => {
     );
 
     expect(await screen.findByText('Corrections saved')).toBeTruthy();
-    expect(screen.getByText('395')).toBeTruthy();
+    expect(screen.getByText('$395.00')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'View action' })).toHaveAttribute(
       'href',
       '#/actions/42',
