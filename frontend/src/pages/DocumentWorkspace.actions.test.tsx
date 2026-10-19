@@ -747,13 +747,30 @@ describe('DocumentWorkspace actions mode', () => {
         source: 'tyrion_bill_match',
         revision: 'v1:2:2',
         message: 'The payment source could not complete the check.',
-        candidates: [],
+        candidates: [{
+          id: 'failure-audit-evidence',
+          payee: 'Brochu Bros',
+          amount: 2598.22,
+          currency: 'USD',
+          transaction_date: null,
+          status: null,
+          account_display_name: null,
+          account_last_four: null,
+          confidence: null,
+          score: null,
+          rank: 1,
+          score_gap_basis_points: null,
+          match_reasons: ['tyrion_transport_unavailable'],
+          receipt_association: null,
+        }],
       },
     });
     renderWorkspace();
 
     expect(await screen.findByText('Payment source unavailable')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Check again' })).toBeEnabled();
+    expect(screen.queryByText('Matched transaction')).not.toBeInTheDocument();
+    expect(screen.queryByText('Brochu Bros')).not.toBeInTheDocument();
   });
 
   it('reloads missing payment status instead of rendering a dead check button', async () => {

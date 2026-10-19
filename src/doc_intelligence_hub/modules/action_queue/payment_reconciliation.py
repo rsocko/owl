@@ -1141,6 +1141,7 @@ class PaymentReconciliationService:
                     "receipt_association": evidence.receipt_association,
                 }
                 for evidence, _edge in evidence_rows
+                if evidence.transaction_ref
             ]
         )
         message = messages[state]

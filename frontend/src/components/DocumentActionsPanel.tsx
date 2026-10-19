@@ -562,7 +562,9 @@ function PaymentCheckPanel({
   onSelectCandidate: (candidateId: string) => void;
   onReviewCandidate: (action: PaymentCandidateDecision, candidate?: PaymentCandidate) => void;
 }) {
-  const candidates = paymentCheck?.candidates || [];
+  const candidates = paymentCheck && !['unchecked', 'checking', 'source_unavailable'].includes(paymentCheck.state)
+    ? paymentCheck.candidates
+    : [];
   const candidate = candidates[0];
   const searchContext = paymentCheck?.search_context;
   const checking = busy || paymentCheck?.state === 'checking';

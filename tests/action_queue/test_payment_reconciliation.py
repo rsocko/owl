@@ -635,6 +635,39 @@ def test_orphaned_check_expires_with_audit_and_allows_retry(db) -> None:
     assert replay is False
 
 
+def test_repeated_source_failures_do_not_become_payment_candidates(db) -> None:
+    obligation = _obligation(db)
+    action = _pay_action(db, obligation)
+    service = PaymentReconciliationService(db)
+
+    revision = "v1:1:1"
+    for attempt in range(2):
+        run, _request, replay = service.start_check(
+            action.id,
+            PaymentCheckRequest(
+                revision=revision,
+                idempotency_key=f"payment-check-failure-{attempt}",
+            ),
+        )
+        projection = service.fail_check(
+            run.id,
+            connector_ref="tyrion-bill-matching-v2",
+            error_code="tyrion_transport_unavailable",
+        )
+
+        assert replay is False
+        assert projection["state"] == "source_unavailable"
+        assert projection["candidates"] == []
+        revision = projection["revision"]
+
+    assert (
+        db.query(PaymentEvidence)
+        .filter(PaymentEvidence.evidence_ref.like("%:source-unavailable"))
+        .count()
+        == 2
+    )
+
+
 def test_orphaned_check_uses_the_configured_connector_reference(db) -> None:
     obligation = _obligation(db)
     action = _pay_action(db, obligation)
