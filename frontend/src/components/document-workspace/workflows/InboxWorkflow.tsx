@@ -71,6 +71,7 @@ interface IntakeQueueResponse {
   documents: IntakeListItem[];
   total: number;
   next_cursor: string | null;
+  filter_counts: Record<QueueFilter, number>;
 }
 
 const QUEUE_PAGE_SIZE = 100;
@@ -648,6 +649,11 @@ export default function InboxWorkflow() {
   );
   const [queue, setQueue] = useState<IntakeListItem[]>([]);
   const [queueTotal, setQueueTotal] = useState(0);
+  const [queueFilterCounts, setQueueFilterCounts] = useState<Record<QueueFilter, number>>({
+    all: 0,
+    actions: 0,
+    missing_type: 0,
+  });
   const [nextQueueCursor, setNextQueueCursor] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(requestedDocument ? Number(requestedDocument) : null);
   const [focusedId, setFocusedId] = useState<number | null>(selectedId);
@@ -719,6 +725,11 @@ export default function InboxWorkflow() {
       const documents: IntakeListItem[] = [];
       let cursor: string | null = null;
       let total = 0;
+      let filterCounts: Record<QueueFilter, number> = {
+        all: 0,
+        actions: 0,
+        missing_type: 0,
+      };
       let pagesLoaded = 0;
       do {
         const response = await endpoints.intake.documents({
@@ -730,12 +741,14 @@ export default function InboxWorkflow() {
         }) as IntakeQueueResponse;
         documents.push(...response.documents);
         total = response.total;
+        filterCounts = response.filter_counts;
         cursor = response.next_cursor;
         pagesLoaded += 1;
       } while (cursor && pagesLoaded < pageCount);
       if (queueRequestId.current !== currentRequest) return documents;
       setQueue(documents);
       setQueueTotal(total);
+      setQueueFilterCounts(filterCounts);
       setNextQueueCursor(cursor);
       setSelectedId((current) => current ?? documents[0]?.id ?? null);
       setFocusedId((current) => current ?? documents[0]?.id ?? null);
@@ -765,6 +778,7 @@ export default function InboxWorkflow() {
         return [...current, ...response.documents.filter((item) => !existingIds.has(item.id))];
       });
       setQueueTotal(response.total);
+      setQueueFilterCounts(response.filter_counts);
       setNextQueueCursor(response.next_cursor);
     } catch (error) {
       setQueueMoreError(errorMessage(error));
@@ -1274,9 +1288,9 @@ export default function InboxWorkflow() {
               value: queueFilter,
               ariaLabel: 'Inbox view',
               options: [
-                { value: 'all', label: 'All documents', count: queueFilter === 'all' ? queueTotal : undefined },
-                { value: 'actions', label: 'Action needed', count: queueFilter === 'actions' ? queueTotal : undefined },
-                { value: 'missing_type', label: 'Missing type', count: queueFilter === 'missing_type' ? queueTotal : undefined },
+                { value: 'all', label: 'All documents', count: queueFilterCounts.all },
+                { value: 'actions', label: 'Action needed', count: queueFilterCounts.actions },
+                { value: 'missing_type', label: 'Missing type', count: queueFilterCounts.missing_type },
               ],
               onChange: (value) => {
                 setPinnedFilteredId(null);
