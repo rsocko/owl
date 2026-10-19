@@ -870,6 +870,48 @@ def test_ranked_alternatives_are_reviewable_without_overriding_the_selected_matc
     assert action.status == "completed"
 
 
+def test_legacy_ranked_alternatives_are_backfilled_when_reviewed(db) -> None:
+    obligation = _obligation(db)
+    action = _pay_action(db, obligation)
+    service = PaymentReconciliationService(db)
+    run, _request, _replay = service.start_check(
+        action.id,
+        PaymentCheckRequest(
+            revision="v1:1:1",
+            idempotency_key="payment-check-legacy-ranked-alternatives",
+        ),
+    )
+    response = _matched_response_with_alternatives(run.id, action.document_id)
+    legacy_response = response.model_copy(update={"candidates": response.candidates[:1]})
+    service.finish_check(
+        run.id,
+        legacy_response,
+        connector_ref="tyrion-bill-matching-v2",
+    )
+    run.response_payload = response.model_dump(by_alias=True, mode="json")
+    db.commit()
+
+    projection = service.payment_projection(action.id)
+    assert len(projection["candidates"]) == 2
+    alternative_id = projection["candidates"][1]["id"]
+
+    confirmed = service.review_candidate(
+        action.id,
+        PaymentCandidateDecisionRequest(
+            action="confirm",
+            revision=projection["revision"],
+            idempotency_key="confirm-legacy-ranked-alternative",
+            evidence_id=alternative_id,
+        ),
+        actor="owl",
+    )
+
+    assert confirmed["payment_check"]["state"] == "confirmed"
+    assert db.query(PaymentEvidence).filter_by(source_generation=run.id).count() == 2
+    db.refresh(action)
+    assert action.status == "completed"
+
+
 def test_ambiguous_candidates_can_be_discarded_and_selected(db) -> None:
     obligation = _obligation(db)
     action = _pay_action(db, obligation)

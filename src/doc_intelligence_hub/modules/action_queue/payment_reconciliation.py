@@ -1070,7 +1070,12 @@ class PaymentReconciliationService:
                     "id": (
                         evidence_by_transaction[candidate["transactionRef"]].id
                         if candidate["transactionRef"] in evidence_by_transaction
-                        else f"{latest_run.id}:{candidate['transactionRef']}"
+                        else _stable_id(
+                            "evidence",
+                            "tyrion_bill_match",
+                            self.bill_matching_connector_ref,
+                            candidate["transactionRef"],
+                        )
                     ),
                     "payee": candidate.get("payee"),
                     "amount": (
@@ -1309,6 +1314,30 @@ class PaymentReconciliationService:
             raise ValueError("tyrion_request_ref_mismatch")
         if response.bill_ref != f"paperless:{action.document_id}":
             raise ValueError("tyrion_bill_ref_mismatch")
+        snapshot = self._payment_check_snapshot(
+            run,
+            action,
+            response,
+            connector_ref=connector_ref,
+        )
+        run.status = "completed"
+        run.response_payload = response.model_dump(by_alias=True, mode="json")
+        self._retire_prior_check_cases(run.obligation_id)
+        self.ingest_snapshot(snapshot)
+        run = self.db.query(PaymentCheckRun).filter_by(id=run_id).one()
+        projection = self.payment_projection(action.id)
+        run.result = {key: value for key, value in projection.items() if not key.startswith("_")}
+        self.db.commit()
+        return projection
+
+    def _payment_check_snapshot(
+        self,
+        run: PaymentCheckRun,
+        action: Action,
+        response: TyrionBillMatchResponseV2,
+        *,
+        connector_ref: str,
+    ) -> PaymentEvidenceSnapshot:
         match_state: MatchState = {
             "matched": "matched",
             "noMatch": "no_match",
@@ -1398,15 +1427,61 @@ class PaymentReconciliationService:
             obligation_id=run.obligation_id,
             evidence=evidence,
         )
-        run.status = "completed"
-        run.response_payload = response.model_dump(by_alias=True, mode="json")
-        self._retire_prior_check_cases(run.obligation_id)
-        self.ingest_snapshot(snapshot)
-        run = self.db.query(PaymentCheckRun).filter_by(id=run_id).one()
-        projection = self.payment_projection(action.id)
-        run.result = {key: value for key, value in projection.items() if not key.startswith("_")}
-        self.db.commit()
-        return projection
+        return snapshot
+
+    def _backfill_legacy_ranked_candidates(
+        self,
+        action: Action,
+        obligation: Obligation,
+    ) -> None:
+        latest_run = (
+            self.db.query(PaymentCheckRun)
+            .filter_by(obligation_id=obligation.id, status="completed")
+            .order_by(PaymentCheckRun.updated_at.desc(), PaymentCheckRun.created_at.desc())
+            .first()
+        )
+        if not latest_run or not latest_run.response_payload:
+            return
+        response = TyrionBillMatchResponseV2.model_validate(latest_run.response_payload)
+        if len(response.candidates) <= 1:
+            return
+        snapshot = self._payment_check_snapshot(
+            latest_run,
+            action,
+            response,
+            connector_ref=self.bill_matching_connector_ref,
+        )
+        existing_refs = {
+            evidence_ref
+            for (evidence_ref,) in self.db.query(PaymentEvidence.evidence_ref)
+            .filter_by(
+                source_system=snapshot.source_system,
+                connector_ref=snapshot.connector_ref,
+                source_generation=snapshot.source_generation,
+            )
+            .all()
+        }
+        missing = [item for item in snapshot.evidence if item.evidence_ref not in existing_refs]
+        if not missing:
+            return
+
+        snapshot_digest = _digest(snapshot.model_dump(mode="json"))
+        generation = (
+            self.db.query(PaymentEvidenceGeneration)
+            .filter_by(
+                source_system=snapshot.source_system,
+                connector_ref=snapshot.connector_ref,
+                obligation_id=snapshot.obligation_id,
+                source_generation=snapshot.source_generation,
+            )
+            .one()
+        )
+        generation.payload_digest = snapshot_digest
+        for item in missing:
+            evidence = self._upsert_evidence(snapshot, item, snapshot_digest)
+            self._reconcile_automatic_edge(obligation, evidence)
+        self._recompute_obligation(obligation)
+        self.db.flush()
 
     def fail_check(
         self,
@@ -1925,6 +2000,7 @@ class PaymentReconciliationService:
         if request.revision != self._action_revision(action, obligation):
             raise RevisionConflictError("payment_check_revision_conflict")
 
+        self._backfill_legacy_ranked_candidates(action, obligation)
         projection = self.payment_projection(action.id)
         candidates = {candidate["id"]: candidate for candidate in projection["candidates"]}
         if request.action == "reject_all":
