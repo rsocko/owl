@@ -1380,7 +1380,9 @@ class PaymentReconciliationService:
                         or "USD"
                     ),
                     evidence_date=candidate.transaction_date if candidate else None,
-                    source_state=(candidate.transaction_state if candidate else candidate_match_state),
+                    source_state=(
+                        candidate.transaction_state if candidate else candidate_match_state
+                    ),
                     match_state=candidate_match_state,
                     payment_status=candidate_payment_status,
                     confidence=candidate.confidence if candidate else None,
