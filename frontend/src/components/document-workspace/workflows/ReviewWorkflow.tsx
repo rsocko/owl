@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { useSearchParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   Badge,
   Button,
@@ -24,6 +24,7 @@ import { DocumentWorkspaceFrame } from '../../DocumentWorkspace';
 import DocumentWorkspaceDocumentView from '../DocumentWorkspaceDocumentView';
 import DocumentMetadataTab from '../tabs/DocumentMetadataTab';
 import DocumentOcrTab from '../tabs/DocumentOcrTab';
+import WorkspaceQueueControls from '../WorkspaceQueueControls';
 import CurrencyInput from '../../CurrencyInput';
 import { formatUsdCurrency } from '../../../lib/currency';
 import '../../../styles/document-workspace-review.css';
@@ -69,6 +70,7 @@ type ItemTypeFilter = 'all' | 'action_classification' | 'eob_match_review' | 'gr
 type StatusFilter = 'pending' | 'deferred' | 'resolved';
 type OcrReviewStatusFilter = '' | 'UNCERTAIN' | 'REVIEW_RECOMMENDED' | 'FAILED';
 type ReviewDocumentTab = 'actions' | 'metadata' | 'ocr';
+type ReviewSort = 'oldest' | 'confidence' | 'priority' | 'recent';
 type ToastState = { message: string; tone?: 'success' | 'error'; undoId?: string } | null;
 type ActionCorrectionDraft = {
   action_type: string;
@@ -245,6 +247,39 @@ function itemDocumentId(item: TriageItem): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function itemConfidence(item: TriageItem) {
+  const metadata = item.metadata ?? {};
+  const candidates = [
+    metadata.confidence,
+    metadata.action_confidence,
+    metadata.score_pct,
+    metadata.quality_score,
+  ];
+  const value = Number(candidates.find((candidate) => candidate != null));
+  return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+}
+
+function itemCreatedAt(item: TriageItem) {
+  return Date.parse(item.created_at ?? '') || 0;
+}
+
+function sortReviewItems(items: TriageItem[], sort: ReviewSort) {
+  return [...items].sort((left, right) => {
+    if (sort === 'confidence') {
+      return itemConfidence(left) - itemConfidence(right)
+        || itemCreatedAt(left) - itemCreatedAt(right);
+    }
+    if (sort === 'priority') {
+      return right.priority - left.priority
+        || itemCreatedAt(left) - itemCreatedAt(right);
+    }
+    if (sort === 'recent') {
+      return itemCreatedAt(right) - itemCreatedAt(left);
+    }
+    return itemCreatedAt(left) - itemCreatedAt(right);
+  });
+}
+
 function TriageDetailBreadcrumb({ item }: { item: TriageItem }) {
   const typeIcons: Record<string, string> = {
     eob_match_review: '🔗',
@@ -415,6 +450,7 @@ export default function ReviewWorkflow() {
   const [populating, setPopulating] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [confirmReviseId, setConfirmReviseId] = useState<string | null>(null);
+  const [reviewSort, setReviewSort] = useState<ReviewSort>('oldest');
 
   // Bulk confirm modal & threshold
   const [pendingBulkAction, setPendingBulkAction] = useState<{ action: string; ids: string[] } | null>(null);
@@ -530,7 +566,10 @@ export default function ReviewWorkflow() {
   useEffect(() => {
     setDocumentTab(selectedItem?.item_type === 'ocr_quality_review' ? 'ocr' : 'actions');
   }, [selectedItem?.id, selectedItem?.item_type]);
-  const visibleItems = items;
+  const visibleItems = useMemo(
+    () => sortReviewItems(items, reviewSort),
+    [items, reviewSort],
+  );
   const bulkEligibleItems = useMemo(
     () => visibleItems.filter(
       (item) => !['action_classification', 'ocr_quality_review'].includes(item.item_type),
@@ -926,81 +965,99 @@ export default function ReviewWorkflow() {
                   {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
                 </button>
                 {!collapsed ? (
-                  <>
-                    <label className="document-workspace-search">
-                      <Search size={16} />
-                      <input
-                        aria-label="Search review items"
-                        placeholder="Find document, reason, or review"
-                        value={query}
-                        onChange={(event) => handleSearchChange(event.target.value)}
-                      />
-                    </label>
-                    <div className="workspace-filter-group">
-                      <span>Status</span>
-                      <div className="workspace-segments">
-                        {([
-                          ['pending', 'Pending', statusCounts.pending ?? 0],
-                          ['deferred', 'Review later', statusCounts.deferred ?? 0],
-                          ['resolved', 'Resolved', (statusCounts.resolved ?? 0) + (statusCounts.dismissed ?? 0)],
-                        ] as const).map(([value, label, count]) => (
-                          <button
-                            type="button"
-                            key={value}
-                            className={statusFilter === value ? 'active' : ''}
-                            onClick={() => handleStatusFilterChange(value)}
-                          >
-                            {label} <b>{count}</b>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="workspace-filter-group">
-                      <span>Review type</span>
-                      <div className="workspace-chips">
-                        {([
-                          ['all', 'All', currentTotal],
-                          ['action_classification', 'Actions', currentTypeCounts.action_classification ?? 0],
-                          ['eob_match_review', 'EOB', currentTypeCounts.eob_match_review ?? 0],
-                          ['ocr_quality_review', 'OCR', currentTypeCounts.ocr_quality_review ?? 0],
-                          ['grouping_anomaly', 'Groups', currentTypeCounts.grouping_anomaly ?? 0],
-                          ['orphan_document', 'Orphans', currentTypeCounts.orphan_document ?? 0],
-                          ['duplicate_document', 'Duplicates', currentTypeCounts.duplicate_document ?? 0],
-                        ] as const).map(([value, label, count]) => (
-                          <button
-                            type="button"
-                            key={value}
-                            className={typeFilter === value ? 'active' : ''}
-                            onClick={() => handleTypeFilterChange(value)}
-                          >
-                            {label} <b>{count}</b>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    {typeFilter === 'ocr_quality_review' ? (
-                      <div className="workspace-filter-group">
-                        <span>OCR assessment</span>
-                        <div className="workspace-chips">
-                          {([
-                            ['', 'All OCR'],
-                            ['FAILED', 'Failed'],
-                            ['REVIEW_RECOMMENDED', 'Review recommended'],
-                            ['UNCERTAIN', 'Uncertain'],
-                          ] as const).map(([value, label]) => (
-                            <button
-                              type="button"
-                              key={value || 'all'}
-                              className={ocrReviewStatus === value ? 'active' : ''}
-                              onClick={() => handleOcrReviewStatusChange(value)}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                  </>
+                  <WorkspaceQueueControls
+                    search={{
+                      value: query,
+                      placeholder: 'Find document, reason, or review',
+                      ariaLabel: 'Search review items',
+                      onChange: handleSearchChange,
+                    }}
+                    primary={{
+                      value: statusFilter,
+                      ariaLabel: 'Review status',
+                      options: [
+                        { value: 'pending', label: 'Pending', count: statusCounts.pending ?? 0 },
+                        { value: 'deferred', label: 'Review later', count: statusCounts.deferred ?? 0 },
+                        {
+                          value: 'resolved',
+                          label: 'Resolved',
+                          count: (statusCounts.resolved ?? 0) + (statusCounts.dismissed ?? 0),
+                        },
+                      ],
+                      onChange: (value) => handleStatusFilterChange(value as StatusFilter),
+                    }}
+                    filterLabel="Filter reviews"
+                    filterGroups={[
+                      {
+                        label: 'Review type',
+                        mode: 'single',
+                        selected: typeFilter,
+                        onSelect: handleTypeFilterChange,
+                        options: [
+                          { value: 'all', label: 'All', count: currentTotal },
+                          { value: 'action_classification', label: 'Actions', count: currentTypeCounts.action_classification ?? 0 },
+                          { value: 'eob_match_review', label: 'EOB', count: currentTypeCounts.eob_match_review ?? 0 },
+                          { value: 'ocr_quality_review', label: 'OCR', count: currentTypeCounts.ocr_quality_review ?? 0 },
+                          { value: 'grouping_anomaly', label: 'Groups', count: currentTypeCounts.grouping_anomaly ?? 0 },
+                          { value: 'orphan_document', label: 'Orphans', count: currentTypeCounts.orphan_document ?? 0 },
+                          { value: 'duplicate_document', label: 'Duplicates', count: currentTypeCounts.duplicate_document ?? 0 },
+                        ],
+                      },
+                      ...(typeFilter === 'ocr_quality_review' ? [{
+                        label: 'OCR assessment',
+                        mode: 'single' as const,
+                        selected: ocrReviewStatus,
+                        onSelect: (value: string) => handleOcrReviewStatusChange(value as OcrReviewStatusFilter),
+                        options: [
+                          { value: '', label: 'All OCR' },
+                          { value: 'FAILED', label: 'Failed' },
+                          { value: 'REVIEW_RECOMMENDED', label: 'Review recommended' },
+                          { value: 'UNCERTAIN', label: 'Uncertain' },
+                        ],
+                      }] : []),
+                    ]}
+                    activeFilters={[
+                      ...(typeFilter !== 'all' ? [{
+                        key: `type-${typeFilter}`,
+                        label: {
+                          action_classification: 'Actions',
+                          eob_match_review: 'EOB',
+                          ocr_quality_review: 'OCR',
+                          grouping_anomaly: 'Groups',
+                          orphan_document: 'Orphans',
+                          duplicate_document: 'Duplicates',
+                        }[typeFilter],
+                        count: currentTypeCounts[typeFilter] ?? 0,
+                        onRemove: () => handleTypeFilterChange('all'),
+                      }] : []),
+                      ...(ocrReviewStatus ? [{
+                        key: `ocr-${ocrReviewStatus}`,
+                        label: {
+                          FAILED: 'Failed',
+                          REVIEW_RECOMMENDED: 'Review recommended',
+                          UNCERTAIN: 'Uncertain',
+                        }[ocrReviewStatus],
+                        onRemove: () => handleOcrReviewStatusChange(''),
+                      }] : []),
+                    ]}
+                    onClearFilters={() => {
+                      const nextParams = new URLSearchParams(searchParams);
+                      nextParams.delete('type');
+                      nextParams.delete('ocr_review_status');
+                      nextParams.delete('item');
+                      setSearchParams(nextParams, { replace: true });
+                    }}
+                    sort={{
+                      value: reviewSort,
+                      options: [
+                        { value: 'oldest', label: 'Oldest first' },
+                        { value: 'confidence', label: 'Lowest confidence first' },
+                        { value: 'priority', label: 'Highest priority first' },
+                        { value: 'recent', label: 'Recently added' },
+                      ],
+                      onChange: (value) => setReviewSort(value as ReviewSort),
+                    }}
+                  />
                 ) : null}
 
                 {/* Auto-accept threshold */}

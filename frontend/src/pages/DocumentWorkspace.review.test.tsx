@@ -89,7 +89,7 @@ describe('Needs Review actions', () => {
       </MemoryRouter>,
     );
 
-    const item = await screen.findByText('OTHER: target-1');
+    const [item] = await screen.findAllByText('OTHER: target-1');
     expect(container.querySelector('.document-workspace-frame.document-review-workspace')).toBeInTheDocument();
     fireEvent.click(item);
 
@@ -501,7 +501,9 @@ describe('Needs Review actions', () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Resolved 1' }));
+    await screen.findAllByText('Pay utility bill');
+    fireEvent.click(await screen.findByRole('button', { name: 'Review status' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved 1' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Revise decision' }));
     expect(screen.getByText(/completion history is preserved/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Reopen review' }));

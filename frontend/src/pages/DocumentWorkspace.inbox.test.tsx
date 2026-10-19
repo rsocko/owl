@@ -390,7 +390,8 @@ describe('DocumentWorkspace inbox mode', () => {
     renderPage();
     await screen.findByRole('button', { name: /Document 1/ });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Action needed' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Inbox view' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Action needed' }));
     expect(screen.queryByRole('button', { name: /Document 1/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Document 2/ })).toBeInTheDocument();
   });
@@ -408,6 +409,22 @@ describe('DocumentWorkspace inbox mode', () => {
       cursor: null,
       search: 'utility',
       filter: 'all',
+    }));
+  });
+
+  it('requests the selected queue sort from the intake API', async () => {
+    renderPage();
+    await screen.findByRole('button', { name: /Document 1/ });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sort: Newest added first' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Oldest added first' }));
+
+    await waitFor(() => expect(documentsMock).toHaveBeenLastCalledWith({
+      pageSize: 100,
+      cursor: null,
+      search: '',
+      filter: 'all',
+      sort: 'oldest',
     }));
   });
 
@@ -823,7 +840,8 @@ describe('DocumentWorkspace inbox mode', () => {
     });
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Missing type' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Inbox view' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Missing type' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Bill' }));
     fireEvent.click(screen.getByRole('button', { name: /Save changes/ }));
 
