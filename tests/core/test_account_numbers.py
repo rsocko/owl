@@ -106,19 +106,19 @@ class TestExtractAccountNumbers:
 class TestPickBestAccountIdentifier:
     """Tests for the best-pick heuristic."""
 
-    def test_prefers_last4(self):
+    def test_prefers_full_identifier_over_last4(self):
         matches = [
             {"pattern": "member_id", "value": "XYZ123", "normalized": "XYZ123"},
             {"pattern": "account_last4", "value": "4321", "normalized": "4321"},
         ]
-        assert pick_best_account_identifier(matches) == "ending 4321"
+        assert pick_best_account_identifier(matches) == "XYZ123"
 
-    def test_prefers_ending_in(self):
+    def test_prefers_full_identifier_over_ending_in(self):
         matches = [
             {"pattern": "ending_in", "value": "9876", "normalized": "9876"},
             {"pattern": "policy_number", "value": "POL123", "normalized": "POL123"},
         ]
-        assert pick_best_account_identifier(matches) == "ending 9876"
+        assert pick_best_account_identifier(matches) == "POL123"
 
     def test_falls_back_to_first_full(self):
         matches = [
@@ -126,14 +126,17 @@ class TestPickBestAccountIdentifier:
         ]
         assert pick_best_account_identifier(matches) == "MEM123456"
 
+    def test_preserves_full_numeric_service_account_from_bill(self):
+        text = "BILL NUMBER 257961    ACCOUNT # 3250513    CUSTOMER # 7009622"
+        assert pick_best_account_identifier(extract_account_numbers(text)) == "3250513"
+
     def test_empty_returns_none(self):
         assert pick_best_account_identifier([]) is None
 
     def test_prefers_anchor_adjacent_match_over_pattern_preference(self):
         text = "Old Card #****9999 (closed)\nAccount Number: ABC123456"
         matches = extract_account_numbers(text)
-        # Naively, "ending 9999" (account_last4) would win over the full account number.
-        assert pick_best_account_identifier(matches) == "ending 9999"
+        assert pick_best_account_identifier(matches) == "ABC123456"
         # But a hint says the true account identifier follows "Account Number:".
         biased = pick_best_account_identifier(matches, text=text, anchor="Account Number:")
         assert biased == "ABC123456"
@@ -142,7 +145,7 @@ class TestPickBestAccountIdentifier:
         text = "Old Card #****9999 (closed)\nAccount Number: ABC123456"
         matches = extract_account_numbers(text)
         biased = pick_best_account_identifier(matches, text=text, anchor="Member ID:")
-        assert biased == "ending 9999"
+        assert biased == "ABC123456"
 
     def test_single_match_ignores_anchor(self):
         matches = [

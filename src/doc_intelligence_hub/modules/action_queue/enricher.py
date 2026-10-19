@@ -6,9 +6,6 @@ import asyncio
 import logging
 from datetime import date
 
-from doc_intelligence_hub.core.extractors.account_numbers import (
-    normalize_masked_account_identifier,
-)
 from doc_intelligence_hub.core.paperless import (
     MetadataDiagnosticCode,
     MetadataFieldKey,
@@ -190,8 +187,11 @@ class PaperlessEnricher:
         extracted_data = extraction.get("extracted_data")
         if not isinstance(extracted_data, dict):
             extracted_data = {}
-        account_identifier = normalize_masked_account_identifier(
-            extracted_data.get("account_identifier")
+        raw_account_identifier = extracted_data.get("account_identifier")
+        account_identifier = (
+            raw_account_identifier.strip()
+            if isinstance(raw_account_identifier, str) and raw_account_identifier.strip()
+            else None
         )
         if account_identifier:
             skip, record_after = self._resolve_field_write(
