@@ -94,6 +94,7 @@ _EDITABLE_CUSTOM_FIELD_KEYS = {
     MetadataFieldKey.ACCOUNT_IDENTIFIER,
     MetadataFieldKey.DOCUMENT_AMOUNT,
     MetadataFieldKey.DOCUMENT_DUE_DATE,
+    MetadataFieldKey.INVOICE_NUMBER,
 }
 _HIDDEN_CUSTOM_FIELD_NAMES = {
     "Action Status",
@@ -1456,6 +1457,11 @@ async def save_intake_document(
             for item in body.metadata.custom_fields:
                 key = editable_keys_by_id[item.field]
                 if key is MetadataFieldKey.ACCOUNT_IDENTIFIER:
+                    if item.value is None or (
+                        isinstance(item.value, str) and not item.value.strip()
+                    ):
+                        requested_by_id[item.field] = None
+                        continue
                     if item.identifier_class is None:
                         raise HTTPException(
                             status_code=422,
