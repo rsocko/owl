@@ -9,6 +9,7 @@ related:
   - "[Product Context](../../../PRODUCT.md)"
   - "[Intake Triage and Action Routing](./intake-triage-and-action-routing.md)"
   - "[Correspondent Intelligence and Acquisition](./correspondent-intelligence-and-acquisition.md)"
+  - "[Document Sources, Expectations, and Coverage](./document-sources-expectations-and-coverage.md)"
   - "[Document Relationships](./document-relationships.md)"
   - "[OWL Architecture](../../architecture/index.md)"
 ---
@@ -57,7 +58,7 @@ This establishes the key distinction:
 - **Needs Review determines what OWL should believe.**
 - **Action Queue tracks what the operator should do.**
 - **Inbox review determines whether Paperless metadata is ready.**
-- **Statement monitoring determines whether expected evidence arrived.**
+- **Document Coverage determines whether expected evidence arrived.**
 
 ## Use case catalog
 
@@ -87,11 +88,11 @@ complete:
 | W-2 | Maintain an action | Add, edit, correct, complete, snooze, dismiss, mark not an action, or reopen an action | OWL | Current / evolving |
 | W-3 | Capture action facts | Retain amount, due date, payee, account context, notes, links, and other action-relevant evidence with provenance | OWL; governed Paperless projection where useful | Current / evolving |
 | W-4 | Resolve an uncertain interpretation | Decide uncertain classification, no-action, metadata conflict, OCR quality, match, grouping, duplicate, or relationship proposals | OWL Needs Review | Current / evolving |
-| W-5 | Establish correspondent policy | Review what a Paperless correspondent sends, define aliases and metadata/title policy, and decide whether documents are expected | OWL profile linked to Paperless correspondent identity | Evolving |
-| W-6 | Establish document expectations | Define recurring, periodic, one-off, irregular, or not-expected series below a correspondent | OWL | Evolving |
-| W-7 | Reconcile Tyrion signals with document expectations | Map bounded account or payee candidates to Paperless correspondents and OWL expectations, or record that no documents are expected | Tyrion evidence; OWL decision | Evolving |
-| W-8 | Detect recurring patterns | Discover bank, utility, insurance, payroll, tax, and other periodic series; infer cadence; accept overrides | OWL | Current / evolving |
-| W-9 | Identify missing documents | Detect gaps and overdue expected documents using availability windows and configurable grace periods | OWL | Current / evolving |
+| W-5 | Review a document source | Review a Paperless correspondent, inspect representative evidence, and record expectations configured, no series expected, waiting for history, or ignored/retired | OWL source profile anchored to Paperless correspondent identity | Evolving |
+| W-6 | Establish document expectations | Define recurring, periodic, one-off, irregular, or not-expected policy below a reviewed source | OWL | Evolving |
+| W-7 | Reconcile external document signals | Map bounded Tyrion account or obligation candidates to a Paperless-anchored source and optionally a specific expectation, or record that no document relationship exists | Tyrion evidence; OWL reviewed relationship | Evolving |
+| W-8 | Curate document series | Discover and correct statement, utility, insurance, payroll, tax, and other series membership through split, merge, add, remove, and reassignment decisions | OWL | Current / evolving |
+| W-9 | Monitor document coverage | Evaluate missing, late, due-soon, fulfilled, and intentionally unmonitored occurrences across document kinds | OWL | Current / evolving |
 | W-10 | Retrieve a missing document | Create a manual follow-up or invoke an approved email/API acquisition path, then verify that the expected occurrence was fulfilled | OWL policy/action; external acquisition execution | Planned / evolving |
 | W-11 | Detect changed or stale evidence | Re-evaluate affected results after material metadata, file, OCR, analyzer, or relationship changes | OWL | Evolving |
 
@@ -239,52 +240,105 @@ consistent workspace. At high volume, filters, reason codes, batching policy,
 sampling, and aging/escalation are more important than one undifferentiated
 count.
 
-### Journey 4: Establish recurring document expectations
+### Journey 4: Review document sources and external signals
 
-**Trigger and context:** Historical Paperless documents or a bounded Tyrion
-signal suggest that a correspondent, account, policy, or obligation should
-produce documents.
+**Trigger and context:** A Paperless correspondent is new, has materially new
+evidence, reaches a requested revisit date, or has an unresolved Tyrion account
+or obligation signal.
 
-**Desired outcome:** The operator creates an explicit, reviewable policy for
-what documents are expected, how they are recognized, when they should arrive,
-and how missing occurrences should escalate.
+**Desired outcome:** The operator decides whether recurring-document policy is
+relevant without forcing every Paperless correspondent into a series.
 
-**Evidence needed:** Paperless correspondent identity, representative
-documents, observed cadence and exceptions, title/tag/type patterns, series
-discriminators, Tyrion provenance when present, and confidence.
+**Evidence needed:** Stable Paperless correspondent identity, representative
+documents, observed patterns, candidate series, prior disposition and reopening
+reason, aliases, and bounded Tyrion provenance when present.
 
-**Current entry points:** `/correspondents`,
-`/correspondents/:correspondentId`, `/statements`, and Mission Control
-payee-document review links.
+**Intended entry points:** `/sources`, its Needs review, External signals, and
+All correspondents modes, or a source-specific deep link. Legacy
+`/correspondents` routes may redirect during rollout.
 
 **Happy path:**
 
-1. Review a correspondent profile and its observed document history.
-2. Separate distinct series such as checking, credit card, policy, pet, or
-   document kind.
-3. Define each expectation as recurring, periodic, one-off, irregular, or not
-   expected.
-4. Confirm cadence or calendar rule, availability window, grace period,
-   importance, metadata policy, title convention, and acquisition source.
-5. When Tyrion evidence exists, map only its opaque account/payee candidate to
-   the Paperless correspondent and OWL expectation; do not copy financial
-   account ownership into OWL.
+1. Select a source from **Needs review**, or find one in the full Paperless
+   correspondent directory.
+2. Review representative documents, candidate series, evidence quality, and
+   optional external relationships.
+3. Correct obvious series membership when necessary.
+4. Choose one durable source outcome:
+   - **Expectations configured**;
+   - **No series expected**;
+   - **Waiting for more history**; or
+   - **Ignored or retired**.
+5. If reviewing an external signal, link it to the Paperless-anchored source,
+   optionally link it to a specific expectation, or record that no document
+   relationship exists.
 
 **Alternate and recovery paths:**
 
-- Incorrect grouping can be split, merged, reassigned, dismissed, or retired.
-- Sparse history permits manual policy rather than requiring a guessed cadence.
-- `not_expected` is durable policy; dismissing one suggestion is not.
+- A one-off correspondent such as a person named on one Venmo receipt can be
+  marked **No series expected** without creating a negative expectation.
+- An unchanged reviewed source stays out of Needs review; a new document,
+  repeatable pattern, new Tyrion relationship, membership correction, or
+  explicit revisit date can reopen it with a reason.
+- Sparse evidence can be deferred as **Waiting for more history** without a
+  guessed cadence.
+- Conflicting Paperless and Tyrion evidence remains unresolved rather than
+  matching by display name.
 - A renamed Paperless correspondent retains identity; a deleted or merged one
   requires explicit relinking or retirement.
-- Conflicting Paperless and Tyrion evidence routes to review rather than
-  display-name matching.
 
-**Data conditions:** A simple correspondent has one series; a typical financial
-institution has several; a high-volume archive requires candidate curation,
-bounded historical scans, and account-safe labels rather than raw identifiers.
+**Data conditions:** The complete Paperless directory may contain many
+one-document correspondents. Needs review must remain a curated exception
+queue, while the full directory requires search and filters for review reason,
+disposition, evidence, and system relationship.
 
-### Journey 5: Detect and recover a missing document
+### Journey 5: Configure an expectation and curate its series
+
+**Trigger and context:** A reviewed source has one or more meaningful document
+series, or the operator defines a required document despite sparse history.
+
+**Desired outcome:** The operator establishes explicit policy for what should
+arrive, how it is recognized, when absence matters, how it should be filed, and
+how it can be obtained.
+
+**Evidence needed:** Representative Paperless documents, reviewed series
+membership, observed cadence and exceptions, title/tag/type patterns, series
+discriminators, and optional Tyrion account or obligation context.
+
+**Intended entry points:** Expectation Setup from `/sources`; series detail from
+`/coverage` or `/sources`. The statement-series editor remains the focused
+membership correction pattern.
+
+**Happy path:**
+
+1. Select or name the document series and correct its members through add,
+   remove, split, merge, or reassignment.
+2. Define the expectation as recurring, periodic, one-off, irregular, or not
+   expected.
+3. Confirm cadence or calendar rule, availability window, grace period, and
+   importance only when absence is meaningful.
+4. Confirm recognition, metadata, title, and acquisition policy.
+5. Optionally link a specific Tyrion account or obligation to this expectation;
+   a source-level Tyrion link does not choose an expectation automatically.
+6. Review the plain-language policy summary before saving.
+
+**Alternate and recovery paths:**
+
+- Sparse history permits manual policy rather than requiring inferred cadence.
+- An irregular series supports recognition and filing but does not emit missing
+  occurrences.
+- Expectation-level `not_expected` resolves a specific candidate or external
+  signal; it is distinct from source-level **No series expected**.
+- Correcting series membership updates matching and coverage without silently
+  rewriting expectation policy.
+- Dismissed suggestions remain review history, not durable expectation modes.
+
+**Data conditions:** A simple source has one series; a financial institution
+may have several accounts and document kinds. High-volume archives require
+reviewed membership, bounded scans, and account-safe labels rather than raw
+identifiers.
+
+### Journey 6: Detect and recover a missing document
 
 **Trigger and context:** A confirmed expectation passes its availability window
 and grace period without a qualifying Paperless document.
@@ -296,8 +350,9 @@ revises the expectation, and can verify fulfillment.
 cadence/calendar policy, grace and escalation rules, acquisition guidance,
 connector health, and any near-match documents.
 
-**Current entry points:** `/statements`, `/statements/:seriesId`, Overview,
-Insights, or a trusted Mission Control alert.
+**Intended entry points:** `/coverage`, expectation or series detail, Overview,
+Insights, or a trusted Mission Control alert. Legacy `/statements` routes may
+redirect to the statement-filtered coverage view during rollout.
 
 **Happy path:**
 
@@ -324,7 +379,7 @@ groups gaps by urgency and importance; high volume requires deduplication,
 escalation control, connector rate limits, and suppression of repeated alerts
 for the same occurrence.
 
-### Journey 6: Reconcile a multi-document case or obligation
+### Journey 7: Reconcile a multi-document case or obligation
 
 **Trigger and context:** Several documents or external evidence may describe
 the same claim, obligation, account period, purchase, payment, or evolving
@@ -409,7 +464,7 @@ flowchart LR
     Case -->|Resolved evidence and lifecycle| Timeline[Auditable case timeline]
 ```
 
-### Journey 7: Correct a decision and verify downstream effects
+### Journey 8: Correct a decision and verify downstream effects
 
 **Trigger and context:** Metadata, OCR-derived facts, a match, relationship,
 grouping, action classification, or prior analysis is incorrect or stale.
@@ -469,7 +524,7 @@ flowchart TD
     Reevaluate --> Relationships[OWL relationships and expectations]
 
     Actions -->|Trusted projection| MC[Mission Control]
-    Relationships --> Monitor[Statement and reconciliation monitoring]
+    Relationships --> Monitor[Document Coverage and reconciliation]
     Monitor -->|Missing or exception| Actions
     Monitor -->|Uncertain match| Review
     Tyrion[Tyrion and Monarch evidence] --> Review
@@ -508,26 +563,27 @@ supporting operational surface, or a compatibility redirect.
 
 | Surface | Role | Journey coverage |
 |---|---|---|
-| `/` Overview | Cross-journey attention summary and entry point | 1–7 |
+| `/` Overview | Cross-journey attention summary and entry point | 1–8 |
 | `/inbox`, `/inbox/:documentId` | Primary intake workspace | 1 |
 | `/actions` | Primary trusted-action workspace | 2 |
-| `/needs-review` | Primary uncertain-belief workspace | 3; supports 1, 4–7 |
-| `/document-views` | Read-only launcher to Paperless or OWL review scopes | 1, 3–7 |
-| `/statements`, `/statements/:seriesId` | Series discovery, expectation, gap, and grouping review | 4–5 |
-| `/correspondents`, `/correspondents/:correspondentId` | Correspondent policy and expectation setup | 4 |
-| `/eob` | Specialist medical reconciliation workspace | 6 |
-| `/eob/benchmarks` | Supporting evaluation and calibration | 6 |
-| `/eob/manual-search`, `/needs-review/manual-search` | Specialist recovery for unresolved medical matches | 3, 6 |
-| `/orphans` | Duplicate, orphan, relationship, and bounded scan review | 3, 6 |
-| `/metadata/:docId` | Specialist metadata correction | 1, 7 |
-| `/corrections` | Supporting correction audit | 7 |
-| `/ocr-quality`, `/ocr-quality/documents/:documentId` | Corpus administration and specialist OCR inspection | 1, 3, 7 |
-| `/insights` | Supporting trends and exception discovery | 2, 4–7 |
-| `/history` | Supporting lifecycle and processing audit | 1–7 |
-| `/dashboard-view` | Supporting operational dashboard; evaluate overlap with Overview | 1–7 |
-| `/actions/operations` | Administrative setup, backfill, and repair | Supports 1, 2, 6–7 |
-| `/rules` | Administrative routing and analysis policy | Supports 1–7 |
-| `/settings` | Administrative connection and scheduling configuration | Supports 1–7 |
+| `/needs-review` | Primary uncertain-belief workspace | 3; supports 1, 4–8 |
+| `/document-views` | Read-only launcher to Paperless or OWL review scopes | 1, 3–8 |
+| `/sources` and source deep links | Paperless correspondent review, source disposition, external-signal reconciliation, and expectation entry | 4–5 |
+| `/coverage` and series/expectation detail | Cross-kind occurrence monitoring, missing-document recovery, and reviewed series membership | 5–7 |
+| Legacy `/correspondents` and `/statements` routes | Temporary compatibility redirects to Sources or statement-filtered Coverage, not separate implementations | 4–6 |
+| `/eob` | Specialist medical reconciliation workspace | 7 |
+| `/eob/benchmarks` | Supporting evaluation and calibration | 7 |
+| `/eob/manual-search`, `/needs-review/manual-search` | Specialist recovery for unresolved medical matches | 3, 7 |
+| `/orphans` | Duplicate, orphan, relationship, and bounded scan review | 3, 7 |
+| `/metadata/:docId` | Specialist metadata correction | 1, 8 |
+| `/corrections` | Supporting correction audit | 8 |
+| `/ocr-quality`, `/ocr-quality/documents/:documentId` | Corpus administration and specialist OCR inspection | 1, 3, 8 |
+| `/insights` | Supporting trends and exception discovery | 2, 4–8 |
+| `/history` | Supporting lifecycle and processing audit | 1–8 |
+| `/dashboard-view` | Supporting operational dashboard; evaluate overlap with Overview | 1–8 |
+| `/actions/operations` | Administrative setup, backfill, and repair | Supports 1, 2, 7–8 |
+| `/rules` | Administrative routing and analysis policy | Supports 1–8 |
+| `/settings` | Administrative connection and scheduling configuration | Supports 1–8 |
 | Legacy `/inbox-review`, `/intake-review`, `/action-queue`, `/triage`, and old EOB routes | Compatibility redirects, not separate use cases | Same as canonical destination |
 
 ## Journey breakdowns and UX risks
@@ -539,7 +595,8 @@ supporting operational surface, or a compatibility redirect.
 | P0 | Missing-document alerts do not yet form a clear retrieval-to-fulfillment loop | Gaps may be noticed but not resolved or may be closed incorrectly | Prototype manual retrieval, connector failure, and fulfillment confirmation |
 | P0 | Multi-document evidence can appear as separate document rows instead of one evolving case | Users may duplicate work, miss later notices, or mistake a receipt or transaction candidate for settlement | Prototype case timelines spanning EOBs, bills, notices, receipts, statements, and payment evidence |
 | P0 | OWL, Mission Control, and Tyrion can all expose payment-related state | The user may confuse a candidate, a task, and confirmed settlement | Validate terminology and explicit-confirmation boundaries across products |
-| P1 | Correspondent, series, expectation, and account-candidate setup spans several surfaces | Policy may be duplicated or configured at the wrong level | Prototype one-to-many correspondent and account mappings with sparse history |
+| P0 | The complete Paperless correspondent directory is mistaken for a recurring-series queue | One-off correspondents create noise and users configure policy where none is needed | Validate durable source dispositions, evidence-driven reopening, and directory-scale filters |
+| P1 | Source, series, expectation, and Tyrion relationship setup spans several decisions | Policy may be duplicated, inferred from an account link, or configured at the wrong level | Validate separate source and expectation links plus focused series correction |
 | P1 | Overview and Dashboard overlap | Users may not know which is the canonical starting point | Test a single attention-oriented landing model |
 | P1 | Partial success and projection failure are complex | A valid OWL decision may look failed, or a failed writeback may look complete | Prototype authoritative-result plus projection-status messaging |
 | P1 | High-volume review lacks a settled batching and sampling policy | Queues may become noisy or encourage unsafe bulk decisions | Test filters, aging, sampling, and safe bulk eligibility with realistic data |
@@ -554,16 +611,18 @@ The following workflows should be validated before broad implementation:
    conflict refresh, and the four intake outcomes.
 2. **Needs Review taxonomy:** mixed review types with consistent queue context
    and type-specific decisions.
-3. **Recurring expectation setup:** correspondent → series/account mapping →
-   cadence/calendar policy → acquisition source.
-4. **Missing-document recovery:** explain gap → retrieve manually or
+3. **Document Sources:** Needs review, External signals, and All correspondents
+   modes with durable dispositions and evidence-driven reopening.
+4. **Expectation and series setup:** reviewed source → corrected membership →
+   optional account relationship → cadence/calendar policy → acquisition source.
+5. **Document Coverage and recovery:** cross-kind coverage → explain gap → retrieve manually or
    automatically → ingest → verify fulfillment.
-5. **Multi-document case reconciliation:** EOB/bill and generalized
+6. **Multi-document case reconciliation:** EOB/bill and generalized
    statement/invoice/notice/receipt evidence → typed links → one case timeline
    and lifecycle.
-6. **Cross-system payment confirmation:** Tyrion candidate → OWL confirmation →
+7. **Cross-system payment confirmation:** Tyrion candidate → OWL confirmation →
    Mission Control reconciliation without implying settlement too early.
-7. **Partial-success feedback:** authoritative OWL success with failed or
+8. **Partial-success feedback:** authoritative OWL success with failed or
    pending Paperless/Mission Control projection and safe repair.
 
 ## Catalog maintenance rules

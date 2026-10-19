@@ -690,7 +690,7 @@ def test_stale_unseen_external_generation_cannot_overwrite_newer_snapshot(tmp_pa
         db.close()
 
 
-def test_external_not_applicable_creates_durable_policy_and_suppresses_repeat_prompt(
+def test_external_not_applicable_records_signal_resolution_without_creating_policy(
     tmp_path,
 ) -> None:
     db = Database(str(tmp_path / "statements.db"))
@@ -736,15 +736,10 @@ def test_external_not_applicable_creates_durable_policy_and_suppresses_repeat_pr
             )
 
         assert concurrent_repeat.expectation_id == reviewed.expectation_id
-        expectation = db.get_document_expectation(DEPLOYMENT_ID, reviewed.expectation_id or "")
-
         assert reviewed.outcome == "not_applicable"
-        assert expectation is not None
-        assert expectation.kind == "other"
-        assert expectation.expectation_mode == "not_expected"
-        assert expectation.status == "confirmed"
-        assert expectation.statement_series_id is None
-        assert expectation.evidence.reason_codes == ["external_signal_documentless"]
+        assert reviewed.expectation_id is None
+        assert reviewed.expectation_ids == []
+        assert db.list_document_expectations(DEPLOYMENT_ID) == []
 
         repeated = db.review_external_candidate(
             DEPLOYMENT_ID,
@@ -752,7 +747,7 @@ def test_external_not_applicable_creates_durable_policy_and_suppresses_repeat_pr
             ExternalCandidateReview(outcome="not_applicable", correspondent_id=42),
         )
         assert repeated.expectation_id == reviewed.expectation_id
-        assert len(db.list_document_expectations(DEPLOYMENT_ID)) == 1
+        assert db.list_document_expectations(DEPLOYMENT_ID) == []
 
         unchanged = _external_snapshot(
             "generation-2",
@@ -772,7 +767,7 @@ def test_external_not_applicable_creates_durable_policy_and_suppresses_repeat_pr
         db.replace_external_candidate_snapshot(DEPLOYMENT_ID, unchanged)
         reconciled = db.list_external_candidates(DEPLOYMENT_ID)[0]
         assert reconciled.outcome == "not_applicable"
-        assert reconciled.expectation_id == reviewed.expectation_id
+        assert reconciled.expectation_id is None
 
         db.replace_external_candidate_snapshot(
             DEPLOYMENT_ID,
@@ -780,18 +775,13 @@ def test_external_not_applicable_creates_durable_policy_and_suppresses_repeat_pr
         )
         inactive = db.list_external_candidates(DEPLOYMENT_ID)[0]
         assert inactive.active is False
-        assert inactive.review_finding == "source_candidate_inactive_confirmed_policy_preserved"
-        assert (
-            db.get_document_expectation(DEPLOYMENT_ID, reviewed.expectation_id or "").status
-            == "confirmed"
+        assert inactive.review_finding == "source_candidate_inactive"
+        changed = db.review_external_candidate(
+            DEPLOYMENT_ID,
+            candidate.id,
+            ExternalCandidateReview(outcome="ambiguous", correspondent_id=42),
         )
-
-        with pytest.raises(ValueError, match="Retire the confirmed not_expected policy"):
-            db.review_external_candidate(
-                DEPLOYMENT_ID,
-                candidate.id,
-                ExternalCandidateReview(outcome="ambiguous", correspondent_id=42),
-            )
+        assert changed.outcome == "ambiguous"
     finally:
         db.close()
 
@@ -830,7 +820,7 @@ def test_recurring_obligation_alone_cannot_suggest_document_requirement(tmp_path
             ),
         )
 
-        with pytest.raises(ValueError, match="recurring obligation alone"):
+        with pytest.raises(ValueError, match="cannot create expectations"):
             db.review_external_candidate(DEPLOYMENT_ID, candidate.id, review)
         assert db.list_document_expectations(DEPLOYMENT_ID) == []
     finally:

@@ -4,6 +4,7 @@ import './styles/theme.css'
 import './styles/layout.css'
 import './styles/components.css'
 import './styles/rules-config.css'
+import './styles/document-sources.css'
 import App from './App.tsx'
 
 createRoot(document.getElementById('root')!).render(

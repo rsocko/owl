@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OWL · Persisted design mockups</title>
+  <style>
+    :root {
+      --bg: #f3f5f8;
+      --surface: #fff;
+      --border: #dbe2ea;
+      --ink: #182334;
+      --muted: #637187;
+      --blue: #2679ba;
+      --blue-soft: #e7f2fb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    header { padding: 24px clamp(20px, 5vw, 72px); border-bottom: 1px solid var(--border); background: var(--surface); }
+    h1 { margin: 0; font-size: 1.7rem; letter-spacing: -.035em; }
+    header p { max-width: 68ch; margin: 8px 0 0; color: var(--muted); line-height: 1.6; }
+    main { width: min(1080px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 60px; }
+    section + section { margin-top: 30px; }
+    h2 { margin: 0 0 10px; font-size: 1rem; }
+    .list { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); }
+    .list a { padding: 16px 18px; display: grid; grid-template-columns: minmax(180px, .8fr) minmax(0, 1.4fr) auto; gap: 18px; align-items: center; color: inherit; text-decoration: none; }
+    .list a + a { border-top: 1px solid var(--border); }
+    .list a:hover { background: var(--blue-soft); }
+    .list strong { font-size: .9rem; }
+    .list span { color: var(--muted); font-size: .78rem; line-height: 1.5; }
+    .list b { color: var(--blue); font-size: .74rem; }
+    @media (max-width: 680px) {
+      .list a { grid-template-columns: 1fr auto; }
+      .list span { grid-column: 1 / -1; grid-row: 2; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>OWL persisted design mockups</h1>
+    <p>Interactive prototypes retained with the design documentation as implementation references. Values and documents are synthetic.</p>
+  </header>
+  <main>
+    <section>
+      <h2>Document Sources and Coverage</h2>
+      <div class="list">
+        <a href="sources-expectations/index.html"><strong>Document Sources</strong><span>Needs-review queue, external Tyrion signals, complete Paperless correspondent directory, source dispositions, series evidence, and expectation decisions.</span><b>Open →</b></a>
+        <a href="sources-expectations/expectation-setup.html"><strong>Expectation Setup</strong><span>Guided policy setup with optional Tyrion relationships, plain-language monitoring decisions, and progressive disclosure.</span><b>Open →</b></a>
+        <a href="sources-expectations/document-coverage.html"><strong>Document Coverage</strong><span>Generalized expected-document monitoring with Statements retained as a category filter.</span><b>Open →</b></a>
+      </div>
+    </section>
+    <section>
+      <h2>Shared Document Workspace</h2>
+      <div class="list">
+        <a href="action-workspace/index.html"><strong>Action and Needs Review</strong><span>Shared evidence workspace for document-level action and interpretation review.</span><b>Open →</b></a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

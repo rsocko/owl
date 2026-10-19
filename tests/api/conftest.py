@@ -145,6 +145,7 @@ def mock_paperless():
         "doc_intelligence_hub.api.routers.make_paperless_client",
         "doc_intelligence_hub.api.routers.system.make_paperless_client",
         "doc_intelligence_hub.api.routers.statements.make_paperless_client",
+        "doc_intelligence_hub.api.routers.document_sources.make_paperless_client",
         "doc_intelligence_hub.api.routers.eob.make_paperless_client",
         "doc_intelligence_hub.api.routers.action_queue.make_paperless_client",
         "doc_intelligence_hub.api.routers.document_views.make_paperless_client",
