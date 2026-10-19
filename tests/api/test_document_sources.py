@@ -207,14 +207,13 @@ def test_occurrence_recovery_is_scoped_idempotent_and_preserves_policy(
     assert refreshed_september["state"] == "fulfilled_late"
     assert refreshed_october["fulfilled_document_id"] is None
     assert client.get("/api/expectations").json()[0] == original_policy
-    assert client.get(f"/api/coverage/occurrences/{september['id']}").json()[
-        "expectation"
-    ]["id"] == expectation["id"]
+    assert (
+        client.get(f"/api/coverage/occurrences/{september['id']}").json()["expectation"]["id"]
+        == expectation["id"]
+    )
 
 
-def test_occurrence_near_matches_are_source_scoped(
-    client, app, mock_paperless, tmp_path
-) -> None:
+def test_occurrence_near_matches_are_source_scoped(client, app, mock_paperless, tmp_path) -> None:
     _configure_database(app, tmp_path)
     mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
     client.post("/api/sources/sync")

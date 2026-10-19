@@ -1016,11 +1016,11 @@ class SourceDatabase:
             recent_document_ids=list(reversed(series.document_ids[-5:])) if series else [],
         )
 
-    def extend_occurrence_grace(
-        self, occurrence_id: str, extend_until: date
-    ) -> CoverageOccurrence:
+    def extend_occurrence_grace(self, occurrence_id: str, extend_until: date) -> CoverageOccurrence:
         row = self._occurrence_row(occurrence_id)
-        current = date.fromisoformat(row["grace_extended_until"]) if row["grace_extended_until"] else None
+        current = (
+            date.fromisoformat(row["grace_extended_until"]) if row["grace_extended_until"] else None
+        )
         if current and extend_until < current:
             raise ValueError("grace extension cannot shorten an existing occurrence extension")
         if extend_until < date.fromisoformat(row["due_end"]):
@@ -1088,23 +1088,31 @@ class SourceDatabase:
         return self._recalculate_occurrence(occurrence_id, as_of or date.today())
 
     def occurrence_assigned_document_ids(self) -> set[int]:
-        rows = self.connect().execute(
-            """SELECT document_id FROM document_series_members_v2 members
+        rows = (
+            self.connect()
+            .execute(
+                """SELECT document_id FROM document_series_members_v2 members
                JOIN document_series_v2 series ON series.id = members.series_id
                WHERE series.deployment_id = ?""",
-            (self.deployment_id,),
-        ).fetchall()
+                (self.deployment_id,),
+            )
+            .fetchall()
+        )
         return {row["document_id"] for row in rows}
 
     def _occurrence_row(self, occurrence_id: str) -> sqlite3.Row:
-        row = self.connect().execute(
-            """SELECT occurrences.*, overrides.grace_extended_until
+        row = (
+            self.connect()
+            .execute(
+                """SELECT occurrences.*, overrides.grace_extended_until
                FROM coverage_occurrences occurrences
                LEFT JOIN coverage_occurrence_overrides overrides
                  ON overrides.occurrence_id = occurrences.id
                WHERE occurrences.deployment_id = ? AND occurrences.id = ?""",
-            (self.deployment_id, occurrence_id),
-        ).fetchone()
+                (self.deployment_id, occurrence_id),
+            )
+            .fetchone()
+        )
         if row is None:
             raise KeyError("coverage_occurrence_not_found")
         return row
@@ -1147,11 +1155,15 @@ class SourceDatabase:
         )
 
     def _grace_extended_until(self, occurrence_id: str) -> date | None:
-        row = self.connect().execute(
-            """SELECT grace_extended_until FROM coverage_occurrence_overrides
+        row = (
+            self.connect()
+            .execute(
+                """SELECT grace_extended_until FROM coverage_occurrence_overrides
                WHERE occurrence_id = ?""",
-            (occurrence_id,),
-        ).fetchone()
+                (occurrence_id,),
+            )
+            .fetchone()
+        )
         return date.fromisoformat(row["grace_extended_until"]) if row else None
 
     def _occurrence_id(self, expectation_id: str, period_key: str) -> str:

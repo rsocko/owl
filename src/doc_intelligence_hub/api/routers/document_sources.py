@@ -517,9 +517,7 @@ async def list_document_coverage(
     "/coverage/occurrences/{occurrence_id}",
     response_model=CoverageOccurrenceDetail,
 )
-async def get_coverage_occurrence(
-    request: Request, occurrence_id: str
-) -> CoverageOccurrenceDetail:
+async def get_coverage_occurrence(request: Request, occurrence_id: str) -> CoverageOccurrenceDetail:
     database = _database(request)
     try:
         try:
@@ -566,12 +564,8 @@ async def list_coverage_near_matches(
         _, _, document_types = await client.fetch_all_metadata()
         documents = await client.list_documents(
             correspondent_id=detail.occurrence.source_correspondent_id,
-            created_after=(
-                detail.occurrence.due_start - date.resolution * 62
-            ).isoformat(),
-            created_before=(
-                detail.occurrence.due_end + date.resolution * 62
-            ).isoformat(),
+            created_after=(detail.occurrence.due_start - date.resolution * 62).isoformat(),
+            created_before=(detail.occurrence.due_end + date.resolution * 62).isoformat(),
             limit=50,
         )
         assigned = database.occurrence_assigned_document_ids()
