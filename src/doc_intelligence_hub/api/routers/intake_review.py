@@ -19,6 +19,11 @@ from doc_intelligence_hub.api.routers.action_queue import (
     _serialize_action_with_siblings,
     _sync_action_queue_settings,
 )
+from doc_intelligence_hub.core.extractors.account_numbers import (
+    evaluate_account_identifiers,
+    extract_account_numbers,
+    normalize_masked_account_identifier,
+)
 from doc_intelligence_hub.core.paperless import (
     AccountIdentifierClass,
     MetadataFieldKey,
@@ -524,7 +529,10 @@ def _metadata_spec_by_name(name: str) -> tuple[MetadataFieldKey, Any] | None:
 
 
 def _review_custom_fields(
-    document: dict[str, Any], definitions: list[dict[str, Any]]
+    document: dict[str, Any],
+    definitions: list[dict[str, Any]],
+    *,
+    content: str | None = None,
 ) -> list[dict[str, Any]]:
     values_by_id = {
         item.get("field"): item.get("value")
@@ -549,12 +557,41 @@ def _review_custom_fields(
         key = matched[0] if matched else None
         if field_id not in values_by_id and key not in _EDITABLE_CUSTOM_FIELD_KEYS:
             continue
+        stored_value = values_by_id.get(field_id)
+        value = stored_value
+        recovered_identifier_class: str | None = None
+        recovered_from_document = False
+        if (
+            key is MetadataFieldKey.ACCOUNT_IDENTIFIER
+            and normalize_masked_account_identifier(stored_value)
+            and content
+        ):
+            decision = evaluate_account_identifiers(extract_account_numbers(content))
+            if (
+                decision.candidate
+                and decision.projection
+                and not decision.requires_review
+                and normalize_masked_account_identifier(decision.projection.display_value)
+                == normalize_masked_account_identifier(stored_value)
+            ):
+                value = decision.projection.paperless_value
+                recovered_identifier_class = decision.projection.identifier_class.value
+                recovered_from_document = value is not None and value != stored_value
         fields.append(
             {
                 "field": field_id,
                 "field_key": key.value if key else None,
                 "name": name,
-                "value": values_by_id.get(field_id),
+                "value": value,
+                **(
+                    {
+                        "stored_value": stored_value,
+                        "identifier_class": recovered_identifier_class,
+                        "recovered_from_document": True,
+                    }
+                    if recovered_from_document
+                    else {}
+                ),
                 "data_type": definition.get("data_type"),
                 "editable": key in _EDITABLE_CUSTOM_FIELD_KEYS,
                 "audit": False,
@@ -563,14 +600,27 @@ def _review_custom_fields(
     return fields
 
 
+def _needs_account_identifier_recovery(
+    document: dict[str, Any],
+    definitions: list[dict[str, Any]],
+) -> bool:
+    return any(
+        field["field_key"] == MetadataFieldKey.ACCOUNT_IDENTIFIER.value
+        and normalize_masked_account_identifier(field["value"])
+        for field in _review_custom_fields(document, definitions)
+    )
+
+
 def _intake_core_payload(
     request: Request,
     document_id: int,
     document: dict[str, Any],
     taxonomies: dict[str, list[dict[str, Any]]],
+    *,
+    content: str | None = None,
 ) -> dict[str, Any]:
     return {
-        "document": _native_document_payload(document, taxonomies),
+        "document": _native_document_payload(document, taxonomies, content=content),
         "taxonomies": taxonomies,
         "preview_url": f"/api/statements/documents/{document_id}/preview",
         "download_url": f"/api/documents/{document_id}/download",
@@ -711,6 +761,8 @@ async def _run_targeted_analysis(
 def _native_document_payload(
     document: dict[str, Any],
     taxonomies: dict[str, list[dict[str, Any]]],
+    *,
+    content: str | None = None,
 ) -> dict[str, Any]:
     catalogs = {
         key: _catalog_map(taxonomies[key])
@@ -743,7 +795,11 @@ def _native_document_payload(
             for tag_id in document.get("tags") or []
             if (item := _catalog_value(catalogs["tags"], tag_id)) is not None
         ],
-        "review_fields": _review_custom_fields(document, taxonomies["custom_fields"]),
+        "review_fields": _review_custom_fields(
+            document,
+            taxonomies["custom_fields"],
+            content=content,
+        ),
     }
 
 
@@ -957,7 +1013,7 @@ async def _document_detail(request: Request, document_id: int) -> dict[str, Any]
         )
         action_payload = _action_and_quality_payload(document_id)
         return {
-            "document": _native_document_payload(document, taxonomies),
+            "document": _native_document_payload(document, taxonomies, content=content),
             "taxonomies": taxonomies,
             "suggestions": suggestions,
             "suggestion_sources": suggestion_sources,
@@ -1145,7 +1201,23 @@ async def get_intake_document_core(request: Request, document_id: int) -> dict[s
             )
         except Exception as exc:
             _raise_paperless_error(exc, "loading the intake document")
-        return _intake_core_payload(request, document_id, document, taxonomies)
+        content = document.get("content")
+        if _needs_account_identifier_recovery(document, taxonomies["custom_fields"]):
+            try:
+                content = await client.get_document_content(document_id)
+            except Exception as exc:
+                logger.warning(
+                    "Could not recover an exact Account Identifier for document %d: %s",
+                    document_id,
+                    type(exc).__name__,
+                )
+        return _intake_core_payload(
+            request,
+            document_id,
+            document,
+            taxonomies,
+            content=content if isinstance(content, str) else None,
+        )
     finally:
         await client.aclose()
 
@@ -1849,6 +1921,9 @@ async def refresh_intake_analysis(
             client.get_document(document_id),
             _load_taxonomies(client),
         )
+        content = document.get("content")
+        if _needs_account_identifier_recovery(document, taxonomies["custom_fields"]):
+            content = await client.get_document_content(document_id)
         suggestions, sources, _ = await _suggestions_for_document(
             client, document, taxonomies, force=True
         )
@@ -1856,7 +1931,13 @@ async def refresh_intake_analysis(
         await client.aclose()
     return {
         "result": result,
-        "core": _intake_core_payload(request, document_id, document, taxonomies),
+        "core": _intake_core_payload(
+            request,
+            document_id,
+            document,
+            taxonomies,
+            content=content if isinstance(content, str) else None,
+        ),
         "actions": _action_and_quality_payload(document_id),
         "suggestions": suggestions,
         "suggestion_sources": sources,

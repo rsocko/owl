@@ -91,7 +91,9 @@ by OWL and does not require a Paperless setting change.
 Durable review fields such as Document Amount, Document Due Date, and Account
 Identifier are editable in the metadata panel. Account Identifier shows the
 exact Paperless value in this trusted review flow and requires an identifier
-type when changed so OWL can validate the value before writing it back.
+type when changed so OWL can validate the value before writing it back. For
+legacy masked Paperless values, OWL restores a single confidently labeled exact
+match from the document text and stages it for review and save.
 
 ## Action editing and audit history
 
