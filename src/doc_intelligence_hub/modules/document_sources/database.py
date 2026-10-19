@@ -380,11 +380,7 @@ class SourceDatabase:
             )
             .fetchone()
         )
-        return (
-            SourceSeriesAnalysisResult.model_validate_json(row["result_json"])
-            if row
-            else None
-        )
+        return SourceSeriesAnalysisResult.model_validate_json(row["result_json"]) if row else None
 
     def clear_series_analysis(self, correspondent_id: int) -> None:
         with self.connect() as conn:

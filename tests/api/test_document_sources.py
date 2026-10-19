@@ -228,9 +228,7 @@ def test_series_analysis_can_target_a_linked_tyrion_account(
     assert payload["signal_id"] == "account-1234"
     assert payload["signal_label"] == "Example Bank checking •••• 1234"
     assert [item["id"] for item in payload["documents"]] == [1, 2]
-    assert client.get(
-        "/api/sources/42/series-analysis?signal_id=account-1234"
-    ).json() == payload
+    assert client.get("/api/sources/42/series-analysis?signal_id=account-1234").json() == payload
 
 
 def test_dismissed_series_candidate_stays_excluded_from_analysis(

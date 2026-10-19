@@ -226,9 +226,7 @@ async def analyze_source_series(
                 else [signal.account_name, signal.account_type]
             )
             terms = [
-                value.casefold()
-                for value in candidate_terms
-                if value and len(value.strip()) >= 3
+                value.casefold() for value in candidate_terms if value and len(value.strip()) >= 3
             ]
             documents = [
                 document
@@ -258,9 +256,7 @@ async def analyze_source_series(
             },
         )
         suggestions = [
-            suggestion
-            for suggestion in result.suggestions
-            if suggestion.evidence.sample_size >= 2
+            suggestion for suggestion in result.suggestions if suggestion.evidence.sample_size >= 2
         ]
         low_evidence_document_count = len(
             {
