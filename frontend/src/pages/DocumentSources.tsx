@@ -7,6 +7,7 @@ import {
   ChevronRight,
   FileText,
   Filter,
+  FolderSearch,
   Link2,
   LoaderCircle,
   Plus,
@@ -547,6 +548,110 @@ function QueueEmpty({ title, body }: { title: string; body: string }) {
   );
 }
 
+function AnalysisCandidate({
+  suggestion,
+  analysis,
+  sourceName,
+  busy,
+  creating,
+  dismissing,
+  onConfirm,
+  onDismiss,
+}: {
+  suggestion: SeriesAnalysisSuggestion;
+  analysis: SeriesAnalysisResult;
+  sourceName: string;
+  busy: boolean;
+  creating: boolean;
+  dismissing: boolean;
+  onConfirm: (suggestion: SeriesAnalysisSuggestion) => void;
+  onDismiss: (suggestion: SeriesAnalysisSuggestion) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState(suggestion.document_ids);
+  const documents = suggestion.document_ids
+    .map((documentId) => analysis.documents.find((document) => document.id === documentId))
+    .filter((document): document is SeriesAnalysisResult['documents'][number] => Boolean(document));
+  const confidence = suggestion.evidence.confidence;
+  const candidateName = suggestion.series_discriminator === 'default'
+    ? `${sourceName} documents`
+    : humanize(suggestion.series_discriminator);
+
+  return (
+    <article className="source-analysis-candidate">
+      <header>
+        <div>
+          <strong>{candidateName}</strong>
+          <span>
+            {humanize(suggestion.kind)} · {suggestion.document_ids.length} documents
+            {confidence == null ? '' : ` · ${Math.round(confidence * 100)}% confidence`}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="source-analysis-inspect"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? 'Hide documents' : 'Inspect documents'} <ChevronDown aria-hidden="true" />
+        </button>
+      </header>
+      {expanded ? (
+        <div className="source-analysis-documents">
+          <p>
+            Uncheck anything that does not belong. Confirming creates a series from only the selected documents;
+            unchecked documents remain available for future analysis.
+          </p>
+          <div>
+            {documents.map((document) => {
+              const selected = selectedDocumentIds.includes(document.id);
+              return (
+                <label key={document.id}>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={(event) => setSelectedDocumentIds((current) => event.target.checked
+                      ? [...current, document.id]
+                      : current.filter((id) => id !== document.id))}
+                  />
+                  <img src={endpoints.statements.documentThumb(String(document.id))} alt="" loading="lazy" />
+                  <span>
+                    <strong>{document.title}</strong>
+                    <small>{formatDate(document.created)} · {document.document_type ?? 'Unknown document type'} · Paperless #{document.id}</small>
+                  </span>
+                  <a
+                    href={endpoints.statements.documentPreview(String(document.id))}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`Open ${document.title}`}
+                  >
+                    Open
+                  </a>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+      <footer>
+        <p><strong>Not a series</strong> excludes all {suggestion.document_ids.length} documents in this candidate from future detection.</p>
+        <div className="source-analysis-candidate-actions">
+          <Button disabled={busy} onClick={() => onDismiss(suggestion)}>
+            {dismissing ? <LoaderCircle className="spin" /> : null} Not a series
+          </Button>
+          <Button
+            variant="primary"
+            disabled={busy || selectedDocumentIds.length === 0}
+            onClick={() => onConfirm({ ...suggestion, document_ids: selectedDocumentIds })}
+          >
+            {creating ? <LoaderCircle className="spin" /> : <Check />} Confirm {selectedDocumentIds.length} selected
+          </Button>
+        </div>
+      </footer>
+    </article>
+  );
+}
+
 function SourceEvidence({
   source,
   series,
@@ -567,8 +672,8 @@ function SourceEvidence({
   series: DocumentSeries[];
   expectations: DocumentExpectation[];
   signals: ExternalSignal[];
-  onConfigure: (seriesId?: string, expectationId?: string) => void;
-  onAnalyze: () => void;
+  onConfigure: (seriesId?: string, expectationId?: string, signalId?: string) => void;
+  onAnalyze: (signalId?: string) => void;
   onCreateSeries: (suggestion: SeriesAnalysisSuggestion) => void;
   onDismissSeries: (suggestion: SeriesAnalysisSuggestion) => void;
   onReopen: () => void;
@@ -578,11 +683,18 @@ function SourceEvidence({
   dismissingSeriesKey: string | null;
   reopening: boolean;
 }) {
+  const [showAllCandidates, setShowAllCandidates] = useState(false);
   const sourceSeries = series.filter((item) => item.source_correspondent_id === source.correspondent_id);
   const sourceExpectations = expectations.filter((item) => item.source_correspondent_id === source.correspondent_id);
   const sourceLevelExpectations = sourceExpectations.filter((item) => !item.series_id);
   const linkedSignals = signals.filter((item) => item.relationship?.source_correspondent_id === source.correspondent_id);
   const documentCount = sourceDocumentCount(source.correspondent_id, series);
+  const candidateSuggestions = analysis?.suggestions.filter((suggestion) => !suggestion.statement_series_id) ?? [];
+  const visibleSuggestions = showAllCandidates ? candidateSuggestions : candidateSuggestions.slice(0, 12);
+
+  useEffect(() => {
+    setShowAllCandidates(false);
+  }, [analysis?.analyzed_at]);
 
   return (
     <section className="source-evidence" aria-label="Selected source evidence">
@@ -626,6 +738,14 @@ function SourceEvidence({
                   <small>{signal.relationship?.expectation_ids.length
                     ? `Scoped to ${signal.relationship.expectation_ids.length} specific expectation${signal.relationship.expectation_ids.length === 1 ? '' : 's'}`
                     : 'Source-level context only · no expectation selected'}</small>
+                  <div className="source-relationship-actions">
+                    <Button onClick={() => onAnalyze(signal.id)}>
+                      <FolderSearch /> Find historical docs
+                    </Button>
+                    <Button variant="primary" onClick={() => onConfigure(undefined, undefined, signal.id)}>
+                      <Plus /> Set up expectation
+                    </Button>
+                  </div>
                 </article>
               ))}
             </div>
@@ -638,7 +758,7 @@ function SourceEvidence({
               <p>Analyze history, confirm which documents belong together, then create expectation policy separately.</p>
             </div>
             <div className="source-series-actions">
-              <Button disabled={analyzing} onClick={onAnalyze}>
+              <Button disabled={analyzing} onClick={() => onAnalyze()}>
                 {analyzing ? <LoaderCircle className="spin" /> : <Sparkles />} {analysis ? 'Analyze again' : 'Analyze history'}
               </Button>
               <Button
@@ -674,32 +794,36 @@ function SourceEvidence({
                 <Sparkles aria-hidden="true" />
                 <span>
                   <strong>{analysis.observed_summary.candidate_series_count} candidate {analysis.observed_summary.candidate_series_count === 1 ? 'series' : 'series'} found</strong>
-                  <small>Analyzed {analysis.observed_summary.document_count} Paperless {analysis.observed_summary.document_count === 1 ? 'document' : 'documents'}. Confirming a candidate creates membership only, never an expectation.</small>
+                  <small>
+                    Analyzed {analysis.observed_summary.document_count} Paperless {analysis.observed_summary.document_count === 1 ? 'document' : 'documents'}
+                    {analysis.signal_label ? ` for ${analysis.signal_label}` : ''}. Confirming creates membership only, never an expectation.
+                  </small>
                 </span>
               </div>
-              {analysis.suggestions.filter((suggestion) => !suggestion.statement_series_id).map((suggestion) => (
-                <article className="source-analysis-candidate" key={suggestion.suggestion_key}>
-                  <div>
-                    <strong>{suggestion.series_discriminator === 'default' ? `${source.current_name} documents` : humanize(suggestion.series_discriminator)}</strong>
-                    <span>{humanize(suggestion.kind)} · {suggestion.document_ids.length} documents · {humanize(suggestion.expectation_mode)}</span>
-                  </div>
-                  <div className="source-analysis-candidate-actions">
-                    <Button
-                      disabled={creatingSeriesKey !== null || dismissingSeriesKey !== null}
-                      onClick={() => onDismissSeries(suggestion)}
-                    >
-                      {dismissingSeriesKey === suggestion.suggestion_key ? <LoaderCircle className="spin" /> : null} Dismiss
-                    </Button>
-                    <Button
-                      variant="primary"
-                      disabled={creatingSeriesKey !== null || dismissingSeriesKey !== null || suggestion.document_ids.length === 0}
-                      onClick={() => onCreateSeries(suggestion)}
-                    >
-                      {creatingSeriesKey === suggestion.suggestion_key ? <LoaderCircle className="spin" /> : <Check />} Confirm series
-                    </Button>
-                  </div>
-                </article>
+              {analysis.low_evidence_document_count > 0 ? (
+                <p className="source-analysis-low-evidence">
+                  {analysis.low_evidence_document_count} isolated {analysis.low_evidence_document_count === 1 ? 'document was' : 'documents were'} not promoted to candidate series.
+                  Single documents remain available in Paperless but do not create review noise.
+                </p>
+              ) : null}
+              {visibleSuggestions.map((suggestion) => (
+                <AnalysisCandidate
+                  key={`${analysis.analyzed_at}-${suggestion.suggestion_key}`}
+                  suggestion={suggestion}
+                  analysis={analysis}
+                  sourceName={source.current_name}
+                  busy={creatingSeriesKey !== null || dismissingSeriesKey !== null}
+                  creating={creatingSeriesKey === suggestion.suggestion_key}
+                  dismissing={dismissingSeriesKey === suggestion.suggestion_key}
+                  onConfirm={onCreateSeries}
+                  onDismiss={onDismissSeries}
+                />
               ))}
+              {!showAllCandidates && candidateSuggestions.length > visibleSuggestions.length ? (
+                <Button onClick={() => setShowAllCandidates(true)}>
+                  Show {candidateSuggestions.length - visibleSuggestions.length} more candidates
+                </Button>
+              ) : null}
               {analysis.suggestions.length === 0 ? (
                 <p className="source-analysis-empty">No repeatable grouping was found. Use “Waiting for more history” or “No series expected,” then revisit when evidence changes.</p>
               ) : null}
@@ -1039,19 +1163,37 @@ export default function DocumentSources() {
     (item) => item.source_correspondent_id === selectedSourceId && item.status === 'confirmed',
   ).length;
 
+  useEffect(() => {
+    if (!selectedSourceId) {
+      setAnalysis(null);
+      return;
+    }
+    let active = true;
+    setAnalysis(null);
+    endpoints.documentSources.getSeriesAnalysis(selectedSourceId)
+      .then((result) => {
+        if (active) setAnalysis(result as SeriesAnalysisResult | null);
+      })
+      .catch((analysisError) => {
+        if (active) setToast(errorMessage(analysisError));
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedSourceId]);
+
   const selectSource = (id: number) => {
     setDetailLoading(true);
-    setAnalysis(null);
     setSelectedSourceId(id);
     navigate(`/sources/${id}`, { replace: true });
     window.setTimeout(() => setDetailLoading(false), 100);
   };
 
-  const analyzeSelectedSource = async () => {
+  const analyzeSelectedSource = async (signalId?: string) => {
     if (!selectedSource) return;
     setAnalyzing(true);
     try {
-      const result = await endpoints.documentSources.analyzeSeries(selectedSource.correspondent_id) as SeriesAnalysisResult;
+      const result = await endpoints.documentSources.analyzeSeries(selectedSource.correspondent_id, signalId) as SeriesAnalysisResult;
       setAnalysis(result);
       setToast(result.suggestions.length
         ? `Found ${result.suggestions.length} candidate ${result.suggestions.length === 1 ? 'series' : 'series'} for ${selectedSource.current_name}.`
@@ -1107,7 +1249,7 @@ export default function DocumentSources() {
         },
         suggestions: current.suggestions.filter((item) => item.suggestion_key !== suggestion.suggestion_key),
       } : current);
-      setToast('The candidate was dismissed and will remain excluded from future analysis.');
+      setToast('All documents in this candidate were marked as not belonging to a recurring series.');
     } catch (dismissError) {
       setToast(errorMessage(dismissError));
     } finally {
@@ -1229,13 +1371,14 @@ export default function DocumentSources() {
               series={series}
               expectations={expectations}
               signals={signals}
-              onConfigure={(seriesId, expectationId) => {
+              onConfigure={(seriesId, expectationId, signalId) => {
                 const query = new URLSearchParams();
                 if (seriesId) query.set('series', seriesId);
                 if (expectationId) query.set('expectation', expectationId);
+                if (signalId) query.set('signal', signalId);
                 navigate(`/sources/${selectedSource.correspondent_id}/expectations/new${query.size ? `?${query}` : ''}`);
               }}
-              onAnalyze={() => void analyzeSelectedSource()}
+              onAnalyze={(signalId) => void analyzeSelectedSource(signalId)}
               onCreateSeries={(suggestion) => void createSeriesFromSuggestion(suggestion)}
               onDismissSeries={(suggestion) => void dismissSeriesSuggestion(suggestion)}
               onReopen={() => void reopenSelectedSource()}

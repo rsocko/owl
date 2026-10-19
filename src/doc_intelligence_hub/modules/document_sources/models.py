@@ -9,6 +9,7 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     AvailabilityWindow,
     Cadence,
     CalendarRule,
+    CorrespondentAnalysisResult,
     EscalationPolicy,
     ExpectationEvidence,
     FulfillmentRule,
@@ -166,6 +167,25 @@ class SeriesAnalysisDismiss(ContractModel):
         if any(item <= 0 for item in value):
             raise ValueError("Paperless document IDs must be positive")
         return sorted(set(value))
+
+
+class SourceSeriesAnalysisRequest(ContractModel):
+    signal_id: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class SourceSeriesAnalysisDocument(ContractModel):
+    id: int = Field(gt=0)
+    title: str
+    created: date
+    document_type: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class SourceSeriesAnalysisResult(CorrespondentAnalysisResult):
+    signal_id: str | None = None
+    signal_label: str | None = None
+    low_evidence_document_count: int = Field(default=0, ge=0)
+    documents: list[SourceSeriesAnalysisDocument] = Field(default_factory=list)
 
 
 class DocumentExpectationCreate(ContractModel):

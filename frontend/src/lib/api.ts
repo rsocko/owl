@@ -147,8 +147,10 @@ export const endpoints = {
       api.put(`/api/sources/${correspondentId}/disposition`, body),
     reopen: (correspondentId: number, body: unknown) =>
       api.post(`/api/sources/${correspondentId}/reopen`, body),
-    analyzeSeries: (correspondentId: number) =>
-      api.post(`/api/sources/${correspondentId}/series-analysis`),
+    getSeriesAnalysis: (correspondentId: number, signalId?: string) =>
+      api.get(`/api/sources/${correspondentId}/series-analysis${signalId ? `?signal_id=${encodeURIComponent(signalId)}` : ''}`),
+    analyzeSeries: (correspondentId: number, signalId?: string) =>
+      api.post(`/api/sources/${correspondentId}/series-analysis`, signalId ? { signal_id: signalId } : {}),
     dismissSeriesCandidate: (correspondentId: number, documentIds: number[]) =>
       api.post(`/api/sources/${correspondentId}/series-analysis/dismiss`, { document_ids: documentIds }),
     series: (correspondentId?: number) =>

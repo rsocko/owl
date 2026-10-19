@@ -27,6 +27,7 @@ export default function ExpectationSetup() {
   const sourceId = Number(correspondentId);
   const requestedSeriesId = searchParams.get('series') ?? '';
   const requestedExpectationId = searchParams.get('expectation') ?? '';
+  const requestedSignalId = searchParams.get('signal') ?? '';
   const [source, setSource] = useState<DocumentSource | null>(null);
   const [series, setSeries] = useState<DocumentSeries[]>([]);
   const [expectations, setExpectations] = useState<DocumentExpectation[]>([]);
@@ -48,7 +49,7 @@ export default function ExpectationSetup() {
   const [titleTemplate, setTitleTemplate] = useState('{correspondent} - {period}');
   const [acquisitionSourceId, setAcquisitionSourceId] = useState('');
   const [acquisitionNotes, setAcquisitionNotes] = useState('');
-  const [tyrionSignalId, setTyrionSignalId] = useState('');
+  const [tyrionSignalId, setTyrionSignalId] = useState(requestedSignalId);
   const [signals, setSignals] = useState<Array<{ id: string; display_hint: string; relationship?: { source_correspondent_id?: number | null; expectation_ids: string[] } | null }>>([]);
 
   useEffect(() => {

@@ -22,6 +22,7 @@ from doc_intelligence_hub.modules.document_sources.models import (
     ExternalSignalRelationship,
     ExternalSignalRelationshipUpdate,
     SourceReopenRequest,
+    SourceSeriesAnalysisResult,
 )
 
 SOURCE_SCHEMA_VERSION = 1
@@ -163,6 +164,17 @@ CREATE TABLE IF NOT EXISTS coverage_occurrence_overrides (
     occurrence_id TEXT PRIMARY KEY REFERENCES coverage_occurrences(id) ON DELETE CASCADE,
     grace_extended_until TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS source_series_analysis (
+    deployment_id TEXT NOT NULL,
+    correspondent_id INTEGER NOT NULL,
+    signal_id TEXT NOT NULL DEFAULT '',
+    result_json TEXT NOT NULL,
+    analyzed_at TEXT NOT NULL,
+    PRIMARY KEY (deployment_id, correspondent_id, signal_id),
+    FOREIGN KEY (deployment_id, correspondent_id)
+        REFERENCES document_sources(deployment_id, correspondent_id) ON DELETE CASCADE
 );
 """
 
@@ -338,6 +350,46 @@ class SourceDatabase:
         )
         return self._source(row) if row else None
 
+    def save_series_analysis(self, result: SourceSeriesAnalysisResult) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT INTO source_series_analysis (
+                       deployment_id, correspondent_id, signal_id, result_json, analyzed_at
+                   ) VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(deployment_id, correspondent_id, signal_id) DO UPDATE SET
+                       result_json = excluded.result_json,
+                       analyzed_at = excluded.analyzed_at""",
+                (
+                    self.deployment_id,
+                    result.correspondent_id,
+                    result.signal_id or "",
+                    result.model_dump_json(),
+                    result.analyzed_at,
+                ),
+            )
+
+    def get_series_analysis(
+        self, correspondent_id: int, signal_id: str | None = None
+    ) -> SourceSeriesAnalysisResult | None:
+        row = (
+            self.connect()
+            .execute(
+                """SELECT result_json FROM source_series_analysis
+                   WHERE deployment_id = ? AND correspondent_id = ? AND signal_id = ?""",
+                (self.deployment_id, correspondent_id, signal_id or ""),
+            )
+            .fetchone()
+        )
+        return SourceSeriesAnalysisResult.model_validate_json(row["result_json"]) if row else None
+
+    def clear_series_analysis(self, correspondent_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """DELETE FROM source_series_analysis
+                   WHERE deployment_id = ? AND correspondent_id = ?""",
+                (self.deployment_id, correspondent_id),
+            )
+
     def update_source(self, correspondent_id: int, update: DocumentSourceUpdate) -> DocumentSource:
         source = self.get_source(correspondent_id)
         if source is None:
@@ -496,6 +548,11 @@ class SourceDatabase:
                 ),
             )
             self._replace_members(conn, series_id, create.document_ids)
+            conn.execute(
+                """DELETE FROM source_series_analysis
+                   WHERE deployment_id = ? AND correspondent_id = ?""",
+                (self.deployment_id, create.source_correspondent_id),
+            )
         result = self.get_series(series_id)
         assert result is not None
         return result
@@ -550,6 +607,11 @@ class SourceDatabase:
             if update.document_ids is not None:
                 self._replace_members(conn, series_id, update.document_ids)
             if membership_changed:
+                conn.execute(
+                    """DELETE FROM source_series_analysis
+                       WHERE deployment_id = ? AND correspondent_id = ?""",
+                    (self.deployment_id, current.source_correspondent_id),
+                )
                 self._event(
                     conn,
                     current.source_correspondent_id,
