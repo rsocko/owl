@@ -3,6 +3,7 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
+  ChevronDown,
   ChevronRight,
   FileText,
   Filter,
@@ -77,6 +78,202 @@ function sourceReason(source: DocumentSource): string {
 
 function sourceRelationshipCount(sourceId: number, signals: ExternalSignal[]): number {
   return signals.filter((signal) => signal.relationship?.source_correspondent_id === sourceId).length;
+}
+
+function normalizeMatchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function bigramSimilarity(left: string, right: string): number {
+  const a = normalizeMatchText(left);
+  const b = normalizeMatchText(right);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (a.includes(b) || b.includes(a)) return Math.min(a.length, b.length) / Math.max(a.length, b.length);
+
+  const bigrams = (value: string) => {
+    const result = new Map<string, number>();
+    for (let index = 0; index < value.length - 1; index += 1) {
+      const pair = value.slice(index, index + 2);
+      result.set(pair, (result.get(pair) ?? 0) + 1);
+    }
+    return result;
+  };
+  const leftPairs = bigrams(a);
+  const rightPairs = bigrams(b);
+  let overlap = 0;
+  leftPairs.forEach((count, pair) => {
+    overlap += Math.min(count, rightPairs.get(pair) ?? 0);
+  });
+  return (2 * overlap) / Math.max(1, a.length + b.length - 2);
+}
+
+function sourceMatchScore(source: DocumentSource, signal: ExternalSignal): number {
+  const sourceNames = [source.current_name, ...source.aliases];
+  const institutionName = signal.institution_name;
+  const institutionScore = institutionName
+    ? Math.max(...sourceNames.map((name) => bigramSimilarity(name, institutionName)))
+    : 0;
+  const context = [signal.account_name, signal.display_hint].filter((value): value is string => Boolean(value));
+  const contextScore = context.length > 0
+    ? Math.max(...sourceNames.flatMap((name) => context.map((value) => bigramSimilarity(name, value))))
+    : 0;
+  return Math.max(institutionScore, contextScore * 0.82);
+}
+
+function recommendedSourceForSignal(sources: DocumentSource[], signal: ExternalSignal): DocumentSource | null {
+  const ranked = sources
+    .filter((source) => source.lifecycle === 'active')
+    .map((source) => ({ source, score: sourceMatchScore(source, signal) }))
+    .sort((left, right) => right.score - left.score || left.source.current_name.localeCompare(right.source.current_name));
+  return ranked[0]?.score >= 0.55 ? ranked[0].source : null;
+}
+
+function SourceTypeahead({
+  signal,
+  sources,
+  sourceId,
+  onChange,
+}: {
+  signal: ExternalSignal;
+  sources: DocumentSource[];
+  sourceId: string;
+  onChange: (sourceId: string) => void;
+}) {
+  const activeSources = useMemo(() => sources.filter((source) => source.lifecycle === 'active'), [sources]);
+  const rankedSources = useMemo(() => activeSources
+    .map((source) => ({ source, score: sourceMatchScore(source, signal) }))
+    .sort((left, right) => right.score - left.score || left.source.current_name.localeCompare(right.source.current_name)), [activeSources, signal]);
+  const recommended = rankedSources[0]?.score >= 0.55 ? rankedSources[0] : null;
+  const exactInstitutionMatch = recommended && signal.institution_name
+    ? [recommended.source.current_name, ...recommended.source.aliases]
+        .some((name) => normalizeMatchText(name) === normalizeMatchText(signal.institution_name!))
+    : false;
+  const selectedSource = activeSources.find((source) => source.correspondent_id.toString() === sourceId) ?? null;
+  const [query, setQuery] = useState(selectedSource?.current_name ?? '');
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listboxId = `signal-source-options-${signal.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+
+  const visibleSources = useMemo(() => {
+    const normalizedQuery = normalizeMatchText(query);
+    if (!normalizedQuery || selectedSource?.current_name === query) return rankedSources.slice(0, 8);
+    return rankedSources
+      .map((item) => ({
+        ...item,
+        queryScore: Math.max(
+          bigramSimilarity(item.source.current_name, normalizedQuery),
+          ...item.source.aliases.map((alias) => bigramSimilarity(alias, normalizedQuery)),
+        ),
+      }))
+      .filter((item) => item.queryScore >= 0.3)
+      .sort((left, right) => right.queryScore - left.queryScore || right.score - left.score)
+      .slice(0, 8);
+  }, [query, rankedSources, selectedSource]);
+
+  useEffect(() => {
+    setQuery('');
+    setActiveIndex(0);
+  }, [signal.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (sourceId) {
+      setQuery(activeSources.find((source) => source.correspondent_id.toString() === sourceId)?.current_name ?? '');
+    }
+  }, [activeSources, sourceId]);
+
+  const selectSource = (source: DocumentSource) => {
+    onChange(source.correspondent_id.toString());
+    setQuery(source.current_name);
+    setOpen(false);
+  };
+
+  return (
+    <div className="source-typeahead">
+      <label htmlFor={`${listboxId}-input`}>Document source</label>
+      <div className="source-typeahead-control">
+        <Search aria-hidden="true" />
+        <input
+          ref={inputRef}
+          id={`${listboxId}-input`}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={open}
+          aria-controls={listboxId}
+          aria-activedescendant={open && visibleSources[activeIndex] ? `${listboxId}-${visibleSources[activeIndex].source.correspondent_id}` : undefined}
+          autoComplete="off"
+          placeholder="Search Paperless correspondents"
+          value={query}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            onChange('');
+            setActiveIndex(0);
+            setOpen(true);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              setOpen(true);
+              setActiveIndex((current) => Math.min(current + 1, visibleSources.length - 1));
+            } else if (event.key === 'ArrowUp') {
+              event.preventDefault();
+              setActiveIndex((current) => Math.max(current - 1, 0));
+            } else if (event.key === 'Enter' && open && visibleSources[activeIndex]) {
+              event.preventDefault();
+              selectSource(visibleSources[activeIndex].source);
+            } else if (event.key === 'Escape') {
+              setOpen(false);
+              setQuery(selectedSource?.current_name ?? '');
+            }
+          }}
+        />
+        <button type="button" aria-label="Show Paperless correspondents" onClick={() => { setOpen((current) => !current); inputRef.current?.focus(); }}>
+          <ChevronDown aria-hidden="true" />
+        </button>
+      </div>
+      {recommended ? (
+        <p className="source-typeahead-hint">
+          Tyrion match: <strong>{recommended.source.current_name}</strong>
+          <span>{exactInstitutionMatch ? 'Exact institution match' : 'Closest Tyrion text match'}</span>
+        </p>
+      ) : null}
+      {open ? (
+        <div className="source-typeahead-options" id={listboxId} role="listbox">
+          {visibleSources.length > 0 ? visibleSources.map(({ source }, index) => {
+            const isRecommended = source.correspondent_id === recommended?.source.correspondent_id;
+            const isSelected = source.correspondent_id.toString() === sourceId;
+            return (
+              <button
+                type="button"
+                id={`${listboxId}-${source.correspondent_id}`}
+                role="option"
+                aria-selected={isSelected}
+                className={[isSelected ? 'selected' : '', index === activeIndex ? 'active' : ''].filter(Boolean).join(' ')}
+                key={source.correspondent_id}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => selectSource(source)}
+              >
+                <span>
+                  <strong>{source.current_name}</strong>
+                  <small>Paperless #{source.correspondent_id}{source.aliases.length > 0 ? ` · Also known as ${source.aliases.join(', ')}` : ''}</small>
+                </span>
+                {isRecommended ? <em>Suggested</em> : null}
+                {isSelected ? <Check aria-hidden="true" /> : null}
+              </button>
+            );
+          }) : <p>No Paperless correspondents match “{query}”.</p>}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function FilterPopover({
@@ -561,7 +758,10 @@ function SignalWorkspace({
   }) => Promise<void>;
   saving: boolean;
 }) {
-  const [sourceId, setSourceId] = useState(signal.relationship?.source_correspondent_id?.toString() ?? '');
+  const initialSuggestedSource = recommendedSourceForSignal(sources, signal);
+  const [sourceId, setSourceId] = useState(
+    signal.relationship?.source_correspondent_id?.toString() ?? initialSuggestedSource?.correspondent_id.toString() ?? '',
+  );
   const [expectationIds, setExpectationIds] = useState<string[]>(signal.relationship?.expectation_ids ?? []);
   const [resolution, setResolution] = useState<'linked' | 'not_expected' | 'deferred'>(
     signal.relationship?.resolution === 'linked' || signal.relationship?.resolution === 'not_expected' || signal.relationship?.resolution === 'deferred'
@@ -573,7 +773,8 @@ function SignalWorkspace({
   const availableExpectations = expectations.filter((item) => item.source_correspondent_id === selectedSourceId);
 
   useEffect(() => {
-    setSourceId(signal.relationship?.source_correspondent_id?.toString() ?? '');
+    const suggestedSource = recommendedSourceForSignal(sources, signal);
+    setSourceId(signal.relationship?.source_correspondent_id?.toString() ?? suggestedSource?.correspondent_id.toString() ?? '');
     setExpectationIds(signal.relationship?.expectation_ids ?? []);
     setResolution(
       signal.relationship?.resolution === 'linked' || signal.relationship?.resolution === 'not_expected' || signal.relationship?.resolution === 'deferred'
@@ -581,7 +782,7 @@ function SignalWorkspace({
         : 'linked',
     );
     setRevisitDate(signal.relationship?.revisit_date ?? '');
-  }, [signal]);
+  }, [signal, sources]);
 
   useEffect(() => {
     setExpectationIds((current) => current.filter((id) => availableExpectations.some((item) => item.id === id)));
@@ -638,15 +839,7 @@ function SignalWorkspace({
         </div>
         {resolution === 'linked' ? (
           <>
-            <label>
-              Document source
-              <select value={sourceId} onChange={(event) => setSourceId(event.target.value)}>
-                <option value="">Choose a Paperless correspondent</option>
-                {sources.filter((source) => source.lifecycle === 'active').map((source) => (
-                  <option value={source.correspondent_id} key={source.correspondent_id}>{source.current_name} · Paperless #{source.correspondent_id}</option>
-                ))}
-              </select>
-            </label>
+            <SourceTypeahead signal={signal} sources={sources} sourceId={sourceId} onChange={setSourceId} />
             <fieldset disabled={!sourceId}>
               <legend>Specific expectations <span>Optional</span></legend>
               {sourceId && availableExpectations.length === 0 ? <p>No expectations exist for this source. Linking will not create one.</p> : null}

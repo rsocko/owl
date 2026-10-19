@@ -222,7 +222,8 @@ describe('Document Sources', () => {
     fireEvent.click(screen.getByRole('button', { name: /external signals/i }));
     await screen.findByRole('heading', { name: signal.display_hint });
 
-    fireEvent.change(screen.getByLabelText('Document source'), { target: { value: '41' } });
+    expect(screen.getByRole('combobox', { name: 'Document source' })).toHaveValue('Harbor Bank');
+    expect(screen.getByText('Exact institution match')).toBeInTheDocument();
     expect(screen.getByText(/zero expectation links/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /save resolution/i }));
 
@@ -234,6 +235,35 @@ describe('Document Sources', () => {
       revisit_date: null,
     }));
     expect(endpoints.documentSources).not.toHaveProperty('createExpectation.mock');
+  });
+
+  it('filters Paperless correspondents as the operator types and selects an option', async () => {
+    mockLoadedData();
+    renderPage();
+    await screen.findByRole('heading', { name: 'Harbor Bank' });
+    fireEvent.click(screen.getByRole('button', { name: /external signals/i }));
+    await screen.findByRole('heading', { name: signal.display_hint });
+
+    const input = screen.getByRole('combobox', { name: 'Document source' });
+    fireEvent.change(input, { target: { value: 'Pine' } });
+    expect(screen.getByRole('option', { name: /Pine Mutual/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Harbor Bank/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('option', { name: /Pine Mutual/ }));
+    expect(input).toHaveValue('Pine Mutual');
+  });
+
+  it('preselects a strong fuzzy Tyrion institution match', async () => {
+    mockLoadedData({
+      sources: [{ ...sourceOne, current_name: 'Harbor Bnk', aliases: [] }, sourceTwo],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Harbor Bnk' });
+    fireEvent.click(screen.getByRole('button', { name: /external signals/i }));
+    await screen.findByRole('heading', { name: signal.display_hint });
+
+    expect(screen.getByRole('combobox', { name: 'Document source' })).toHaveValue('Harbor Bnk');
+    expect(screen.getByText('Closest Tyrion text match')).toBeInTheDocument();
   });
 
   it('shows explicit empty and error states', async () => {
