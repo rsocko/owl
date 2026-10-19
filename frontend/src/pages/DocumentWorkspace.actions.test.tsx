@@ -433,6 +433,59 @@ describe('DocumentWorkspace actions mode', () => {
     }));
   });
 
+  it('shows candidate review failures inside the confirmation dialog', async () => {
+    actionsMock.mockResolvedValue({
+      actions: actions.map((action) => (
+        action.id === 1 ? { ...action, obligation_id: 'obligation-1' } : { ...action }
+      )),
+      total: actions.length,
+    });
+    paymentCheckMock.mockResolvedValue({
+      payment_check: {
+        state: 'posted_match',
+        revision: 'v1:2:3',
+        message: 'A posted payment candidate requires confirmation.',
+        candidates: [
+          {
+            id: 'evidence-1',
+            rank: 1,
+            payee: 'Project Client',
+            amount: 5000,
+            currency: 'USD',
+            transaction_date: '2026-09-04',
+            status: 'posted',
+            confidence: 'high',
+            score: 94,
+          },
+          {
+            id: 'evidence-2',
+            rank: 2,
+            payee: 'Project Client',
+            amount: 5000,
+            currency: 'USD',
+            transaction_date: '2026-08-03',
+            status: 'posted',
+            confidence: 'medium',
+            score: 82,
+          },
+        ],
+      },
+    });
+    reviewPaymentCandidateMock.mockRejectedValueOnce(
+      new Error('Payment reconciliation request was rejected.'),
+    );
+    renderWorkspace();
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'This is the match' }))[0]);
+    const dialog = screen.getByRole('dialog', { name: 'Confirm this transaction?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm and complete' }));
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'Payment reconciliation request was rejected.',
+    );
+    expect(within(dialog).getByRole('button', { name: 'Confirm and complete' })).toBeEnabled();
+  });
+
   it('explains the full ranked result set when no candidate meets the threshold', async () => {
     actionsMock.mockResolvedValue({
       actions: actions.map((action) => (

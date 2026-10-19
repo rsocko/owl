@@ -403,7 +403,10 @@ export default function DocumentActionsPanel({
               onConfirm={() => setConfirmPayment(true)}
               selectedCandidateId={selectedPaymentCandidateId}
               onSelectCandidate={setSelectedPaymentCandidateId}
-              onReviewCandidate={(action, candidate) => setPendingPaymentDecision({ action, candidate })}
+              onReviewCandidate={(action, candidate) => {
+                setPaymentError('');
+                setPendingPaymentDecision({ action, candidate });
+              }}
             />
           ) : null}
           <QuickWorkLinks action={selectedAction} />
@@ -477,6 +480,7 @@ export default function DocumentActionsPanel({
                     ? 'OWL will record that this transaction is not the payment and remove it from the ranked results.'
                     : 'OWL will remove this transaction from the candidate list. You can run the payment check again later.'}
             </p>
+            {paymentError ? <p className="workspace-dialog-error" role="alert">{paymentError}</p> : null}
             <div>
               <Button onClick={() => setPendingPaymentDecision(null)} disabled={paymentBusy}>Cancel</Button>
               <Button

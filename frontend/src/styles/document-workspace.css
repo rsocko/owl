@@ -1289,6 +1289,11 @@
   font-size: .75rem;
 }
 
+.workspace-dialog .workspace-dialog-error {
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .workspace-dialog > div {
   display: flex;
   justify-content: flex-end;
