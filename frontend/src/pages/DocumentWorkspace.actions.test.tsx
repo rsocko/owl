@@ -749,7 +749,7 @@ describe('DocumentWorkspace actions mode', () => {
         message: 'The payment source could not complete the check.',
         candidates: [{
           id: 'failure-audit-evidence',
-          payee: 'Brochu Bros',
+          payee: 'Example Vendor',
           amount: 2598.22,
           currency: 'USD',
           transaction_date: null,
@@ -770,7 +770,7 @@ describe('DocumentWorkspace actions mode', () => {
     expect(await screen.findByText('Payment source unavailable')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Check again' })).toBeEnabled();
     expect(screen.queryByText('Matched transaction')).not.toBeInTheDocument();
-    expect(screen.queryByText('Brochu Bros')).not.toBeInTheDocument();
+    expect(screen.queryByText('Example Vendor')).not.toBeInTheDocument();
   });
 
   it('reloads missing payment status instead of rendering a dead check button', async () => {
