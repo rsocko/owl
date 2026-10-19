@@ -28,12 +28,20 @@ from doc_intelligence_hub.core.paperless import (
     MetadataSchemaError,
     MetadataValueError,
     PaperlessMetadataResolver,
+    PaperlessRevisionConflict,
     build_account_identifier_update,
     build_metadata_update,
     get_metadata_field_spec,
     mask_account_identifier,
     resolve_metadata_schema,
     resolve_metadata_value,
+)
+from doc_intelligence_hub.core.paperless.writeback import (
+    audit_paperless_write,
+    build_write_conflicts,
+    is_idempotent_replay,
+    sanitize_initiator,
+    values_equal,
 )
 from doc_intelligence_hub.modules.triage.database import (
     create_extraction_correction,
@@ -84,6 +92,11 @@ class CorrectFieldRequest(BaseModel):
         default=None,
         description="Required classification for an Account Identifier correction",
     )
+    expected_modified: str | None = Field(
+        default=None,
+        description="Paperless modified revision captured when the field was loaded",
+    )
+    initiated_by: str = Field(default="owl-metadata-correction", min_length=1, max_length=64)
 
 
 class ConfirmFieldRequest(BaseModel):
@@ -95,6 +108,13 @@ class ConfirmFieldRequest(BaseModel):
     source_region: dict | None = Field(
         default=None, description="Bounding box / OCR region coordinates"
     )
+
+
+class WritebackRequest(BaseModel):
+    expected_modified: str
+    base_values: dict[str, Any] = Field(default_factory=dict)
+    field_names: list[str] | None = None
+    initiated_by: str = Field(default="owl-metadata-correction", min_length=1, max_length=64)
 
 
 # ------------------------------------------------------------------
@@ -227,6 +247,7 @@ async def get_document_metadata(
             ),
         ),
         "paperless_url": f"/documents/{doc_id}/details",
+        "source_modified": doc.get("modified"),
         "extracted_fields": extracted_fields,
         "corrections": corrections,
         "latest_corrections": latest_corrections,
@@ -276,7 +297,7 @@ async def _resolve_correction_context(
     try:
         doc = await client.get_document(doc_id)
     except Exception as exc:
-        logger.warning("Could not fetch document %d to resolve correction context: %s", doc_id, exc)
+        logger.warning("Could not fetch Paperless correction context: %s", exc)
         return None, None
 
     correspondent_raw = doc.get("correspondent")
@@ -287,7 +308,7 @@ async def _resolve_correction_context(
         try:
             correspondents = await client.list_correspondents()
         except Exception as exc:
-            logger.warning("Could not resolve correspondent for document %d: %s", doc_id, exc)
+            logger.warning("Could not resolve correction correspondent: %s", exc)
             correspondents = []
         for correspondent in correspondents:
             if correspondent.get("id") == correspondent_raw:
@@ -313,25 +334,128 @@ async def correct_field(doc_id: int, body: CorrectFieldRequest, request: Request
                 status_code=422,
                 detail="identifier_class is required for Account Identifier corrections",
             )
+        if not body.expected_modified:
+            raise HTTPException(
+                status_code=422,
+                detail="expected_modified is required for Account Identifier corrections",
+            )
+        initiator = sanitize_initiator(body.initiated_by, fallback="owl-metadata-correction")
         try:
+            current = await client.get_document(doc_id)
             schema = await PaperlessMetadataResolver(client).resolve(
                 (MetadataFieldKey.ACCOUNT_IDENTIFIER,)
             )
+            current_value = resolve_metadata_value(
+                MetadataFieldKey.ACCOUNT_IDENTIFIER,
+                current.get("custom_fields", []),
+                schema,
+            ).value
+            loaded_current_value = current_value
             update, projection = build_account_identifier_update(
                 body.corrected_value,
                 body.identifier_class,
                 1.0,
                 schema,
             )
-            await client.update_custom_fields(doc_id, [update])
+            replayed = current.get("modified") != body.expected_modified and values_equal(
+                current_value, body.corrected_value
+            )
+            if current.get("modified") != body.expected_modified and not replayed:
+                audit_paperless_write(
+                    logger,
+                    initiator=initiator,
+                    surface="metadata-correction-account",
+                    fields=[body.field_name],
+                    outcome="conflict",
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "source_revision_conflict",
+                        "message": "This field changed in Paperless. Resolve it before saving.",
+                        "expected_modified": body.expected_modified,
+                        "current_modified": current.get("modified"),
+                        "conflicts": build_write_conflicts(
+                            loaded={body.field_name: body.original_value},
+                            current={body.field_name: current_value},
+                            proposed={body.field_name: body.corrected_value},
+                            labels={body.field_name: "Account Identifier"},
+                        ),
+                    },
+                )
+            if not replayed:
+                await client.update_custom_fields(
+                    doc_id,
+                    [update],
+                    expected_modified=current.get("modified"),
+                )
+            audit_paperless_write(
+                logger,
+                initiator=initiator,
+                surface="metadata-correction-account",
+                fields=[body.field_name],
+                outcome="replayed" if replayed else "succeeded",
+            )
         except (MetadataSchemaError, MetadataValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except PaperlessRevisionConflict as exc:
+            race_value = resolve_metadata_value(
+                MetadataFieldKey.ACCOUNT_IDENTIFIER,
+                exc.current_document.get("custom_fields", []),
+                schema,
+            ).value
+            audit_paperless_write(
+                logger,
+                initiator=initiator,
+                surface="metadata-correction-account",
+                fields=[body.field_name],
+                outcome="conflict",
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "source_revision_conflict",
+                    "message": "This field changed in Paperless. Resolve it before saving.",
+                    "expected_modified": current.get("modified"),
+                    "current_modified": exc.current_document.get("modified"),
+                    "conflicts": build_write_conflicts(
+                        loaded={body.field_name: loaded_current_value},
+                        current={body.field_name: race_value},
+                        proposed={body.field_name: body.corrected_value},
+                        labels={body.field_name: "Account Identifier"},
+                    ),
+                },
+            ) from exc
+        except HTTPException:
+            raise
         except Exception as exc:
-            logger.error("Account Identifier write-through failed for doc %d", doc_id)
+            audit_paperless_write(
+                logger,
+                initiator=initiator,
+                surface="metadata-correction-account",
+                fields=[body.field_name],
+                outcome="failed",
+            )
             raise HTTPException(
                 status_code=502,
                 detail="Failed to write Account Identifier to Paperless",
             ) from exc
+        if replayed:
+            existing = next(
+                (
+                    correction
+                    for correction in get_corrections_for_document(doc_id)
+                    if correction.get("field_name") == body.field_name
+                    and correction.get("corrected_value") == projection.display_value
+                ),
+                None,
+            )
+            if existing is not None:
+                return {
+                    "correction": existing,
+                    "written_to_paperless": True,
+                    "idempotent_replay": True,
+                }
         correction = create_extraction_correction(
             document_id=doc_id,
             field_name=body.field_name,
@@ -344,7 +468,11 @@ async def correct_field(doc_id: int, body: CorrectFieldRequest, request: Request
             label_anchor=label_anchor,
             notes=None,
         )
-        return {"correction": correction, "written_to_paperless": True}
+        return {
+            "correction": correction,
+            "written_to_paperless": True,
+            "idempotent_replay": replayed,
+        }
 
     correction = create_extraction_correction(
         document_id=doc_id,
@@ -389,7 +517,9 @@ async def confirm_field(doc_id: int, body: ConfirmFieldRequest, request: Request
 
 
 @router.post("/{doc_id}/writeback")
-async def writeback_to_paperless(doc_id: int, request: Request) -> dict[str, Any]:
+async def writeback_to_paperless(
+    doc_id: int, body: WritebackRequest, request: Request
+) -> dict[str, Any]:
     """Push all corrections to Paperless custom fields.
 
     Reads the latest correction for each field, resolves Paperless custom field IDs,
@@ -406,18 +536,69 @@ async def writeback_to_paperless(doc_id: int, request: Request) -> dict[str, Any
         if fn not in latest_per_field and c.get("corrected_value") is not None:
             latest_per_field[fn] = c["corrected_value"]
 
+    if body.field_names is not None:
+        unknown_fields = sorted(set(body.field_names) - VALID_FIELD_NAMES)
+        if unknown_fields:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown writeback fields: {unknown_fields}",
+            )
+        latest_per_field = {
+            field: value
+            for field, value in latest_per_field.items()
+            if field in set(body.field_names)
+        }
+
     if not latest_per_field:
         raise HTTPException(status_code=400, detail="No corrected values to write back.")
 
     client = make_paperless_client(request)
+    initiator = sanitize_initiator(body.initiated_by, fallback="owl-metadata-correction")
 
     try:
-        schema = await PaperlessMetadataResolver(client).resolve(_API_FIELD_KEYS.values())
+        current = await client.get_document(doc_id)
+        definitions = await client.list_custom_fields()
+        schema = resolve_metadata_schema(definitions, _API_FIELD_KEYS.values())
     except Exception as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Failed to list Paperless custom fields: {exc}",
+            detail=f"Failed to load current Paperless metadata: {exc}",
         ) from exc
+
+    current_values = {
+        field: resolve_metadata_value(
+            _API_FIELD_KEYS[field],
+            current.get("custom_fields", []),
+            schema,
+        ).value
+        for field in latest_per_field
+    }
+    replayed = current.get("modified") != body.expected_modified and is_idempotent_replay(
+        current_values, latest_per_field
+    )
+    if current.get("modified") != body.expected_modified and not replayed:
+        audit_paperless_write(
+            logger,
+            initiator=initiator,
+            surface="metadata-correction-writeback",
+            fields=list(latest_per_field),
+            outcome="conflict",
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "source_revision_conflict",
+                "message": "Paperless metadata changed after this page was loaded.",
+                "expected_modified": body.expected_modified,
+                "current_modified": current.get("modified"),
+                "conflicts": build_write_conflicts(
+                    loaded=body.base_values,
+                    current=current_values,
+                    proposed=latest_per_field,
+                    labels=FIELD_TO_PAPERLESS,
+                ),
+            },
+        )
 
     updates: list[dict] = []
     written_fields: list[str] = []
@@ -447,18 +628,72 @@ async def writeback_to_paperless(doc_id: int, request: Request) -> dict[str, Any
         )
 
     try:
-        await client.update_custom_fields(doc_id, updates)
+        updated = (
+            await client.update_custom_fields(
+                doc_id,
+                updates,
+                expected_modified=current.get("modified"),
+            )
+            if not replayed
+            else current
+        )
+    except PaperlessRevisionConflict as exc:
+        race_values = {
+            field: resolve_metadata_value(
+                _API_FIELD_KEYS[field],
+                exc.current_document.get("custom_fields", []),
+                schema,
+            ).value
+            for field in latest_per_field
+        }
+        audit_paperless_write(
+            logger,
+            initiator=initiator,
+            surface="metadata-correction-writeback",
+            fields=list(latest_per_field),
+            outcome="conflict",
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "source_revision_conflict",
+                "message": "Paperless metadata changed while the write was being prepared.",
+                "expected_modified": current.get("modified"),
+                "current_modified": exc.current_document.get("modified"),
+                "conflicts": build_write_conflicts(
+                    loaded=current_values,
+                    current=race_values,
+                    proposed=latest_per_field,
+                    labels=FIELD_TO_PAPERLESS,
+                ),
+            },
+        ) from exc
     except Exception as exc:
+        audit_paperless_write(
+            logger,
+            initiator=initiator,
+            surface="metadata-correction-writeback",
+            fields=list(latest_per_field),
+            outcome="failed",
+        )
         raise HTTPException(
             status_code=502,
             detail=f"Failed to write to Paperless: {exc}",
         ) from exc
 
-    logger.info("Wrote %d fields to Paperless doc %d: %s", len(updates), doc_id, written_fields)
+    audit_paperless_write(
+        logger,
+        initiator=initiator,
+        surface="metadata-correction-writeback",
+        fields=written_fields,
+        outcome="replayed" if replayed else "succeeded",
+    )
 
     return {
         "document_id": doc_id,
         "written_fields": written_fields,
         "missing_fields": missing_fields,
         "update_count": len(updates),
+        "source_modified": updated.get("modified"),
+        "idempotent_replay": replayed,
     }

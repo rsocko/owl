@@ -446,11 +446,12 @@ export const endpoints = {
   },
   metadata: {
     get: (docId: string | number) => api.get(`/api/metadata/${docId}?context=account_review`),
-    correct: (docId: string | number, body: { field_name: string; corrected_value: string; original_value?: string; confidence?: number; source_region?: unknown; notes?: string; identifier_class?: string }) =>
+    correct: (docId: string | number, body: { field_name: string; corrected_value: string; original_value?: string; confidence?: number; source_region?: unknown; notes?: string; identifier_class?: string; expected_modified?: string; initiated_by?: string }) =>
       api.post(`/api/metadata/${docId}/correct`, body),
     confirm: (docId: string | number, body: { field_name: string; current_value?: string; confidence?: number; source_region?: unknown }) =>
       api.post(`/api/metadata/${docId}/confirm`, body),
-    writeback: (docId: string | number) => api.post(`/api/metadata/${docId}/writeback`),
+    writeback: (docId: string | number, body: unknown) =>
+      api.post(`/api/metadata/${docId}/writeback`, body),
     corrections: (params?: string) => api.get(`/api/metadata/corrections${params ? `?${params}` : ''}`),
   },
   dashboard: {

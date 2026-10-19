@@ -1116,6 +1116,99 @@
   font-size: 0.76rem;
 }
 
+.intake-conflict-dialog {
+  display: grid;
+  gap: 1rem;
+}
+
+.intake-conflict-dialog > p {
+  max-width: 68ch;
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.intake-conflict-field {
+  min-width: 0;
+  margin: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 0.55rem;
+}
+
+.intake-conflict-field legend {
+  padding-inline: 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.intake-conflict-history {
+  min-width: 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--muted-bg);
+  display: grid;
+  grid-template-columns: minmax(6rem, 0.35fr) minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: baseline;
+}
+
+.intake-conflict-history span {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.intake-conflict-history strong,
+.intake-conflict-choice b {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.76rem;
+}
+
+.intake-conflict-choice {
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: grid;
+  grid-template-columns: auto minmax(7rem, 0.45fr) minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: center;
+  cursor: pointer;
+}
+
+.intake-conflict-choice:hover {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+}
+
+.intake-conflict-choice.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.intake-conflict-choice:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.intake-conflict-choice > span {
+  min-width: 0;
+  display: grid;
+  gap: 0.12rem;
+}
+
+.intake-conflict-choice small {
+  color: var(--text-muted);
+  font-size: 0.65rem;
+}
+
+.intake-conflict-choice input {
+  margin: 0;
+}
+
 .intake-footer {
   flex: 0 0 auto;
   min-height: 3.5rem;
@@ -1342,6 +1435,16 @@
 
   .intake-field-wide {
     grid-column: auto;
+  }
+
+  .intake-conflict-history,
+  .intake-conflict-choice {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .intake-conflict-history strong,
+  .intake-conflict-choice b {
+    grid-column: 2;
   }
 
   .intake-metadata-panel,

@@ -98,8 +98,15 @@ result without hiding values already applied by Paperless.
 Accepted changes use the ordinary Paperless document API. Before writing, OWL
 must compare the current Paperless `modified` value or an equivalent source
 fingerprint with the version loaded into the workspace. If Paperless changed
-underneath the user, OWL refreshes and shows the conflict rather than silently
-overwriting a mobile, web, workflow, or API edit.
+underneath the user, OWL compares only the sparse field patch against the
+loaded values. Non-overlapping external edits are preserved. Overlapping fields
+show the loaded, current Paperless, and proposed OWL values with explicit
+**Keep Paperless**, **Apply OWL**, and **Continue editing** choices.
+
+The write contract rechecks `modified` immediately before PATCH, recognizes a
+matching newer value as an idempotent replay, and reports post-write partial
+failures distinctly. Audit events record the initiating OWL surface and field
+names without document text, field values, or exact protected identifiers.
 
 Paperless's native suggestion UI remains available. OWL does not disable it.
 Deployments may also retain existing automatic non-AI matching. Automatic AI

@@ -56,6 +56,7 @@ interface MetadataResponse {
   corrections: CorrectionRecord[];
   latest_corrections: Record<string, CorrectionRecord>;
   field_mapping: Record<string, string>;
+  source_modified: string;
 }
 
 interface WritebackResponse {
@@ -63,9 +64,53 @@ interface WritebackResponse {
   written_fields: string[];
   missing_fields: string[];
   update_count: number;
+  source_modified?: string | null;
+}
+
+interface WriteConflict {
+  field: string;
+  label: string;
+  loaded_value: unknown;
+  paperless_value: unknown;
+  owl_value: unknown;
+}
+
+interface SourceConflictDetails {
+  code: 'source_revision_conflict';
+  message: string;
+  current_modified: string;
+  conflicts: WriteConflict[];
+}
+
+interface AccountCorrectionRequest {
+  field_name: string;
+  corrected_value: string;
+  original_value?: string;
+  confidence?: number;
+  identifier_class: AccountIdentifierClass;
+  expected_modified: string;
+  initiated_by: 'owl-metadata-correction';
 }
 
 type ToastState = { message: string; tone: 'success' | 'error' } | null;
+
+function conflictDetails(error: unknown): SourceConflictDetails | null {
+  if (!(error instanceof Error) || !('details' in error)) return null;
+  const details = (error as {
+    details?: {
+      detail?: SourceConflictDetails;
+      error?: SourceConflictDetails;
+    };
+  }).details;
+  const conflict = details?.detail || details?.error;
+  return conflict?.code === 'source_revision_conflict' ? conflict : null;
+}
+
+function displayConflictValue(value: unknown): string {
+  if (value == null || value === '') return 'Not set';
+  if (Array.isArray(value)) return value.join(', ') || 'None';
+  return String(value);
+}
 
 // ------------------------------------------------------------------
 // Constants
@@ -144,6 +189,13 @@ export default function MetadataCorrection() {
   const [busyField, setBusyField] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [highlightedField, setHighlightedField] = useState<string | null>(null);
+  const [writeConflict, setWriteConflict] = useState<{
+    mode: 'writeback' | 'account';
+    details: SourceConflictDetails;
+    choices: Record<string, 'paperless' | 'owl'>;
+    attemptedFields: string[];
+    accountRequest?: AccountCorrectionRequest;
+  } | null>(null);
 
   // ------------------------------------------------------------------
   // Data loading
@@ -222,16 +274,30 @@ export default function MetadataCorrection() {
 
       const field = data.extracted_fields.find((f) => f.field_name === fieldName);
       const originalValue = field?.value ?? data.latest_corrections[fieldName]?.original_value ?? null;
+      const correctionRequest = {
+        field_name: fieldName,
+        corrected_value: newValue,
+        original_value: originalValue ?? undefined,
+        confidence: data.latest_corrections[fieldName]?.confidence ?? undefined,
+        identifier_class: accountIdentifierClass,
+        expected_modified: data.source_modified,
+        initiated_by: 'owl-metadata-correction' as const,
+      };
 
       setBusyField(fieldName);
       try {
-        await endpoints.metadata.correct(docId, {
-          field_name: fieldName,
-          corrected_value: newValue,
-          original_value: originalValue ?? undefined,
-          confidence: data.latest_corrections[fieldName]?.confidence ?? undefined,
-          identifier_class: fieldName === 'account_identifier' ? accountIdentifierClass : undefined,
-        });
+        await endpoints.metadata.correct(
+          docId,
+          fieldName === 'account_identifier'
+            ? correctionRequest
+            : {
+                field_name: fieldName,
+                corrected_value: newValue,
+                original_value: originalValue ?? undefined,
+                confidence: data.latest_corrections[fieldName]?.confidence ?? undefined,
+                initiated_by: 'owl-metadata-correction',
+              },
+        );
         setEditingField(null);
         setEditValues((prev) => {
           const next = { ...prev };
@@ -247,13 +313,26 @@ export default function MetadataCorrection() {
         });
         await loadData();
       } catch (err) {
-        setToast({
-          message:
-            err instanceof Error
-              ? err.message
-              : `Failed to save correction for ${fieldLabel(fieldName)}`,
-          tone: 'error',
-        });
+        const conflict = conflictDetails(err);
+        if (fieldName === 'account_identifier' && conflict) {
+          setWriteConflict({
+            mode: 'account',
+            details: conflict,
+            choices: Object.fromEntries(
+              conflict.conflicts.map((item) => [item.field, 'paperless' as const]),
+            ),
+            attemptedFields: [fieldName],
+            accountRequest: correctionRequest,
+          });
+        } else {
+          setToast({
+            message:
+              err instanceof Error
+                ? err.message
+                : `Failed to save correction for ${fieldLabel(fieldName)}`,
+            tone: 'error',
+          });
+        }
       } finally {
         setBusyField(null);
       }
@@ -285,22 +364,95 @@ export default function MetadataCorrection() {
     [docId, data, currentValues, loadData],
   );
 
-  const handleWriteback = useCallback(async () => {
-    if (!docId) return;
+  const handleWriteback = useCallback(async (
+    fieldNames?: string[],
+    expectedModified = data?.source_modified,
+  ) => {
+    if (!docId || !data || !expectedModified) return;
     setWritingBack(true);
     try {
-      const res = (await endpoints.metadata.writeback(docId)) as WritebackResponse;
+      const res = (await endpoints.metadata.writeback(docId, {
+        expected_modified: expectedModified,
+        base_values: Object.fromEntries(
+          data.extracted_fields.map((field) => [field.field_name, field.value]),
+        ),
+        field_names: fieldNames,
+        initiated_by: 'owl-metadata-correction',
+      })) as WritebackResponse;
+      setWriteConflict(null);
       setToast({
         message: `Wrote ${res.update_count} field(s) to Paperless${res.missing_fields.length ? ` (${res.missing_fields.length} skipped)` : ''}`,
         tone: 'success',
       });
       await loadData();
     } catch (err) {
-      setToast({ message: err instanceof Error ? err.message : 'Writeback failed', tone: 'error' });
+      const conflict = conflictDetails(err);
+      if (conflict) {
+        const attemptedFields = fieldNames || pendingWritebacks.map((field) => field.field_name);
+        setWriteConflict({
+          mode: 'writeback',
+          details: conflict,
+          choices: Object.fromEntries(
+            conflict.conflicts.map((item) => [item.field, 'paperless' as const]),
+          ),
+          attemptedFields,
+        });
+      } else {
+        setToast({ message: err instanceof Error ? err.message : 'Writeback failed', tone: 'error' });
+      }
     } finally {
       setWritingBack(false);
     }
-  }, [docId, loadData]);
+  }, [data, docId, loadData, pendingWritebacks]);
+
+  const resolveWriteConflict = useCallback(async () => {
+    if (!writeConflict) return;
+    const keepPaperless = new Set(
+      writeConflict.details.conflicts
+        .filter((item) => writeConflict.choices[item.field] === 'paperless')
+        .map((item) => item.field),
+    );
+    const owlFields = writeConflict.attemptedFields.filter((field) => !keepPaperless.has(field));
+    if (writeConflict.mode === 'account') {
+      if (!owlFields.length || !writeConflict.accountRequest || !docId) {
+        setWriteConflict(null);
+        setToast({ message: 'Kept the current Paperless value.', tone: 'success' });
+        await loadData();
+        return;
+      }
+      setWritingBack(true);
+      try {
+        await endpoints.metadata.correct(docId, {
+          ...writeConflict.accountRequest,
+          expected_modified: writeConflict.details.current_modified,
+        });
+        setWriteConflict(null);
+        setEditingField(null);
+        setEditValues((current) => {
+          const next = { ...current };
+          delete next.account_identifier;
+          return next;
+        });
+        setToast({ message: 'Account Identifier updated in Paperless', tone: 'success' });
+        await loadData();
+      } catch (error) {
+        setToast({
+          message: error instanceof Error ? error.message : 'Account Identifier writeback failed',
+          tone: 'error',
+        });
+      } finally {
+        setWritingBack(false);
+      }
+      return;
+    }
+    if (!owlFields.length) {
+      setWriteConflict(null);
+      setToast({ message: 'Kept the current Paperless values.', tone: 'success' });
+      await loadData();
+      return;
+    }
+    await handleWriteback(owlFields, writeConflict.details.current_modified);
+  }, [docId, handleWriteback, loadData, writeConflict]);
 
   const startEditing = useCallback(
     (fieldName: string) => {
@@ -622,6 +774,77 @@ export default function MetadataCorrection() {
           </div>
         </div>
       </div>
+
+      {writeConflict && (
+        <Modal
+          title="Paperless metadata changed"
+          onClose={() => setWriteConflict(null)}
+          footer={(
+            <>
+              <Button
+                variant="ghost"
+                disabled={writingBack}
+                onClick={() => setWriteConflict(null)}
+              >
+                Continue editing
+              </Button>
+              <Button
+                variant="primary"
+                disabled={writingBack}
+                onClick={() => void resolveWriteConflict()}
+              >
+                {writingBack ? 'Resolving…' : 'Resolve & write'}
+              </Button>
+            </>
+          )}
+        >
+          <div className="meta-conflict-dialog">
+            <p>
+              Choose which value to keep where Paperless and OWL both changed the same field.
+              Other external edits will remain untouched.
+            </p>
+            {writeConflict.details.conflicts.length === 0 ? (
+              <div className="meta-conflict-safe">
+                The external edit does not overlap these corrections. You can safely continue.
+              </div>
+            ) : writeConflict.details.conflicts.map((conflict) => (
+              <fieldset className="meta-conflict-field" key={conflict.field}>
+                <legend>{conflict.label}</legend>
+                <div className="meta-conflict-loaded">
+                  <span>When opened</span>
+                  <strong>{displayConflictValue(conflict.loaded_value)}</strong>
+                </div>
+                <label className={writeConflict.choices[conflict.field] === 'paperless' ? 'selected' : ''}>
+                  <input
+                    type="radio"
+                    name={`metadata-conflict-${conflict.field}`}
+                    checked={writeConflict.choices[conflict.field] === 'paperless'}
+                    onChange={() => setWriteConflict((current) => current ? {
+                      ...current,
+                      choices: { ...current.choices, [conflict.field]: 'paperless' },
+                    } : current)}
+                  />
+                  <span><strong>Keep Paperless</strong><small>Current external value</small></span>
+                  <b>{displayConflictValue(conflict.paperless_value)}</b>
+                </label>
+                <label className={writeConflict.choices[conflict.field] === 'owl' ? 'selected' : ''}>
+                  <input
+                    type="radio"
+                    name={`metadata-conflict-${conflict.field}`}
+                    checked={writeConflict.choices[conflict.field] === 'owl'}
+                    onChange={() => setWriteConflict((current) => current ? {
+                      ...current,
+                      choices: { ...current.choices, [conflict.field]: 'owl' },
+                    } : current)}
+                  />
+                  <span><strong>Apply OWL</strong><small>Reviewed correction</small></span>
+                  <b>{displayConflictValue(conflict.owl_value)}</b>
+                </label>
+              </fieldset>
+            ))}
+          </div>
+        </Modal>
+      )}
 
       {/* Correction History Modal */}
       {showHistory && (

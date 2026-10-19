@@ -773,26 +773,43 @@ describe('DocumentWorkspace inbox mode', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save & file' })).toBeEnabled());
   });
 
-  it('offers to reload when Paperless changed after the document was opened', async () => {
+  it('offers field-level resolution when Paperless changed after the document was opened', async () => {
     const conflict = Object.assign(new Error('This document changed in Paperless.'), {
-      details: { error: { code: 'source_revision_conflict' } },
+      details: {
+        error: {
+          code: 'source_revision_conflict',
+          message: 'Resolve the changed fields before saving.',
+          expected_modified: 'revision-1',
+          current_modified: 'revision-2',
+          conflicts: [{
+            field: 'title',
+            label: 'Title',
+            loaded_value: 'Document 1',
+            paperless_value: 'External title',
+            owl_value: 'Unsaved title',
+          }],
+        },
+      },
     });
     saveDocumentMock.mockRejectedValueOnce(conflict);
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderPage();
 
     fireEvent.change(await screen.findByLabelText('Title'), { target: { value: 'Unsaved title' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
-    const reload = await screen.findByRole('button', { name: 'Reload' });
-    expect(screen.getByText(
-      'This document changed after it was opened. Reload it to review the latest version before saving.',
-    )).toBeInTheDocument();
-    fireEvent.click(reload);
+    expect(await screen.findByText('Paperless changed while you were reviewing')).toBeInTheDocument();
+    expect(screen.getByText('External title')).toBeInTheDocument();
+    expect(screen.getAllByText('Unsaved title')).not.toHaveLength(0);
+    fireEvent.click(screen.getByRole('radio', { name: /Apply OWL/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve & save' }));
 
-    expect(confirm).toHaveBeenCalledWith('Reload this document and discard your unsaved changes?');
-    await waitFor(() => expect(documentCoreMock).toHaveBeenCalledTimes(2));
-    confirm.mockRestore();
+    await waitFor(() => expect(saveDocumentMock).toHaveBeenLastCalledWith(
+      1,
+      expect.objectContaining({
+        expected_modified: 'revision-2',
+        metadata: { title: 'Unsaved title' },
+      }),
+    ));
   });
 
   it('opens the document preview full screen and exposes external links', async () => {

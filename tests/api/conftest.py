@@ -113,7 +113,7 @@ def _make_mock_paperless() -> AsyncMock:
         {"id": 1, "name": "Household"},
     ]
     mock.resolve_tag_ids.return_value = [1]
-    mock.update_document.side_effect = lambda _document_id, data: {
+    mock.update_document.side_effect = lambda _document_id, data, **_kwargs: {
         **mock.get_document.return_value,
         **data,
         "modified": "2026-01-02T00:00:00Z",
@@ -152,6 +152,7 @@ def mock_paperless():
         "doc_intelligence_hub.api.routers.ocr_quality_candidates.make_paperless_client",
         "doc_intelligence_hub.api.routers.receipt_intake.make_paperless_client",
         "doc_intelligence_hub.api.routers.intake_review.make_paperless_client",
+        "doc_intelligence_hub.api.routers.metadata.make_paperless_client",
         # "doc_intelligence_hub.api.routers.stats.make_paperless_client",  # stats doesn't import this
     ]
     patches = [patch(t, return_value=mock) for t in targets]

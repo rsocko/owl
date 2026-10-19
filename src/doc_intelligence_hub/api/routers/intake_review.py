@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -24,9 +25,17 @@ from doc_intelligence_hub.core.paperless import (
     MetadataProjectionPolicy,
     MetadataSchemaError,
     MetadataValueError,
+    PaperlessRevisionConflict,
     build_account_identifier_update,
     get_metadata_field_spec,
     resolve_metadata_schema,
+)
+from doc_intelligence_hub.core.paperless.writeback import (
+    audit_paperless_write,
+    build_write_conflicts,
+    is_idempotent_replay,
+    sanitize_initiator,
+    values_equal,
 )
 from doc_intelligence_hub.modules.action_queue.analyzer import OllamaAnalyzer
 from doc_intelligence_hub.modules.action_queue.database import (
@@ -78,6 +87,7 @@ from doc_intelligence_hub.modules.triage.relationships import (
 )
 
 router = APIRouter(prefix="/api/intake", tags=["intake-review"])
+logger = logging.getLogger(__name__)
 
 _TAXONOMY_METHODS = {
     "tag": ("list_tags", "create_tag"),
@@ -169,14 +179,94 @@ class IntakeMetadataPatch(BaseModel):
 class IntakeSaveRequest(BaseModel):
     expected_modified: str
     metadata: IntakeMetadataPatch
+    base_metadata: IntakeMetadataPatch | None = None
     disposition: Literal["save", "defer", "file_only", "confirm_and_file"] = "save"
     action_versions: dict[int, int] = Field(default_factory=dict)
+    initiated_by: str = Field(default="owl-intake-review", min_length=1, max_length=64)
 
     @model_validator(mode="after")
     def validate_confirmation(self) -> "IntakeSaveRequest":
         if self.disposition == "confirm_and_file" and not self.action_versions:
             raise ValueError("action_versions are required when confirming actions")
         return self
+
+
+_INTAKE_FIELD_LABELS = {
+    "title": "Title",
+    "created": "Document date",
+    "correspondent": "Correspondent",
+    "document_type": "Document type",
+    "storage_path": "Storage path",
+    "tags": "Tags",
+}
+
+
+def _intake_patch_values(patch: IntakeMetadataPatch | None) -> dict[str, Any]:
+    if patch is None:
+        return {}
+    values: dict[str, Any] = {}
+    for field in patch.model_fields_set:
+        value = getattr(patch, field)
+        if field == "custom_fields":
+            for item in value or []:
+                values[f"custom_fields.{item.field}"] = item.value
+        else:
+            values[field] = value.isoformat() if isinstance(value, date) else value
+    return values
+
+
+def _intake_document_values(document: dict[str, Any], fields: set[str]) -> dict[str, Any]:
+    custom_fields = {
+        int(item["field"]): item.get("value")
+        for item in document.get("custom_fields") or []
+        if isinstance(item, dict) and str(item.get("field", "")).isdigit()
+    }
+    return {
+        field: (
+            custom_fields.get(int(field.rsplit(".", 1)[1]))
+            if field.startswith("custom_fields.")
+            else document.get(field)
+        )
+        for field in fields
+    }
+
+
+def _intake_field_labels(definitions: list[dict[str, Any]]) -> dict[str, str]:
+    labels = dict(_INTAKE_FIELD_LABELS)
+    labels.update(
+        {
+            f"custom_fields.{definition['id']}": str(definition.get("name") or "Custom field")
+            for definition in definitions
+            if isinstance(definition, dict) and definition.get("id")
+        }
+    )
+    return labels
+
+
+def _source_revision_conflict(
+    *,
+    expected_modified: str,
+    current: dict[str, Any],
+    loaded_values: dict[str, Any],
+    proposed_values: dict[str, Any],
+    labels: dict[str, str],
+) -> HTTPException:
+    current_values = _intake_document_values(current, set(proposed_values))
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "source_revision_conflict",
+            "message": "This document changed in Paperless. Resolve the changed fields before saving.",
+            "expected_modified": expected_modified,
+            "current_modified": current.get("modified"),
+            "conflicts": build_write_conflicts(
+                loaded=loaded_values,
+                current=current_values,
+                proposed=proposed_values,
+                labels=labels,
+            ),
+        },
+    )
 
 
 class TaxonomyCreateRequest(BaseModel):
@@ -1380,20 +1470,40 @@ async def save_intake_document(
     client = make_paperless_client(request, timeout=30.0)
     action_db = None
     actions_to_confirm: list[Action] = []
+    initiator = sanitize_initiator(body.initiated_by, fallback="owl-intake-review")
+    proposed_values = _intake_patch_values(body.metadata)
+    loaded_values = _intake_patch_values(body.base_metadata)
+    write_fields = list(proposed_values)
+    definitions: list[dict[str, Any]] = []
     try:
         try:
             current = await client.get_document(document_id)
         except Exception as exc:
             _raise_paperless_error(exc, "checking the current document revision")
-        if current.get("modified") != body.expected_modified:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "source_revision_conflict",
-                    "message": "This document changed in Paperless. Reload it before saving.",
-                    "expected_modified": body.expected_modified,
-                    "current_modified": current.get("modified"),
-                },
+        if body.metadata.custom_fields is not None:
+            try:
+                definitions = await client.list_custom_fields()
+            except Exception as exc:
+                _raise_paperless_error(exc, "validating custom field updates")
+        labels = _intake_field_labels(definitions)
+        current_values = _intake_document_values(current, set(proposed_values))
+        replayed = current.get("modified") != body.expected_modified and is_idempotent_replay(
+            current_values, proposed_values
+        )
+        if current.get("modified") != body.expected_modified and not replayed:
+            audit_paperless_write(
+                logger,
+                initiator=initiator,
+                surface="intake-review",
+                fields=write_fields,
+                outcome="conflict",
+            )
+            raise _source_revision_conflict(
+                expected_modified=body.expected_modified,
+                current=current,
+                loaded_values=loaded_values,
+                proposed_values=proposed_values,
+                labels=labels,
             )
 
         if body.disposition == "confirm_and_file":
@@ -1437,10 +1547,6 @@ async def save_intake_document(
                 patch[field] = value.isoformat() if isinstance(value, date) else value
 
         if body.metadata.custom_fields is not None:
-            try:
-                definitions = await client.list_custom_fields()
-            except Exception as exc:
-                _raise_paperless_error(exc, "validating custom field updates")
             editable_keys_by_id = {
                 definition["id"]: matched[0]
                 for definition in definitions
@@ -1520,73 +1626,150 @@ async def save_intake_document(
             inbox_tag_id = await _resolve_inbox_tag_id(client)
             source_tags = patch.get("tags", current.get("tags") or [])
             patch["tags"] = [tag_id for tag_id in source_tags if tag_id != inbox_tag_id]
+            if "tags" not in write_fields:
+                write_fields.append("tags")
 
         try:
+            effective_patch = {
+                field: value
+                for field, value in patch.items()
+                if not values_equal(current.get(field), value)
+            }
             updated_response = (
-                await client.update_document(document_id, patch) if patch else current
+                await client.update_document(
+                    document_id,
+                    effective_patch,
+                    expected_modified=current.get("modified"),
+                )
+                if effective_patch
+                else current
             )
             updated = {**current, **updated_response}
+        except PaperlessRevisionConflict as exc:
+            audit_paperless_write(
+                logger,
+                initiator=initiator,
+                surface="intake-review",
+                fields=write_fields,
+                outcome="conflict",
+            )
+            raise _source_revision_conflict(
+                expected_modified=current.get("modified"),
+                current=exc.current_document,
+                loaded_values=_intake_document_values(current, set(proposed_values)),
+                proposed_values=proposed_values,
+                labels=labels,
+            ) from exc
         except Exception as exc:
+            audit_paperless_write(
+                logger,
+                initiator=initiator,
+                surface="intake-review",
+                fields=write_fields,
+                outcome="failed",
+            )
             _raise_paperless_error(exc, "saving document metadata")
 
         reanalysis: dict[str, Any] | None = None
+        warnings: list[dict[str, str]] = []
         if patch:
             try:
                 taxonomies = await _load_taxonomies(client)
             except Exception as exc:
-                _raise_paperless_error(exc, "loading analysis inputs after saving")
-            before_source_fingerprint, _, _ = _document_analysis_inputs(current, taxonomies)
-            after_source_fingerprint, content_identity, metadata_fields = _document_analysis_inputs(
-                updated, taxonomies
-            )
-            if before_source_fingerprint != after_source_fingerprint:
-                init_invalidation_db()
-                AnalysisFreshnessService().record_invalidation(
-                    document_id=document_id,
-                    accepted_checksum=content_identity,
-                    metadata_fields=metadata_fields,
-                    reason=InvalidationReason.METADATA_CHANGED,
-                    triggered_by="intake-review:save",
+                logger.warning(
+                    "Paperless write succeeded but reanalysis preparation failed: %s", exc
                 )
-                targeted_service = TargetedReanalysisService()
-                reanalysis = targeted_service.schedule(
-                    document_id=document_id,
-                    source_fingerprint=after_source_fingerprint,
-                    source_modified=updated.get("modified"),
-                    reason="metadata_changed",
-                    analyzer_version=ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
-                    debounce_seconds=invalidation_settings.targeted_reanalysis_debounce_seconds,
+                warnings.append(
+                    {
+                        "code": "reanalysis_not_scheduled",
+                        "message": "Changes were saved, but automatic reanalysis could not be scheduled.",
+                    }
                 )
-                spawn_debounced_reanalysis(
-                    service=targeted_service,
-                    document_id=document_id,
-                    generation=reanalysis["generation"],
-                    delay_seconds=invalidation_settings.targeted_reanalysis_debounce_seconds,
-                    analyze=lambda target_id, fingerprint: _run_targeted_analysis(
-                        request,
-                        targeted_service,
-                        target_id,
-                        fingerprint,
-                        force=False,
-                    ),
-                )
+            else:
+                before_source_fingerprint, _, _ = _document_analysis_inputs(current, taxonomies)
+                (
+                    after_source_fingerprint,
+                    content_identity,
+                    metadata_fields,
+                ) = _document_analysis_inputs(updated, taxonomies)
+                if before_source_fingerprint != after_source_fingerprint:
+                    init_invalidation_db()
+                    AnalysisFreshnessService().record_invalidation(
+                        document_id=document_id,
+                        accepted_checksum=content_identity,
+                        metadata_fields=metadata_fields,
+                        reason=InvalidationReason.METADATA_CHANGED,
+                        triggered_by=initiator,
+                    )
+                    targeted_service = TargetedReanalysisService()
+                    reanalysis = targeted_service.schedule(
+                        document_id=document_id,
+                        source_fingerprint=after_source_fingerprint,
+                        source_modified=updated.get("modified"),
+                        reason="metadata_changed",
+                        analyzer_version=ACTION_QUEUE_ANALYSIS_MODULE_VERSION,
+                        debounce_seconds=invalidation_settings.targeted_reanalysis_debounce_seconds,
+                    )
+                    spawn_debounced_reanalysis(
+                        service=targeted_service,
+                        document_id=document_id,
+                        generation=reanalysis["generation"],
+                        delay_seconds=invalidation_settings.targeted_reanalysis_debounce_seconds,
+                        analyze=lambda target_id, fingerprint: _run_targeted_analysis(
+                            request,
+                            targeted_service,
+                            target_id,
+                            fingerprint,
+                            force=False,
+                        ),
+                    )
 
         if body.disposition == "confirm_and_file" and action_db is not None:
-            for action in actions_to_confirm:
-                mark_action_ready(action)
-                action.human_reviewed = True
-                action.version = (action.version or 1) + 1
-                action_db.add(
-                    ActionLifecycleEvent(
-                        action_id=action.id,
-                        event_type="confirmed",
-                        previous_status=action.status,
-                        new_status=action.status,
-                        action_version=action.version,
-                        details={"document_id": document_id, "disposition": body.disposition},
+            try:
+                for action in actions_to_confirm:
+                    mark_action_ready(action)
+                    action.human_reviewed = True
+                    action.version = (action.version or 1) + 1
+                    action_db.add(
+                        ActionLifecycleEvent(
+                            action_id=action.id,
+                            event_type="confirmed",
+                            previous_status=action.status,
+                            new_status=action.status,
+                            action_version=action.version,
+                            details={"document_id": document_id, "disposition": body.disposition},
+                        )
                     )
+                action_db.commit()
+            except Exception as exc:
+                action_db.rollback()
+                audit_paperless_write(
+                    logger,
+                    initiator=initiator,
+                    surface="intake-review",
+                    fields=write_fields,
+                    outcome="partial_failure",
                 )
-            action_db.commit()
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "code": "partial_write_failure",
+                        "message": (
+                            "Paperless was updated, but action confirmation failed. "
+                            "Reload before retrying."
+                        ),
+                        "paperless_updated": True,
+                        "current_modified": updated.get("modified"),
+                    },
+                ) from exc
+
+        audit_paperless_write(
+            logger,
+            initiator=initiator,
+            surface="intake-review",
+            fields=write_fields,
+            outcome="replayed" if replayed else "succeeded",
+        )
 
         return {
             "document": updated,
@@ -1596,6 +1779,8 @@ async def save_intake_document(
             if body.disposition == "confirm_and_file"
             else [],
             "reanalysis": reanalysis,
+            "warnings": warnings,
+            "idempotent_replay": replayed,
         }
     finally:
         if action_db is not None:
