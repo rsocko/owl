@@ -283,6 +283,9 @@ class CoverageOccurrence(ContractModel):
     period_key: str
     due_start: date
     due_end: date
+    importance: ExpectationImportance
+    grace_period_days: int = Field(ge=0)
+    grace_extended_until: date | None = None
     state: CoverageState
     fulfilled_document_id: int | None = None
     fulfilled_at: datetime | None = None
@@ -292,3 +295,28 @@ class CoverageOccurrence(ContractModel):
 class CoverageEvaluationRequest(ContractModel):
     as_of: date
     horizon_start: date | None = None
+
+
+class CoverageGraceExtension(ContractModel):
+    extend_until: date
+
+
+class CoverageNearMatch(ContractModel):
+    document_id: int = Field(gt=0)
+    title: str
+    document_date: date | None = None
+    correspondent_id: int | None = None
+    document_type: str | None = None
+    already_assigned: bool = False
+
+
+class CoverageOccurrenceDetail(ContractModel):
+    occurrence: CoverageOccurrence
+    expectation: DocumentExpectation
+    series: DocumentSeries | None = None
+    recent_document_ids: list[int] = Field(default_factory=list)
+
+
+class CoverageReassignment(ContractModel):
+    document_id: int = Field(gt=0)
+    document_date: date

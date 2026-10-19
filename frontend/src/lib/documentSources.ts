@@ -24,6 +24,14 @@ export type DocumentKind =
   | 'record'
   | 'other';
 export type ExpectationMode = 'recurring' | 'periodic' | 'one_off' | 'irregular' | 'not_expected';
+export type CoverageState =
+  | 'upcoming'
+  | 'due_soon'
+  | 'missing'
+  | 'fulfilled'
+  | 'fulfilled_late'
+  | 'unmonitored'
+  | 'cancelled';
 
 export interface DocumentSource {
   correspondent_id: number;
@@ -114,6 +122,41 @@ export interface AcquisitionSource {
   portal_url?: string | null;
 }
 
+export interface CoverageOccurrence {
+  id: string;
+  expectation_id: string;
+  source_correspondent_id: number;
+  source_name: string;
+  expectation_name: string;
+  kind: DocumentKind;
+  period_key: string;
+  due_start: string;
+  due_end: string;
+  importance: 'routine' | 'important' | 'critical';
+  grace_period_days: number;
+  grace_extended_until?: string | null;
+  state: CoverageState;
+  fulfilled_document_id?: number | null;
+  fulfilled_at?: string | null;
+  evaluated_at: string;
+}
+
+export interface CoverageOccurrenceDetail {
+  occurrence: CoverageOccurrence;
+  expectation: DocumentExpectation;
+  series?: DocumentSeries | null;
+  recent_document_ids: number[];
+}
+
+export interface CoverageNearMatch {
+  document_id: number;
+  title: string;
+  document_date?: string | null;
+  correspondent_id?: number | null;
+  document_type?: string | null;
+  already_assigned: boolean;
+}
+
 export function humanize(value: string): string {
   return value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
@@ -131,4 +174,3 @@ export function sourceDocumentCount(sourceId: number, series: DocumentSeries[]):
     series.filter((item) => item.source_correspondent_id === sourceId).flatMap((item) => item.document_ids),
   ).size;
 }
-

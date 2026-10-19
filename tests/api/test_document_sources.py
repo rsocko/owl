@@ -122,3 +122,152 @@ def test_document_source_contract_uses_stable_deployment_identity(
     assert source["correspondent_id"] == 42
     assert paperless_deployment_identity("http://paperless.test").startswith("paperless:")
     assert database_path
+
+
+def test_occurrence_recovery_is_scoped_idempotent_and_preserves_policy(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    _configure_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    client.post("/api/sources/sync")
+    series = client.post(
+        "/api/series",
+        json={
+            "source_correspondent_id": 42,
+            "name": "Checking 1234",
+            "kind": "statement",
+            "document_ids": [1],
+        },
+    ).json()
+    expectation = client.post(
+        "/api/expectations",
+        json={
+            "source_correspondent_id": 42,
+            "series_id": series["id"],
+            "name": "Monthly checking statement",
+            "kind": "statement",
+            "expectation_mode": "recurring",
+            "status": "confirmed",
+            "cadence": {"frequency": "monthly", "expected_day": 5},
+            "monitoring_mode": "presence",
+            "importance": "critical",
+            "grace_period_days": 2,
+            "evidence": {"source": "user", "reason_codes": ["user_confirmed"]},
+        },
+    ).json()
+    client.put("/api/sources/42/disposition", json={"disposition": "expectations_configured"})
+    occurrences = client.post(
+        "/api/coverage/evaluate",
+        json={"as_of": "2026-10-20", "horizon_start": "2026-09-01"},
+    ).json()
+    september = next(item for item in occurrences if item["period_key"] == "2026-09")
+    october = next(item for item in occurrences if item["period_key"] == "2026-10")
+    assert september["state"] == "missing"
+    original_policy = client.get("/api/expectations").json()[0]
+
+    first_extension = client.post(
+        f"/api/coverage/occurrences/{september['id']}/extend-grace",
+        json={"extend_until": "2026-11-01"},
+    )
+    second_extension = client.post(
+        f"/api/coverage/occurrences/{september['id']}/extend-grace",
+        json={"extend_until": "2026-11-01"},
+    )
+    assert first_extension.status_code == second_extension.status_code == 200
+    assert first_extension.json()["grace_extended_until"] == "2026-11-01"
+    assert second_extension.json()["grace_extended_until"] == "2026-11-01"
+
+    mock_paperless.list_documents.return_value = [
+        {
+            "id": 99,
+            "title": "September checking statement",
+            "created_date": "2026-09-30",
+            "correspondent": 42,
+            "document_type": None,
+        }
+    ]
+    reassigned = client.post(
+        f"/api/coverage/occurrences/{september['id']}/reassign",
+        json={"document_id": 99, "document_date": "2026-09-30"},
+    )
+    repeated = client.post(
+        f"/api/coverage/occurrences/{september['id']}/reassign",
+        json={"document_id": 99, "document_date": "2026-09-30"},
+    )
+    assert reassigned.status_code == repeated.status_code == 200
+    assert reassigned.json()["state"] == repeated.json()["state"] == "fulfilled_late"
+    assert reassigned.json()["fulfilled_document_id"] == 99
+
+    refreshed = client.post(
+        "/api/coverage/evaluate",
+        json={"as_of": "2026-10-20", "horizon_start": "2026-09-01"},
+    ).json()
+    refreshed_september = next(item for item in refreshed if item["id"] == september["id"])
+    refreshed_october = next(item for item in refreshed if item["id"] == october["id"])
+    assert refreshed_september["state"] == "fulfilled_late"
+    assert refreshed_october["fulfilled_document_id"] is None
+    assert client.get("/api/expectations").json()[0] == original_policy
+    assert (
+        client.get(f"/api/coverage/occurrences/{september['id']}").json()["expectation"]["id"]
+        == expectation["id"]
+    )
+
+
+def test_occurrence_near_matches_are_source_scoped(client, app, mock_paperless, tmp_path) -> None:
+    _configure_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    client.post("/api/sources/sync")
+    series = client.post(
+        "/api/series",
+        json={
+            "source_correspondent_id": 42,
+            "name": "Annual tax form",
+            "kind": "tax_document",
+            "document_ids": [],
+        },
+    ).json()
+    client.post(
+        "/api/expectations",
+        json={
+            "source_correspondent_id": 42,
+            "series_id": series["id"],
+            "name": "Annual tax form",
+            "kind": "tax_document",
+            "expectation_mode": "recurring",
+            "status": "confirmed",
+            "cadence": {"frequency": "annual", "expected_day": 15},
+            "monitoring_mode": "presence",
+            "importance": "important",
+            "evidence": {"source": "user", "reason_codes": ["user_confirmed"]},
+        },
+    )
+    client.put("/api/sources/42/disposition", json={"disposition": "expectations_configured"})
+    occurrence = client.post(
+        "/api/coverage/evaluate",
+        json={"as_of": "2026-10-20", "horizon_start": "2026-01-01"},
+    ).json()[0]
+    mock_paperless.fetch_all_metadata.return_value = ({42: "Example Bank"}, {}, {7: "Tax form"})
+    mock_paperless.list_documents.return_value = [
+        {
+            "id": 77,
+            "title": "2026 tax statement",
+            "created_date": "2026-01-18",
+            "correspondent": 42,
+            "document_type": 7,
+        }
+    ]
+
+    response = client.get(f"/api/coverage/occurrences/{occurrence['id']}/near-matches")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "document_id": 77,
+            "title": "2026 tax statement",
+            "document_date": "2026-01-18",
+            "correspondent_id": 42,
+            "document_type": "Tax form",
+            "already_assigned": False,
+        }
+    ]
+    assert mock_paperless.list_documents.await_args.kwargs["correspondent_id"] == 42

@@ -10,6 +10,7 @@ from typing import Any
 
 from doc_intelligence_hub.modules.document_sources.models import (
     CoverageOccurrence,
+    CoverageOccurrenceDetail,
     DocumentExpectation,
     DocumentExpectationCreate,
     DocumentExpectationUpdate,
@@ -155,6 +156,12 @@ CREATE TABLE IF NOT EXISTS coverage_occurrences (
     evaluated_at TEXT NOT NULL,
     UNIQUE (deployment_id, expectation_id, period_key),
     FOREIGN KEY (expectation_id) REFERENCES source_expectations(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS coverage_occurrence_overrides (
+    occurrence_id TEXT PRIMARY KEY REFERENCES coverage_occurrences(id) ON DELETE CASCADE,
+    grace_extended_until TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 """
 
@@ -876,6 +883,12 @@ class SourceDatabase:
             member_periods = self._member_periods(expectation.series_id)
             for period_key, due_start, due_end in periods:
                 fulfilled = member_periods.get(period_key)
+                occurrence_id = self._occurrence_id(expectation.id, period_key)
+                grace_extended_until = self._grace_extended_until(occurrence_id)
+                effective_due_end = max(
+                    due_end + timedelta(days=expectation.grace_period_days),
+                    grace_extended_until or due_end,
+                )
                 if not eligible:
                     state = "unmonitored"
                 elif expectation.calendar_rule and expectation.calendar_rule.rule_type == "one_off":
@@ -884,7 +897,7 @@ class SourceDatabase:
                         state = "cancelled"
                     elif status == "fulfilled":
                         state = "fulfilled"
-                    elif as_of > due_end + timedelta(days=expectation.grace_period_days):
+                    elif as_of > effective_due_end:
                         state = "missing"
                     elif as_of >= due_start:
                         state = "due_soon"
@@ -893,7 +906,7 @@ class SourceDatabase:
                 elif fulfilled:
                     document_date = date.fromisoformat(fulfilled["document_date"])
                     state = "fulfilled_late" if document_date > due_end else "fulfilled"
-                elif as_of > due_end + timedelta(days=expectation.grace_period_days):
+                elif as_of > effective_due_end:
                     state = "missing"
                 elif as_of >= due_start:
                     state = "due_soon"
@@ -907,6 +920,7 @@ class SourceDatabase:
                     due_end,
                     state,
                     fulfilled,
+                    grace_extended_until,
                 )
                 results.append(occurrence)
         return sorted(results, key=lambda item: (item.due_end, item.expectation_name, item.id))
@@ -988,6 +1002,200 @@ class SourceDatabase:
                 (series_id, document_id, document_date.isoformat(), period_key, _now()),
             )
 
+    def get_occurrence_detail(self, occurrence_id: str) -> CoverageOccurrenceDetail:
+        row = self._occurrence_row(occurrence_id)
+        expectation = self.get_expectation(row["expectation_id"])
+        if expectation is None:
+            raise KeyError("document_expectation_not_found")
+        occurrence = self._coverage_occurrence(row, expectation)
+        series = self.get_series(expectation.series_id) if expectation.series_id else None
+        return CoverageOccurrenceDetail(
+            occurrence=occurrence,
+            expectation=expectation,
+            series=series,
+            recent_document_ids=list(reversed(series.document_ids[-5:])) if series else [],
+        )
+
+    def extend_occurrence_grace(self, occurrence_id: str, extend_until: date) -> CoverageOccurrence:
+        row = self._occurrence_row(occurrence_id)
+        current = (
+            date.fromisoformat(row["grace_extended_until"]) if row["grace_extended_until"] else None
+        )
+        if current and extend_until < current:
+            raise ValueError("grace extension cannot shorten an existing occurrence extension")
+        if extend_until < date.fromisoformat(row["due_end"]):
+            raise ValueError("grace extension must end on or after the occurrence due date")
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT INTO coverage_occurrence_overrides (
+                       occurrence_id, grace_extended_until, updated_at
+                   ) VALUES (?, ?, ?)
+                   ON CONFLICT (occurrence_id) DO UPDATE SET
+                       grace_extended_until = excluded.grace_extended_until,
+                       updated_at = excluded.updated_at""",
+                (occurrence_id, extend_until.isoformat(), _now()),
+            )
+        return self._recalculate_occurrence(occurrence_id, date.today())
+
+    def reassign_occurrence_document(
+        self,
+        occurrence_id: str,
+        document_id: int,
+        document_date: date,
+        *,
+        as_of: date | None = None,
+    ) -> CoverageOccurrence:
+        row = self._occurrence_row(occurrence_id)
+        expectation = self.get_expectation(row["expectation_id"])
+        if expectation is None or expectation.series_id is None:
+            raise ValueError("occurrence requires a reviewed series before reassignment")
+        conn = self.connect()
+        affected = [
+            item["series_id"]
+            for item in conn.execute(
+                """SELECT DISTINCT series_id FROM document_series_members_v2
+                   WHERE document_id = ? AND series_id != ?""",
+                (document_id, expectation.series_id),
+            ).fetchall()
+        ]
+        with conn:
+            conn.execute(
+                "DELETE FROM document_series_members_v2 WHERE document_id = ? AND series_id != ?",
+                (document_id, expectation.series_id),
+            )
+            conn.execute(
+                """INSERT INTO document_series_members_v2 (
+                       series_id, document_id, document_date, period_key, created_at
+                   ) VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT (series_id, document_id) DO UPDATE SET
+                       document_date = excluded.document_date,
+                       period_key = excluded.period_key""",
+                (
+                    expectation.series_id,
+                    document_id,
+                    document_date.isoformat(),
+                    row["period_key"],
+                    _now(),
+                ),
+            )
+            for series_id in [*affected, expectation.series_id]:
+                conn.execute(
+                    """UPDATE document_series_v2
+                       SET membership_revision = membership_revision + 1, updated_at = ?
+                       WHERE id = ?""",
+                    (_now(), series_id),
+                )
+        return self._recalculate_occurrence(occurrence_id, as_of or date.today())
+
+    def occurrence_assigned_document_ids(self) -> set[int]:
+        rows = (
+            self.connect()
+            .execute(
+                """SELECT document_id FROM document_series_members_v2 members
+               JOIN document_series_v2 series ON series.id = members.series_id
+               WHERE series.deployment_id = ?""",
+                (self.deployment_id,),
+            )
+            .fetchall()
+        )
+        return {row["document_id"] for row in rows}
+
+    def _occurrence_row(self, occurrence_id: str) -> sqlite3.Row:
+        row = (
+            self.connect()
+            .execute(
+                """SELECT occurrences.*, overrides.grace_extended_until
+               FROM coverage_occurrences occurrences
+               LEFT JOIN coverage_occurrence_overrides overrides
+                 ON overrides.occurrence_id = occurrences.id
+               WHERE occurrences.deployment_id = ? AND occurrences.id = ?""",
+                (self.deployment_id, occurrence_id),
+            )
+            .fetchone()
+        )
+        if row is None:
+            raise KeyError("coverage_occurrence_not_found")
+        return row
+
+    def _recalculate_occurrence(self, occurrence_id: str, as_of: date) -> CoverageOccurrence:
+        row = self._occurrence_row(occurrence_id)
+        expectation = self.get_expectation(row["expectation_id"])
+        if expectation is None:
+            raise KeyError("document_expectation_not_found")
+        source = self.get_source(expectation.source_correspondent_id)
+        assert source is not None
+        fulfilled = self._member_periods(expectation.series_id).get(row["period_key"])
+        due_start = date.fromisoformat(row["due_start"])
+        due_end = date.fromisoformat(row["due_end"])
+        grace_extended_until = self._grace_extended_until(occurrence_id)
+        effective_due_end = max(
+            due_end + timedelta(days=expectation.grace_period_days),
+            grace_extended_until or due_end,
+        )
+        if not self.expectation_is_coverage_eligible(expectation.id):
+            state = "unmonitored"
+        elif fulfilled:
+            document_date = date.fromisoformat(fulfilled["document_date"])
+            state = "fulfilled_late" if document_date > due_end else "fulfilled"
+        elif as_of > effective_due_end:
+            state = "missing"
+        elif as_of >= due_start:
+            state = "due_soon"
+        else:
+            state = "upcoming"
+        return self._upsert_occurrence(
+            expectation,
+            source.current_name,
+            row["period_key"],
+            due_start,
+            due_end,
+            state,
+            fulfilled,
+            grace_extended_until,
+        )
+
+    def _grace_extended_until(self, occurrence_id: str) -> date | None:
+        row = (
+            self.connect()
+            .execute(
+                """SELECT grace_extended_until FROM coverage_occurrence_overrides
+               WHERE occurrence_id = ?""",
+                (occurrence_id,),
+            )
+            .fetchone()
+        )
+        return date.fromisoformat(row["grace_extended_until"]) if row else None
+
+    def _occurrence_id(self, expectation_id: str, period_key: str) -> str:
+        return uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"{self.deployment_id}:{expectation_id}:{period_key}",
+        ).hex
+
+    def _coverage_occurrence(
+        self, row: sqlite3.Row, expectation: DocumentExpectation
+    ) -> CoverageOccurrence:
+        source = self.get_source(expectation.source_correspondent_id)
+        assert source is not None
+        return CoverageOccurrence(
+            id=row["id"],
+            expectation_id=expectation.id,
+            source_correspondent_id=expectation.source_correspondent_id,
+            source_name=source.current_name,
+            expectation_name=expectation.name,
+            kind=expectation.kind,
+            period_key=row["period_key"],
+            due_start=row["due_start"],
+            due_end=row["due_end"],
+            importance=expectation.importance,
+            grace_period_days=expectation.grace_period_days,
+            grace_extended_until=row["grace_extended_until"],
+            state=row["state"],
+            fulfilled_document_id=row["fulfilled_document_id"],
+            fulfilled_at=row["fulfilled_at"],
+            evaluated_at=row["evaluated_at"],
+        )
+
     def _upsert_occurrence(
         self,
         expectation: DocumentExpectation,
@@ -997,12 +1205,10 @@ class SourceDatabase:
         due_end: date,
         state: str,
         fulfilled: sqlite3.Row | None,
+        grace_extended_until: date | None = None,
     ) -> CoverageOccurrence:
         conn = self.connect()
-        occurrence_id = uuid.uuid5(
-            uuid.NAMESPACE_URL,
-            f"{self.deployment_id}:{expectation.id}:{period_key}",
-        ).hex
+        occurrence_id = self._occurrence_id(expectation.id, period_key)
         evaluated_at = _now()
         fulfilled_document_id = fulfilled["document_id"] if fulfilled else None
         fulfilled_at = fulfilled["document_date"] if fulfilled else None
@@ -1041,6 +1247,9 @@ class SourceDatabase:
             period_key=period_key,
             due_start=due_start,
             due_end=due_end,
+            importance=expectation.importance,
+            grace_period_days=expectation.grace_period_days,
+            grace_extended_until=grace_extended_until,
             state=state,
             fulfilled_document_id=fulfilled_document_id,
             fulfilled_at=fulfilled_at,
