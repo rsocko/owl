@@ -112,25 +112,6 @@ export const endpoints = {
     providerOverrides: () => api.get('/api/statements/providers/overrides'),
     setProviderOverride: (key: string, body: unknown) => api.post(`/api/statements/providers/${key}/override`, body),
     clearProviderOverride: (key: string) => api.delete(`/api/statements/providers/${key}/override`),
-    correspondentProfiles: () => api.get('/api/statements/correspondent-profiles'),
-    correspondentProfile: (id: number) => api.get(`/api/statements/correspondent-profiles/${id}`),
-    syncCorrespondentProfiles: () => api.post('/api/statements/correspondent-profiles/sync'),
-    analyzeCorrespondentProfiles: () => api.post('/api/statements/correspondent-profiles/analyze'),
-    analyzeCorrespondentProfile: (id: number, extractMissingAccountIdentifiers = false) =>
-      api.post(
-        `/api/statements/correspondent-profiles/${id}/analyze`
-        + (extractMissingAccountIdentifiers ? '?extract_missing_account_identifiers=true' : ''),
-      ),
-    updateCorrespondentProfile: (id: number, body: unknown) =>
-      api.patch(`/api/statements/correspondent-profiles/${id}`, body),
-    relinkCorrespondentProfile: (id: number, body: { correspondent_id: number }) =>
-      api.post(`/api/statements/correspondent-profiles/${id}/relink`, body),
-    correspondentExpectations: (id: number) =>
-      api.get(`/api/statements/correspondent-profiles/${id}/expectations`),
-    createCorrespondentExpectation: (id: number, body: unknown) =>
-      api.post(`/api/statements/correspondent-profiles/${id}/expectations`, body),
-    updateDocumentExpectation: (id: string, body: unknown) =>
-      api.patch(`/api/statements/document-expectations/${id}`, body),
     externalCandidateConnection: () => api.get('/api/statements/external-candidates/connection'),
     updateExternalCandidateConnection: (body: unknown) =>
       api.put('/api/statements/external-candidates/connection', body),
@@ -138,20 +119,6 @@ export const endpoints = {
       api.delete('/api/statements/external-candidates/connection'),
     testExternalCandidateConnection: () =>
       api.post('/api/statements/external-candidates/connection/test'),
-    syncExternalCandidates: () =>
-      api.post('/api/statements/external-candidates/sync'),
-    externalCandidates: () => api.get('/api/statements/external-candidates'),
-    reviewExternalCandidate: (id: string, body: unknown) =>
-      api.put(`/api/statements/external-candidates/${id}/review`, body),
-    previewDocumentExpectationPolicy: (id: string) =>
-      api.post(`/api/statements/document-expectations/${id}/policy-preview`),
-    applyDocumentExpectationPolicy: (id: string, body: unknown) =>
-      api.post(`/api/statements/document-expectations/${id}/policy-apply`, body),
-    undoDocumentExpectationPolicy: (eventId: string, body: unknown) =>
-      api.post(`/api/statements/policy-corrections/${eventId}/undo`, body),
-    acquisitionSources: () => api.get('/api/statements/acquisition-sources'),
-    createAcquisitionSource: (body: unknown) => api.post('/api/statements/acquisition-sources', body),
-    paperlessUrl: () => api.get('/api/statements/config/paperless-url'),
     documentPreview: (docId: string) => `/api/statements/documents/${docId}/preview`,
     documentThumb: (docId: string) => `/api/statements/documents/${docId}/thumb`,
     // Series grouping
@@ -175,6 +142,36 @@ export const endpoints = {
       api.post(`/api/statements/series/${id}/candidate-split`, body),
     candidateMerge: (id: string, sourceId: string) =>
       api.post(`/api/statements/series/${id}/candidate-merge/${sourceId}`),
+  },
+  documentSources: {
+    sync: () => api.post('/api/sources/sync'),
+    list: (params?: string) => api.get(`/api/sources${params ? `?${params}` : ''}`),
+    get: (correspondentId: number) => api.get(`/api/sources/${correspondentId}`),
+    setDisposition: (correspondentId: number, body: unknown) =>
+      api.put(`/api/sources/${correspondentId}/disposition`, body),
+    reopen: (correspondentId: number, body: unknown) =>
+      api.post(`/api/sources/${correspondentId}/reopen`, body),
+    series: (correspondentId?: number) =>
+      api.get(`/api/series${correspondentId ? `?correspondent_id=${correspondentId}` : ''}`),
+    createSeries: (body: unknown) => api.post('/api/series', body),
+    updateSeries: (seriesId: string, body: unknown) => api.patch(`/api/series/${seriesId}`, body),
+    expectations: (correspondentId?: number) =>
+      api.get(`/api/expectations${correspondentId ? `?correspondent_id=${correspondentId}` : ''}`),
+    createExpectation: (body: unknown) => api.post('/api/expectations', body),
+    updateExpectation: (expectationId: string, body: unknown) =>
+      api.patch(`/api/expectations/${expectationId}`, body),
+    previewPolicy: (expectationId: string) =>
+      api.post(`/api/expectations/${expectationId}/policy-preview`),
+    applyPolicy: (expectationId: string, body: unknown) =>
+      api.post(`/api/expectations/${expectationId}/policy-apply`, body),
+    externalSignals: (activeOnly = true) =>
+      api.get(`/api/external-signals?active_only=${activeOnly}`),
+    setExternalSignalRelationship: (signalId: string, body: unknown) =>
+      api.put(`/api/external-signals/${signalId}/relationship`, body),
+    acquisitionSources: () => api.get('/api/acquisition-sources'),
+    createAcquisitionSource: (body: unknown) => api.post('/api/acquisition-sources', body),
+    updateAcquisitionSource: (sourceId: string, body: unknown) =>
+      api.patch(`/api/acquisition-sources/${sourceId}`, body),
   },
   eob: {
     check: () => api.get('/api/eob/check'),
