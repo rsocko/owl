@@ -13,7 +13,11 @@ from doc_intelligence_hub.api.routers import (
 from doc_intelligence_hub.modules.document_sources.database import SourceDatabase
 from doc_intelligence_hub.modules.document_sources.models import (
     CoverageEvaluationRequest,
+    CoverageGraceExtension,
+    CoverageNearMatch,
     CoverageOccurrence,
+    CoverageOccurrenceDetail,
+    CoverageReassignment,
     DocumentExpectation,
     DocumentExpectationCreate,
     DocumentExpectationUpdate,
@@ -507,6 +511,123 @@ async def list_document_coverage(
         return database.evaluate_coverage(as_of, horizon_start)
     finally:
         database.close()
+
+
+@router.get(
+    "/coverage/occurrences/{occurrence_id}",
+    response_model=CoverageOccurrenceDetail,
+)
+async def get_coverage_occurrence(
+    request: Request, occurrence_id: str
+) -> CoverageOccurrenceDetail:
+    database = _database(request)
+    try:
+        try:
+            return database.get_occurrence_detail(occurrence_id)
+        except (KeyError, ValueError) as exc:
+            _domain_error(exc)
+    finally:
+        database.close()
+
+
+@router.post(
+    "/coverage/occurrences/{occurrence_id}/extend-grace",
+    response_model=CoverageOccurrence,
+)
+async def extend_coverage_occurrence_grace(
+    request: Request,
+    occurrence_id: str,
+    body: CoverageGraceExtension,
+) -> CoverageOccurrence:
+    database = _database(request)
+    try:
+        try:
+            return database.extend_occurrence_grace(occurrence_id, body.extend_until)
+        except (KeyError, ValueError) as exc:
+            _domain_error(exc)
+    finally:
+        database.close()
+
+
+@router.get(
+    "/coverage/occurrences/{occurrence_id}/near-matches",
+    response_model=list[CoverageNearMatch],
+)
+async def list_coverage_near_matches(
+    request: Request, occurrence_id: str
+) -> list[CoverageNearMatch]:
+    database = _database(request)
+    client = make_paperless_client(request, timeout=30.0)
+    try:
+        try:
+            detail = database.get_occurrence_detail(occurrence_id)
+        except (KeyError, ValueError) as exc:
+            _domain_error(exc)
+        _, _, document_types = await client.fetch_all_metadata()
+        documents = await client.list_documents(
+            correspondent_id=detail.occurrence.source_correspondent_id,
+            created_after=(
+                detail.occurrence.due_start - date.resolution * 62
+            ).isoformat(),
+            created_before=(
+                detail.occurrence.due_end + date.resolution * 62
+            ).isoformat(),
+            limit=50,
+        )
+        assigned = database.occurrence_assigned_document_ids()
+        return [
+            CoverageNearMatch(
+                document_id=int(item["id"]),
+                title=str(item.get("title") or "Untitled document"),
+                document_date=item.get("created_date") or item.get("created"),
+                correspondent_id=item.get("correspondent"),
+                document_type=document_types.get(item.get("document_type")),
+                already_assigned=int(item["id"]) in assigned,
+            )
+            for item in documents
+        ]
+    finally:
+        database.close()
+        await client.aclose()
+
+
+@router.post(
+    "/coverage/occurrences/{occurrence_id}/reassign",
+    response_model=CoverageOccurrence,
+)
+async def reassign_coverage_occurrence_document(
+    request: Request,
+    occurrence_id: str,
+    body: CoverageReassignment,
+) -> CoverageOccurrence:
+    database = _database(request)
+    client = make_paperless_client(request, timeout=30.0)
+    try:
+        try:
+            detail = database.get_occurrence_detail(occurrence_id)
+        except (KeyError, ValueError) as exc:
+            _domain_error(exc)
+        candidates = await client.list_documents(
+            correspondent_id=detail.occurrence.source_correspondent_id,
+            limit=200,
+        )
+        if body.document_id not in {int(item["id"]) for item in candidates}:
+            raise_api_error(
+                409,
+                "coverage_document_not_eligible",
+                "The selected Paperless document does not belong to this occurrence source.",
+            )
+        try:
+            return database.reassign_occurrence_document(
+                occurrence_id,
+                body.document_id,
+                body.document_date,
+            )
+        except (KeyError, ValueError) as exc:
+            _domain_error(exc)
+    finally:
+        database.close()
+        await client.aclose()
 
 
 @router.delete("/sources/legacy-contract", include_in_schema=False)

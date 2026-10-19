@@ -103,11 +103,7 @@ export const endpoints = {
     models: () => api.get('/api/llm/models'),
   },
   statements: {
-    missing: () => api.get('/api/statements/missing'),
-    providers: () => api.get('/api/statements/providers'),
-    discoveryRun: () => api.post('/api/statements/discovery/run'),
     discoveryStreamUrl: '/api/statements/discovery/stream',
-    recommendationsRun: (asOf: string) => api.post(`/api/statements/recommendations/run?as_of=${asOf}`),
     recommendationsStreamUrl: (asOf: string) => `/api/statements/recommendations/stream?as_of=${asOf}`,
     providerOverrides: () => api.get('/api/statements/providers/overrides'),
     setProviderOverride: (key: string, body: unknown) => api.post(`/api/statements/providers/${key}/override`, body),
@@ -172,6 +168,22 @@ export const endpoints = {
     createAcquisitionSource: (body: unknown) => api.post('/api/acquisition-sources', body),
     updateAcquisitionSource: (sourceId: string, body: unknown) =>
       api.patch(`/api/acquisition-sources/${sourceId}`, body),
+  },
+  coverage: {
+    list: (asOf: string, horizonStart?: string) =>
+      api.get(`/api/coverage?as_of=${asOf}${horizonStart ? `&horizon_start=${horizonStart}` : ''}`),
+    detail: (occurrenceId: string) => api.get(`/api/coverage/occurrences/${occurrenceId}`),
+    nearMatches: (occurrenceId: string) =>
+      api.get(`/api/coverage/occurrences/${occurrenceId}/near-matches`),
+    extendGrace: (occurrenceId: string, extendUntil: string) =>
+      api.post(`/api/coverage/occurrences/${occurrenceId}/extend-grace`, {
+        extend_until: extendUntil,
+      }),
+    reassign: (occurrenceId: string, documentId: number, documentDate: string) =>
+      api.post(`/api/coverage/occurrences/${occurrenceId}/reassign`, {
+        document_id: documentId,
+        document_date: documentDate,
+      }),
   },
   eob: {
     check: () => api.get('/api/eob/check'),

@@ -5,8 +5,8 @@ import { TooltipProvider } from './components/ui';
 import OverviewDashboard from './pages/OverviewDashboard';
 import DashboardView from './pages/DashboardView';
 import CorrectionHistory from './pages/CorrectionHistory';
-import Statements from './pages/Statements';
-import StatementSeriesDetail from './pages/StatementSeriesDetail';
+import DocumentCoverage from './pages/DocumentCoverage';
+import DocumentSeriesDetail from './pages/DocumentSeriesDetail';
 import DocumentSources from './pages/DocumentSources';
 import ExpectationSetup from './pages/ExpectationSetup';
 import EobWorkspace from './pages/EobWorkspace';
@@ -38,6 +38,10 @@ function EobMatchRedirect() {
 function LegacyRouteRedirect({ to }: { to: string }) {
   const { search } = useLocation();
   return <Navigate to={`${to}${search}`} replace />;
+}
+
+export function LegacyStatementsRedirect() {
+  return <Navigate to="/coverage?kind=statement" replace />;
 }
 
 function LegacySourceRedirect() {
@@ -95,8 +99,10 @@ function App() {
             <Route path="/dashboard-view" element={<DashboardView />} />
             <Route path="/document-views" element={<DocumentViews />} />
             <Route path="/corrections" element={<CorrectionHistory />} />
-            <Route path="/statements" element={<Statements />} />
-            <Route path="/statements/:seriesId" element={<StatementSeriesDetail />} />
+            <Route path="/coverage" element={<DocumentCoverage />} />
+            <Route path="/coverage/series/:seriesId" element={<DocumentSeriesDetail />} />
+            <Route path="/statements" element={<LegacyStatementsRedirect />} />
+            <Route path="/statements/:seriesId" element={<LegacyStatementSeriesRedirect />} />
             <Route path="/sources" element={<DocumentSources />} />
             <Route path="/sources/:correspondentId" element={<DocumentSources />} />
             <Route path="/sources/:correspondentId/expectations/new" element={<ExpectationSetup />} />
@@ -142,6 +148,11 @@ function App() {
       </TooltipProvider>
     </HashRouter>
   );
+}
+
+export function LegacyStatementSeriesRedirect() {
+  const { seriesId } = useParams();
+  return <Navigate to={`/coverage/series/${encodeURIComponent(seriesId ?? '')}`} replace />;
 }
 
 export default App;
