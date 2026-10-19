@@ -109,6 +109,7 @@ describe('DocumentCoverage', () => {
         importance: 'critical',
         monitoring_mode: 'presence',
         grace_period_days: 3,
+        acquisition_notes: 'Download the assessment from the county portal.',
         evidence: { source: 'user', reason_codes: ['user_confirmed'], sample_size: 1 },
       },
       series: {
@@ -155,7 +156,7 @@ describe('DocumentCoverage', () => {
     render(<MemoryRouter><DocumentCoverage /></MemoryRouter>);
     fireEvent.click((await screen.findAllByText('County Tax Office')).find((element) => element.tagName === 'STRONG')!);
     expect(await screen.findByText('Expectation and evidence')).toBeInTheDocument();
-    expect(screen.getByText(/No automatic retrieval is claimed here/)).toBeInTheDocument();
+    expect(screen.getByText('Download the assessment from the county portal.')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Inspect near matches' }));
     expect(await screen.findByText('2026 property assessment')).toBeInTheDocument();

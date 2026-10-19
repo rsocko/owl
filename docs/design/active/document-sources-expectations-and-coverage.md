@@ -207,7 +207,8 @@ authoritative for the reviewed mapping and document policy.
 
 1. Open **Needs review** or find a correspondent in **All correspondents**.
 2. Run **Analyze history** when no reviewed series exists, then confirm any
-   candidate grouping that represents real document membership.
+   candidate grouping that represents real document membership or dismiss a
+   false candidate so it remains excluded from future analysis.
 3. Review representative documents and current external relationships, and
    correct series membership when needed.
 4. Choose **Configure expectations**, **No series expected**,
@@ -224,13 +225,16 @@ authoritative for the reviewed mapping and document policy.
 
 ### Configure an expectation
 
-1. Select or name the reviewed series.
+1. Name the expected document and optionally select a reviewed series. A user
+   may define policy before any document exists or while OWL has not identified
+   existing documents as a series.
 2. Choose recurring, periodic, one-off, irregular, or not expected.
 3. Define schedule, availability window, importance, and missing-document
    behavior only when absence is meaningful.
 4. Define recognition and filing policy.
 5. Record acquisition guidance and an optional Tyrion relationship.
-6. Review the plain-language policy summary before saving.
+6. Review the plain-language policy summary, then save a draft or confirm the
+   active policy.
 
 ### Monitor coverage
 
@@ -304,3 +308,6 @@ Implementation is not complete until these cases are clear:
    Document Coverage with kind-specific filters.
 7. Correcting series membership updates coverage without silently rewriting
    the expectation policy.
+8. A user can confirm an expectation with no reviewed series, see missing or
+   upcoming coverage, manually assign a qualifying Paperless document, and
+   attach a reviewed series later without recreating policy.

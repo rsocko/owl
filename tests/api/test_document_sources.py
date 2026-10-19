@@ -141,6 +141,95 @@ def test_document_source_series_analysis_returns_reviewable_candidates(
     assert client.get("/api/series?correspondent_id=42").json() == []
 
 
+def test_dismissed_series_candidate_stays_excluded_from_analysis(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    _configure_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    mock_paperless.fetch_all_metadata.return_value = (
+        {42: "Example Bank"},
+        {7: "Finance"},
+        {3: "Statement"},
+    )
+    mock_paperless.list_documents.return_value = [
+        {
+            "id": month,
+            "title": f"Example Bank Checking Statement 2026-{month:02d}",
+            "correspondent": 42,
+            "document_type": 3,
+            "tags": [7],
+            "created": f"2026-{month:02d}-03",
+        }
+        for month in range(1, 5)
+    ]
+    client.post("/api/sources/sync")
+    first = client.post("/api/sources/42/series-analysis").json()
+    document_ids = first["suggestions"][0]["document_ids"]
+
+    dismissed = client.post(
+        "/api/sources/42/series-analysis/dismiss",
+        json={"document_ids": document_ids},
+    )
+    second = client.post("/api/sources/42/series-analysis")
+
+    assert dismissed.status_code == 204
+    assert second.status_code == 200
+    assert second.json()["suggestions"] == []
+    assert second.json()["observed_summary"]["excluded_document_count"] == 4
+
+
+def test_source_defined_expectation_does_not_require_existing_documents(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    _configure_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    client.post("/api/sources/sync")
+
+    expectation = client.post(
+        "/api/expectations",
+        json={
+            "source_correspondent_id": 42,
+            "series_id": None,
+            "name": "Annual account tax form",
+            "kind": "tax_document",
+            "expectation_mode": "periodic",
+            "status": "confirmed",
+            "cadence": {"frequency": "annual", "expected_day": 15},
+            "monitoring_mode": "presence",
+            "importance": "important",
+            "fulfillment_rule": {
+                "match_series": False,
+                "match_kind": True,
+                "match_calendar_period": True,
+                "required_tag_ids": [],
+                "required_document_type_id": None,
+            },
+            "evidence": {
+                "source": "user",
+                "reason_codes": ["user_defined_without_series"],
+            },
+            "acquisition_notes": "Download it from the account portal.",
+        },
+    )
+
+    assert expectation.status_code == 201, expectation.text
+    assert expectation.json()["series_id"] is None
+    assert expectation.json()["acquisition_notes"] == "Download it from the account portal."
+    client.put("/api/sources/42/disposition", json={"disposition": "expectations_configured"})
+    assert client.get(
+        f"/api/expectations/{expectation.json()['id']}/coverage-eligibility"
+    ).json() == {"eligible": True}
+
+    coverage = client.post(
+        "/api/coverage/evaluate",
+        json={"as_of": "2026-10-20", "horizon_start": "2026-01-01"},
+    ).json()
+    occurrence = next(
+        item for item in coverage if item["expectation_id"] == expectation.json()["id"]
+    )
+    assert occurrence["state"] == "missing"
+
+
 def test_document_source_contract_uses_stable_deployment_identity(
     client, app, mock_paperless, tmp_path
 ) -> None:

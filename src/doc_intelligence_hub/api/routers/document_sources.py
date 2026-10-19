@@ -29,6 +29,7 @@ from doc_intelligence_hub.modules.document_sources.models import (
     ExternalSignalQueueItem,
     ExternalSignalRelationship,
     ExternalSignalRelationshipUpdate,
+    SeriesAnalysisDismiss,
     SeriesMemberPeriod,
     SourceReopenRequest,
 )
@@ -189,6 +190,7 @@ async def analyze_source_series(
     request: Request, correspondent_id: int
 ) -> CorrespondentAnalysisResult:
     database = _database(request)
+    legacy_database, deployment_id = _legacy_database(request)
     client = make_paperless_client(request, timeout=60.0)
     try:
         source = database.get_source(correspondent_id)
@@ -217,10 +219,41 @@ async def analyze_source_series(
             source.current_name,
             documents,
             existing_series,
+            candidate_overrides={
+                override.document_id: override
+                for override in legacy_database.list_candidate_overrides(
+                    deployment_id, correspondent_id
+                )
+            },
         )
     finally:
         database.close()
+        legacy_database.close()
         await client.aclose()
+
+
+@router.post("/sources/{correspondent_id}/series-analysis/dismiss", status_code=204)
+async def dismiss_source_series_candidate(
+    request: Request,
+    correspondent_id: int,
+    body: SeriesAnalysisDismiss,
+) -> Response:
+    database = _database(request)
+    legacy_database, deployment_id = _legacy_database(request)
+    try:
+        if database.get_source(correspondent_id) is None:
+            raise_api_error(404, "document_source_not_found", "Document source not found.")
+        legacy_database.set_candidate_overrides(
+            deployment_id,
+            correspondent_id,
+            body.document_ids,
+            group_key=None,
+            excluded=True,
+        )
+        return Response(status_code=204)
+    finally:
+        database.close()
+        legacy_database.close()
 
 
 @router.post("/series", response_model=DocumentSeries, status_code=201)

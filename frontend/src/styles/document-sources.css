@@ -322,6 +322,7 @@
 .source-reason svg { margin-top: .08rem; color: var(--warning); }
 .source-reason strong { font-size: .74rem; }
 .source-reason p { margin: .18rem 0 0; color: color-mix(in srgb, var(--warning) 58%, var(--text)); font-size: .65rem; }
+.source-reason > .btn { margin-left: auto; display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
 
 .source-section { padding: 1rem 1.1rem 1.15rem; border-top: 1px solid var(--border); }
 .source-section > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
@@ -386,7 +387,25 @@
 .source-analysis-candidate strong { font-size: .68rem; }
 .source-analysis-candidate span { color: var(--text-muted); font-size: .58rem; }
 .source-analysis-candidate .btn { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
+.source-analysis-candidate-actions { display: flex; align-items: center; gap: .35rem; }
 .source-analysis-empty { margin: 0; padding: .65rem .7rem; border: 1px dashed var(--border); border-radius: .55rem; color: var(--text-muted); font-size: .62rem; }
+.source-level-expectations { margin-top: .75rem; display: grid; gap: .45rem; }
+.source-level-expectations > strong { color: var(--text-muted); font-size: .58rem; text-transform: uppercase; }
+.source-level-expectations article {
+  padding: .7rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .8rem;
+  border: 1px solid var(--border);
+  border-radius: .55rem;
+  background: var(--surface-hover);
+}
+.source-level-expectations article > div { min-width: 0; }
+.source-level-expectations span { color: var(--text-muted); font-size: .54rem; font-weight: 800; text-transform: uppercase; }
+.source-level-expectations h4 { margin: .12rem 0 0; font-size: .72rem; }
+.source-level-expectations p { margin: .18rem 0 0; color: var(--text-muted); font-size: .59rem; }
+.source-level-expectations .btn { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
 
 .source-series-list { margin-top: .75rem; display: grid; gap: .65rem; }
 .source-series-card { border: 1px solid var(--border); border-radius: .7rem; overflow: hidden; background: var(--card); }
@@ -416,6 +435,9 @@
 .source-series-card footer { padding: .55rem .7rem; display: flex; align-items: center; justify-content: space-between; gap: .7rem; border-top: 1px solid var(--border); background: var(--surface-hover); }
 .source-series-card footer > span { color: var(--text-muted); font-size: .57rem; }
 .source-series-card footer .btn { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
+.source-series-footer-actions { display: flex; align-items: center; gap: .55rem; }
+.source-series-footer-actions > a { color: var(--accent); font-size: .6rem; font-weight: 750; text-decoration: none; }
+.source-series-footer-actions > a:hover { text-decoration: underline; }
 
 .source-history ol { margin: .65rem 0 0; padding: 0; list-style: none; }
 .source-history li { padding: .55rem 0; display: grid; grid-template-columns: 7rem 1fr; gap: .8rem; border-top: 1px solid var(--border); font-size: .62rem; }
@@ -732,6 +754,7 @@
 .expectation-evidence small { font-size: .6rem; }
 .expectation-actions { margin-top: 1.6rem; padding-top: 1rem; display: flex; justify-content: space-between; border-top: 1px solid var(--border); }
 .expectation-actions .btn { display: inline-flex; align-items: center; gap: .4rem; }
+.expectation-actions > div { display: flex; align-items: center; gap: .45rem; }
 
 .expectation-summary { padding: 1.35rem 1rem; border-left: 1px solid var(--border); background: var(--bg); overflow-y: auto; }
 .expectation-summary h3 { margin: 0; font-size: .84rem; }
@@ -792,9 +815,14 @@
   .expectation-field-grid { grid-template-columns: 1fr; }
   .expectation-choice-grid button:last-child:nth-child(odd) { grid-column: auto; }
   .source-series-card footer { align-items: stretch; flex-direction: column; }
+  .source-series-footer-actions { align-items: stretch; flex-direction: column; }
   .source-series-heading,
-  .source-analysis-candidate { align-items: stretch !important; flex-direction: column; }
+  .source-analysis-candidate,
+  .source-level-expectations article { align-items: stretch !important; flex-direction: column; }
   .source-series-actions { align-items: stretch; flex-direction: column; }
+  .source-analysis-candidate-actions,
+  .expectation-actions,
+  .expectation-actions > div { align-items: stretch; flex-direction: column; }
   .signal-evidence dl { grid-template-columns: 1fr; }
   .signal-evidence dl div:nth-child(even) { border-left: 0; }
   .signal-evidence dl div + div { border-top: 1px solid var(--border); }

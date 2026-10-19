@@ -149,6 +149,8 @@ export const endpoints = {
       api.post(`/api/sources/${correspondentId}/reopen`, body),
     analyzeSeries: (correspondentId: number) =>
       api.post(`/api/sources/${correspondentId}/series-analysis`),
+    dismissSeriesCandidate: (correspondentId: number, documentIds: number[]) =>
+      api.post(`/api/sources/${correspondentId}/series-analysis/dismiss`, { document_ids: documentIds }),
     series: (correspondentId?: number) =>
       api.get(`/api/series${correspondentId ? `?correspondent_id=${correspondentId}` : ''}`),
     createSeries: (body: unknown) => api.post('/api/series', body),

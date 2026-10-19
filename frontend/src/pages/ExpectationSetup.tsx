@@ -26,6 +26,7 @@ export default function ExpectationSetup() {
   const [searchParams] = useSearchParams();
   const sourceId = Number(correspondentId);
   const requestedSeriesId = searchParams.get('series') ?? '';
+  const requestedExpectationId = searchParams.get('expectation') ?? '';
   const [source, setSource] = useState<DocumentSource | null>(null);
   const [series, setSeries] = useState<DocumentSeries[]>([]);
   const [expectations, setExpectations] = useState<DocumentExpectation[]>([]);
@@ -68,19 +69,42 @@ export default function ExpectationSetup() {
       setExpectations(expectationData);
       setAcquisitionSources(acquisitionData);
       setSignals(signalData.filter((signal) => signal.relationship?.source_correspondent_id === sourceId));
-      const selected = seriesData.find((item) => item.id === requestedSeriesId) ?? seriesData[0];
+      const requestedExpectation = expectationData.find((item) => item.id === requestedExpectationId);
+      const selected = seriesData.find((item) => item.id === (requestedExpectation?.series_id ?? requestedSeriesId))
+        ?? (!requestedExpectationId ? seriesData.find((item) => item.id === requestedSeriesId) : undefined);
       if (selected) {
         setSeriesId(selected.id);
         setName(selected.name);
         setKind(selected.kind);
       }
+      if (requestedExpectation) {
+        setSeriesId(requestedExpectation.series_id ?? '');
+        setName(requestedExpectation.name);
+        setKind(requestedExpectation.kind);
+        setMode(requestedExpectation.expectation_mode);
+        setFrequency(requestedExpectation.cadence?.frequency ?? 'monthly');
+        setExpectedDay(String(requestedExpectation.cadence?.expected_day ?? 28));
+        setGraceDays(String(requestedExpectation.grace_period_days));
+        setDueStart(requestedExpectation.calendar_rule?.due_start ?? '');
+        setDueEnd(requestedExpectation.calendar_rule?.due_end ?? '');
+        setImportance(requestedExpectation.importance);
+        setTitleTemplate(requestedExpectation.title_convention?.template ?? '{correspondent} - {period}');
+        setAcquisitionSourceId(requestedExpectation.acquisition_source_id ?? '');
+        setAcquisitionNotes(requestedExpectation.acquisition_notes ?? '');
+        setTyrionSignalId(
+          signalData.find((signal) => signal.relationship?.expectation_ids.includes(requestedExpectation.id))?.id ?? '',
+        );
+      } else if (requestedExpectationId) {
+        setError('The requested expectation does not belong to this document source.');
+      }
     }).catch((loadError) => setError(errorMessage(loadError))).finally(() => setLoading(false));
-  }, [requestedSeriesId, sourceId]);
+  }, [requestedExpectationId, requestedSeriesId, sourceId]);
 
   const selectedSeries = series.find((item) => item.id === seriesId);
   const monitored = mode === 'recurring' || mode === 'periodic';
   const deadlineMonitored = mode === 'one_off';
-  const existingExpectation = expectations.find((item) => item.series_id === seriesId);
+  const existingExpectation = expectations.find((item) => item.id === requestedExpectationId)
+    ?? (seriesId ? expectations.find((item) => item.series_id === seriesId) : undefined);
   const selectedAcquisition = acquisitionSources.find((item) => item.id === acquisitionSourceId);
   const summary = useMemo(() => ({
     expectation: mode === 'recurring' || mode === 'periodic'
@@ -95,18 +119,18 @@ export default function ExpectationSetup() {
     acquisition: selectedAcquisition ? `${humanize(selectedAcquisition.channel)} · ${humanize(selectedAcquisition.delivery_mode)}` : acquisitionNotes || 'No acquisition guidance recorded',
   }), [acquisitionNotes, deadlineMonitored, dueEnd, dueStart, expectedDay, frequency, graceDays, kind, mode, monitored, selectedAcquisition, titleTemplate]);
 
-  const canContinue = step !== 0 || Boolean(seriesId && name.trim());
+  const canContinue = step !== 0 || Boolean(name.trim());
 
-  const save = async () => {
-    if (!source || !selectedSeries) return;
+  const save = async (status: 'suggested' | 'confirmed') => {
+    if (!source || !name.trim()) return;
     setSaving(true);
     setError(null);
     try {
       const policy = {
         name: name.trim(),
-        series_id: selectedSeries.id,
+        series_id: selectedSeries?.id ?? null,
         expectation_mode: mode,
-        status: 'confirmed',
+        status,
         cadence: monitored ? {
           frequency,
           expected_day: Number(expectedDay),
@@ -117,7 +141,7 @@ export default function ExpectationSetup() {
         monitoring_mode: monitored ? 'presence' : deadlineMonitored ? 'deadline' : 'none',
         calendar_rule: deadlineMonitored ? {
           rule_type: 'one_off',
-          occurrence_id: `${selectedSeries.id}-${dueEnd}`,
+          occurrence_id: `${selectedSeries?.id ?? `source-${source.correspondent_id}`}-${dueEnd}`,
           due_start: dueStart,
           due_end: dueEnd,
           occurrence_status: 'pending',
@@ -130,7 +154,7 @@ export default function ExpectationSetup() {
           max_overdue_reminders: importance === 'critical' ? 3 : 0,
         },
         fulfillment_rule: {
-          match_series: true,
+          match_series: Boolean(selectedSeries),
           match_kind: true,
           match_calendar_period: monitored || deadlineMonitored,
           required_tag_ids: [],
@@ -138,9 +162,9 @@ export default function ExpectationSetup() {
         },
         evidence: {
           source: 'user',
-          reason_codes: ['user_confirmed_series'],
+          reason_codes: [selectedSeries ? 'user_confirmed_series' : 'user_defined_without_series'],
           confidence: null,
-          sample_size: selectedSeries.document_ids.length,
+          sample_size: selectedSeries?.document_ids.length ?? 0,
           observed_from: null,
           observed_to: null,
         },
@@ -156,6 +180,7 @@ export default function ExpectationSetup() {
           required_document_type_id: null,
         },
         acquisition_source_id: acquisitionSourceId || null,
+        acquisition_notes: acquisitionNotes.trim() || null,
       };
       const body = {
         source_correspondent_id: source.correspondent_id,
@@ -175,12 +200,14 @@ export default function ExpectationSetup() {
           revisit_date: null,
         });
       }
-      await endpoints.documentSources.setDisposition(source.correspondent_id, {
-        disposition: 'expectations_configured',
-        waiting_revisit_date: null,
-        aliases: source.aliases,
-        notes: source.notes ?? null,
-      });
+      if (status === 'confirmed') {
+        await endpoints.documentSources.setDisposition(source.correspondent_id, {
+          disposition: 'expectations_configured',
+          waiting_revisit_date: null,
+          aliases: source.aliases,
+          notes: source.notes ?? null,
+        });
+      }
       navigate(`/sources/${source.correspondent_id}`, { replace: true });
     } catch (saveError) {
       setError(errorMessage(saveError));
@@ -192,7 +219,7 @@ export default function ExpectationSetup() {
   if (loading) {
     return <div className="sources-page-state" role="status"><LoaderCircle className="spin" /><h1>Loading expectation policy…</h1></div>;
   }
-  if (!source || error && series.length === 0) {
+  if (!source) {
     return <div className="sources-page-state" role="alert"><h1>Expectation Setup could not load</h1><p>{error}</p><Button onClick={() => navigate('/sources')}>Back to Document Sources</Button></div>;
   }
 
@@ -201,7 +228,7 @@ export default function ExpectationSetup() {
       <aside className="expectation-steps">
         <div>
           <button type="button" onClick={() => navigate(`/sources/${source.correspondent_id}`)}><ArrowLeft /> Source evidence</button>
-          <h1>Configure expectation</h1>
+          <h1>{existingExpectation ? 'Edit expectation' : 'Configure expectation'}</h1>
           <p>{source.current_name}{selectedSeries ? ` · ${selectedSeries.name}` : ''}</p>
         </div>
         <ol>
@@ -219,7 +246,7 @@ export default function ExpectationSetup() {
           <span>Step {step + 1} of {STEPS.length}</span>
           <h2>{STEPS[step]}</h2>
           <p>{[
-            'Choose the reviewed document series and give the policy a clear name.',
+            'Name the expected document. A reviewed series can provide evidence now or be attached later.',
             'Decide whether another document should arrive. Irregular policy can still recognize and file documents without monitoring absence.',
             'Define the schedule only when absence has real meaning.',
             'Describe how OWL recognizes and files matching documents in Paperless.',
@@ -230,20 +257,21 @@ export default function ExpectationSetup() {
         <section className="expectation-step-panel">
           {step === 0 ? (
             <>
-              <label>Reviewed series<select value={seriesId} onChange={(event) => {
+              <label>Reviewed series <span>Optional</span><select value={seriesId} onChange={(event) => {
                 setSeriesId(event.target.value);
                 const next = series.find((item) => item.id === event.target.value);
                 if (next) { setName(next.name); setKind(next.kind); }
               }}>
-                <option value="">Choose a reviewed series</option>
+                <option value="">No reviewed series yet</option>
                 {series.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.document_ids.length} documents</option>)}
               </select></label>
-              {series.length === 0 ? <div className="expectation-note">A confirmed expectation requires a reviewed series. Return to source evidence and curate membership first.</div> : null}
+              {series.length === 0 ? <div className="expectation-note">Define the expectation now. OWL can monitor its schedule immediately and a reviewed series can be attached when documents arrive or are identified.</div> : null}
               <label>Expectation name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Harbor Bank checking statement" /></label>
-              <label>Document kind<select value={kind} onChange={(event) => setKind(event.target.value as DocumentKind)}>
+              <label>Document kind<select value={kind} disabled={Boolean(existingExpectation)} onChange={(event) => setKind(event.target.value as DocumentKind)}>
                 {['statement', 'invoice', 'bill', 'receipt', 'tax_document', 'renewal', 'record', 'other'].map((value) => <option key={value} value={value}>{humanize(value)}</option>)}
               </select></label>
               {selectedSeries ? <div className="expectation-evidence"><FileCheck2 /><span><strong>{selectedSeries.document_ids.length} reviewed documents</strong><small>Membership revision {selectedSeries.membership_revision}; saving policy will not rewrite membership.</small></span></div> : null}
+              {!selectedSeries ? <div className="expectation-evidence"><ShieldCheck /><span><strong>Source-defined expectation</strong><small>No document evidence is required. Fulfillment can be assigned manually until OWL identifies a reviewed series.</small></span></div> : null}
             </>
           ) : null}
           {step === 1 ? (
@@ -277,7 +305,7 @@ export default function ExpectationSetup() {
               </div>
               <details>
                 <summary>Advanced monitoring behavior <ChevronDown /></summary>
-                <p>OWL will require series, kind, and calendar-period agreement before a document fulfills an occurrence. Coverage eligibility still requires this source to remain active and disposed as expectations configured.</p>
+                <p>OWL will require {selectedSeries ? 'series, ' : ''}kind, and calendar-period agreement before a document fulfills an occurrence. Coverage eligibility still requires this source to remain active and disposed as expectations configured.</p>
               </details>
             </>
           ) : deadlineMonitored ? (
@@ -295,8 +323,8 @@ export default function ExpectationSetup() {
           {step === 3 ? (
             <>
               <label>Paperless title convention<input value={titleTemplate} onChange={(event) => setTitleTemplate(event.target.value)} /></label>
-              <div className="expectation-note">Allowed fields include <code>{'{correspondent}'}</code>, <code>{'{period}'}</code>, and <code>{'{kind}'}</code>. Tag and document-type IDs remain optional; OWL will match the reviewed series and document kind.</div>
-              <div className="expectation-evidence"><FileCheck2 /><span><strong>Recognition policy</strong><small>Match the reviewed series, {humanize(kind).toLowerCase()} kind, and {monitored ? 'calendar period' : 'series identity'}.</small></span></div>
+              <div className="expectation-note">Allowed fields include <code>{'{correspondent}'}</code>, <code>{'{period}'}</code>, and <code>{'{kind}'}</code>. Tag and document-type IDs remain optional. {selectedSeries ? 'The reviewed series is also required.' : 'Until a series is attached, source and document kind provide the recognition boundary.'}</div>
+              <div className="expectation-evidence"><FileCheck2 /><span><strong>Recognition policy</strong><small>Match {selectedSeries ? 'the reviewed series, ' : `${source.current_name}, `}{humanize(kind).toLowerCase()} kind, and {monitored ? 'calendar period' : selectedSeries ? 'series identity' : 'source identity'}.</small></span></div>
             </>
           ) : null}
           {step === 4 ? (
@@ -316,8 +344,11 @@ export default function ExpectationSetup() {
         </section>
         <footer className="expectation-actions">
           <Button disabled={step === 0} onClick={() => setStep((step - 1) as Step)}><ArrowLeft /> Previous</Button>
-          {step < 4 ? <Button variant="primary" disabled={!canContinue} onClick={() => setStep((step + 1) as Step)}>Continue <ArrowRight /></Button>
-            : <Button variant="primary" disabled={saving || !selectedSeries || (deadlineMonitored && (!dueStart || !dueEnd))} onClick={() => void save()}>{saving ? <LoaderCircle className="spin" /> : <Check />} Confirm policy</Button>}
+          <div>
+            {existingExpectation?.status !== 'confirmed' ? <Button disabled={saving || !name.trim()} onClick={() => void save('suggested')}>Save draft</Button> : null}
+            {step < 4 ? <Button variant="primary" disabled={!canContinue} onClick={() => setStep((step + 1) as Step)}>Continue <ArrowRight /></Button>
+              : <Button variant="primary" disabled={saving || !name.trim() || (deadlineMonitored && (!dueStart || !dueEnd))} onClick={() => void save('confirmed')}>{saving ? <LoaderCircle className="spin" /> : <Check />} Confirm policy</Button>}
+          </div>
         </footer>
       </main>
       <aside className="expectation-summary" aria-label="Expectation policy summary">
@@ -329,7 +360,7 @@ export default function ExpectationSetup() {
             <div><dt>Expectation</dt><dd>{summary.expectation}</dd></div>
             <div><dt>Monitoring</dt><dd>{summary.monitoring}</dd></div>
             <div><dt>Importance</dt><dd>{humanize(importance)}</dd></div>
-            <div><dt>Recognition</dt><dd>Reviewed series and {humanize(kind).toLowerCase()} kind</dd></div>
+            <div><dt>Recognition</dt><dd>{selectedSeries ? `${selectedSeries.name} and ` : `${source.current_name} and `}{humanize(kind).toLowerCase()} kind</dd></div>
             <div><dt>Filing</dt><dd>{summary.filing}</dd></div>
             <div><dt>Acquisition</dt><dd>{summary.acquisition}</dd></div>
             <div><dt>Tyrion context</dt><dd>{tyrionSignalId ? signals.find((item) => item.id === tyrionSignalId)?.display_hint : 'No expectation-scoped relationship'}</dd></div>
