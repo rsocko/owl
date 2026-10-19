@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import * as RadixTooltip from '@radix-ui/react-tooltip';
+import { getToastDuration } from '../lib/toast';
 
 export type Tone = 'ok' | 'warn' | 'err' | 'info' | 'muted' | 'success' | 'warning' | 'danger';
 
@@ -422,12 +423,14 @@ export function Toast({
   duration?: number;
   onDismiss?: () => void;
 }) {
+  const dismissAfter = duration ?? getToastDuration(tone);
+
   useEffect(() => {
-    if (duration && onDismiss) {
-      const timer = setTimeout(onDismiss, duration);
+    if (dismissAfter > 0 && onDismiss) {
+      const timer = setTimeout(onDismiss, dismissAfter);
       return () => clearTimeout(timer);
     }
-  }, [duration, onDismiss]);
+  }, [dismissAfter, onDismiss]);
 
   return (
     <div

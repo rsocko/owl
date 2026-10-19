@@ -260,7 +260,7 @@
 
 /* Toast */
 .toast {
-  position: fixed; bottom: 24px; right: 24px; background: var(--card); border: 1px solid var(--border);
+  position: fixed; top: calc(var(--topnav-height) + 16px); right: 24px; background: var(--card); border: 1px solid var(--border);
   padding: 16px 20px; border-radius: var(--radius-sm); font-size: 0.95rem; line-height: 1.45; z-index: 1100;
   box-shadow: 0 8px 24px rgba(0,0,0,0.15); display: inline-flex; align-items: center; gap: 12px;
   min-width: min(360px, calc(100vw - 48px)); max-width: min(560px, calc(100vw - 48px));
