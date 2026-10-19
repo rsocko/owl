@@ -206,9 +206,10 @@ authoritative for the reviewed mapping and document policy.
 ### Review a Paperless correspondent
 
 1. Open **Needs review** or find a correspondent in **All correspondents**.
-2. Review representative documents, observed patterns, candidate series, and
-   current external relationships.
-3. Correct series membership when needed.
+2. Run **Analyze history** when no reviewed series exists, then confirm any
+   candidate grouping that represents real document membership.
+3. Review representative documents and current external relationships, and
+   correct series membership when needed.
 4. Choose **Configure expectations**, **No series expected**,
    **Waiting for more history**, or **Ignore / retire**.
 5. Record the decision and advance to the next source.

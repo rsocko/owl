@@ -61,6 +61,32 @@ export interface DocumentSeries {
   updated_at: string;
 }
 
+export interface SeriesAnalysisSuggestion {
+  suggestion_key: string;
+  kind: DocumentKind;
+  series_discriminator: string;
+  statement_series_id?: string | null;
+  expectation_mode: ExpectationMode | 'unknown';
+  document_ids: number[];
+  sample_document_ids: number[];
+  evidence: {
+    confidence?: number | null;
+    reason_codes: string[];
+    sample_size: number;
+  };
+}
+
+export interface SeriesAnalysisResult {
+  correspondent_id: number;
+  correspondent_name: string;
+  analyzed_at: string;
+  observed_summary: {
+    document_count: number;
+    candidate_series_count: number;
+  };
+  suggestions: SeriesAnalysisSuggestion[];
+}
+
 export interface DocumentExpectation {
   id: string;
   source_correspondent_id: number;

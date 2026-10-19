@@ -108,6 +108,39 @@ def test_document_source_expectation_and_coverage_api(
     assert coverage.json()[0]["state"] == "missing"
 
 
+def test_document_source_series_analysis_returns_reviewable_candidates(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    _configure_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    mock_paperless.fetch_all_metadata.return_value = (
+        {42: "Example Bank"},
+        {7: "Finance"},
+        {3: "Statement"},
+    )
+    mock_paperless.list_documents.return_value = [
+        {
+            "id": month,
+            "title": f"Example Bank Checking Statement 2026-{month:02d}",
+            "correspondent": 42,
+            "document_type": 3,
+            "tags": [7],
+            "created": f"2026-{month:02d}-03",
+        }
+        for month in range(1, 5)
+    ]
+    client.post("/api/sources/sync")
+
+    response = client.post("/api/sources/42/series-analysis")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["observed_summary"]["document_count"] == 4
+    assert payload["observed_summary"]["candidate_series_count"] == 1
+    assert payload["suggestions"][0]["document_ids"] == [1, 2, 3, 4]
+    assert client.get("/api/series?correspondent_id=42").json() == []
+
+
 def test_document_source_contract_uses_stable_deployment_identity(
     client, app, mock_paperless, tmp_path
 ) -> None:
