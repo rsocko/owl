@@ -1095,9 +1095,7 @@ async def list_intake_documents(
                 },
             }
             count_filters = [
-                filter_name
-                for filter_name in filter_scope_params
-                if filter_name != queue_filter
+                filter_name for filter_name in filter_scope_params if filter_name != queue_filter
             ]
             page, taxonomies, *count_pages = await asyncio.gather(
                 client.list_document_page(
@@ -1119,9 +1117,7 @@ async def list_intake_documents(
                 queue_filter: page.total_count,
                 **{
                     filter_name: count_page.total_count
-                    for filter_name, count_page in zip(
-                        count_filters, count_pages, strict=True
-                    )
+                    for filter_name, count_page in zip(count_filters, count_pages, strict=True)
                 },
             }
             documents = list(page.results)

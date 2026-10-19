@@ -142,9 +142,7 @@ def test_list_intake_documents_reports_counts_for_every_filter(client, mock_pape
 
     mock_paperless.list_document_page.side_effect = list_page
 
-    response = client.get(
-        "/api/intake/documents?search=utility&queue_filter=missing_type"
-    )
+    response = client.get("/api/intake/documents?search=utility&queue_filter=missing_type")
 
     assert response.status_code == 200
     assert response.json()["filter_counts"] == {
