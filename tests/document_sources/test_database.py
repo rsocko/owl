@@ -14,6 +14,7 @@ from doc_intelligence_hub.modules.document_sources.models import (
 from doc_intelligence_hub.modules.statements.correspondent_models import (
     Cadence,
     ExpectationEvidence,
+    FulfillmentRule,
 )
 
 DEPLOYMENT_ID = "paperless:test"
@@ -206,6 +207,76 @@ def test_expectation_eligibility_requires_source_disposition_and_monitoring_poli
             )
         )
         assert database.expectation_is_coverage_eligible(irregular.id) is False
+    finally:
+        database.close()
+
+
+def test_source_defined_expectation_can_monitor_and_be_fulfilled_without_series(
+    tmp_path,
+) -> None:
+    database = _database(tmp_path)
+    try:
+        _sync_bank(database)
+        expectation = database.create_expectation(
+            DocumentExpectationCreate(
+                source_correspondent_id=42,
+                series_id=None,
+                name="Annual account tax form",
+                kind="tax_document",
+                expectation_mode="periodic",
+                status="confirmed",
+                cadence=Cadence(frequency="annual", expected_day=15),
+                monitoring_mode="presence",
+                importance="important",
+                fulfillment_rule=FulfillmentRule(match_series=False),
+                evidence=ExpectationEvidence(
+                    source="user",
+                    reason_codes=["user_defined_without_series"],
+                ),
+                acquisition_notes="Download it from the account portal.",
+            )
+        )
+        database.update_source(
+            42,
+            DocumentSourceUpdate(disposition="expectations_configured"),
+        )
+
+        assert database.expectation_is_coverage_eligible(expectation.id) is True
+        assert database.get_expectation(expectation.id).acquisition_notes == (
+            "Download it from the account portal."
+        )
+
+        occurrence = next(
+            item
+            for item in database.evaluate_coverage(
+                date(2026, 10, 20),
+                horizon_start=date(2026, 1, 1),
+            )
+            if item.expectation_id == expectation.id
+        )
+        assert occurrence.state == "missing"
+
+        fulfilled = database.reassign_occurrence_document(
+            occurrence.id,
+            501,
+            date(2026, 1, 14),
+            as_of=date(2026, 10, 20),
+        )
+        assert fulfilled.state == "fulfilled"
+        assert fulfilled.fulfilled_document_id == 501
+        assert 501 in database.occurrence_assigned_document_ids()
+
+        refreshed = next(
+            item
+            for item in database.evaluate_coverage(
+                date(2026, 10, 20),
+                horizon_start=date(2026, 1, 1),
+            )
+            if item.expectation_id == expectation.id
+        )
+        assert refreshed.state == "fulfilled"
+        assert refreshed.fulfilled_document_id == 501
+        assert database.get_occurrence_detail(refreshed.id).recent_document_ids == [501]
     finally:
         database.close()
 

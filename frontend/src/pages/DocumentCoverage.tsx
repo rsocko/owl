@@ -227,7 +227,8 @@ function OccurrenceDrawer({
           </section>
           <section className="coverage-acquisition">
             <h3>Acquisition status</h3>
-            <p>No automatic retrieval is claimed here. Follow the expectation’s manual or connector guidance, then refresh Coverage after Paperless ingests the document.</p>
+            <p>{detail.expectation.acquisition_notes
+              ?? 'No automatic retrieval is claimed here. Follow the expectation’s manual or connector guidance, then refresh Coverage after Paperless ingests the document.'}</p>
           </section>
         </div>
       ) : null}

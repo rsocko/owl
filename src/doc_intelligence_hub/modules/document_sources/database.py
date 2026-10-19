@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS source_expectations (
     title_convention_json TEXT,
     metadata_policy_json TEXT NOT NULL,
     acquisition_source_id TEXT,
+    acquisition_notes TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (deployment_id, source_correspondent_id)
@@ -182,6 +183,16 @@ class SourceDatabase:
             self._connection.row_factory = sqlite3.Row
             self._connection.execute("PRAGMA foreign_keys = ON")
             self._connection.executescript(_SCHEMA)
+            expectation_columns = {
+                row["name"]
+                for row in self._connection.execute(
+                    "PRAGMA table_info(source_expectations)"
+                ).fetchall()
+            }
+            if "acquisition_notes" not in expectation_columns:
+                self._connection.execute(
+                    "ALTER TABLE source_expectations ADD COLUMN acquisition_notes TEXT"
+                )
             row = self._connection.execute(
                 "SELECT version FROM document_source_schema_version LIMIT 1"
             ).fetchone()
@@ -597,6 +608,7 @@ class SourceDatabase:
             else None,
             "metadata_policy": json.loads(row["metadata_policy_json"]),
             "acquisition_source_id": row["acquisition_source_id"],
+            "acquisition_notes": row["acquisition_notes"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
@@ -628,8 +640,8 @@ class SourceDatabase:
                        calendar_rule_json, availability_window_json, grace_period_days,
                        escalation_policy_json, fulfillment_rule_json, evidence_json,
                        title_convention_json, metadata_policy_json, acquisition_source_id,
-                       created_at, updated_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       acquisition_notes, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     expectation_id,
                     self.deployment_id,
@@ -653,6 +665,7 @@ class SourceDatabase:
                     create.title_convention.model_dump_json() if create.title_convention else None,
                     create.metadata_policy.model_dump_json(),
                     create.acquisition_source_id,
+                    create.acquisition_notes,
                     now,
                     now,
                 ),
@@ -697,6 +710,8 @@ class SourceDatabase:
         series = self.get_series(validated.series_id) if validated.series_id else None
         if series and series.source_correspondent_id != current.source_correspondent_id:
             raise ValueError("series belongs to a different document source")
+        if series and series.kind != validated.kind:
+            raise ValueError("expectation kind must match its reviewed series")
         if validated.acquisition_source_id and not self._acquisition_source_exists(
             validated.acquisition_source_id
         ):
@@ -710,7 +725,7 @@ class SourceDatabase:
                        grace_period_days = ?, escalation_policy_json = ?,
                        fulfillment_rule_json = ?, evidence_json = ?,
                        title_convention_json = ?, metadata_policy_json = ?,
-                       acquisition_source_id = ?, updated_at = ?
+                       acquisition_source_id = ?, acquisition_notes = ?, updated_at = ?
                    WHERE deployment_id = ? AND id = ?""",
                 (
                     validated.series_id,
@@ -733,6 +748,7 @@ class SourceDatabase:
                     else None,
                     validated.metadata_policy.model_dump_json(),
                     validated.acquisition_source_id,
+                    validated.acquisition_notes,
                     _now(),
                     self.deployment_id,
                     expectation_id,
@@ -773,7 +789,7 @@ class SourceDatabase:
         ):
             return False
         if expectation.expectation_mode in {"recurring", "periodic"}:
-            return expectation.cadence is not None and expectation.series_id is not None
+            return expectation.cadence is not None
         if expectation.expectation_mode == "one_off":
             return (
                 expectation.monitoring_mode == "deadline"
@@ -883,6 +899,10 @@ class SourceDatabase:
             member_periods = self._member_periods(expectation.series_id)
             for period_key, due_start, due_end in periods:
                 fulfilled = member_periods.get(period_key)
+                if fulfilled is None and expectation.series_id is None:
+                    fulfilled = self._stored_occurrence_fulfillment(
+                        expectation.id, period_key
+                    )
                 occurrence_id = self._occurrence_id(expectation.id, period_key)
                 grace_extended_until = self._grace_extended_until(occurrence_id)
                 effective_due_end = max(
@@ -895,6 +915,9 @@ class SourceDatabase:
                     status = expectation.calendar_rule.occurrence_status
                     if status == "cancelled":
                         state = "cancelled"
+                    elif fulfilled:
+                        document_date = date.fromisoformat(fulfilled["document_date"])
+                        state = "fulfilled_late" if document_date > due_end else "fulfilled"
                     elif status == "fulfilled":
                         state = "fulfilled"
                     elif as_of > effective_due_end:
@@ -938,6 +961,22 @@ class SourceDatabase:
             .fetchall()
         )
         return {row["period_key"]: row for row in rows}
+
+    def _stored_occurrence_fulfillment(
+        self, expectation_id: str, period_key: str
+    ) -> sqlite3.Row | None:
+        return (
+            self.connect()
+            .execute(
+                """SELECT fulfilled_document_id AS document_id,
+                          fulfilled_at AS document_date
+                   FROM coverage_occurrences
+                   WHERE deployment_id = ? AND expectation_id = ? AND period_key = ?
+                     AND fulfilled_document_id IS NOT NULL AND fulfilled_at IS NOT NULL""",
+                (self.deployment_id, expectation_id, period_key),
+            )
+            .fetchone()
+        )
 
     @staticmethod
     def _periods(
@@ -1013,7 +1052,13 @@ class SourceDatabase:
             occurrence=occurrence,
             expectation=expectation,
             series=series,
-            recent_document_ids=list(reversed(series.document_ids[-5:])) if series else [],
+            recent_document_ids=(
+                list(reversed(series.document_ids[-5:]))
+                if series
+                else [occurrence.fulfilled_document_id]
+                if occurrence.fulfilled_document_id
+                else []
+            ),
         )
 
     def extend_occurrence_grace(self, occurrence_id: str, extend_until: date) -> CoverageOccurrence:
@@ -1047,8 +1092,23 @@ class SourceDatabase:
     ) -> CoverageOccurrence:
         row = self._occurrence_row(occurrence_id)
         expectation = self.get_expectation(row["expectation_id"])
-        if expectation is None or expectation.series_id is None:
-            raise ValueError("occurrence requires a reviewed series before reassignment")
+        if expectation is None:
+            raise KeyError("document_expectation_not_found")
+        if expectation.series_id is None:
+            with self.connect() as conn:
+                conn.execute(
+                    """UPDATE coverage_occurrences
+                       SET fulfilled_document_id = ?, fulfilled_at = ?, evaluated_at = ?
+                       WHERE deployment_id = ? AND id = ?""",
+                    (
+                        document_id,
+                        document_date.isoformat(),
+                        _now(),
+                        self.deployment_id,
+                        occurrence_id,
+                    ),
+                )
+            return self._recalculate_occurrence(occurrence_id, as_of or date.today())
         conn = self.connect()
         affected = [
             item["series_id"]
@@ -1088,17 +1148,22 @@ class SourceDatabase:
         return self._recalculate_occurrence(occurrence_id, as_of or date.today())
 
     def occurrence_assigned_document_ids(self) -> set[int]:
-        rows = (
-            self.connect()
-            .execute(
+        conn = self.connect()
+        rows = conn.execute(
                 """SELECT document_id FROM document_series_members_v2 members
                JOIN document_series_v2 series ON series.id = members.series_id
                WHERE series.deployment_id = ?""",
                 (self.deployment_id,),
-            )
-            .fetchall()
-        )
-        return {row["document_id"] for row in rows}
+            ).fetchall()
+        occurrence_rows = conn.execute(
+            """SELECT fulfilled_document_id FROM coverage_occurrences
+               WHERE deployment_id = ? AND fulfilled_document_id IS NOT NULL""",
+            (self.deployment_id,),
+        ).fetchall()
+        return {
+            *[row["document_id"] for row in rows],
+            *[row["fulfilled_document_id"] for row in occurrence_rows],
+        }
 
     def _occurrence_row(self, occurrence_id: str) -> sqlite3.Row:
         row = (
@@ -1125,6 +1190,10 @@ class SourceDatabase:
         source = self.get_source(expectation.source_correspondent_id)
         assert source is not None
         fulfilled = self._member_periods(expectation.series_id).get(row["period_key"])
+        if fulfilled is None and expectation.series_id is None:
+            fulfilled = self._stored_occurrence_fulfillment(
+                expectation.id, row["period_key"]
+            )
         due_start = date.fromisoformat(row["due_start"])
         due_end = date.fromisoformat(row["due_end"])
         grace_extended_until = self._grace_extended_until(occurrence_id)
@@ -1134,9 +1203,21 @@ class SourceDatabase:
         )
         if not self.expectation_is_coverage_eligible(expectation.id):
             state = "unmonitored"
+        elif (
+            expectation.calendar_rule
+            and expectation.calendar_rule.rule_type == "one_off"
+            and expectation.calendar_rule.occurrence_status == "cancelled"
+        ):
+            state = "cancelled"
         elif fulfilled:
             document_date = date.fromisoformat(fulfilled["document_date"])
             state = "fulfilled_late" if document_date > due_end else "fulfilled"
+        elif (
+            expectation.calendar_rule
+            and expectation.calendar_rule.rule_type == "one_off"
+            and expectation.calendar_rule.occurrence_status == "fulfilled"
+        ):
+            state = "fulfilled"
         elif as_of > effective_due_end:
             state = "missing"
         elif as_of >= due_start:
@@ -1204,7 +1285,7 @@ class SourceDatabase:
         due_start: date,
         due_end: date,
         state: str,
-        fulfilled: sqlite3.Row | None,
+        fulfilled: sqlite3.Row | dict[str, Any] | None,
         grace_extended_until: date | None = None,
     ) -> CoverageOccurrence:
         conn = self.connect()

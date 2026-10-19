@@ -157,6 +157,17 @@ class SeriesMemberPeriod(ContractModel):
     period_key: str = Field(min_length=1, max_length=100)
 
 
+class SeriesAnalysisDismiss(ContractModel):
+    document_ids: list[int] = Field(min_length=1, max_length=500)
+
+    @field_validator("document_ids")
+    @classmethod
+    def normalize_document_ids(cls, value: list[int]) -> list[int]:
+        if any(item <= 0 for item in value):
+            raise ValueError("Paperless document IDs must be positive")
+        return sorted(set(value))
+
+
 class DocumentExpectationCreate(ContractModel):
     source_correspondent_id: int = Field(gt=0)
     series_id: str | None = Field(default=None, min_length=1, max_length=64)
@@ -176,6 +187,7 @@ class DocumentExpectationCreate(ContractModel):
     title_convention: TitleConvention | None = None
     metadata_policy: MetadataPolicy = Field(default_factory=MetadataPolicy)
     acquisition_source_id: str | None = None
+    acquisition_notes: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="after")
     def validate_policy(self) -> DocumentExpectationCreate:
@@ -198,12 +210,8 @@ class DocumentExpectationCreate(ContractModel):
             raise ValueError("only one_off expectations can use a one_off calendar rule")
         if self.monitoring_mode == "deadline" and self.calendar_rule is None:
             raise ValueError("deadline monitoring requires a calendar rule")
-        if (
-            self.status == "confirmed"
-            and self.expectation_mode != "not_expected"
-            and self.series_id is None
-        ):
-            raise ValueError("confirmed expectations require a reviewed series")
+        if self.series_id is None and self.fulfillment_rule.match_series:
+            raise ValueError("expectations without a reviewed series cannot require series matching")
         return self
 
 
@@ -224,6 +232,7 @@ class DocumentExpectationUpdate(ContractModel):
     title_convention: TitleConvention | None = None
     metadata_policy: MetadataPolicy | None = None
     acquisition_source_id: str | None = None
+    acquisition_notes: str | None = Field(default=None, max_length=4000)
 
 
 class DocumentExpectation(DocumentExpectationCreate):

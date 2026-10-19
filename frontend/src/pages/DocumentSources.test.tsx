@@ -21,7 +21,9 @@ vi.mock('../lib/api', () => ({
       setDisposition: vi.fn(),
       setExternalSignalRelationship: vi.fn(),
       analyzeSeries: vi.fn(),
+      dismissSeriesCandidate: vi.fn(),
       createSeries: vi.fn(),
+      reopen: vi.fn(),
     },
     statements: {
       documentPreview: (id: string) => `/preview/${id}`,
@@ -230,7 +232,7 @@ describe('Document Sources', () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Harbor Bank' });
 
-    expect(screen.getByRole('button', { name: /create expectation/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /create expectation/i })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: /analyze history/i }));
     expect(await screen.findByText(/1 candidate series found/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /confirm series/i }));
@@ -243,6 +245,74 @@ describe('Document Sources', () => {
       document_ids: [101, 102, 103],
     }));
     expect(screen.getByRole('button', { name: /create expectation/i })).toBeEnabled();
+  });
+
+  it('shows source-defined expectations that do not have a reviewed series', async () => {
+    mockLoadedData({
+      sourceSeries: [],
+      expectations: [{
+        ...expectation,
+        id: 'source-expectation',
+        series_id: null,
+        name: 'Annual account tax form',
+        kind: 'tax_document',
+      }],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Harbor Bank' });
+
+    expect(screen.getByText('Annual account tax form')).toBeInTheDocument();
+    expect(screen.getByText(/active source-defined policy/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /review expectation/i })).toBeEnabled();
+  });
+
+  it('dismisses a candidate series and keeps it out of the current analysis', async () => {
+    mockLoadedData({ sourceSeries: [], expectations: [] });
+    vi.mocked(endpoints.documentSources.analyzeSeries).mockResolvedValue({
+      correspondent_id: 41,
+      correspondent_name: 'Harbor Bank',
+      analyzed_at: '2026-10-19T00:00:00Z',
+      observed_summary: { document_count: 3, candidate_series_count: 1 },
+      suggestions: [{
+        suggestion_key: 'checking',
+        kind: 'statement',
+        series_discriminator: 'checking_4821',
+        statement_series_id: null,
+        expectation_mode: 'recurring',
+        document_ids: [101, 102, 103],
+        sample_document_ids: [101, 102, 103],
+        evidence: { confidence: 0.92, reason_codes: ['monthly_cadence'], sample_size: 3 },
+      }],
+    });
+    vi.mocked(endpoints.documentSources.dismissSeriesCandidate).mockResolvedValue(undefined);
+    renderPage();
+    await screen.findByRole('heading', { name: 'Harbor Bank' });
+    fireEvent.click(screen.getByRole('button', { name: /analyze history/i }));
+    await screen.findByText(/1 candidate series found/i);
+    fireEvent.click(screen.getByRole('button', { name: /^Dismiss/i }));
+
+    await waitFor(() => expect(endpoints.documentSources.dismissSeriesCandidate).toHaveBeenCalledWith(41, [101, 102, 103]));
+    expect(screen.queryByRole('button', { name: /confirm series/i })).not.toBeInTheDocument();
+  });
+
+  it('manually reopens a resolved source for review', async () => {
+    mockLoadedData();
+    vi.mocked(endpoints.documentSources.reopen).mockResolvedValue({
+      ...sourceTwo,
+      review_state: 'needs_review',
+      disposition: null,
+      reopen_reasons: ['manual'],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Harbor Bank' });
+    fireEvent.click(screen.getByRole('button', { name: /all correspondents/i }));
+    fireEvent.click(screen.getByRole('button', { name: /pine mutual/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /reopen review/i }));
+
+    await waitFor(() => expect(endpoints.documentSources.reopen).toHaveBeenCalledWith(88, {
+      reason: 'manual',
+      detail: 'Operator reopened source review.',
+    }));
   });
 
   it('links an external signal to a source with zero expectation links and never creates policy implicitly', async () => {

@@ -17,7 +17,7 @@ import {
   Unlink,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Button, Toast } from '../components/ui';
 import { endpoints } from '../lib/api';
 import {
@@ -555,23 +555,32 @@ function SourceEvidence({
   onConfigure,
   onAnalyze,
   onCreateSeries,
+  onDismissSeries,
+  onReopen,
   analysis,
   analyzing,
   creatingSeriesKey,
+  dismissingSeriesKey,
+  reopening,
 }: {
   source: DocumentSource;
   series: DocumentSeries[];
   expectations: DocumentExpectation[];
   signals: ExternalSignal[];
-  onConfigure: (seriesId?: string) => void;
+  onConfigure: (seriesId?: string, expectationId?: string) => void;
   onAnalyze: () => void;
   onCreateSeries: (suggestion: SeriesAnalysisSuggestion) => void;
+  onDismissSeries: (suggestion: SeriesAnalysisSuggestion) => void;
+  onReopen: () => void;
   analysis: SeriesAnalysisResult | null;
   analyzing: boolean;
   creatingSeriesKey: string | null;
+  dismissingSeriesKey: string | null;
+  reopening: boolean;
 }) {
   const sourceSeries = series.filter((item) => item.source_correspondent_id === source.correspondent_id);
   const sourceExpectations = expectations.filter((item) => item.source_correspondent_id === source.correspondent_id);
+  const sourceLevelExpectations = sourceExpectations.filter((item) => !item.series_id);
   const linkedSignals = signals.filter((item) => item.relationship?.source_correspondent_id === source.correspondent_id);
   const documentCount = sourceDocumentCount(source.correspondent_id, series);
 
@@ -583,7 +592,7 @@ function SourceEvidence({
           <h2>{source.current_name}</h2>
         </div>
         <dl>
-          <div><dt>Documents</dt><dd>{documentCount}</dd></div>
+          <div><dt>Series documents</dt><dd>{documentCount}</dd></div>
           <div><dt>Reviewed series</dt><dd>{sourceSeries.length}</dd></div>
           <div><dt>Tyrion context</dt><dd>{linkedSignals.length}</dd></div>
         </dl>
@@ -597,6 +606,9 @@ function SourceEvidence({
               ? `${sourceReason(source)}. Review the observed series and choose one durable source outcome.`
               : `${humanize(source.disposition ?? 'not reviewed')} was recorded ${formatDate(source.last_reviewed_at)}.`}</p>
           </div>
+          {source.review_state === 'resolved' ? <Button disabled={reopening} onClick={onReopen}>
+            {reopening ? <LoaderCircle className="spin" /> : null} Reopen review
+          </Button> : null}
         </div>
         <section className="source-section">
           <header>
@@ -631,14 +643,31 @@ function SourceEvidence({
               </Button>
               <Button
                 variant="primary"
-                disabled={sourceSeries.length === 0}
-                onClick={() => onConfigure(sourceSeries[0]?.id)}
-                title={sourceSeries.length === 0 ? 'Confirm a reviewed series before creating an expectation.' : undefined}
+                onClick={() => onConfigure()}
               >
                 <Plus /> Create expectation
               </Button>
             </div>
           </header>
+          {sourceLevelExpectations.length > 0 ? (
+            <div className="source-level-expectations">
+              <strong>Expectations without a reviewed series</strong>
+              {sourceLevelExpectations.map((expectation) => (
+                <article key={expectation.id}>
+                  <div>
+                    <span>{humanize(expectation.kind)} · {humanize(expectation.expectation_mode)}</span>
+                    <h4>{expectation.name}</h4>
+                    <p>{expectation.status === 'confirmed'
+                      ? 'Active source-defined policy. Attach a reviewed series when matching documents are identified.'
+                      : 'Draft policy. Confirm it when the schedule and recognition rules are ready.'}</p>
+                  </div>
+                  <Button variant={expectation.status === 'confirmed' ? 'default' : 'primary'} onClick={() => onConfigure(undefined, expectation.id)}>
+                    {expectation.status === 'confirmed' ? 'Review expectation' : 'Continue setup'} <ChevronRight />
+                  </Button>
+                </article>
+              ))}
+            </div>
+          ) : null}
           {analysis ? (
             <div className="source-analysis-results" role="status">
               <div className="source-analysis-summary">
@@ -654,13 +683,21 @@ function SourceEvidence({
                     <strong>{suggestion.series_discriminator === 'default' ? `${source.current_name} documents` : humanize(suggestion.series_discriminator)}</strong>
                     <span>{humanize(suggestion.kind)} · {suggestion.document_ids.length} documents · {humanize(suggestion.expectation_mode)}</span>
                   </div>
-                  <Button
-                    variant="primary"
-                    disabled={creatingSeriesKey !== null || suggestion.document_ids.length === 0}
-                    onClick={() => onCreateSeries(suggestion)}
-                  >
-                    {creatingSeriesKey === suggestion.suggestion_key ? <LoaderCircle className="spin" /> : <Check />} Confirm series
-                  </Button>
+                  <div className="source-analysis-candidate-actions">
+                    <Button
+                      disabled={creatingSeriesKey !== null || dismissingSeriesKey !== null}
+                      onClick={() => onDismissSeries(suggestion)}
+                    >
+                      {dismissingSeriesKey === suggestion.suggestion_key ? <LoaderCircle className="spin" /> : null} Dismiss
+                    </Button>
+                    <Button
+                      variant="primary"
+                      disabled={creatingSeriesKey !== null || dismissingSeriesKey !== null || suggestion.document_ids.length === 0}
+                      onClick={() => onCreateSeries(suggestion)}
+                    >
+                      {creatingSeriesKey === suggestion.suggestion_key ? <LoaderCircle className="spin" /> : <Check />} Confirm series
+                    </Button>
+                  </div>
                 </article>
               ))}
               {analysis.suggestions.length === 0 ? (
@@ -701,9 +738,12 @@ function SourceEvidence({
                     </div>
                     <footer>
                       <span>Series revisions do not rewrite expectation policy.</span>
-                      <Button variant={expectation ? 'default' : 'primary'} onClick={() => onConfigure(item.id)}>
-                        {expectation ? 'Review expectation' : 'Configure expectation'} <ChevronRight />
-                      </Button>
+                      <div className="source-series-footer-actions">
+                        <Link to={`/coverage/series/${item.id}`}>Edit membership</Link>
+                        <Button variant={expectation ? 'default' : 'primary'} onClick={() => onConfigure(item.id, expectation?.id)}>
+                          {expectation ? 'Review expectation' : 'Configure expectation'} <ChevronRight />
+                        </Button>
+                      </div>
                     </footer>
                   </article>
                 );
@@ -714,7 +754,7 @@ function SourceEvidence({
               <FileText />
               <span>
                 <strong>No reviewed series yet</strong>
-                <small>Analyze this source’s Paperless history to find candidate groupings. Confirm a series before creating an expectation.</small>
+                <small>Create an expectation now if you already know what should arrive, or analyze Paperless history to find candidate groupings and attach evidence.</small>
               </span>
             </div>
           )}
@@ -961,6 +1001,8 @@ export default function DocumentSources() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<SeriesAnalysisResult | null>(null);
   const [creatingSeriesKey, setCreatingSeriesKey] = useState<string | null>(null);
+  const [dismissingSeriesKey, setDismissingSeriesKey] = useState<string | null>(null);
+  const [reopening, setReopening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -1046,6 +1088,47 @@ export default function DocumentSources() {
       setToast(errorMessage(createError));
     } finally {
       setCreatingSeriesKey(null);
+    }
+  };
+
+  const dismissSeriesSuggestion = async (suggestion: SeriesAnalysisSuggestion) => {
+    if (!selectedSource) return;
+    setDismissingSeriesKey(suggestion.suggestion_key);
+    try {
+      await endpoints.documentSources.dismissSeriesCandidate(
+        selectedSource.correspondent_id,
+        suggestion.document_ids,
+      );
+      setAnalysis((current) => current ? {
+        ...current,
+        observed_summary: {
+          ...current.observed_summary,
+          candidate_series_count: Math.max(0, current.observed_summary.candidate_series_count - 1),
+        },
+        suggestions: current.suggestions.filter((item) => item.suggestion_key !== suggestion.suggestion_key),
+      } : current);
+      setToast('The candidate was dismissed and will remain excluded from future analysis.');
+    } catch (dismissError) {
+      setToast(errorMessage(dismissError));
+    } finally {
+      setDismissingSeriesKey(null);
+    }
+  };
+
+  const reopenSelectedSource = async () => {
+    if (!selectedSource) return;
+    setReopening(true);
+    try {
+      const updated = await endpoints.documentSources.reopen(selectedSource.correspondent_id, {
+        reason: 'manual',
+        detail: 'Operator reopened source review.',
+      }) as DocumentSource;
+      setSources((current) => current.map((source) => source.correspondent_id === updated.correspondent_id ? updated : source));
+      setToast(`${updated.current_name} was reopened for review.`);
+    } catch (reopenError) {
+      setToast(errorMessage(reopenError));
+    } finally {
+      setReopening(false);
     }
   };
 
@@ -1146,12 +1229,21 @@ export default function DocumentSources() {
               series={series}
               expectations={expectations}
               signals={signals}
-              onConfigure={(seriesId) => navigate(`/sources/${selectedSource.correspondent_id}/expectations/new${seriesId ? `?series=${seriesId}` : ''}`)}
+              onConfigure={(seriesId, expectationId) => {
+                const query = new URLSearchParams();
+                if (seriesId) query.set('series', seriesId);
+                if (expectationId) query.set('expectation', expectationId);
+                navigate(`/sources/${selectedSource.correspondent_id}/expectations/new${query.size ? `?${query}` : ''}`);
+              }}
               onAnalyze={() => void analyzeSelectedSource()}
               onCreateSeries={(suggestion) => void createSeriesFromSuggestion(suggestion)}
+              onDismissSeries={(suggestion) => void dismissSeriesSuggestion(suggestion)}
+              onReopen={() => void reopenSelectedSource()}
               analysis={analysis}
               analyzing={analyzing}
               creatingSeriesKey={creatingSeriesKey}
+              dismissingSeriesKey={dismissingSeriesKey}
+              reopening={reopening}
             />
             <DispositionPanel
               key={selectedSource.correspondent_id}

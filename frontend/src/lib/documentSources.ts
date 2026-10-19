@@ -101,10 +101,30 @@ export interface DocumentExpectation {
     availability_delay_days: number;
     grace_period_days: number;
   } | null;
+  calendar_rule?: {
+    rule_type: string;
+    occurrence_id?: string | null;
+    due_start?: string | null;
+    due_end?: string | null;
+    occurrence_status?: string | null;
+  } | null;
   importance: 'routine' | 'important' | 'critical';
   monitoring_mode: 'none' | 'presence' | 'deadline';
   grace_period_days: number;
+  fulfillment_rule?: {
+    match_series: boolean;
+    match_kind: boolean;
+    match_calendar_period: boolean;
+    required_tag_ids: number[];
+    required_document_type_id?: number | null;
+  };
+  title_convention?: {
+    template: string;
+    date_basis: string;
+    example?: string | null;
+  } | null;
   acquisition_source_id?: string | null;
+  acquisition_notes?: string | null;
   evidence: {
     source: string;
     reason_codes: string[];
