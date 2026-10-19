@@ -478,6 +478,70 @@
   color: var(--text);
   font-size: .7rem;
 }
+.source-typeahead { display: grid; gap: .3rem; }
+.source-typeahead > label { color: var(--text-muted); font-size: .6rem; font-weight: 750; }
+.source-typeahead-control {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: .45rem;
+  background: var(--card);
+}
+.source-typeahead-control:focus-within { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 22%, transparent); outline-offset: 2px; }
+.source-typeahead-control > svg { width: .82rem; height: .82rem; margin-left: .65rem; color: var(--text-muted); }
+.source-typeahead-control input { min-width: 0; border: 0; outline: 0; }
+.source-typeahead-control button {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.source-typeahead-control button:hover { color: var(--text); }
+.source-typeahead-control button svg { width: .85rem; height: .85rem; }
+.source-typeahead-hint { margin: 0; display: flex; flex-wrap: wrap; gap: .15rem .3rem; color: var(--text-muted); font-size: .57rem; }
+.source-typeahead-hint strong { color: var(--text); }
+.source-typeahead-hint span { color: var(--accent); }
+.source-typeahead-options {
+  max-height: 15rem;
+  padding: .3rem;
+  display: grid;
+  gap: .15rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: .55rem;
+  background: var(--card);
+  box-shadow: 0 .65rem 1.6rem color-mix(in srgb, var(--text) 14%, transparent);
+}
+.source-typeahead-options > button {
+  min-width: 0;
+  padding: .55rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: .45rem;
+  border: 0;
+  border-radius: .4rem;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.source-typeahead-options > button:hover,
+.source-typeahead-options > button.active,
+.source-typeahead-options > button.selected { background: var(--selected-bg); }
+.source-typeahead-options > button > span { min-width: 0; display: grid; gap: .08rem; }
+.source-typeahead-options strong,
+.source-typeahead-options small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-typeahead-options strong { font-size: .66rem; }
+.source-typeahead-options small { color: var(--text-muted); font-size: .55rem; }
+.source-typeahead-options em { padding: .15rem .35rem; border-radius: 999px; background: var(--accent-bg); color: var(--accent); font-size: .5rem; font-style: normal; font-weight: 800; }
+.source-typeahead-options svg { width: .78rem; height: .78rem; color: var(--accent); }
+.source-typeahead-options > p { margin: 0; padding: .65rem; color: var(--text-muted); font-size: .6rem; }
 .source-decision label small { font-size: .56rem; font-weight: 500; }
 .source-form-error { margin: 0; padding: .55rem; border-radius: .4rem; background: var(--danger-bg); color: var(--danger); font-size: .62rem; }
 .source-decision > .btn { margin-top: auto; display: inline-flex; align-items: center; justify-content: center; gap: .4rem; }
