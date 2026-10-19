@@ -328,12 +328,14 @@ def test_core_hides_operational_fields_and_exposes_editable_document_fields(clie
             {"field": 9, "value": "A-123"},
             {"field": 10, "value": "84.20"},
             {"field": 11, "value": "pending"},
+            {"field": 12, "value": "INV-2026-1042"},
         ]
     )
     mock_paperless.list_custom_fields.return_value = [
         {"id": 9, "name": "Account Identifier", "data_type": "string"},
         {"id": 10, "name": "Document Amount", "data_type": "monetary"},
         {"id": 11, "name": "Action Status", "data_type": "string"},
+        {"id": 12, "name": "Invoice Number", "data_type": "string"},
     ]
 
     response = client.get("/api/intake/documents/42/core")
@@ -343,6 +345,7 @@ def test_core_hides_operational_fields_and_exposes_editable_document_fields(clie
     assert [(field["name"], field["field_key"], field["editable"]) for field in fields] == [
         ("Account Identifier", "account_identifier", True),
         ("Document Amount", "document_amount", True),
+        ("Invoice Number", "invoice_number", True),
     ]
     assert fields[0]["value"] == "A-123"
     assert fields[0]["audit"] is False
@@ -357,6 +360,7 @@ def test_core_exposes_unset_editable_document_fields(client, mock_paperless):
         {"id": 11, "name": "Document Due Date", "data_type": "date"},
         {"id": 12, "name": "Action Status", "data_type": "string"},
         {"id": 13, "name": "Household Note", "data_type": "string"},
+        {"id": 14, "name": "Invoice Number", "data_type": "string"},
     ]
 
     response = client.get("/api/intake/documents/42/core")
@@ -367,6 +371,7 @@ def test_core_exposes_unset_editable_document_fields(client, mock_paperless):
         ("Account Identifier", None, True),
         ("Document Amount", None, True),
         ("Document Due Date", None, True),
+        ("Invoice Number", None, True),
     ]
 
 
@@ -553,6 +558,32 @@ def test_save_merges_editable_custom_fields(client, mock_paperless):
     )
 
 
+def test_save_updates_invoice_number(client, mock_paperless):
+    mock_paperless.get_document.return_value = _document(
+        custom_fields=[{"field": 12, "value": "INV-WRONG"}]
+    )
+    mock_paperless.list_custom_fields.return_value = [
+        {"id": 12, "name": "Invoice Number", "data_type": "string"},
+    ]
+
+    response = client.put(
+        "/api/intake/documents/42",
+        json={
+            "expected_modified": "2026-10-16T12:00:00Z",
+            "metadata": {
+                "custom_fields": [{"field": 12, "value": "INV-2026-1042"}],
+            },
+            "disposition": "save",
+        },
+    )
+
+    assert response.status_code == 200
+    mock_paperless.update_document.assert_awaited_once_with(
+        42,
+        {"custom_fields": [{"field": 12, "value": "INV-2026-1042"}]},
+    )
+
+
 def test_save_updates_exact_classified_account_identifier(client, mock_paperless):
     mock_paperless.get_document.return_value = _document(
         custom_fields=[{"field": 9, "value": "ending 2025"}]
@@ -582,6 +613,37 @@ def test_save_updates_exact_classified_account_identifier(client, mock_paperless
     mock_paperless.update_document.assert_awaited_once_with(
         42,
         {"custom_fields": [{"field": 9, "value": "ACCT-2025-8675309"}]},
+    )
+
+
+def test_file_only_clears_account_identifier(client, mock_paperless):
+    mock_paperless.get_document.return_value = _document(
+        custom_fields=[{"field": 9, "value": "ACCT-2025-8675309"}]
+    )
+    mock_paperless.list_custom_fields.return_value = [
+        {"id": 9, "name": "Account Identifier", "data_type": "string"},
+    ]
+
+    response = client.put(
+        "/api/intake/documents/42",
+        json={
+            "expected_modified": "2026-10-16T12:00:00Z",
+            "metadata": {
+                "tags": [1, 2],
+                "custom_fields": [{"field": 9, "value": None}],
+            },
+            "disposition": "file_only",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["filed"] is True
+    mock_paperless.update_document.assert_awaited_once_with(
+        42,
+        {
+            "tags": [2],
+            "custom_fields": [{"field": 9, "value": None}],
+        },
     )
 
 

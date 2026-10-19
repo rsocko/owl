@@ -25,6 +25,8 @@ import DocumentWorkspaceDocumentView from '../DocumentWorkspaceDocumentView';
 import DocumentMetadataTab from '../tabs/DocumentMetadataTab';
 import DocumentOcrTab from '../tabs/DocumentOcrTab';
 import WorkspaceQueueControls from '../WorkspaceQueueControls';
+import CurrencyInput from '../../CurrencyInput';
+import { formatUsdCurrency } from '../../../lib/currency';
 import '../../../styles/document-workspace-review.css';
 import '../../../styles/document-workspace.css';
 
@@ -394,13 +396,10 @@ function ActionCorrectionEditor({
       </label>
       <label>
         <span>Amount</span>
-        <input
-          aria-label={`Corrected amount${suffix}`}
-          type="number"
-          min="0"
-          step="0.01"
+        <CurrencyInput
+          label={`Corrected amount${suffix}`}
           value={draft.amount}
-          onChange={(event) => onChange({ ...draft, amount: event.target.value })}
+          onChange={(amount) => onChange({ ...draft, amount })}
         />
       </label>
     </div>
@@ -1277,7 +1276,7 @@ export default function ReviewWorkflow() {
                       </div>
                       <div className="triage-detail-row">
                         <span>Amount</span>
-                        <strong>{String(selectedItem.metadata?.amount ?? '—')}</strong>
+                        <strong>{formatUsdCurrency(selectedItem.metadata?.amount) || '—'}</strong>
                       </div>
                     </div>
                     {selectedReviewCanResolve && actionCorrection && (

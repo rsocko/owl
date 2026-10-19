@@ -236,6 +236,7 @@ describe('Needs Review actions', () => {
 
     const type = await screen.findByLabelText('Corrected action type');
     expect(container.querySelector('.document-workspace-detail-host .document-workspace-document')).toBeInTheDocument();
+    expect(container.querySelector('.document-workspace-frame-preview > iframe')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Actions' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'Metadata' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'OCR' })).toBeInTheDocument();
@@ -307,7 +308,7 @@ describe('Needs Review actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reset to suggested values' }));
 
     expect(screen.getByRole('button', { name: 'Accept suggestion' })).toBeEnabled();
-    expect(screen.getByLabelText('Corrected amount')).toHaveValue(25);
+    expect(screen.getByLabelText('Corrected amount')).toHaveValue('$25.00');
   });
 
   it('accepts multiple proposed actions as one document review', async () => {
@@ -451,7 +452,7 @@ describe('Needs Review actions', () => {
     );
 
     expect(await screen.findByText('Corrections saved')).toBeTruthy();
-    expect(screen.getByText('395')).toBeTruthy();
+    expect(screen.getByText('$395.00')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'View action' })).toHaveAttribute(
       'href',
       '#/actions/42',
