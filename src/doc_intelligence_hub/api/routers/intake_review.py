@@ -897,14 +897,21 @@ async def list_intake_documents(
     cursor: str | None = None,
     search: str = Query(default="", max_length=200),
     queue_filter: Literal["all", "actions", "missing_type"] = "all",
+    sort: Literal["newest", "oldest", "document_date", "title"] = "newest",
 ) -> dict[str, Any]:
     client = make_paperless_client(request, timeout=30.0)
     try:
         try:
             inbox_tag_id = await _resolve_inbox_tag_id(client)
+            ordering = {
+                "newest": "-id",
+                "oldest": "id",
+                "document_date": "-created",
+                "title": "title",
+            }[sort]
             scope_params = {
                 "tags__id__in": str(inbox_tag_id),
-                "ordering": "-id",
+                "ordering": ordering,
             }
             if search.strip():
                 scope_params["query"] = search.strip()

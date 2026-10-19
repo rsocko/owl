@@ -5,7 +5,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
-  Search,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -24,6 +23,7 @@ import {
   type DocumentActionStatus,
 } from '../../../lib/documentActions';
 import OcrFocusInspector from '../../OcrFocusInspector';
+import WorkspaceQueueControls from '../WorkspaceQueueControls';
 import { useOcrSummary } from '../../../hooks/useOcrSummary';
 import { endpoints, type DocumentSummaryModel } from '../../../lib/api';
 import { getToastDuration } from '../../../lib/toast';
@@ -31,6 +31,7 @@ import '../../../styles/document-workspace.css';
 
 type LifecycleFilter = 'pending' | 'snoozed' | 'resolved';
 type DueFilter = 'all' | 'overdue' | 'upcoming';
+type ActionSort = 'due_asc' | 'due_desc' | 'amount_desc' | 'recent';
 type WorkspaceTab = 'metadata' | 'actions' | 'related' | 'ocr';
 type ActionType = 'PAY' | 'RESPOND' | 'REVIEW' | 'SCHEDULE' | 'SHARE' | 'SIGN' | 'TASK';
 type ActionStatus = 'completed' | 'dismissed' | 'pending' | 'acknowledged' | 'snoozed' | 'not_an_action';
@@ -199,9 +200,44 @@ function documentGroups(actions: ActionItem[], matching: ActionItem[]): Document
       });
     }
   }
-  return [...groups.values()].sort((left, right) => {
-    const leftDue = left.matchingActions.map((action) => action.due_date || '9999-12-31').sort()[0];
-    const rightDue = right.matchingActions.map((action) => action.due_date || '9999-12-31').sort()[0];
+  return [...groups.values()];
+}
+
+function groupDue(group: DocumentGroup, direction: 'asc' | 'desc') {
+  const dates = group.matchingActions
+    .map((action) => action.due_date?.slice(0, 10))
+    .filter((value): value is string => Boolean(value))
+    .sort();
+  return direction === 'asc' ? dates[0] : dates.at(-1);
+}
+
+function groupAmount(group: DocumentGroup) {
+  return group.matchingActions.reduce((sum, action) => sum + (action.amount ?? 0), 0);
+}
+
+function groupCreatedAt(group: DocumentGroup) {
+  return Math.max(...group.matchingActions.map((action) => Date.parse(action.created_at ?? '') || 0));
+}
+
+function sortDocumentGroups(groups: DocumentGroup[], sort: ActionSort) {
+  return [...groups].sort((left, right) => {
+    if (sort === 'amount_desc') {
+      return groupAmount(right) - groupAmount(left) || left.documentId - right.documentId;
+    }
+    if (sort === 'recent') {
+      return groupCreatedAt(right) - groupCreatedAt(left) || left.documentId - right.documentId;
+    }
+    if (sort === 'due_desc') {
+      const leftDue = groupDue(left, 'desc');
+      const rightDue = groupDue(right, 'desc');
+      if (!leftDue) return rightDue ? 1 : left.documentId - right.documentId;
+      if (!rightDue) return -1;
+      return rightDue.localeCompare(leftDue) || left.documentId - right.documentId;
+    }
+    const leftDue = groupDue(left, 'asc');
+    const rightDue = groupDue(right, 'asc');
+    if (!leftDue) return rightDue ? 1 : left.documentId - right.documentId;
+    if (!rightDue) return -1;
     return leftDue.localeCompare(rightDue) || left.documentId - right.documentId;
   });
 }
@@ -225,8 +261,9 @@ export default function ActionsWorkflow() {
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
   const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>('pending');
-  const [dueFilter, setDueFilter] = useState<DueFilter>('all');
-  const [typeFilter, setTypeFilter] = useState<'all' | ActionType>('all');
+  const [dueFilters, setDueFilters] = useState<Array<Exclude<DueFilter, 'all'>>>([]);
+  const [typeFilters, setTypeFilters] = useState<ActionType[]>([]);
+  const [actionSort, setActionSort] = useState<ActionSort>('due_asc');
   const [query, setQuery] = useState('');
   const [selectedActionId, setSelectedActionId] = useState<number | null>(linkedActionId);
   const [tab, setTab] = useState<WorkspaceTab>('actions');
@@ -278,9 +315,10 @@ export default function ActionsWorkflow() {
 
   const matchingActions = useMemo(() => actions.filter((action) => {
     if (!statusMatches(action, lifecycleFilter)) return false;
-    if (typeFilter !== 'all' && normalizedType(action.action_type) !== typeFilter) return false;
-    if (dueFilter === 'overdue' && !isOverdue(action)) return false;
-    if (dueFilter === 'upcoming' && !isUpcoming(action)) return false;
+    if (typeFilters.length && !typeFilters.includes(normalizedType(action.action_type))) return false;
+    if (dueFilters.length && !dueFilters.some((filter) => (
+      filter === 'overdue' ? isOverdue(action) : isUpcoming(action)
+    ))) return false;
     if (query.trim()) {
       const needle = query.trim().toLowerCase();
       const haystack = [
@@ -293,9 +331,12 @@ export default function ActionsWorkflow() {
       if (!haystack.includes(needle)) return false;
     }
     return true;
-  }), [actions, dueFilter, lifecycleFilter, query, typeFilter]);
+  }), [actions, dueFilters, lifecycleFilter, query, typeFilters]);
 
-  const groups = useMemo(() => documentGroups(actions, matchingActions), [actions, matchingActions]);
+  const groups = useMemo(
+    () => sortDocumentGroups(documentGroups(actions, matchingActions), actionSort),
+    [actionSort, actions, matchingActions],
+  );
   const selectedAction = useMemo(
     () => actions.find((action) => action.id === selectedActionId) ?? null,
     [actions, selectedActionId],
@@ -472,6 +513,24 @@ export default function ActionsWorkflow() {
     type,
     count: actions.filter((action) => statusMatches(action, lifecycleFilter) && normalizedType(action.action_type) === type).length,
   }));
+  const dueOptions = ([
+    ['overdue', 'Overdue', actions.filter((action) => statusMatches(action, lifecycleFilter) && isOverdue(action)).length],
+    ['upcoming', 'Upcoming', actions.filter((action) => statusMatches(action, lifecycleFilter) && isUpcoming(action)).length],
+  ] as const);
+
+  const toggleDueFilter = (value: string) => {
+    const filter = value as Exclude<DueFilter, 'all'>;
+    setDueFilters((current) => current.includes(filter)
+      ? current.filter((candidate) => candidate !== filter)
+      : [...current, filter]);
+  };
+
+  const toggleTypeFilter = (value: string) => {
+    const filter = value as ActionType;
+    setTypeFilters((current) => current.includes(filter)
+      ? current.filter((candidate) => candidate !== filter)
+      : [...current, filter]);
+  };
 
   return (
     <DocumentWorkspaceFrame
@@ -497,75 +556,79 @@ export default function ActionsWorkflow() {
         {!railCollapsed ? (
           <>
             <div className="document-workspace-tools">
-              <label className="document-workspace-search">
-                <Search size={16} />
-                <input
-                  aria-label="Search action documents"
-                  placeholder="Find document, action, or correspondent"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                />
-              </label>
-              <div className="workspace-filter-group">
-                <span>Status</span>
-                <div className="workspace-segments">
-                  {([
-                    ['pending', 'Pending', counts.pending],
-                    ['snoozed', 'Remind later', counts.snoozed],
-                    ['resolved', 'Resolved', counts.resolved],
-                  ] as const).map(([value, label, count]) => (
-                    <button
-                      type="button"
-                      key={value}
-                      className={lifecycleFilter === value ? 'active' : ''}
-                      onClick={() => setLifecycleFilter(value)}
-                    >
-                      {label} <b>{count}</b>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="workspace-filter-group">
-                <span>Due window</span>
-                <div className="workspace-chips">
-                  {([
-                    ['all', 'All'],
-                    ['overdue', 'Overdue'],
-                    ['upcoming', 'Upcoming'],
-                  ] as const).map(([value, label]) => (
-                    <button
-                      type="button"
-                      key={value}
-                      className={dueFilter === value ? 'active' : ''}
-                      onClick={() => setDueFilter(value)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="workspace-filter-group">
-                <span>Action type</span>
-                <div className="workspace-chips">
-                  <button
-                    type="button"
-                    className={typeFilter === 'all' ? 'active' : ''}
-                    onClick={() => setTypeFilter('all')}
-                  >
-                    All <b>{actions.filter((action) => statusMatches(action, lifecycleFilter)).length}</b>
-                  </button>
-                  {actionTypes.map(({ type, count }) => (
-                    <button
-                      type="button"
-                      key={type}
-                      className={typeFilter === type ? 'active' : ''}
-                      onClick={() => setTypeFilter(type)}
-                    >
-                      {type.charAt(0) + type.slice(1).toLowerCase()} <b>{count}</b>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <WorkspaceQueueControls
+                search={{
+                  value: query,
+                  placeholder: 'Find document, action, or correspondent',
+                  ariaLabel: 'Search action documents',
+                  onChange: setQuery,
+                }}
+                primary={{
+                  value: lifecycleFilter,
+                  ariaLabel: 'Action status',
+                  options: [
+                    { value: 'pending', label: 'Pending', count: counts.pending },
+                    { value: 'snoozed', label: 'Remind later', count: counts.snoozed },
+                    { value: 'resolved', label: 'Resolved', count: counts.resolved },
+                  ],
+                  onChange: (value) => setLifecycleFilter(value as LifecycleFilter),
+                }}
+                filterLabel="Filter actions"
+                filterGroups={[
+                  {
+                    label: 'Due window',
+                    mode: 'multiple',
+                    selected: dueFilters,
+                    onSelect: toggleDueFilter,
+                    options: dueOptions.map(([value, label, count]) => ({ value, label, count })),
+                  },
+                  {
+                    label: 'Action type',
+                    mode: 'multiple',
+                    selected: typeFilters,
+                    onSelect: toggleTypeFilter,
+                    options: actionTypes.map(({ type, count }) => ({
+                      value: type,
+                      label: type.charAt(0) + type.slice(1).toLowerCase(),
+                      count,
+                    })),
+                  },
+                ]}
+                activeFilters={[
+                  ...dueFilters.map((filter) => {
+                    const option = dueOptions.find(([value]) => value === filter);
+                    return {
+                      key: `due-${filter}`,
+                      label: option?.[1] ?? filter,
+                      count: option?.[2],
+                      onRemove: () => toggleDueFilter(filter),
+                    };
+                  }),
+                  ...typeFilters.map((filter) => {
+                    const option = actionTypes.find(({ type }) => type === filter);
+                    return {
+                      key: `type-${filter}`,
+                      label: filter.charAt(0) + filter.slice(1).toLowerCase(),
+                      count: option?.count,
+                      onRemove: () => toggleTypeFilter(filter),
+                    };
+                  }),
+                ]}
+                onClearFilters={() => {
+                  setDueFilters([]);
+                  setTypeFilters([]);
+                }}
+                sort={{
+                  value: actionSort,
+                  options: [
+                    { value: 'due_asc', label: 'Oldest due first' },
+                    { value: 'due_desc', label: 'Newest due first' },
+                    { value: 'amount_desc', label: 'Highest amount' },
+                    { value: 'recent', label: 'Recently added' },
+                  ],
+                  onChange: (value) => setActionSort(value as ActionSort),
+                }}
+              />
             </div>
             <div className="document-workspace-queue">
               {groups.length ? groups.map((group) => {

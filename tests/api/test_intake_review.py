@@ -98,6 +98,27 @@ def test_list_intake_documents_applies_search_and_missing_type_to_paperless(clie
     )
 
 
+def test_list_intake_documents_applies_requested_sort_to_paperless(client, mock_paperless):
+    mock_paperless.resolve_tag_ids.return_value = [1]
+    mock_paperless.list_document_page.return_value = PaperlessPage(
+        results=(),
+        next_cursor=None,
+        total_count=0,
+    )
+
+    response = client.get("/api/intake/documents?sort=oldest")
+
+    assert response.status_code == 200
+    mock_paperless.list_document_page.assert_awaited_once_with(
+        page_size=100,
+        cursor=None,
+        scope_params={
+            "tags__id__in": "1",
+            "ordering": "id",
+        },
+    )
+
+
 def test_document_detail_combines_metadata_suggestions_actions_and_ocr(client, mock_paperless):
     mock_paperless.get_document.return_value = _document()
     mock_paperless.get_document_suggestions.return_value = {

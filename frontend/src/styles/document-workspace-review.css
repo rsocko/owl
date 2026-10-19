@@ -729,6 +729,7 @@
 }
 
 .document-review-workspace .document-workspace-search,
+.document-review-workspace .workspace-queue-controls,
 .document-review-workspace .workspace-filter-group,
 .document-review-workspace .triage-threshold-bar {
   grid-column: 1 / -1;

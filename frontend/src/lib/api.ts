@@ -281,12 +281,14 @@ export const endpoints = {
       cursor?: string | null;
       search?: string;
       filter?: 'all' | 'actions' | 'missing_type';
+      sort?: 'newest' | 'oldest' | 'document_date' | 'title';
     }) => {
       const query = new URLSearchParams();
       if (params?.pageSize != null) query.set('page_size', String(params.pageSize));
       if (params?.cursor) query.set('cursor', params.cursor);
       if (params?.search?.trim()) query.set('search', params.search.trim());
       if (params?.filter && params.filter !== 'all') query.set('queue_filter', params.filter);
+      if (params?.sort && params.sort !== 'newest') query.set('sort', params.sort);
       const suffix = query.toString();
       return api.get(`/api/intake/documents${suffix ? `?${suffix}` : ''}`);
     },

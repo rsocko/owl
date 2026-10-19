@@ -236,6 +236,18 @@ describe('DocumentWorkspace actions mode', () => {
     expect(screen.getByText('2 actions · PAY + SIGN')).toBeInTheDocument();
   });
 
+  it('filters action types from the compact filter popover', async () => {
+    renderWorkspace();
+
+    await screen.findByRole('button', { name: /Utility bill/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Filter actions' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Pay 1' }));
+
+    expect(screen.getByRole('button', { name: /Utility bill/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Insurance renewal/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove Pay filter' })).toBeInTheDocument();
+  });
+
   it('requires an explicit save for action edits', async () => {
     renderWorkspace();
 
