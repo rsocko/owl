@@ -12,6 +12,7 @@ import {
   type DocumentActionStatus,
   type DocumentActionType,
 } from '../lib/documentActions';
+import CurrencyInput from './CurrencyInput';
 import { Button, EmptyState, ErrorState } from './ui';
 
 interface PaymentCandidate {
@@ -518,7 +519,12 @@ function ActionForm({
       <label><span>Type</span><select value={draft.action_type} onChange={(event) => onChange({ ...draft, action_type: event.target.value as DocumentActionType })}>{DOCUMENT_ACTION_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>
       <label className="wide"><span>Title</span><input value={draft.title} onChange={(event) => onChange({ ...draft, title: event.target.value })} /></label>
       {schema.owner ? <label><span>{schema.owner}</span><input value={draft.payee_or_owner} onChange={(event) => onChange({ ...draft, payee_or_owner: event.target.value })} /></label> : null}
-      {schema.amount ? <label><span>Amount</span><input type="number" min="0" step="0.01" value={draft.amount} onChange={(event) => onChange({ ...draft, amount: event.target.value })} /></label> : null}
+      {schema.amount ? (
+        <label>
+          <span>Amount</span>
+          <CurrencyInput value={draft.amount} onChange={(amount) => onChange({ ...draft, amount })} />
+        </label>
+      ) : null}
       <label><span>{schema.due}</span><input type="date" value={draft.due_date} onChange={(event) => onChange({ ...draft, due_date: event.target.value })} /></label>
       {schema.reference ? <label><span>{schema.reference}</span><input value={draft.reference} onChange={(event) => onChange({ ...draft, reference: event.target.value })} /></label> : null}
       <label className="wide"><span>Details</span><textarea rows={3} value={draft.summary} onChange={(event) => onChange({ ...draft, summary: event.target.value })} /></label>
