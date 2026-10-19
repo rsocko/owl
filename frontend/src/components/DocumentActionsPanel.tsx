@@ -148,7 +148,6 @@ export default function DocumentActionsPanel({
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentError, setPaymentError] = useState('');
   const [paymentBusy, setPaymentBusy] = useState(false);
-  const [confirmPayment, setConfirmPayment] = useState(false);
   const [selectedPaymentCandidateId, setSelectedPaymentCandidateId] = useState<string | null>(null);
   const [pendingPaymentDecision, setPendingPaymentDecision] = useState<PendingPaymentDecision | null>(null);
   const [selectionWarning, setSelectionWarning] = useState('');
@@ -259,23 +258,6 @@ export default function DocumentActionsPanel({
       }
     } catch (requestError) {
       setPaymentError(requestError instanceof Error ? requestError.message : 'Could not review this payment candidate.');
-    } finally {
-      setPaymentBusy(false);
-    }
-  };
-
-  const confirmPaymentAndComplete = async () => {
-    if (!selectedAction || !paymentCheck?.candidates[0]) return;
-    setPaymentBusy(true);
-    try {
-      await endpoints.actionQueue.confirmPaymentAndComplete(String(selectedAction.id), {
-        revision: paymentCheck.revision,
-        idempotency_key: `owl-confirm-payment:${selectedAction.id}:${paymentCheck.revision}`,
-      });
-      setConfirmPayment(false);
-      await onRefresh();
-    } catch (requestError) {
-      setPaymentError(requestError instanceof Error ? requestError.message : 'Could not confirm payment.');
     } finally {
       setPaymentBusy(false);
     }
@@ -400,7 +382,6 @@ export default function DocumentActionsPanel({
                 && (selectedAction.due_date || selectedAction.document_date),
               )}
               onCheck={() => void checkForPayment()}
-              onConfirm={() => setConfirmPayment(true)}
               selectedCandidateId={selectedPaymentCandidateId}
               onSelectCandidate={setSelectedPaymentCandidateId}
               onReviewCandidate={(action, candidate) => {
@@ -444,19 +425,6 @@ export default function DocumentActionsPanel({
         </div>
       ) : null}
 
-      {confirmPayment && selectedAction && paymentCheck ? (
-        <div className="workspace-dialog-backdrop">
-          <section role="dialog" aria-modal="true" aria-labelledby="shared-confirm-payment-title" className="workspace-dialog">
-            <h2 id="shared-confirm-payment-title">Confirm this posted payment?</h2>
-            <p>OWL will record your confirmation and complete the selected action and obligation in one operation.</p>
-            <div>
-              <Button onClick={() => setConfirmPayment(false)}>Cancel</Button>
-              <Button variant="primary" onClick={() => void confirmPaymentAndComplete()}>Confirm payment and complete</Button>
-            </div>
-          </section>
-        </div>
-      ) : null}
-
       {pendingPaymentDecision && selectedAction && paymentCheck ? (
         <div className="workspace-dialog-backdrop">
           <section role="dialog" aria-modal="true" aria-labelledby="review-payment-candidate-title" className="workspace-dialog">
@@ -465,7 +433,7 @@ export default function DocumentActionsPanel({
                 ? 'Confirm this transaction?'
                 : pendingPaymentDecision.action === 'reject_all'
                   ? 'None of these transactions match?'
-                  : paymentCheck.state === 'no_match'
+                  : paymentCheck.state === 'no_match' || paymentCheck.state === 'posted_match'
                     ? 'Mark this as not the match?'
                     : 'Discard this candidate?'}
             </h2>
@@ -476,7 +444,7 @@ export default function DocumentActionsPanel({
                   : 'OWL will record this pending transaction as the selected match without completing the obligation.'
                 : pendingPaymentDecision.action === 'reject_all'
                   ? 'OWL will reject every suggested transaction. The payment action will remain open.'
-                  : paymentCheck.state === 'no_match'
+                  : paymentCheck.state === 'no_match' || paymentCheck.state === 'posted_match'
                     ? 'OWL will record that this transaction is not the payment and remove it from the ranked results.'
                     : 'OWL will remove this transaction from the candidate list. You can run the payment check again later.'}
             </p>
@@ -496,7 +464,7 @@ export default function DocumentActionsPanel({
                       : 'Confirm pending match'
                     : pendingPaymentDecision.action === 'reject_all'
                       ? 'Reject all candidates'
-                      : paymentCheck.state === 'no_match'
+                      : paymentCheck.state === 'no_match' || paymentCheck.state === 'posted_match'
                         ? 'Not the match'
                         : 'Discard candidate'}
               </Button>
@@ -580,7 +548,6 @@ function PaymentCheckPanel({
   busy,
   eligible,
   onCheck,
-  onConfirm,
   selectedCandidateId,
   onSelectCandidate,
   onReviewCandidate,
@@ -591,7 +558,6 @@ function PaymentCheckPanel({
   busy: boolean;
   eligible: boolean;
   onCheck: () => void;
-  onConfirm: () => void;
   selectedCandidateId: string | null;
   onSelectCandidate: (candidateId: string) => void;
   onReviewCandidate: (action: PaymentCandidateDecision, candidate?: PaymentCandidate) => void;
@@ -602,7 +568,8 @@ function PaymentCheckPanel({
   const checking = busy || paymentCheck?.state === 'checking';
   const unavailable = !loading && !paymentCheck && Boolean(error);
   const closestResults = paymentCheck?.state === 'no_match';
-  const rankedPostedResults = paymentCheck?.state === 'posted_match' && candidates.length > 1;
+  const postedResults = paymentCheck?.state === 'posted_match';
+  const rankedPostedResults = postedResults && candidates.length > 1;
   const candidateHeading = paymentCheck?.state === 'multiple_matches'
     ? 'Candidates requiring review'
     : closestResults
@@ -709,7 +676,7 @@ function PaymentCheckPanel({
                     </ul>
                   </details>
                 ) : null}
-                {closestResults || rankedPostedResults ? (
+                {closestResults || postedResults ? (
                   <div className="payment-candidate-actions">
                     <Button
                       variant="ghost"
@@ -717,7 +684,7 @@ function PaymentCheckPanel({
                       disabled={busy}
                       onClick={() => onReviewCandidate('reject', item)}
                     >
-                      {closestResults ? 'Not the match' : 'Discard'}
+                      Not the match
                     </Button>
                     <Button
                       variant="primary"
@@ -735,12 +702,6 @@ function PaymentCheckPanel({
         </section>
       ) : paymentCheck?.state === 'no_match' ? (
         <p className="payment-no-candidates">No transaction had enough matching evidence to rank.</p>
-      ) : null}
-      {paymentCheck?.state === 'posted_match' && !rankedPostedResults ? (
-        <div className="payment-check-confirm">
-          <span>A posted match does not complete this obligation until you confirm it.</span>
-          <Button variant="primary" size="sm" disabled={busy} onClick={onConfirm}>Confirm payment and complete</Button>
-        </div>
       ) : null}
       {rankedPostedResults ? (
         <div className="payment-check-confirm">
