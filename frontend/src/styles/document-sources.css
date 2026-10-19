@@ -327,6 +327,10 @@
 .source-section > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
 .source-section h3 { margin: 0; font-size: .85rem; }
 .source-section header p { margin: .18rem 0 0; color: var(--text-muted); font-size: .64rem; }
+.source-series-heading { align-items: center !important; }
+.source-series-actions { display: flex; align-items: center; gap: .4rem; }
+.source-series-actions .btn { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
+.source-series-actions .btn svg { width: .75rem; height: .75rem; }
 .source-relationships { margin-top: .7rem; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
 .source-relationships article {
   padding: .7rem;
@@ -351,6 +355,38 @@
   color: var(--text-muted);
   font-size: .64rem;
 }
+.source-series-empty span { display: grid; gap: .12rem; }
+.source-series-empty strong { color: var(--text); font-size: .66rem; }
+.source-series-empty small { font-size: .6rem; line-height: 1.45; }
+.source-analysis-results { margin-top: .75rem; display: grid; gap: .45rem; }
+.source-analysis-summary {
+  padding: .65rem .7rem;
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  border-radius: .55rem;
+  background: var(--selected-bg);
+  color: var(--accent);
+}
+.source-analysis-summary > svg { flex: 0 0 auto; }
+.source-analysis-summary > span { display: grid; gap: .1rem; color: var(--text); }
+.source-analysis-summary strong { font-size: .68rem; }
+.source-analysis-summary small { color: var(--text-muted); font-size: .58rem; }
+.source-analysis-candidate {
+  padding: .6rem .7rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  border: 1px solid var(--border);
+  border-radius: .55rem;
+  background: var(--card);
+}
+.source-analysis-candidate > div { display: grid; gap: .12rem; }
+.source-analysis-candidate strong { font-size: .68rem; }
+.source-analysis-candidate span { color: var(--text-muted); font-size: .58rem; }
+.source-analysis-candidate .btn { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
+.source-analysis-empty { margin: 0; padding: .65rem .7rem; border: 1px dashed var(--border); border-radius: .55rem; color: var(--text-muted); font-size: .62rem; }
 
 .source-series-list { margin-top: .75rem; display: grid; gap: .65rem; }
 .source-series-card { border: 1px solid var(--border); border-radius: .7rem; overflow: hidden; background: var(--card); }
@@ -756,6 +792,9 @@
   .expectation-field-grid { grid-template-columns: 1fr; }
   .expectation-choice-grid button:last-child:nth-child(odd) { grid-column: auto; }
   .source-series-card footer { align-items: stretch; flex-direction: column; }
+  .source-series-heading,
+  .source-analysis-candidate { align-items: stretch !important; flex-direction: column; }
+  .source-series-actions { align-items: stretch; flex-direction: column; }
   .signal-evidence dl { grid-template-columns: 1fr; }
   .signal-evidence dl div:nth-child(even) { border-left: 0; }
   .signal-evidence dl div + div { border-top: 1px solid var(--border); }

@@ -9,8 +9,10 @@ import {
   Filter,
   Link2,
   LoaderCircle,
+  Plus,
   Search,
   SlidersHorizontal,
+  Sparkles,
   RefreshCw,
   Unlink,
 } from 'lucide-react';
@@ -26,6 +28,8 @@ import {
   type DocumentSeries,
   type DocumentSource,
   type ExternalSignal,
+  type SeriesAnalysisResult,
+  type SeriesAnalysisSuggestion,
   type SourceDisposition,
 } from '../lib/documentSources';
 
@@ -549,12 +553,22 @@ function SourceEvidence({
   expectations,
   signals,
   onConfigure,
+  onAnalyze,
+  onCreateSeries,
+  analysis,
+  analyzing,
+  creatingSeriesKey,
 }: {
   source: DocumentSource;
   series: DocumentSeries[];
   expectations: DocumentExpectation[];
   signals: ExternalSignal[];
   onConfigure: (seriesId?: string) => void;
+  onAnalyze: () => void;
+  onCreateSeries: (suggestion: SeriesAnalysisSuggestion) => void;
+  analysis: SeriesAnalysisResult | null;
+  analyzing: boolean;
+  creatingSeriesKey: string | null;
 }) {
   const sourceSeries = series.filter((item) => item.source_correspondent_id === source.correspondent_id);
   const sourceExpectations = expectations.filter((item) => item.source_correspondent_id === source.correspondent_id);
@@ -606,12 +620,54 @@ function SourceEvidence({
           ) : <div className="source-inline-empty"><Unlink /> No Tyrion relationship is required for this source.</div>}
         </section>
         <section className="source-section">
-          <header>
+          <header className="source-series-heading">
             <div>
               <h3>Reviewed document series</h3>
-              <p>Membership identifies which documents belong together. Expectation policy remains separate.</p>
+              <p>Analyze history, confirm which documents belong together, then create expectation policy separately.</p>
+            </div>
+            <div className="source-series-actions">
+              <Button disabled={analyzing} onClick={onAnalyze}>
+                {analyzing ? <LoaderCircle className="spin" /> : <Sparkles />} {analysis ? 'Analyze again' : 'Analyze history'}
+              </Button>
+              <Button
+                variant="primary"
+                disabled={sourceSeries.length === 0}
+                onClick={() => onConfigure(sourceSeries[0]?.id)}
+                title={sourceSeries.length === 0 ? 'Confirm a reviewed series before creating an expectation.' : undefined}
+              >
+                <Plus /> Create expectation
+              </Button>
             </div>
           </header>
+          {analysis ? (
+            <div className="source-analysis-results" role="status">
+              <div className="source-analysis-summary">
+                <Sparkles aria-hidden="true" />
+                <span>
+                  <strong>{analysis.observed_summary.candidate_series_count} candidate {analysis.observed_summary.candidate_series_count === 1 ? 'series' : 'series'} found</strong>
+                  <small>Analyzed {analysis.observed_summary.document_count} Paperless {analysis.observed_summary.document_count === 1 ? 'document' : 'documents'}. Confirming a candidate creates membership only, never an expectation.</small>
+                </span>
+              </div>
+              {analysis.suggestions.filter((suggestion) => !suggestion.statement_series_id).map((suggestion) => (
+                <article className="source-analysis-candidate" key={suggestion.suggestion_key}>
+                  <div>
+                    <strong>{suggestion.series_discriminator === 'default' ? `${source.current_name} documents` : humanize(suggestion.series_discriminator)}</strong>
+                    <span>{humanize(suggestion.kind)} · {suggestion.document_ids.length} documents · {humanize(suggestion.expectation_mode)}</span>
+                  </div>
+                  <Button
+                    variant="primary"
+                    disabled={creatingSeriesKey !== null || suggestion.document_ids.length === 0}
+                    onClick={() => onCreateSeries(suggestion)}
+                  >
+                    {creatingSeriesKey === suggestion.suggestion_key ? <LoaderCircle className="spin" /> : <Check />} Confirm series
+                  </Button>
+                </article>
+              ))}
+              {analysis.suggestions.length === 0 ? (
+                <p className="source-analysis-empty">No repeatable grouping was found. Use “Waiting for more history” or “No series expected,” then revisit when evidence changes.</p>
+              ) : null}
+            </div>
+          ) : null}
           {sourceSeries.length > 0 ? (
             <div className="source-series-list">
               {sourceSeries.map((item) => {
@@ -654,8 +710,12 @@ function SourceEvidence({
               })}
             </div>
           ) : (
-            <div className="source-inline-empty">
-              <FileText /> No reviewed series exists yet. You can still record a source disposition without inventing policy.
+            <div className="source-inline-empty source-series-empty">
+              <FileText />
+              <span>
+                <strong>No reviewed series yet</strong>
+                <small>Analyze this source’s Paperless history to find candidate groupings. Confirm a series before creating an expectation.</small>
+              </span>
             </div>
           )}
         </section>
@@ -898,6 +958,9 @@ export default function DocumentSources() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<SeriesAnalysisResult | null>(null);
+  const [creatingSeriesKey, setCreatingSeriesKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -936,9 +999,54 @@ export default function DocumentSources() {
 
   const selectSource = (id: number) => {
     setDetailLoading(true);
+    setAnalysis(null);
     setSelectedSourceId(id);
     navigate(`/sources/${id}`, { replace: true });
     window.setTimeout(() => setDetailLoading(false), 100);
+  };
+
+  const analyzeSelectedSource = async () => {
+    if (!selectedSource) return;
+    setAnalyzing(true);
+    try {
+      const result = await endpoints.documentSources.analyzeSeries(selectedSource.correspondent_id) as SeriesAnalysisResult;
+      setAnalysis(result);
+      setToast(result.suggestions.length
+        ? `Found ${result.suggestions.length} candidate ${result.suggestions.length === 1 ? 'series' : 'series'} for ${selectedSource.current_name}.`
+        : `No repeatable series found for ${selectedSource.current_name}.`);
+    } catch (analysisError) {
+      setToast(errorMessage(analysisError));
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const createSeriesFromSuggestion = async (suggestion: SeriesAnalysisSuggestion) => {
+    if (!selectedSource) return;
+    setCreatingSeriesKey(suggestion.suggestion_key);
+    try {
+      const created = await endpoints.documentSources.createSeries({
+        source_correspondent_id: selectedSource.correspondent_id,
+        name: suggestion.series_discriminator === 'default'
+          ? `${selectedSource.current_name} documents`
+          : humanize(suggestion.series_discriminator),
+        kind: suggestion.kind,
+        discriminator: suggestion.series_discriminator,
+        document_ids: suggestion.document_ids,
+      }) as DocumentSeries;
+      setSeries((current) => [...current, created]);
+      setAnalysis((current) => current ? {
+        ...current,
+        suggestions: current.suggestions.map((item) => item.suggestion_key === suggestion.suggestion_key
+          ? { ...item, statement_series_id: created.id }
+          : item),
+      } : current);
+      setToast(`${created.name} confirmed as a reviewed series. You can now create its expectation.`);
+    } catch (createError) {
+      setToast(errorMessage(createError));
+    } finally {
+      setCreatingSeriesKey(null);
+    }
   };
 
   const saveDisposition = async (disposition: SourceDisposition, revisitDate: string, notes: string) => {
@@ -1039,6 +1147,11 @@ export default function DocumentSources() {
               expectations={expectations}
               signals={signals}
               onConfigure={(seriesId) => navigate(`/sources/${selectedSource.correspondent_id}/expectations/new${seriesId ? `?series=${seriesId}` : ''}`)}
+              onAnalyze={() => void analyzeSelectedSource()}
+              onCreateSeries={(suggestion) => void createSeriesFromSuggestion(suggestion)}
+              analysis={analysis}
+              analyzing={analyzing}
+              creatingSeriesKey={creatingSeriesKey}
             />
             <DispositionPanel
               key={selectedSource.correspondent_id}
