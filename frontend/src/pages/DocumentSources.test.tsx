@@ -20,6 +20,8 @@ vi.mock('../lib/api', () => ({
       sync: vi.fn(),
       setDisposition: vi.fn(),
       setExternalSignalRelationship: vi.fn(),
+      analyzeSeries: vi.fn(),
+      createSeries: vi.fn(),
     },
     statements: {
       documentPreview: (id: string) => `/preview/${id}`,
@@ -204,6 +206,43 @@ describe('Document Sources', () => {
       aliases: ['Harbor Financial'],
       notes: 'Need another quarter of evidence.',
     }));
+  });
+
+  it('analyzes source history, confirms a reviewed series, and exposes expectation creation', async () => {
+    mockLoadedData({ sourceSeries: [], expectations: [] });
+    vi.mocked(endpoints.documentSources.analyzeSeries).mockResolvedValue({
+      correspondent_id: 41,
+      correspondent_name: 'Harbor Bank',
+      analyzed_at: '2026-10-19T00:00:00Z',
+      observed_summary: { document_count: 3, candidate_series_count: 1 },
+      suggestions: [{
+        suggestion_key: 'checking',
+        kind: 'statement',
+        series_discriminator: 'checking_4821',
+        statement_series_id: null,
+        expectation_mode: 'recurring',
+        document_ids: [101, 102, 103],
+        sample_document_ids: [101, 102, 103],
+        evidence: { confidence: 0.92, reason_codes: ['monthly_cadence'], sample_size: 3 },
+      }],
+    });
+    vi.mocked(endpoints.documentSources.createSeries).mockResolvedValue(series[0]);
+    renderPage();
+    await screen.findByRole('heading', { name: 'Harbor Bank' });
+
+    expect(screen.getByRole('button', { name: /create expectation/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /analyze history/i }));
+    expect(await screen.findByText(/1 candidate series found/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /confirm series/i }));
+
+    await waitFor(() => expect(endpoints.documentSources.createSeries).toHaveBeenCalledWith({
+      source_correspondent_id: 41,
+      name: 'Checking 4821',
+      kind: 'statement',
+      discriminator: 'checking_4821',
+      document_ids: [101, 102, 103],
+    }));
+    expect(screen.getByRole('button', { name: /create expectation/i })).toBeEnabled();
   });
 
   it('links an external signal to a source with zero expectation links and never creates policy implicitly', async () => {

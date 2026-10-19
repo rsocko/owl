@@ -32,10 +32,14 @@ from doc_intelligence_hub.modules.document_sources.models import (
     SeriesMemberPeriod,
     SourceReopenRequest,
 )
+from doc_intelligence_hub.modules.statements.correspondent_analysis import (
+    analyze_correspondent_policy,
+)
 from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSource,
     AcquisitionSourceCreate,
     AcquisitionSourceUpdate,
+    CorrespondentAnalysisResult,
     ExpectationPolicyPreview,
     PolicyApplyRequest,
     PolicyApplyResponse,
@@ -175,6 +179,48 @@ async def list_document_series(
         return database.list_series(correspondent_id)
     finally:
         database.close()
+
+
+@router.post(
+    "/sources/{correspondent_id}/series-analysis",
+    response_model=CorrespondentAnalysisResult,
+)
+async def analyze_source_series(
+    request: Request, correspondent_id: int
+) -> CorrespondentAnalysisResult:
+    database = _database(request)
+    client = make_paperless_client(request, timeout=60.0)
+    try:
+        source = database.get_source(correspondent_id)
+        if source is None:
+            raise_api_error(404, "document_source_not_found", "Document source not found.")
+        correspondents, tags, document_types = await client.fetch_all_metadata()
+        raw_documents = await client.list_documents(correspondent_id=correspondent_id)
+        documents = build_document_records(
+            raw_documents,
+            correspondents,
+            tags,
+            document_types,
+        )
+        existing_series = [
+            {
+                "id": item.id,
+                "name": item.name,
+                "correspondent_id": item.source_correspondent_id,
+                "correspondent_name": source.current_name,
+                "document_ids": item.document_ids,
+            }
+            for item in database.list_series(correspondent_id)
+        ]
+        return analyze_correspondent_policy(
+            correspondent_id,
+            source.current_name,
+            documents,
+            existing_series,
+        )
+    finally:
+        database.close()
+        await client.aclose()
 
 
 @router.post("/series", response_model=DocumentSeries, status_code=201)
