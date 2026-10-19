@@ -746,8 +746,8 @@ describe('DocumentWorkspace inbox mode', () => {
           field: 9,
           field_key: 'account_identifier',
           name: 'Account Identifier',
-          value: 'sockaloskyl',
-          stored_value: 'ending SKYL',
+          value: 'DEMOACCOUNTXYZ9',
+          stored_value: 'ending XYZ9',
           identifier_class: 'provider_account',
           recovered_from_document: true,
           data_type: 'string',
@@ -758,7 +758,7 @@ describe('DocumentWorkspace inbox mode', () => {
     });
     renderPage();
 
-    expect(await screen.findByLabelText('Account Identifier')).toHaveValue('sockaloskyl');
+    expect(await screen.findByLabelText('Account Identifier')).toHaveValue('DEMOACCOUNTXYZ9');
     expect(screen.getByLabelText('Identifier type')).toHaveValue('provider_account');
     expect(screen.getByText(
       'Recovered from document text. Save changes to replace the masked Paperless value.',
@@ -773,14 +773,14 @@ describe('DocumentWorkspace inbox mode', () => {
         metadata: {
           custom_fields: [{
             field: 9,
-            value: 'sockaloskyl',
+            value: 'DEMOACCOUNTXYZ9',
             identifier_class: 'provider_account',
           }],
         },
         base_metadata: {
           custom_fields: [{
             field: 9,
-            value: 'ending SKYL',
+            value: 'ending XYZ9',
           }],
         },
       }),

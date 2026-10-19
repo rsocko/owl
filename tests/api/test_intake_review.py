@@ -357,10 +357,10 @@ def test_core_hides_operational_fields_and_exposes_editable_document_fields(clie
 def test_core_recovers_exact_account_identifier_from_document_text(client, mock_paperless):
     intake_review._taxonomy_cache = None
     mock_paperless.get_document.return_value = _document(
-        custom_fields=[{"field": 9, "value": "ending SKYL"}]
+        custom_fields=[{"field": 9, "value": "ending XYZ9"}]
     )
     mock_paperless.get_document_content.return_value = (
-        "Patient Account\nAccount Number sockaloskyl\nStatement Date 09/11/2026"
+        "Customer Account\nAccount Number DEMOACCOUNTXYZ9\nStatement Date 09/11/2026"
     )
     mock_paperless.list_custom_fields.return_value = [
         {"id": 9, "name": "Account Identifier", "data_type": "string"},
@@ -374,8 +374,8 @@ def test_core_recovers_exact_account_identifier_from_document_text(client, mock_
         "field": 9,
         "field_key": "account_identifier",
         "name": "Account Identifier",
-        "value": "sockaloskyl",
-        "stored_value": "ending SKYL",
+        "value": "DEMOACCOUNTXYZ9",
+        "stored_value": "ending XYZ9",
         "identifier_class": "provider_account",
         "recovered_from_document": True,
         "data_type": "string",
@@ -390,7 +390,7 @@ def test_core_keeps_masked_identifier_when_document_has_no_matching_exact_value(
 ):
     intake_review._taxonomy_cache = None
     mock_paperless.get_document.return_value = _document(
-        custom_fields=[{"field": 9, "value": "ending SKYL"}]
+        custom_fields=[{"field": 9, "value": "ending XYZ9"}]
     )
     mock_paperless.get_document_content.return_value = "Account Number OTHER1234"
     mock_paperless.list_custom_fields.return_value = [
@@ -401,7 +401,7 @@ def test_core_keeps_masked_identifier_when_document_has_no_matching_exact_value(
 
     assert response.status_code == 200
     field = response.json()["document"]["review_fields"][0]
-    assert field["value"] == "ending SKYL"
+    assert field["value"] == "ending XYZ9"
     assert "stored_value" not in field
     assert "identifier_class" not in field
     assert "recovered_from_document" not in field
