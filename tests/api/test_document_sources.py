@@ -1,6 +1,9 @@
+import json
+
 from doc_intelligence_hub.modules.statements.correspondent_models import (
     paperless_deployment_identity,
 )
+from doc_intelligence_hub.modules.statements.database import Database
 
 
 def _configure_database(app, tmp_path) -> str:
@@ -138,7 +141,96 @@ def test_document_source_series_analysis_returns_reviewable_candidates(
     assert payload["observed_summary"]["document_count"] == 4
     assert payload["observed_summary"]["candidate_series_count"] == 1
     assert payload["suggestions"][0]["document_ids"] == [1, 2, 3, 4]
+    assert [item["title"] for item in payload["documents"]] == [
+        "Example Bank Checking Statement 2026-01",
+        "Example Bank Checking Statement 2026-02",
+        "Example Bank Checking Statement 2026-03",
+        "Example Bank Checking Statement 2026-04",
+    ]
+    assert client.get("/api/sources/42/series-analysis").json() == payload
     assert client.get("/api/series?correspondent_id=42").json() == []
+
+
+def test_series_analysis_can_target_a_linked_tyrion_account(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    database_path = _configure_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    mock_paperless.fetch_all_metadata.return_value = (
+        {42: "Example Bank"},
+        {7: "Finance"},
+        {3: "Statement"},
+    )
+    mock_paperless.list_documents.return_value = [
+        {
+            "id": 1,
+            "title": "Example Bank Checking 1234 January",
+            "correspondent": 42,
+            "document_type": 3,
+            "tags": [7],
+            "created": "2026-01-03",
+        },
+        {
+            "id": 2,
+            "title": "Example Bank Checking 1234 February",
+            "correspondent": 42,
+            "document_type": 3,
+            "tags": [7],
+            "created": "2026-02-03",
+        },
+        {
+            "id": 3,
+            "title": "Example Bank Savings 9876 January",
+            "correspondent": 42,
+            "document_type": 3,
+            "tags": [7],
+            "created": "2026-01-04",
+        },
+    ]
+    client.post("/api/sources/sync")
+
+    deployment_id = paperless_deployment_identity("http://paperless.test")
+    database = Database(database_path)
+    with database.connect() as connection:
+        connection.execute(
+            """INSERT INTO external_document_candidates (
+                   id, deployment_id, connector_ref, series_ref, source_generation,
+                   source_as_of, kind, active, display_hint, confidence, basis_json,
+                   account_name, institution_name, account_type, account_last_four
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "account-1234",
+                deployment_id,
+                "tyrion",
+                "checking-1234",
+                "test",
+                "2026-10-19T00:00:00Z",
+                "accountStatementCandidate",
+                1,
+                "Example Bank checking •••• 1234",
+                0.9,
+                json.dumps(["account_suffix"]),
+                "Checking",
+                "Example Bank",
+                "checking",
+                "1234",
+            ),
+        )
+    database.close()
+
+    response = client.post(
+        "/api/sources/42/series-analysis",
+        json={"signal_id": "account-1234"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["signal_id"] == "account-1234"
+    assert payload["signal_label"] == "Example Bank checking •••• 1234"
+    assert [item["id"] for item in payload["documents"]] == [1, 2]
+    assert client.get(
+        "/api/sources/42/series-analysis?signal_id=account-1234"
+    ).json() == payload
 
 
 def test_dismissed_series_candidate_stays_excluded_from_analysis(

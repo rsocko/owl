@@ -20,6 +20,7 @@ vi.mock('../lib/api', () => ({
       sync: vi.fn(),
       setDisposition: vi.fn(),
       setExternalSignalRelationship: vi.fn(),
+      getSeriesAnalysis: vi.fn(),
       analyzeSeries: vi.fn(),
       dismissSeriesCandidate: vi.fn(),
       createSeries: vi.fn(),
@@ -140,6 +141,7 @@ function renderPage(path = '/sources') {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(endpoints.documentSources.getSeriesAnalysis).mockResolvedValue(null);
 });
 
 describe('Document Sources', () => {
@@ -217,6 +219,12 @@ describe('Document Sources', () => {
       correspondent_name: 'Harbor Bank',
       analyzed_at: '2026-10-19T00:00:00Z',
       observed_summary: { document_count: 3, candidate_series_count: 1 },
+      low_evidence_document_count: 0,
+      documents: [
+        { id: 101, title: 'January checking statement', created: '2026-01-31', document_type: 'Statement', tags: [] },
+        { id: 102, title: 'February checking statement', created: '2026-02-28', document_type: 'Statement', tags: [] },
+        { id: 103, title: 'March checking statement', created: '2026-03-31', document_type: 'Statement', tags: [] },
+      ],
       suggestions: [{
         suggestion_key: 'checking',
         kind: 'statement',
@@ -235,16 +243,87 @@ describe('Document Sources', () => {
     expect(screen.getByRole('button', { name: /create expectation/i })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: /analyze history/i }));
     expect(await screen.findByText(/1 candidate series found/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /confirm series/i }));
+    fireEvent.click(screen.getByRole('button', { name: /inspect documents/i }));
+    expect(screen.getByRole('link', { name: /open january checking statement/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: /january checking statement/i }));
+    fireEvent.click(screen.getByRole('button', { name: /confirm 2 selected/i }));
 
     await waitFor(() => expect(endpoints.documentSources.createSeries).toHaveBeenCalledWith({
       source_correspondent_id: 41,
       name: 'Checking 4821',
       kind: 'statement',
       discriminator: 'checking_4821',
-      document_ids: [101, 102, 103],
+      document_ids: [102, 103],
     }));
     expect(screen.getByRole('button', { name: /create expectation/i })).toBeEnabled();
+  });
+
+  it('restores persisted analysis when the source workspace is revisited', async () => {
+    mockLoadedData({ sourceSeries: [], expectations: [] });
+    vi.mocked(endpoints.documentSources.getSeriesAnalysis).mockResolvedValue({
+      correspondent_id: 41,
+      correspondent_name: 'Harbor Bank',
+      analyzed_at: '2026-10-19T00:00:00Z',
+      observed_summary: { document_count: 3, candidate_series_count: 1 },
+      low_evidence_document_count: 0,
+      documents: [
+        { id: 101, title: 'January checking statement', created: '2026-01-31', document_type: 'Statement', tags: [] },
+        { id: 102, title: 'February checking statement', created: '2026-02-28', document_type: 'Statement', tags: [] },
+      ],
+      suggestions: [{
+        suggestion_key: 'checking',
+        kind: 'statement',
+        series_discriminator: 'checking_4821',
+        statement_series_id: null,
+        expectation_mode: 'recurring',
+        document_ids: [101, 102],
+        sample_document_ids: [101, 102],
+        evidence: { confidence: 0.92, reason_codes: ['monthly_cadence'], sample_size: 2 },
+      }],
+    });
+
+    renderPage('/sources/41');
+
+    expect(await screen.findByText(/1 candidate series found/i)).toBeInTheDocument();
+    expect(endpoints.documentSources.analyzeSeries).not.toHaveBeenCalled();
+  });
+
+  it('offers expectation setup and targeted history analysis for each linked Tyrion account', async () => {
+    mockLoadedData({
+      sourceSeries: [],
+      expectations: [],
+      signals: [{
+        ...signal,
+        relationship: {
+          signal_id: signal.id,
+          source_correspondent_id: 41,
+          expectation_ids: [],
+          resolution: 'linked',
+          safe_label: signal.display_hint,
+          revisit_date: null,
+          updated_at: '2026-10-18T00:00:00Z',
+        },
+      }],
+    });
+    vi.mocked(endpoints.documentSources.analyzeSeries).mockResolvedValue({
+      correspondent_id: 41,
+      correspondent_name: 'Harbor Bank',
+      analyzed_at: '2026-10-19T00:00:00Z',
+      signal_id: signal.id,
+      signal_label: signal.display_hint,
+      observed_summary: { document_count: 0, candidate_series_count: 0 },
+      low_evidence_document_count: 0,
+      documents: [],
+      suggestions: [],
+    });
+    renderPage('/sources/41');
+    await screen.findByRole('heading', { name: 'Harbor Bank' });
+
+    expect(screen.getByRole('button', { name: /set up expectation/i })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /find historical docs/i }));
+
+    await waitFor(() => expect(endpoints.documentSources.analyzeSeries).toHaveBeenCalledWith(41, signal.id));
+    expect(await screen.findByText(/Analyzed 0 Paperless documents for Harbor Bank checking/)).toBeInTheDocument();
   });
 
   it('shows source-defined expectations that do not have a reviewed series', async () => {
@@ -273,6 +352,12 @@ describe('Document Sources', () => {
       correspondent_name: 'Harbor Bank',
       analyzed_at: '2026-10-19T00:00:00Z',
       observed_summary: { document_count: 3, candidate_series_count: 1 },
+      low_evidence_document_count: 0,
+      documents: [
+        { id: 101, title: 'January checking statement', created: '2026-01-31', document_type: 'Statement', tags: [] },
+        { id: 102, title: 'February checking statement', created: '2026-02-28', document_type: 'Statement', tags: [] },
+        { id: 103, title: 'March checking statement', created: '2026-03-31', document_type: 'Statement', tags: [] },
+      ],
       suggestions: [{
         suggestion_key: 'checking',
         kind: 'statement',
@@ -289,10 +374,10 @@ describe('Document Sources', () => {
     await screen.findByRole('heading', { name: 'Harbor Bank' });
     fireEvent.click(screen.getByRole('button', { name: /analyze history/i }));
     await screen.findByText(/1 candidate series found/i);
-    fireEvent.click(screen.getByRole('button', { name: /^Dismiss/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Not a series/i }));
 
     await waitFor(() => expect(endpoints.documentSources.dismissSeriesCandidate).toHaveBeenCalledWith(41, [101, 102, 103]));
-    expect(screen.queryByRole('button', { name: /confirm series/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /confirm 3 selected/i })).not.toBeInTheDocument();
   });
 
   it('manually reopens a resolved source for review', async () => {

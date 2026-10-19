@@ -83,7 +83,18 @@ export interface SeriesAnalysisResult {
   observed_summary: {
     document_count: number;
     candidate_series_count: number;
+    excluded_document_count?: number;
   };
+  signal_id?: string | null;
+  signal_label?: string | null;
+  low_evidence_document_count: number;
+  documents: Array<{
+    id: number;
+    title: string;
+    created: string;
+    document_type?: string | null;
+    tags: string[];
+  }>;
   suggestions: SeriesAnalysisSuggestion[];
 }
 

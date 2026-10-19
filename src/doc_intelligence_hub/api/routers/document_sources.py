@@ -32,6 +32,9 @@ from doc_intelligence_hub.modules.document_sources.models import (
     SeriesAnalysisDismiss,
     SeriesMemberPeriod,
     SourceReopenRequest,
+    SourceSeriesAnalysisDocument,
+    SourceSeriesAnalysisRequest,
+    SourceSeriesAnalysisResult,
 )
 from doc_intelligence_hub.modules.statements.correspondent_analysis import (
     analyze_correspondent_policy,
@@ -40,7 +43,6 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     AcquisitionSource,
     AcquisitionSourceCreate,
     AcquisitionSourceUpdate,
-    CorrespondentAnalysisResult,
     ExpectationPolicyPreview,
     PolicyApplyRequest,
     PolicyApplyResponse,
@@ -184,11 +186,13 @@ async def list_document_series(
 
 @router.post(
     "/sources/{correspondent_id}/series-analysis",
-    response_model=CorrespondentAnalysisResult,
+    response_model=SourceSeriesAnalysisResult,
 )
 async def analyze_source_series(
-    request: Request, correspondent_id: int
-) -> CorrespondentAnalysisResult:
+    request: Request,
+    correspondent_id: int,
+    body: SourceSeriesAnalysisRequest | None = None,
+) -> SourceSeriesAnalysisResult:
     database = _database(request)
     legacy_database, deployment_id = _legacy_database(request)
     client = make_paperless_client(request, timeout=60.0)
@@ -204,6 +208,33 @@ async def analyze_source_series(
             tags,
             document_types,
         )
+        signal = None
+        if body and body.signal_id:
+            signal = next(
+                (
+                    item
+                    for item in legacy_database.list_external_candidates(deployment_id)
+                    if item.id == body.signal_id
+                ),
+                None,
+            )
+            if signal is None:
+                raise_api_error(404, "external_signal_not_found", "External signal not found.")
+            candidate_terms = (
+                [signal.account_last_four]
+                if signal.account_last_four
+                else [signal.account_name, signal.account_type]
+            )
+            terms = [
+                value.casefold()
+                for value in candidate_terms
+                if value and len(value.strip()) >= 3
+            ]
+            documents = [
+                document
+                for document in documents
+                if any(term in document.title.casefold() for term in terms)
+            ]
         existing_series = [
             {
                 "id": item.id,
@@ -214,7 +245,7 @@ async def analyze_source_series(
             }
             for item in database.list_series(correspondent_id)
         ]
-        return analyze_correspondent_policy(
+        result = analyze_correspondent_policy(
             correspondent_id,
             source.current_name,
             documents,
@@ -226,10 +257,61 @@ async def analyze_source_series(
                 )
             },
         )
+        suggestions = [
+            suggestion
+            for suggestion in result.suggestions
+            if suggestion.evidence.sample_size >= 2
+        ]
+        low_evidence_document_count = len(
+            {
+                document_id
+                for suggestion in result.suggestions
+                if suggestion.evidence.sample_size < 2
+                for document_id in suggestion.document_ids
+            }
+        )
+        response = SourceSeriesAnalysisResult(
+            **result.model_dump(exclude={"suggestions"}),
+            suggestions=suggestions,
+            signal_id=signal.id if signal else None,
+            signal_label=signal.display_hint if signal else None,
+            low_evidence_document_count=low_evidence_document_count,
+            documents=[
+                SourceSeriesAnalysisDocument(
+                    id=document.id,
+                    title=document.title,
+                    created=document.created,
+                    document_type=document.document_type,
+                    tags=document.tags,
+                )
+                for document in documents
+            ],
+        )
+        response.observed_summary.candidate_series_count = len(suggestions)
+        database.save_series_analysis(response)
+        return response
     finally:
         database.close()
         legacy_database.close()
         await client.aclose()
+
+
+@router.get(
+    "/sources/{correspondent_id}/series-analysis",
+    response_model=SourceSeriesAnalysisResult | None,
+)
+async def get_source_series_analysis(
+    request: Request,
+    correspondent_id: int,
+    signal_id: str | None = Query(default=None, max_length=200),
+) -> SourceSeriesAnalysisResult | None:
+    database = _database(request)
+    try:
+        if database.get_source(correspondent_id) is None:
+            raise_api_error(404, "document_source_not_found", "Document source not found.")
+        return database.get_series_analysis(correspondent_id, signal_id)
+    finally:
+        database.close()
 
 
 @router.post("/sources/{correspondent_id}/series-analysis/dismiss", status_code=204)
@@ -250,6 +332,7 @@ async def dismiss_source_series_candidate(
             group_key=None,
             excluded=True,
         )
+        database.clear_series_analysis(correspondent_id)
         return Response(status_code=204)
     finally:
         database.close()
