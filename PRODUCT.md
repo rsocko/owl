@@ -315,8 +315,9 @@ Key evidence includes:
   for payment-evidence ownership and reconciliation behavior;
 - [Feature Roadmap](docs/feature-roadmap.md) for the distinction between built
   and planned capabilities;
-- [Shared Scenarios](docs/modules/shared/overview-scenarios.md) for the current
-  statement, EOB, action, alert, and configuration scenarios;
+- [Use Case Catalog and User Journeys](docs/design/active/use-case-catalog-and-user-journeys.md)
+  for the canonical outcome catalog, cross-system ownership, primary journeys,
+  route coverage, and UX risks;
 - [Module Reference](docs/modules/shared/index.md) and the module-specific
   design documents under `docs/modules/` for detailed behavior; and
 - [Paperless Ecosystem Strategy](docs/research/paperless-ecosystem-strategy.md)
