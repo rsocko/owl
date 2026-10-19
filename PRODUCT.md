@@ -98,7 +98,8 @@ Typical work includes:
   uncertain beliefs in Needs Review;
 - resolving uncertain classifications, matches, duplicates, and groupings;
 - matching medical EOBs to bills and reviewing discrepancies;
-- tracking recurring statements and investigating gaps;
+- reviewing Paperless-anchored document sources, defining recurring-document
+  expectations, and investigating coverage gaps across document kinds;
 - connecting reminders, revisions, receipts, payments, and other supporting
   evidence to an obligation;
 - reviewing OCR quality or candidate improvements before changing a searchable
@@ -170,7 +171,8 @@ and refresh rather than silently overwrite it.
 - Needs Review queues for uncertain interpretation;
 - cross-document relationships and obligation consolidation;
 - reconciliation eligibility and evidence-backed decisions;
-- statement expectations, gaps, matching, and exception analysis;
+- document-source dispositions, recurring-document expectations, coverage
+  gaps, series matching, and exception analysis;
 - reviewable OCR quality assessment and candidate decisions; and
 - the authoritative record of why an OWL decision was made or changed.
 
@@ -415,8 +417,8 @@ Later UX and product work must settle these decisions with evidence rather than
 allowing individual screens to choose independently:
 
 1. **Primary navigation model:** determine the durable grouping and hierarchy
-   for Intake, Action Queue, Needs Review, relationships, statements, EOBs,
-   OCR quality, insights, and administration.
+   for Intake, Action Queue, Needs Review, relationships, Document Sources,
+   Document Coverage, EOBs, OCR quality, insights, and administration.
 2. **OWL versus Mission Control interaction split:** define which trusted
    action operations belong in both products and which specialist review
    workflows must deep-link back to OWL.
