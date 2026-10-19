@@ -79,9 +79,10 @@ recorded as source unavailable so the operator can safely retry.
 The workspace keeps posted, pending, multiple-match, no-match, partial-payment,
 source-unavailable, stale, conflict, and possible-double-payment results distinct. A
 posted candidate does not complete the action automatically. The operator must choose
-**Confirm payment and complete**, which records the chosen evidence and completes the
-action and obligation atomically. Pending transactions and receipt links remain
-supporting evidence and cannot be confirmed as settlement.
+the matching transaction when Tyrion returns ranked alternatives, or choose **Confirm
+payment and complete** for a single result. OWL records the chosen evidence and
+completes the action and obligation atomically. Pending transactions and receipt links
+remain supporting evidence and cannot be confirmed as settlement.
 
 ### OCR summary
 

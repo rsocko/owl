@@ -598,6 +598,7 @@ function PaymentCheckPanel({
   const checking = busy || paymentCheck?.state === 'checking';
   const unavailable = !loading && !paymentCheck && Boolean(error);
   const closestResults = paymentCheck?.state === 'no_match';
+  const rankedPostedResults = paymentCheck?.state === 'posted_match' && candidates.length > 1;
   const candidateHeading = paymentCheck?.state === 'multiple_matches'
     ? 'Candidates requiring review'
     : closestResults
@@ -704,7 +705,7 @@ function PaymentCheckPanel({
                     </ul>
                   </details>
                 ) : null}
-                {closestResults ? (
+                {closestResults || rankedPostedResults ? (
                   <div className="payment-candidate-actions">
                     <Button
                       variant="ghost"
@@ -712,7 +713,7 @@ function PaymentCheckPanel({
                       disabled={busy}
                       onClick={() => onReviewCandidate('reject', item)}
                     >
-                      Not the match
+                      {closestResults ? 'Not the match' : 'Discard'}
                     </Button>
                     <Button
                       variant="primary"
@@ -731,10 +732,15 @@ function PaymentCheckPanel({
       ) : paymentCheck?.state === 'no_match' ? (
         <p className="payment-no-candidates">No transaction had enough matching evidence to rank.</p>
       ) : null}
-      {paymentCheck?.state === 'posted_match' ? (
+      {paymentCheck?.state === 'posted_match' && !rankedPostedResults ? (
         <div className="payment-check-confirm">
           <span>A posted match does not complete this obligation until you confirm it.</span>
           <Button variant="primary" size="sm" disabled={busy} onClick={onConfirm}>Confirm payment and complete</Button>
+        </div>
+      ) : null}
+      {rankedPostedResults ? (
+        <div className="payment-check-confirm">
+          <span>Choose the transaction that belongs to this obligation.</span>
         </div>
       ) : null}
       {paymentCheck?.state === 'multiple_matches' ? (
