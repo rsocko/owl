@@ -580,7 +580,7 @@ class TestPipelineErrorIsolation:
             assert action.action_ready is False
             assert action.review_state == "needs_review"
             assert action.review_item_id
-            assert action.extracted_data["account_identifier"] == "ending 6789"
+            assert action.extracted_data["account_identifier"] == "123456789"
             assert "account_number" not in action.extracted_data
         finally:
             session.close()
