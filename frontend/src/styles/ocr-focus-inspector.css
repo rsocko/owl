@@ -1,3 +1,13 @@
+.app-main:has(> .ocr-focus-page) {
+  max-width: none;
+  padding: 0;
+}
+
+.ocr-focus-page {
+  min-width: 0;
+  height: calc(100dvh - var(--topnav-height));
+}
+
 .ocr-focus {
   min-width: 0;
   min-height: 0;
@@ -54,12 +64,49 @@
 }
 
 .ocr-focus-candidates .data-table {
+  table-layout: fixed;
   font-size: .68rem;
 }
 
-.ocr-focus-candidates .data-table th:nth-child(n+4),
+.ocr-focus-candidates .data-table th,
+.ocr-focus-candidates .data-table td {
+  padding: .55rem .35rem;
+  overflow-wrap: anywhere;
+}
+
+.ocr-focus-candidates .data-table th:nth-child(n+4):not(:last-child),
 .ocr-focus-candidates .data-table td:nth-child(n+4):not(:last-child) {
   display: none;
+}
+
+.ocr-focus-candidates .data-table th:first-child,
+.ocr-focus-candidates .data-table td:first-child {
+  width: 36%;
+}
+
+.ocr-focus-candidates .data-table th:nth-child(2),
+.ocr-focus-candidates .data-table td:nth-child(2) {
+  width: 20%;
+}
+
+.ocr-focus-candidates .data-table th:nth-child(3),
+.ocr-focus-candidates .data-table td:nth-child(3) {
+  width: 14%;
+}
+
+.ocr-focus-candidates .data-table th:last-child,
+.ocr-focus-candidates .data-table td:last-child {
+  width: 30%;
+}
+
+.ocr-focus-candidates .ocr-candidate-actions > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: .2rem;
+}
+
+.ocr-focus-candidates .ocr-candidate-actions .btn.sm {
+  padding-inline: .4rem;
 }
 
 .ocr-focus-canvas {
