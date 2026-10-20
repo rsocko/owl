@@ -210,9 +210,9 @@ def pick_best_account_identifier(
 
     When ``text``/``anchor`` are supplied (a stored correspondent+field label anchor —
     see issue #171) and more than one match exists, prefers whichever match sits
-    nearest the anchor over the default pattern-preference order below. Otherwise
-    prefers last-4-digit identifiers (masked format) as they're the most commonly used
-    for account disambiguation in statements.
+    nearest the anchor over the default pattern-preference order below. Otherwise,
+    prefers a full identifier whenever the document exposes one and only falls back
+    to a masked suffix when no full value is available.
     """
     if not matches:
         return None
@@ -230,6 +230,19 @@ def pick_best_account_identifier(
             ):
                 return f"ending {biased['normalized']}"
             return biased["value"]
+
+    exact_patterns = {
+        "bank_account",
+        "service_account",
+        "account_number_full",
+        "member_id",
+        "policy_number",
+    }
+    for match in matches:
+        if match["pattern"] in exact_patterns:
+            return str(match["value"])
+        if match["pattern"] == "payment_card" and len(str(match["normalized"])) > 4:
+            return str(match["value"])
 
     for match in matches:
         if match["pattern"] in (

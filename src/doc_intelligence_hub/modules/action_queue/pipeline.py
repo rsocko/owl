@@ -13,7 +13,7 @@ from rich.console import Console
 
 from doc_intelligence_hub.core.extractors.account_numbers import (
     extract_account_numbers,
-    pick_masked_account_identifier,
+    pick_best_account_identifier,
 )
 from doc_intelligence_hub.core.paperless import PaperlessClient
 from doc_intelligence_hub.modules.analysis_invalidation.database import (
@@ -730,7 +730,7 @@ class Pipeline:
                 extracted_data = assessment.get("extracted_data")
                 if not isinstance(extracted_data, dict):
                     extracted_data = {}
-                account_identifier = pick_masked_account_identifier(
+                account_identifier = pick_best_account_identifier(
                     extract_account_numbers(content),
                     text=content,
                     anchor=self._get_account_hint_anchor(doc.get("correspondent_name")),

@@ -272,7 +272,7 @@ async def test_enrich_document_writes_only_neutral_metadata(enricher):
 
 
 @pytest.mark.asyncio
-async def test_enrich_document_projects_only_masked_identifier_and_canonical_reference(enricher):
+async def test_enrich_document_projects_exact_identifier_and_canonical_reference(enricher):
     _prime_schema(enricher)
 
     await enricher.enrich_document(
@@ -280,7 +280,7 @@ async def test_enrich_document_projects_only_masked_identifier_and_canonical_ref
         {
             "amount": 50.0,
             "extracted_data": {
-                "account_identifier": "ending 4321",
+                "account_identifier": "ACCOUNT-123456789",
                 "reference_number": "INV-42",
                 "payment_url": "https://example.test/pay",
                 "email": "billing@example.test",
@@ -290,7 +290,7 @@ async def test_enrich_document_projects_only_masked_identifier_and_canonical_ref
 
     fields = enricher.client.update_custom_fields_verified.await_args.args[1]
     values = {field["field"]: field["value"] for field in fields}
-    assert values[10] == "ending 4321"
+    assert values[10] == "ACCOUNT-123456789"
     assert values[11] == "INV-42"
     assert all("example.test" not in str(value) for value in values.values())
 
