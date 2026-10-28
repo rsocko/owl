@@ -631,6 +631,53 @@ class SourceDatabase:
         assert result is not None
         return result
 
+    def add_series_members(self, series_id: str, document_ids: list[int]) -> DocumentSeries:
+        conn = self.connect()
+        with conn:
+            # Read and append under one write lock so concurrent additions are retained.
+            conn.execute("BEGIN IMMEDIATE")
+            current = self.get_series(series_id)
+            if current is None:
+                raise KeyError("document_series_not_found")
+            for other in self.list_series(current.source_correspondent_id):
+                if other.id != series_id and set(other.document_ids).intersection(document_ids):
+                    raise ValueError(
+                        "A selected document already belongs to another reviewed series. "
+                        "Use the membership editor to move or merge it."
+                    )
+            merged = sorted(set(current.document_ids).union(document_ids))
+            if merged != current.document_ids:
+                conn.executemany(
+                    """INSERT OR IGNORE INTO document_series_members_v2
+                       (series_id, document_id, created_at) VALUES (?, ?, ?)""",
+                    [(series_id, document_id, _now()) for document_id in document_ids],
+                )
+                conn.execute(
+                    """UPDATE document_series_v2 SET membership_revision = membership_revision + 1,
+                       updated_at = ? WHERE deployment_id = ? AND id = ?""",
+                    (_now(), self.deployment_id, series_id),
+                )
+                conn.execute(
+                    """DELETE FROM source_series_analysis
+                       WHERE deployment_id = ? AND correspondent_id = ?""",
+                    (self.deployment_id, current.source_correspondent_id),
+                )
+                self._event(
+                    conn,
+                    current.source_correspondent_id,
+                    "series_membership_changed",
+                    "series_membership_changed",
+                    series_id,
+                )
+        if merged != current.document_ids:
+            self.reopen_source(
+                current.source_correspondent_id,
+                SourceReopenRequest(reason="series_membership_changed", detail=series_id),
+            )
+        result = self.get_series(series_id)
+        assert result is not None
+        return result
+
     @staticmethod
     def _replace_members(conn: sqlite3.Connection, series_id: str, document_ids: list[int]) -> None:
         conn.execute("DELETE FROM document_series_members_v2 WHERE series_id = ?", (series_id,))

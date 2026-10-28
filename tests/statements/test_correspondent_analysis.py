@@ -487,3 +487,96 @@ def test_single_document_title_only_group_flags_low_evidence() -> None:
     suggestion = result.suggestions[0]
     assert "title_pattern_match" in suggestion.evidence.reason_codes
     assert "single_document_low_evidence" in suggestion.evidence.reason_codes
+
+
+def test_source_metadata_groups_generic_card_title_variants_but_not_annual_summaries() -> None:
+    documents = [
+        _document(index, title, date(2026, index, 3), tags=["Credit Card"])
+        for index, title in enumerate(
+            [
+                "Credit Card",
+                "Credit Card Stmt",
+                "Example Bank Statement",
+                "Credit Card Annual Summary",
+                "Credit Card Annual Summary",
+            ],
+            start=1,
+        )
+    ]
+    result = analyze_correspondent_policy(
+        42,
+        "Example Bank",
+        documents,
+        [],
+        metadata_first=True,
+    )
+    assert sorted(suggestion.document_ids for suggestion in result.suggestions) == [
+        [1, 2, 3],
+        [4, 5],
+    ]
+    assert len({suggestion.suggestion_key for suggestion in result.suggestions}) == 2
+
+
+def test_account_evidence_does_not_merge_annual_summaries_into_monthly_statements() -> None:
+    documents = [
+        _document(index, title, date(2026, index, 3)).model_copy(
+            update={"account_identifier": "ending 1234"}
+        )
+        for index, title in enumerate(
+            [
+                "Card statement",
+                "Downloaded statement",
+                "Annual summary",
+                "Annual summary",
+            ],
+            start=1,
+        )
+    ]
+    result = analyze_correspondent_policy(
+        42,
+        "Example Bank",
+        documents,
+        [],
+        metadata_first=True,
+    )
+    assert sorted(suggestion.document_ids for suggestion in result.suggestions) == [
+        [1, 2],
+        [3, 4],
+    ]
+
+
+def test_distinct_title_candidates_of_same_type_have_distinct_keys() -> None:
+    documents = [
+        _document(index, title, date(2026, index, 3))
+        for index, title in enumerate(
+            [
+                "Checking statement",
+                "Checking statement",
+                "Savings statement",
+                "Savings statement",
+            ],
+            start=1,
+        )
+    ]
+    result = analyze_correspondent_policy(42, "Example Bank", documents, [])
+    assert len(result.suggestions) == 2
+    assert len({suggestion.suggestion_key for suggestion in result.suggestions}) == 2
+
+
+def test_source_name_match_is_not_reviewed_membership_and_curated_members_override_noise() -> None:
+    documents = [
+        _document(index, "Checking statement", date(2026, index, 3)) for index in range(1, 5)
+    ]
+    result = analyze_correspondent_policy(
+        42,
+        "Example Bank",
+        documents,
+        [{"id": "checking", "name": "Checking", "correspondent_id": 42, "document_ids": [1, 2]}],
+        metadata_first=True,
+        candidate_overrides={1: CandidateOverride(document_id=1, excluded=True)},
+    )
+    assert result.observed_summary.excluded_document_count == 0
+    curated = next(item for item in result.suggestions if item.statement_series_id)
+    unreviewed = next(item for item in result.suggestions if not item.statement_series_id)
+    assert curated.document_ids == [1, 2]
+    assert unreviewed.document_ids == [3, 4]

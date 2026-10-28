@@ -88,14 +88,18 @@ export interface SeriesAnalysisResult {
   signal_id?: string | null;
   signal_label?: string | null;
   low_evidence_document_count: number;
-  documents: Array<{
-    id: number;
-    title: string;
-    created: string;
-    document_type?: string | null;
-    tags: string[];
-  }>;
+  documents: SourceDocument[];
   suggestions: SeriesAnalysisSuggestion[];
+}
+
+export interface SourceDocument {
+  id: number;
+  title: string;
+  created: string;
+  document_type?: string | null;
+  tags: string[];
+  account_identifier_display?: string | null;
+  account_identifier_source?: 'stored' | 'extracted' | 'extraction_failed' | null;
 }
 
 export interface DocumentExpectation {
@@ -220,7 +224,7 @@ export function humanize(value: string): string {
 
 export function formatDate(value?: string | null): string {
   if (!value) return 'Not recorded';
-  const parsed = new Date(value);
+  const parsed = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00` : value);
   return Number.isNaN(parsed.getTime())
     ? value
     : parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });

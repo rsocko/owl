@@ -81,6 +81,10 @@
 .series-member-list strong { font-size: .7rem; }
 .series-member-list small { color: var(--text-muted); font-size: .58rem; }
 .series-add-row { margin-top: .8rem; display: flex; align-items: end; gap: .55rem; }
+.series-evidence-picker { margin-top: 1.5rem; display: grid; gap: .75rem; }
+.series-evidence-picker p { margin: 0; color: var(--text-muted); font-size: .8rem; line-height: 1.5; }
+.series-evidence-picker label { display: grid; gap: .4rem; }
+.series-evidence-picker input { width: 100%; min-width: 0; padding: .65rem; color: var(--text); background: var(--card); border: 1px solid var(--border); border-radius: .4rem; }
 .series-editor-grid aside { display: grid; gap: 1rem; }
 .series-editor-grid aside p { color: var(--text-muted); font-size: .65rem; line-height: 1.5; }
 .series-editor-grid aside label { margin-bottom: .65rem; }
