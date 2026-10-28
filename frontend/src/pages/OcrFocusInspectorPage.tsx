@@ -9,7 +9,7 @@ export default function OcrFocusInspectorPage() {
   if (!Number.isFinite(id)) return null;
 
   return (
-    <div style={{ height: 'calc(100dvh - var(--topnav-height))', margin: -20 }}>
+    <div className="ocr-focus-page">
       <OcrFocusInspector
         documentId={id}
         onReturn={() => navigate('/needs-review?type=ocr_quality_review')}

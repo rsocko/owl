@@ -438,20 +438,22 @@ export default function OcrCandidatesPanel({
                   <td>{c.page_count || '—'}</td>
                   <td>{c.decision ?? '—'}</td>
                   <td>{c.state === 'ready' || c.decision ? <SuggestedReadBadges badges={rowBadges} /> : <span className="text-muted">—</span>}</td>
-                  <td style={{ display: 'flex', gap: 6 }}>
-                    <Button variant="ghost" size="sm" onClick={() => loadDetail(c.candidate_id)}>
-                      View
-                    </Button>
-                    {ACTIVE_STATES.has(c.state) && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={() => cancel(c.candidate_id)}
-                        disabled={cancelling}
-                      >
-                        Cancel
+                  <td className="ocr-candidate-actions">
+                    <div>
+                      <Button variant="ghost" size="sm" onClick={() => loadDetail(c.candidate_id)}>
+                        View
                       </Button>
-                    )}
+                      {ACTIVE_STATES.has(c.state) && (
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => cancel(c.candidate_id)}
+                          disabled={cancelling}
+                        >
+                          Cancel
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );
