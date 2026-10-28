@@ -20,6 +20,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Button, Toast } from '../components/ui';
+import { SourceDocumentInspector, SourceDocumentList } from '../components/SourceDocumentEvidence';
 import { endpoints } from '../lib/api';
 import {
   formatDate,
@@ -32,6 +33,7 @@ import {
   type SeriesAnalysisResult,
   type SeriesAnalysisSuggestion,
   type SourceDisposition,
+  type SourceDocument,
 } from '../lib/documentSources';
 
 type SourceMode = 'review' | 'signals' | 'directory';
@@ -557,6 +559,11 @@ function AnalysisCandidate({
   dismissing,
   onConfirm,
   onDismiss,
+  series,
+  onPreview,
+  selected,
+  onSelect,
+  combined = false,
 }: {
   suggestion: SeriesAnalysisSuggestion;
   analysis: SeriesAnalysisResult;
@@ -564,10 +571,15 @@ function AnalysisCandidate({
   busy: boolean;
   creating: boolean;
   dismissing: boolean;
-  onConfirm: (suggestion: SeriesAnalysisSuggestion) => void;
+  onConfirm: (suggestion: SeriesAnalysisSuggestion, targetId?: string) => void;
   onDismiss: (suggestion: SeriesAnalysisSuggestion) => void;
+  series: DocumentSeries[];
+  onPreview: (document: SourceDocument) => void;
+  selected?: boolean;
+  onSelect?: () => void;
+  combined?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(combined);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState(suggestion.document_ids);
   const documents = suggestion.document_ids
     .map((documentId) => analysis.documents.find((document) => document.id === documentId))
@@ -576,16 +588,32 @@ function AnalysisCandidate({
   const candidateName = suggestion.series_discriminator === 'default'
     ? `${sourceName} documents`
     : humanize(suggestion.series_discriminator);
+  const [name, setName] = useState(candidateName);
+  const [targetId, setTargetId] = useState('');
+  const target = series.find((item) => item.id === targetId);
+  const targetDocuments = target
+    ? analysis.documents.filter((document) => target.document_ids.includes(document.id)).slice(0, 3)
+    : [];
 
   return (
     <article className="source-analysis-candidate">
       <header>
         <div>
+          {onSelect ? <label className="source-candidate-select">
+            <input type="checkbox" checked={selected} disabled={busy} onChange={onSelect} />
+            Include in combined review
+          </label> : null}
           <strong>{candidateName}</strong>
           <span>
             {humanize(suggestion.kind)} · {suggestion.document_ids.length} documents
-            {confidence == null ? '' : ` · ${Math.round(confidence * 100)}% confidence`}
+            {confidence == null ? '' : ` · ${Math.round(confidence * 100)}% cadence confidence`}
           </span>
+          <small className="source-candidate-evidence">
+            Grouping: {suggestion.evidence.reason_codes
+              .filter((reason) => /match|override|existing_statement_series/.test(reason))
+              .map(humanize).join(', ') || 'Paperless filing metadata and title pattern'}.
+            Cadence confidence does not measure account identity.
+          </small>
         </div>
         <button
           type="button"
@@ -602,49 +630,41 @@ function AnalysisCandidate({
             Uncheck anything that does not belong. Confirming creates a series from only the selected documents;
             unchecked documents remain available for future analysis.
           </p>
-          <div>
-            {documents.map((document) => {
-              const selected = selectedDocumentIds.includes(document.id);
-              return (
-                <label key={document.id}>
-                  <input
-                    type="checkbox"
-                    checked={selected}
-                    onChange={(event) => setSelectedDocumentIds((current) => event.target.checked
-                      ? [...current, document.id]
-                      : current.filter((id) => id !== document.id))}
-                  />
-                  <img src={endpoints.statements.documentThumb(String(document.id))} alt="" loading="lazy" />
-                  <span>
-                    <strong>{document.title}</strong>
-                    <small>{formatDate(document.created)} · {document.document_type ?? 'Unknown document type'} · Paperless #{document.id}</small>
-                  </span>
-                  <a
-                    href={endpoints.statements.documentPreview(String(document.id))}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label={`Open ${document.title}`}
-                  >
-                    Open
-                  </a>
-                </label>
-              );
-            })}
-          </div>
+          <SourceDocumentList documents={documents} selected={selectedDocumentIds}
+            onToggle={(id) => setSelectedDocumentIds((current) => current.includes(id)
+              ? current.filter((item) => item !== id) : [...current, id])}
+            onPreview={onPreview} />
         </div>
       ) : null}
+      <div className="source-candidate-destination">
+        <label>Destination series
+          <select value={targetId} disabled={busy} onChange={(event) => setTargetId(event.target.value)}>
+            <option value="">Create a new reviewed series</option>
+            {series.filter((item) => item.kind === suggestion.kind).map((item) => (
+              <option key={item.id} value={item.id}>{item.name} · {item.document_ids.length} documents · {humanize(item.kind)}</option>
+            ))}
+          </select>
+        </label>
+        {!target ? <label>Series name<input value={name} maxLength={200} disabled={busy}
+          onChange={(event) => setName(event.target.value)} /></label> : (
+          <div>
+            <p>Append to <strong>{target.name}</strong>; existing members and expectation policy stay unchanged.</p>
+            {targetDocuments.length ? <SourceDocumentList documents={targetDocuments} onPreview={onPreview} /> : null}
+          </div>
+        )}
+      </div>
       <footer>
-        <p><strong>Not a series</strong> excludes all {suggestion.document_ids.length} documents in this candidate from future detection.</p>
+        <p>{combined ? 'Review the combined selection before confirming. Different account suffixes may indicate separate accounts or replacement cards; they are never merged automatically.' : <><strong>Not a series</strong> excludes all {suggestion.document_ids.length} documents in this candidate from future detection.</>}</p>
         <div className="source-analysis-candidate-actions">
-          <Button disabled={busy} onClick={() => onDismiss(suggestion)}>
+          {!combined ? <Button disabled={busy} onClick={() => onDismiss(suggestion)}>
             {dismissing ? <LoaderCircle className="spin" /> : null} Not a series
-          </Button>
+          </Button> : null}
           <Button
             variant="primary"
-            disabled={busy || selectedDocumentIds.length === 0}
-            onClick={() => onConfirm({ ...suggestion, document_ids: selectedDocumentIds })}
+            disabled={busy || selectedDocumentIds.length === 0 || (!targetId && !name.trim())}
+            onClick={() => onConfirm({ ...suggestion, series_discriminator: name === candidateName ? suggestion.series_discriminator : name.trim(), document_ids: selectedDocumentIds }, targetId || undefined)}
           >
-            {creating ? <LoaderCircle className="spin" /> : <Check />} Confirm {selectedDocumentIds.length} selected
+            {creating ? <LoaderCircle className="spin" /> : <Check />} {target ? 'Add' : 'Confirm'} {selectedDocumentIds.length} selected
           </Button>
         </div>
       </footer>
@@ -674,7 +694,7 @@ function SourceEvidence({
   signals: ExternalSignal[];
   onConfigure: (seriesId?: string, expectationId?: string, signalId?: string) => void;
   onAnalyze: (signalId?: string) => void;
-  onCreateSeries: (suggestion: SeriesAnalysisSuggestion) => void;
+  onCreateSeries: (suggestion: SeriesAnalysisSuggestion, targetId?: string) => void;
   onDismissSeries: (suggestion: SeriesAnalysisSuggestion) => void;
   onReopen: () => void;
   analysis: SeriesAnalysisResult | null;
@@ -684,17 +704,57 @@ function SourceEvidence({
   reopening: boolean;
 }) {
   const [showAllCandidates, setShowAllCandidates] = useState(false);
+  const [selectedCandidates, setSelectedCandidates] = useState<string[]>([]);
+  const [preview, setPreview] = useState<SourceDocument | null>(null);
+  const [reviewedDocuments, setReviewedDocuments] = useState<SourceDocument[]>([]);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
   const sourceSeries = series.filter((item) => item.source_correspondent_id === source.correspondent_id);
+  const hasReviewedSeries = sourceSeries.length > 0;
+  const evidenceDocuments = Array.from(new Map([
+    ...reviewedDocuments, ...(analysis?.documents ?? []),
+  ].map((document) => [document.id, document])).values());
+  const reviewAnalysis = analysis ? { ...analysis, documents: evidenceDocuments } : null;
   const sourceExpectations = expectations.filter((item) => item.source_correspondent_id === source.correspondent_id);
   const sourceLevelExpectations = sourceExpectations.filter((item) => !item.series_id);
   const linkedSignals = signals.filter((item) => item.relationship?.source_correspondent_id === source.correspondent_id);
   const documentCount = sourceDocumentCount(source.correspondent_id, series);
-  const candidateSuggestions = analysis?.suggestions.filter((suggestion) => !suggestion.statement_series_id) ?? [];
+  const reviewedIds = new Set(sourceSeries.flatMap((item) => item.document_ids));
+  const candidateSuggestions = analysis?.suggestions
+    .filter((suggestion) => !suggestion.statement_series_id)
+    .map((suggestion) => ({ ...suggestion,
+      suggestion_key: `${suggestion.suggestion_key}:${suggestion.document_ids.join('-')}`,
+      document_ids: suggestion.document_ids.filter((id) => !reviewedIds.has(id)),
+    }))
+    .filter((suggestion) => suggestion.document_ids.length > 0) ?? [];
   const visibleSuggestions = showAllCandidates ? candidateSuggestions : candidateSuggestions.slice(0, 12);
+  const combinedCandidates = candidateSuggestions.filter((item) => selectedCandidates.includes(item.suggestion_key));
+  const sameKind = new Set(combinedCandidates.map((item) => item.kind)).size === 1;
+  const combinedSuggestion: SeriesAnalysisSuggestion | null = combinedCandidates.length > 1 && sameKind
+    ? { ...combinedCandidates[0], suggestion_key: 'combined', series_discriminator: `${source.current_name} ${combinedCandidates[0].kind} series`,
+      document_ids: Array.from(new Set(combinedCandidates.flatMap((item) => item.document_ids))),
+      evidence: { reason_codes: ['manual_candidate_override'], sample_size: 0 } }
+    : null;
 
   useEffect(() => {
     setShowAllCandidates(false);
-  }, [analysis?.analyzed_at]);
+    setSelectedCandidates([]);
+    setPreview(null);
+  }, [analysis?.analyzed_at, source.correspondent_id]);
+
+  useEffect(() => {
+    let active = true;
+    setReviewedDocuments([]);
+    setEvidenceError(null);
+    setEvidenceLoading(hasReviewedSeries);
+    if (hasReviewedSeries) {
+      endpoints.documentSources.documents(source.correspondent_id)
+        .then((result) => { if (active) setReviewedDocuments(result as SourceDocument[]); })
+        .catch((error: unknown) => { if (active) setEvidenceError(errorMessage(error)); })
+        .finally(() => { if (active) setEvidenceLoading(false); });
+    }
+    return () => { active = false; };
+  }, [source.correspondent_id, hasReviewedSeries]);
 
   return (
     <section className="source-evidence" aria-label="Selected source evidence">
@@ -788,18 +848,28 @@ function SourceEvidence({
               ))}
             </div>
           ) : null}
-          {analysis ? (
+          {analysis && reviewAnalysis ? (
             <div className="source-analysis-results" role="status">
               <div className="source-analysis-summary">
                 <Sparkles aria-hidden="true" />
                 <span>
-                  <strong>{analysis.observed_summary.candidate_series_count} candidate {analysis.observed_summary.candidate_series_count === 1 ? 'series' : 'series'} found</strong>
+                  <strong>{candidateSuggestions.length} candidate series found</strong>
                   <small>
                     Analyzed {analysis.observed_summary.document_count} Paperless {analysis.observed_summary.document_count === 1 ? 'document' : 'documents'}
                     {analysis.signal_label ? ` for ${analysis.signal_label}` : ''}. Confirming creates membership only, never an expectation.
                   </small>
                 </span>
               </div>
+              <p className="source-analysis-low-evidence">Select groups to review and confirm them as one series, or choose an existing destination on any candidate. Account evidence comes from stored metadata and existing OCR; no individual Analyze run is needed.</p>
+              {combinedCandidates.length > 1 && !sameKind ? <p role="alert">Select groups of the same document kind to combine. Different kinds need separate series.</p> : null}
+              {combinedSuggestion ? <AnalysisCandidate
+                key={`${analysis.analyzed_at}-${combinedSuggestion.document_ids.join('-')}`}
+                suggestion={combinedSuggestion} analysis={reviewAnalysis} sourceName={source.current_name}
+                busy={analyzing || creatingSeriesKey !== null || dismissingSeriesKey !== null}
+                creating={creatingSeriesKey === 'combined'} dismissing={false}
+                onConfirm={onCreateSeries} onDismiss={onDismissSeries}
+                series={sourceSeries} onPreview={setPreview} combined
+              /> : null}
               {analysis.low_evidence_document_count > 0 ? (
                 <p className="source-analysis-low-evidence">
                   {analysis.low_evidence_document_count} isolated {analysis.low_evidence_document_count === 1 ? 'document was' : 'documents were'} not promoted to candidate series.
@@ -808,11 +878,16 @@ function SourceEvidence({
               ) : null}
               {visibleSuggestions.map((suggestion) => (
                 <AnalysisCandidate
-                  key={`${analysis.analyzed_at}-${suggestion.suggestion_key}`}
+                  key={`${analysis.analyzed_at}-${suggestion.suggestion_key}-${suggestion.document_ids.join('-')}`}
                   suggestion={suggestion}
-                  analysis={analysis}
+                  analysis={reviewAnalysis}
+                  series={sourceSeries}
+                  onPreview={setPreview}
+                  selected={selectedCandidates.includes(suggestion.suggestion_key)}
+                  onSelect={() => setSelectedCandidates((current) => current.includes(suggestion.suggestion_key)
+                    ? current.filter((key) => key !== suggestion.suggestion_key) : [...current, suggestion.suggestion_key])}
                   sourceName={source.current_name}
-                  busy={creatingSeriesKey !== null || dismissingSeriesKey !== null}
+                  busy={analyzing || creatingSeriesKey !== null || dismissingSeriesKey !== null}
                   creating={creatingSeriesKey === suggestion.suggestion_key}
                   dismissing={dismissingSeriesKey === suggestion.suggestion_key}
                   onConfirm={onCreateSeries}
@@ -831,8 +906,14 @@ function SourceEvidence({
           ) : null}
           {sourceSeries.length > 0 ? (
             <div className="source-series-list">
+              {evidenceLoading ? <p role="status">Loading reviewed document evidence…</p> : null}
+              {evidenceError ? <p role="alert">{evidenceError}</p> : null}
               {sourceSeries.map((item) => {
                 const expectation = sourceExpectations.find((candidate) => candidate.series_id === item.id);
+                const samples = item.document_ids.slice(0, 4).flatMap((id) => {
+                  const document = evidenceDocuments.find((document) => document.id === id);
+                  return document ? [document] : [];
+                });
                 return (
                   <article className="source-series-card" key={item.id}>
                     <div className="source-series-copy">
@@ -846,19 +927,9 @@ function SourceEvidence({
                       </span>
                     </div>
                     <div className="source-document-strip" aria-label={`Representative Paperless evidence for ${item.name}`}>
-                      {item.document_ids.slice(0, 4).map((documentId) => (
-                        <a
-                          key={documentId}
-                          href={endpoints.statements.documentPreview(String(documentId))}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="source-document-sample"
-                        >
-                          <img src={endpoints.statements.documentThumb(String(documentId))} alt="" loading="lazy" />
-                          <span><FileText /> Paperless #{documentId}</span>
-                          <strong>Open representative document</strong>
-                        </a>
-                      ))}
+                      <SourceDocumentList documents={samples} onPreview={setPreview} />
+                      {!evidenceLoading && !evidenceError && samples.length < Math.min(4, item.document_ids.length)
+                        ? <p role="alert">Some reviewed documents are unavailable in this source. Check membership or Paperless.</p> : null}
                     </div>
                     <footer>
                       <span>Series revisions do not rewrite expectation policy.</span>
@@ -892,6 +963,8 @@ function SourceEvidence({
           </ol>
         </section>
       </div>
+      {preview ? <SourceDocumentInspector document={preview} documents={evidenceDocuments}
+        onChange={setPreview} onClose={() => setPreview(null)} /> : null}
     </section>
   );
 }
@@ -1128,7 +1201,10 @@ export default function DocumentSources() {
   const [dismissingSeriesKey, setDismissingSeriesKey] = useState<string | null>(null);
   const [reopening, setReopening] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setNotification] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
+  const setToast = useCallback((message: string | null, tone: 'success' | 'error' = 'success') => {
+    setNotification(message ? { message, tone } : null);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1175,12 +1251,12 @@ export default function DocumentSources() {
         if (active) setAnalysis(result as SeriesAnalysisResult | null);
       })
       .catch((analysisError) => {
-        if (active) setToast(errorMessage(analysisError));
+        if (active) setToast(errorMessage(analysisError), 'error');
       });
     return () => {
       active = false;
     };
-  }, [selectedSourceId]);
+  }, [selectedSourceId, setToast]);
 
   const selectSource = (id: number) => {
     setDetailLoading(true);
@@ -1199,17 +1275,19 @@ export default function DocumentSources() {
         ? `Found ${result.suggestions.length} candidate ${result.suggestions.length === 1 ? 'series' : 'series'} for ${selectedSource.current_name}.`
         : `No repeatable series found for ${selectedSource.current_name}.`);
     } catch (analysisError) {
-      setToast(errorMessage(analysisError));
+      setToast(errorMessage(analysisError), 'error');
     } finally {
       setAnalyzing(false);
     }
   };
 
-  const createSeriesFromSuggestion = async (suggestion: SeriesAnalysisSuggestion) => {
+  const createSeriesFromSuggestion = async (suggestion: SeriesAnalysisSuggestion, targetId?: string) => {
     if (!selectedSource) return;
     setCreatingSeriesKey(suggestion.suggestion_key);
     try {
-      const created = await endpoints.documentSources.createSeries({
+      const created = await (targetId
+        ? endpoints.documentSources.addSeriesMembers(targetId, suggestion.document_ids)
+        : endpoints.documentSources.createSeries({
         source_correspondent_id: selectedSource.correspondent_id,
         name: suggestion.series_discriminator === 'default'
           ? `${selectedSource.current_name} documents`
@@ -1217,17 +1295,18 @@ export default function DocumentSources() {
         kind: suggestion.kind,
         discriminator: suggestion.series_discriminator,
         document_ids: suggestion.document_ids,
-      }) as DocumentSeries;
-      setSeries((current) => [...current, created]);
+      })) as DocumentSeries;
+      setSeries((current) => [...current.filter((item) => item.id !== created.id), created]);
       setAnalysis((current) => current ? {
         ...current,
-        suggestions: current.suggestions.map((item) => item.suggestion_key === suggestion.suggestion_key
-          ? { ...item, statement_series_id: created.id }
-          : item),
+        suggestions: current.suggestions.map((item) => ({
+          ...item, document_ids: item.document_ids.filter((id) => !suggestion.document_ids.includes(id)),
+        })).filter((item) => item.document_ids.length > 0),
       } : current);
-      setToast(`${created.name} confirmed as a reviewed series. You can now create its expectation.`);
+      setToast(targetId ? `Documents added to ${created.name}. Existing membership and expectation policy were preserved.`
+        : `${created.name} confirmed as a reviewed series. You can now create its expectation.`);
     } catch (createError) {
-      setToast(errorMessage(createError));
+      setToast(errorMessage(createError), 'error');
     } finally {
       setCreatingSeriesKey(null);
     }
@@ -1247,11 +1326,11 @@ export default function DocumentSources() {
           ...current.observed_summary,
           candidate_series_count: Math.max(0, current.observed_summary.candidate_series_count - 1),
         },
-        suggestions: current.suggestions.filter((item) => item.suggestion_key !== suggestion.suggestion_key),
+        suggestions: current.suggestions.filter((item) => !item.document_ids.every((id) => suggestion.document_ids.includes(id))),
       } : current);
       setToast('All documents in this candidate were marked as not belonging to a recurring series.');
     } catch (dismissError) {
-      setToast(errorMessage(dismissError));
+      setToast(errorMessage(dismissError), 'error');
     } finally {
       setDismissingSeriesKey(null);
     }
@@ -1268,7 +1347,7 @@ export default function DocumentSources() {
       setSources((current) => current.map((source) => source.correspondent_id === updated.correspondent_id ? updated : source));
       setToast(`${updated.current_name} was reopened for review.`);
     } catch (reopenError) {
-      setToast(errorMessage(reopenError));
+      setToast(errorMessage(reopenError), 'error');
     } finally {
       setReopening(false);
     }
@@ -1291,7 +1370,7 @@ export default function DocumentSources() {
         if (next) selectSource(next.correspondent_id);
       }
     } catch (saveError) {
-      setToast(errorMessage(saveError));
+      setToast(errorMessage(saveError), 'error');
     } finally {
       setSaving(false);
     }
@@ -1304,7 +1383,7 @@ export default function DocumentSources() {
       await load();
       setToast(`Paperless sync complete: ${result.created} new, ${result.updated} updated, ${result.orphaned} orphaned.`);
     } catch (syncError) {
-      setToast(errorMessage(syncError));
+      setToast(errorMessage(syncError), 'error');
     } finally {
       setSyncing(false);
     }
@@ -1326,7 +1405,7 @@ export default function DocumentSources() {
       const next = signals.find((signal) => signal.id !== selectedSignal.id && ['unresolved', 'deferred'].includes(signal.relationship?.resolution ?? 'unresolved'));
       if (next) setSelectedSignalId(next.id);
     } catch (saveError) {
-      setToast(errorMessage(saveError));
+      setToast(errorMessage(saveError), 'error');
     } finally {
       setSaving(false);
     }
@@ -1379,7 +1458,7 @@ export default function DocumentSources() {
                 navigate(`/sources/${selectedSource.correspondent_id}/expectations/new${query.size ? `?${query}` : ''}`);
               }}
               onAnalyze={(signalId) => void analyzeSelectedSource(signalId)}
-              onCreateSeries={(suggestion) => void createSeriesFromSuggestion(suggestion)}
+              onCreateSeries={(suggestion, targetId) => void createSeriesFromSuggestion(suggestion, targetId)}
               onDismissSeries={(suggestion) => void dismissSeriesSuggestion(suggestion)}
               onReopen={() => void reopenSelectedSource()}
               analysis={analysis}
@@ -1398,7 +1477,7 @@ export default function DocumentSources() {
           </div>
         </>
       ) : <WorkspaceEmpty />}
-      {toast ? <Toast message={toast} tone={toast.includes('could not') || toast.includes('failed') ? 'error' : 'success'} onDismiss={() => setToast(null)} /> : null}
+      {toast ? <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} /> : null}
     </div>
   );
 }

@@ -2,8 +2,9 @@ import { ArrowLeft, Merge, Scissors, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Button, Toast } from '../components/ui';
+import { SourceDocumentInspector, SourceDocumentList } from '../components/SourceDocumentEvidence';
 import { endpoints } from '../lib/api';
-import { humanize, type DocumentExpectation, type DocumentSeries } from '../lib/documentSources';
+import { humanize, type DocumentExpectation, type DocumentSeries, type SourceDocument } from '../lib/documentSources';
 import '../styles/document-coverage.css';
 
 function message(error: unknown): string {
@@ -18,7 +19,12 @@ export default function DocumentSeriesDetail() {
   const [selected, setSelected] = useState<number[]>([]);
   const [newName, setNewName] = useState('');
   const [targetId, setTargetId] = useState('');
-  const [addId, setAddId] = useState('');
+  const [documents, setDocuments] = useState<SourceDocument[]>([]);
+  const [adding, setAdding] = useState<number[]>([]);
+  const [search, setSearch] = useState('');
+  const [visibleLimit, setVisibleLimit] = useState(20);
+  const [preview, setPreview] = useState<SourceDocument | null>(null);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -31,16 +37,51 @@ export default function DocumentSeriesDetail() {
         endpoints.documentSources.expectations(),
       ]) as [DocumentSeries[], DocumentExpectation[]];
       setAllSeries(seriesResponse);
-      setSeries(seriesResponse.find((item) => item.id === seriesId) ?? null);
+      const current = seriesResponse.find((item) => item.id === seriesId) ?? null;
+      setSeries(current);
       setExpectations(expectationResponse);
+      if (current) {
+        setDocumentsLoading(true);
+        const evidence = await endpoints.documentSources.documents(current.source_correspondent_id) as SourceDocument[];
+        setDocuments(evidence);
+      } else {
+        setError('This reviewed series no longer exists. Return to Document Sources and refresh.');
+      }
     } catch (requestError) {
       setError(message(requestError));
+    } finally {
+      setDocumentsLoading(false);
     }
   }, [seriesId]);
   useEffect(() => { void load(); }, [load]);
 
   const attached = useMemo(() => expectations.filter((item) => item.series_id === seriesId), [expectations, seriesId]);
   const otherSeries = useMemo(() => allSeries.filter((item) => item.id !== seriesId && item.source_correspondent_id === series?.source_correspondent_id), [allSeries, series, seriesId]);
+  const memberDocuments = documents.filter((document) => series?.document_ids.includes(document.id));
+  const unavailableIds = series?.document_ids.filter((id) => !documents.some((document) => document.id === id)) ?? [];
+  const assignedIds = new Set(allSeries.filter((item) => item.source_correspondent_id === series?.source_correspondent_id).flatMap((item) => item.document_ids));
+  const availableDocuments = documents.filter((document) => !assignedIds.has(document.id));
+  const matches = availableDocuments.filter((document) => [
+    document.title, document.document_type, document.created, document.account_identifier_display,
+    ...document.tags, String(document.id),
+  ].filter(Boolean).join(' ').toLowerCase().includes(search.trim().toLowerCase()));
+  const visibleDocuments = matches.slice(0, visibleLimit);
+
+  const addDocuments = async () => {
+    if (!adding.length) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await endpoints.documentSources.addSeriesMembers(seriesId, adding);
+      setAdding([]);
+      setToast('Selected documents added. Existing members and expectation policy were preserved.');
+      await load();
+    } catch (requestError) {
+      setError(message(requestError));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const saveMembers = async (documentIds: number[], success: string) => {
     setBusy(true);
@@ -119,18 +160,36 @@ export default function DocumentSeriesDetail() {
         <section>
           <h2>Documents in series</h2>
           <div className="series-member-list">
-            {series.document_ids.length === 0 ? <p>No documents are assigned to this series.</p> : series.document_ids.map((id) => (
-              <label key={id}>
-                <input type="checkbox" checked={selected.includes(id)} onChange={() => setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])} />
-                <span><strong>Paperless document #{id}</strong><small>Reviewed series member</small></span>
-                <Button size="sm" disabled={busy} onClick={() => void saveMembers(series.document_ids.filter((item) => item !== id), 'Document removed. Expectation policy was preserved.')}><Trash2 /> Remove</Button>
-              </label>
+            {documentsLoading ? <p role="status">Loading document titles and evidence…</p> : null}
+            {series.document_ids.length === 0 ? <p>No documents are assigned to this series.</p> : null}
+            {memberDocuments.map((document) => (
+              <div key={document.id}>
+                <SourceDocumentList documents={[document]} selected={selected}
+                  onToggle={(id) => setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])}
+                  onPreview={setPreview} />
+                <Button size="sm" disabled={busy} onClick={() => void saveMembers(series.document_ids.filter((item) => item !== document.id), 'Document removed. Expectation policy was preserved.')}><Trash2 /> Remove</Button>
+              </div>
+            ))}
+            {!documentsLoading && unavailableIds.map((id) => (
+              <div key={id}><p>Document #{id} is unavailable in this source. Refresh or check Paperless.</p>
+                <Button size="sm" disabled={busy} onClick={() => void saveMembers(series.document_ids.filter((item) => item !== id), 'Unavailable document removed. Expectation policy was preserved.')}><Trash2 /> Remove</Button>
+              </div>
             ))}
           </div>
-          <div className="series-add-row">
-            <label>Add Paperless document ID<input inputMode="numeric" value={addId} onChange={(event) => setAddId(event.target.value)} /></label>
-            <Button disabled={busy || !Number(addId)} onClick={() => { void saveMembers(Array.from(new Set([...series.document_ids, Number(addId)])), 'Document added. Coverage will use the updated membership.'); setAddId(''); }}>Add document</Button>
-          </div>
+          <section className="series-evidence-picker">
+            <h2>Add documents from this source</h2>
+            <p>Review titles, dates, tags, account evidence, and previews before adding. Documents already in a reviewed series are excluded.</p>
+            <label>Find documents<input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setVisibleLimit(20); }}
+              placeholder="Search title, date, type, tag, or account suffix" /></label>
+            <p>{matches.length} matching documents · showing {visibleDocuments.length}. {adding.length} selected.</p>
+            <SourceDocumentList documents={visibleDocuments} selected={adding}
+              onToggle={(id) => setAdding((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])}
+              onPreview={setPreview} />
+            {visibleDocuments.length < matches.length ? <Button onClick={() => setVisibleLimit((current) => current + 20)}>Show more documents</Button> : null}
+            {!documentsLoading && !matches.length ? <p>No unassigned documents match. Change the search or review another series to move its members.</p> : null}
+            <Button variant="primary" disabled={busy || documentsLoading || !adding.length}
+              onClick={() => void addDocuments()}>Add {adding.length || ''} selected documents</Button>
+          </section>
         </section>
         <aside>
           <section>
@@ -148,6 +207,8 @@ export default function DocumentSeriesDetail() {
         </aside>
       </div>
       {toast ? <Toast message={toast} tone="success" onDismiss={() => setToast(null)} /> : null}
+      {preview ? <SourceDocumentInspector document={preview} documents={documents}
+        onChange={setPreview} onClose={() => setPreview(null)} /> : null}
     </main>
   );
 }

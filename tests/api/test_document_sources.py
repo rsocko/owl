@@ -151,6 +151,163 @@ def test_document_source_series_analysis_returns_reviewable_candidates(
     assert client.get("/api/series?correspondent_id=42").json() == []
 
 
+def test_source_discovery_uses_stored_accounts_and_existing_ocr_without_writeback(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    _configure_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    mock_paperless.fetch_all_metadata.return_value = (
+        {42: "Example Bank"},
+        {7: "Credit Card"},
+        {3: "Statement"},
+    )
+    mock_paperless.list_custom_fields.return_value = [
+        {"id": 9, "name": "Account Identifier", "data_type": "string"},
+    ]
+    mock_paperless.list_documents.return_value = [
+        {
+            "id": 1,
+            "title": "Download",
+            "correspondent": 42,
+            "document_type": 3,
+            "tags": [7],
+            "created": "2026-01-03",
+            "custom_fields": [{"field": 9, "value": "ending 1234"}],
+            "content": "Card number: 5555666677779876",
+        },
+        {
+            "id": 2,
+            "title": "Portal copy",
+            "correspondent": 42,
+            "document_type": 3,
+            "tags": [7],
+            "created": "2026-02-03",
+            "content": "Card number: 5555666677771234. Account number: ****1234",
+        },
+        {
+            "id": 3,
+            "title": "Conflicting evidence",
+            "correspondent": 42,
+            "document_type": 3,
+            "tags": [7],
+            "created": "2026-03-03",
+            "content": "Card ending in 1234. Bank account number: 9999999876",
+        },
+    ]
+    client.post("/api/sources/sync")
+    response = client.post("/api/sources/42/series-analysis")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["suggestions"][0]["document_ids"] == [1, 2]
+    assert payload["account_identifiers"]["stored_document_count"] == 1
+    assert payload["account_identifiers"]["extracted_document_count"] == 1
+    assert payload["account_identifiers"]["unresolved_document_count"] == 1
+    documents = payload["documents"]
+    assert documents[0]["account_identifier_display"] == "ending 1234"
+    assert documents[1]["account_identifier_source"] == "extracted"
+    assert documents[2]["account_identifier_display"] is None
+    assert "5555666677771234" not in response.text
+    assert "9999999876" not in response.text
+    mock_paperless.get_document_content.assert_not_awaited()
+    mock_paperless.update_document.assert_not_awaited()
+    assert client.get("/api/sources/42/documents").json() == documents
+
+
+def test_add_series_members_is_idempotent_source_scoped_and_preserves_policy(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    _configure_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    mock_paperless.list_documents.return_value = [
+        {"id": document_id, "correspondent": 42} for document_id in [1, 2, 3, 4]
+    ]
+    client.post("/api/sources/sync")
+    series = client.post(
+        "/api/series",
+        json={
+            "source_correspondent_id": 42,
+            "name": "Card history",
+            "kind": "statement",
+            "document_ids": [1],
+        },
+    ).json()
+    policy = client.post(
+        "/api/expectations",
+        json={
+            "source_correspondent_id": 42,
+            "series_id": series["id"],
+            "name": "Card",
+            "kind": "statement",
+            "expectation_mode": "irregular",
+            "evidence": {"source": "user", "reason_codes": ["user_confirmed"]},
+        },
+    ).json()
+    path = f"/api/series/{series['id']}/members"
+    assert client.post(path, json={"document_ids": [2, 2]}).json()["document_ids"] == [1, 2]
+    revision = client.get("/api/series").json()[0]["membership_revision"]
+    assert client.post(path, json={"document_ids": [2]}).json()["membership_revision"] == revision
+    assert client.post(path, json={"document_ids": [3]}).json()["document_ids"] == [1, 2, 3]
+    assert client.post(path, json={"document_ids": [999]}).status_code == 409
+    assert client.post(path, json={"document_ids": [-1]}).status_code == 422
+    assert client.post(path, json={"document_ids": []}).status_code == 422
+    client.post(
+        "/api/series",
+        json={
+            "source_correspondent_id": 42,
+            "name": "Another account",
+            "kind": "statement",
+            "document_ids": [4],
+        },
+    )
+    assert client.post(path, json={"document_ids": [4]}).status_code == 409
+    assert client.get("/api/expectations").json() == [policy]
+    assert client.get("/api/sources/42").json()["reopen_reasons"] == [
+        "new_source",
+        "series_membership_changed",
+    ]
+
+
+def test_combined_confirmation_stays_together_after_reanalysis(
+    client, app, mock_paperless, tmp_path
+) -> None:
+    _configure_database(app, tmp_path)
+    mock_paperless.list_correspondents.return_value = [{"id": 42, "name": "Example Bank"}]
+    mock_paperless.fetch_all_metadata.return_value = (
+        {42: "Example Bank"},
+        {7: "Credit Card"},
+        {3: "Statement"},
+    )
+    mock_paperless.list_documents.return_value = [
+        {
+            "id": month,
+            "title": f"Label {month}",
+            "correspondent": 42,
+            "document_type": 3,
+            "tags": [7],
+            "created": f"2026-{month:02d}-03",
+            "content": f"Card ending in {1234 if month <= 2 else 9876}",
+        }
+        for month in range(1, 5)
+    ]
+    client.post("/api/sources/sync")
+    before = client.post("/api/sources/42/series-analysis").json()
+    assert len(before["suggestions"]) == 2
+    confirmed = client.post(
+        "/api/series",
+        json={
+            "source_correspondent_id": 42,
+            "name": "Replacement card history",
+            "kind": "statement",
+            "document_ids": [1, 2, 3, 4],
+        },
+    ).json()
+    assert client.get("/api/sources/42/series-analysis").json() is None
+    after = client.post("/api/sources/42/series-analysis").json()
+    assert len(after["suggestions"]) == 1
+    assert after["suggestions"][0]["document_ids"] == [1, 2, 3, 4]
+    assert after["suggestions"][0]["statement_series_id"] == confirmed["id"]
+
+
 def test_series_analysis_can_target_a_linked_tyrion_account(
     client, app, mock_paperless, tmp_path
 ) -> None:
@@ -185,6 +342,24 @@ def test_series_analysis_can_target_a_linked_tyrion_account(
             "document_type": 3,
             "tags": [7],
             "created": "2026-01-04",
+        },
+        {
+            "id": 4,
+            "title": "Portal download",
+            "correspondent": 42,
+            "document_type": 3,
+            "tags": [7],
+            "created": "2026-03-03",
+            "content": "Card ending in 1234",
+        },
+        {
+            "id": 5,
+            "title": "Old misleading title 1234",
+            "correspondent": 42,
+            "document_type": 3,
+            "tags": [7],
+            "created": "2026-03-03",
+            "content": "Card ending in 9876",
         },
     ]
     client.post("/api/sources/sync")
@@ -227,7 +402,7 @@ def test_series_analysis_can_target_a_linked_tyrion_account(
     payload = response.json()
     assert payload["signal_id"] == "account-1234"
     assert payload["signal_label"] == "Example Bank checking •••• 1234"
-    assert [item["id"] for item in payload["documents"]] == [1, 2]
+    assert [item["id"] for item in payload["documents"]] == [1, 2, 4]
     assert client.get("/api/sources/42/series-analysis?signal_id=account-1234").json() == payload
 
 

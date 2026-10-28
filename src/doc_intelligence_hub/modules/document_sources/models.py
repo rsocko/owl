@@ -179,6 +179,17 @@ class SourceSeriesAnalysisDocument(ContractModel):
     created: date
     document_type: str | None = None
     tags: list[str] = Field(default_factory=list)
+    account_identifier_display: str | None = None
+    account_identifier_source: Literal["stored", "extracted", "extraction_failed"] | None = None
+
+
+class SeriesMembersAdd(ContractModel):
+    document_ids: list[int] = Field(min_length=1, max_length=5000)
+
+    @field_validator("document_ids")
+    @classmethod
+    def normalize_document_ids(cls, value: list[int]) -> list[int]:
+        return DocumentSeriesCreate.normalize_document_ids(value)
 
 
 class SourceSeriesAnalysisResult(CorrespondentAnalysisResult):

@@ -215,6 +215,35 @@ authoritative for the reviewed mapping and document policy.
    **Waiting for more history**, or **Ignore / retire**.
 5. Record the decision and advance to the next source.
 
+### Correct detected and reviewed membership
+
+Source discovery reads stored account metadata and extracts masked account suffixes
+from existing Paperless OCR text without running individual document analysis,
+invoking an LLM, or writing metadata back to Paperless. Conflicting OCR identifiers
+remain unresolved. Account evidence outranks generic filing-title variants;
+annual summaries and notices remain distinct from regular statements.
+
+The confidence shown on a detected group describes **cadence**, not account
+identity. Inspect the document evidence before confirming a relationship.
+
+Select multiple detected groups of the same kind with **Include in combined
+review**, inspect the combined documents, uncheck outliers, and name the reviewed
+series. Alternatively choose a **Destination series** to append the selected
+documents to an existing reviewed series. Confirmed membership survives later
+analysis, including deliberate grouping across replacement-card suffixes.
+Different suffixes are never automatically inferred to be the same account.
+
+Both source review and the membership editor show document titles, dates, types,
+tags, masked account evidence, and uncropped 96-by-116-pixel thumbnails. **Open**
+uses a right-side preview with previous/next navigation; **New tab** remains an
+explicit alternative. The preview fills the viewport width on narrow screens.
+
+The membership editor's **Add documents from this source** searches unassigned
+documents by title, date, type, tag, account suffix, or ID. Selection and preview
+replace the ID-only add field. Appending is transactional and idempotent, preserves
+existing members, rejects documents from another source or reviewed series,
+invalidates cached detection, and does not change expectation policy.
+
 ### Reconcile an external signal
 
 1. Open **External signals** and inspect Tyrion provenance.

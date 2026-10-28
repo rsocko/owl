@@ -143,6 +143,7 @@ export const endpoints = {
     sync: () => api.post('/api/sources/sync'),
     list: (params?: string) => api.get(`/api/sources${params ? `?${params}` : ''}`),
     get: (correspondentId: number) => api.get(`/api/sources/${correspondentId}`),
+    documents: (correspondentId: number) => api.get(`/api/sources/${correspondentId}/documents`),
     setDisposition: (correspondentId: number, body: unknown) =>
       api.put(`/api/sources/${correspondentId}/disposition`, body),
     reopen: (correspondentId: number, body: unknown) =>
@@ -157,6 +158,8 @@ export const endpoints = {
       api.get(`/api/series${correspondentId ? `?correspondent_id=${correspondentId}` : ''}`),
     createSeries: (body: unknown) => api.post('/api/series', body),
     updateSeries: (seriesId: string, body: unknown) => api.patch(`/api/series/${seriesId}`, body),
+    addSeriesMembers: (seriesId: string, documentIds: number[]) =>
+      api.post(`/api/series/${seriesId}/members`, { document_ids: documentIds }),
     expectations: (correspondentId?: number) =>
       api.get(`/api/expectations${correspondentId ? `?correspondent_id=${correspondentId}` : ''}`),
     createExpectation: (body: unknown) => api.post('/api/expectations', body),

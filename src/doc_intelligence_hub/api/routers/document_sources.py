@@ -10,6 +10,15 @@ from doc_intelligence_hub.api.routers import (
     make_paperless_client,
     raise_api_error,
 )
+from doc_intelligence_hub.core.extractors.account_numbers import (
+    extract_account_numbers,
+    pick_masked_account_identifier,
+)
+from doc_intelligence_hub.core.paperless import (
+    MetadataFieldKey,
+    PaperlessClient,
+    PaperlessMetadataResolver,
+)
 from doc_intelligence_hub.modules.document_sources.database import SourceDatabase
 from doc_intelligence_hub.modules.document_sources.models import (
     CoverageEvaluationRequest,
@@ -31,6 +40,7 @@ from doc_intelligence_hub.modules.document_sources.models import (
     ExternalSignalRelationshipUpdate,
     SeriesAnalysisDismiss,
     SeriesMemberPeriod,
+    SeriesMembersAdd,
     SourceReopenRequest,
     SourceSeriesAnalysisDocument,
     SourceSeriesAnalysisRequest,
@@ -52,11 +62,91 @@ from doc_intelligence_hub.modules.statements.correspondent_models import (
     DocumentExpectation as LegacyDocumentExpectation,
 )
 from doc_intelligence_hub.modules.statements.database import Database
+from doc_intelligence_hub.modules.statements.models import DocumentRecord
 from doc_intelligence_hub.modules.statements.paperless import build_document_records
 from doc_intelligence_hub.modules.statements.policy_corrections import apply_policy_operations
 from doc_intelligence_hub.modules.statements.policy_evaluation import evaluate_expectation_policy
 
 router = APIRouter(prefix="/api", tags=["document-sources"])
+
+
+async def _source_documents(client: PaperlessClient, correspondent_id: int) -> list[DocumentRecord]:
+    correspondents, tags, document_types = await client.fetch_all_metadata()
+    raw_documents = await client.list_documents(correspondent_id=correspondent_id)
+    schema = await PaperlessMetadataResolver(client).resolve((MetadataFieldKey.ACCOUNT_IDENTIFIER,))
+    documents = build_document_records(
+        raw_documents, correspondents, tags, document_types, metadata_schema=schema
+    )
+    raw_by_id = {item["id"]: item for item in raw_documents}
+    account_patterns = {
+        "bank_account",
+        "payment_card",
+        "payment_card_ending",
+        "service_account",
+        "account_last4",
+        "account_number_full",
+        "ending_in",
+        "masked_number",
+    }
+    for index, document in enumerate(documents):
+        if document.account_identifier:
+            continue
+        raw = raw_by_id[document.id]
+        content = raw.get("content")
+        if content is None:
+            content = await client.get_document_content(document.id)
+        matches = [
+            match
+            for match in extract_account_numbers(content)
+            if match["pattern"] in account_patterns
+        ]
+        # A full number and its masked form can agree; different suffixes cannot.
+        identifiers = {
+            identifier
+            for match in matches
+            if (identifier := pick_masked_account_identifier([match]))
+        }
+        if len(identifiers) == 1:
+            documents[index] = document.model_copy(
+                update={
+                    "account_identifier": next(iter(identifiers)),
+                    "account_identifier_source": "extracted",
+                }
+            )
+    return documents
+
+
+def _document_evidence(document: DocumentRecord) -> SourceSeriesAnalysisDocument:
+    return SourceSeriesAnalysisDocument(
+        id=document.id,
+        title=document.title,
+        created=document.created,
+        document_type=document.document_type,
+        tags=document.tags,
+        account_identifier_display=document.account_identifier,
+        account_identifier_source=document.account_identifier_source,
+    )
+
+
+@router.get(
+    "/sources/{correspondent_id}/documents",
+    response_model=list[SourceSeriesAnalysisDocument],
+)
+async def list_source_documents(
+    request: Request, correspondent_id: int
+) -> list[SourceSeriesAnalysisDocument]:
+    database = _database(request)
+    client = make_paperless_client(request, timeout=60.0)
+    try:
+        if database.get_source(correspondent_id) is None:
+            raise_api_error(404, "document_source_not_found", "Document source not found.")
+        return [
+            _document_evidence(document)
+            for document in await _source_documents(client, correspondent_id)
+        ]
+    finally:
+        database.close()
+        await client.aclose()
 
 
 def _database(request: Request) -> SourceDatabase:
@@ -200,14 +290,7 @@ async def analyze_source_series(
         source = database.get_source(correspondent_id)
         if source is None:
             raise_api_error(404, "document_source_not_found", "Document source not found.")
-        correspondents, tags, document_types = await client.fetch_all_metadata()
-        raw_documents = await client.list_documents(correspondent_id=correspondent_id)
-        documents = build_document_records(
-            raw_documents,
-            correspondents,
-            tags,
-            document_types,
-        )
+        documents = await _source_documents(client, correspondent_id)
         signal = None
         if body and body.signal_id:
             signal = next(
@@ -231,7 +314,12 @@ async def analyze_source_series(
             documents = [
                 document
                 for document in documents
-                if any(term in document.title.casefold() for term in terms)
+                if (
+                    document.account_identifier.rsplit(" ", 1)[-1].casefold()
+                    == signal.account_last_four.casefold()
+                    if signal.account_last_four and document.account_identifier
+                    else any(term in document.title.casefold() for term in terms)
+                )
             ]
         existing_series = [
             {
@@ -248,6 +336,8 @@ async def analyze_source_series(
             source.current_name,
             documents,
             existing_series,
+            account_identifier_extraction_requested=True,
+            metadata_first=True,
             candidate_overrides={
                 override.document_id: override
                 for override in legacy_database.list_candidate_overrides(
@@ -272,16 +362,7 @@ async def analyze_source_series(
             signal_id=signal.id if signal else None,
             signal_label=signal.display_hint if signal else None,
             low_evidence_document_count=low_evidence_document_count,
-            documents=[
-                SourceSeriesAnalysisDocument(
-                    id=document.id,
-                    title=document.title,
-                    created=document.created,
-                    document_type=document.document_type,
-                    tags=document.tags,
-                )
-                for document in documents
-            ],
+            documents=[_document_evidence(document) for document in documents],
         )
         response.observed_summary.candidate_series_count = len(suggestions)
         database.save_series_analysis(response)
@@ -382,6 +463,32 @@ async def record_series_member_period(
         return Response(status_code=204)
     finally:
         database.close()
+
+
+@router.post("/series/{series_id}/members", response_model=DocumentSeries)
+async def add_series_members(
+    request: Request, series_id: str, body: SeriesMembersAdd
+) -> DocumentSeries:
+    database = _database(request)
+    client = make_paperless_client(request, timeout=60.0)
+    try:
+        series = database.get_series(series_id)
+        if series is None:
+            raise_api_error(404, "document_series_not_found", "Document series not found.")
+        documents = await client.list_documents(correspondent_id=series.source_correspondent_id)
+        if not set(body.document_ids).issubset({item["id"] for item in documents}):
+            raise_api_error(
+                409,
+                "source_membership_conflict",
+                "Selected documents no longer belong to this source. Refresh and try again.",
+            )
+        try:
+            return database.add_series_members(series_id, body.document_ids)
+        except (KeyError, ValueError) as exc:
+            _domain_error(exc)
+    finally:
+        database.close()
+        await client.aclose()
 
 
 @router.get("/expectations", response_model=list[DocumentExpectation])

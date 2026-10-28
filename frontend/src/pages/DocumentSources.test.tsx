@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { endpoints } from '../lib/api';
@@ -24,6 +24,8 @@ vi.mock('../lib/api', () => ({
       analyzeSeries: vi.fn(),
       dismissSeriesCandidate: vi.fn(),
       createSeries: vi.fn(),
+      documents: vi.fn(),
+      addSeriesMembers: vi.fn(),
       reopen: vi.fn(),
     },
     statements: {
@@ -142,6 +144,11 @@ function renderPage(path = '/sources') {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(endpoints.documentSources.getSeriesAnalysis).mockResolvedValue(null);
+  vi.mocked(endpoints.documentSources.documents).mockResolvedValue([
+    { id: 101, title: 'January checking statement', created: '2026-01-31', document_type: 'Statement', tags: ['Credit Card'] },
+    { id: 102, title: 'February checking statement', created: '2026-02-28', document_type: 'Statement', tags: ['Credit Card'] },
+    { id: 103, title: 'March checking statement', created: '2026-03-31', document_type: 'Statement', tags: ['Credit Card'] },
+  ]);
 });
 
 describe('Document Sources', () => {
@@ -159,7 +166,7 @@ describe('Document Sources', () => {
     resolveSources([sourceOne, sourceTwo]);
     expect(await screen.findByRole('heading', { name: 'Harbor Bank' })).toBeInTheDocument();
     expect(screen.getByText('Series revisions do not rewrite expectation policy.')).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: /open representative document/i })).toHaveLength(3);
+    expect(await screen.findAllByRole('button', { name: /open .* checking statement/i })).toHaveLength(3);
   });
 
   it('switches between review, external signal, and complete directory modes', async () => {
@@ -244,7 +251,9 @@ describe('Document Sources', () => {
     fireEvent.click(screen.getByRole('button', { name: /analyze history/i }));
     expect(await screen.findByText(/1 candidate series found/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /inspect documents/i }));
-    expect(screen.getByRole('link', { name: /open january checking statement/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /open january checking statement/i }));
+    expect(screen.getByTitle('Preview of January checking statement')).toHaveAttribute('src', '/preview/101');
+    fireEvent.click(screen.getByRole('button', { name: 'Close document preview' }));
     fireEvent.click(screen.getByRole('checkbox', { name: /january checking statement/i }));
     fireEvent.click(screen.getByRole('button', { name: /confirm 2 selected/i }));
 
@@ -287,6 +296,69 @@ describe('Document Sources', () => {
     expect(await screen.findByText(/1 candidate series found/i)).toBeInTheDocument();
     expect(endpoints.documentSources.analyzeSeries).not.toHaveBeenCalled();
   });
+
+  it('combines detected groups, excludes outliers, and saves one durable series', async () => {
+      mockLoadedData({ sourceSeries: [], expectations: [] });
+      vi.mocked(endpoints.documentSources.getSeriesAnalysis).mockResolvedValue({
+        correspondent_id: 41, correspondent_name: 'Harbor Bank', analyzed_at: '2026-10-19',
+        observed_summary: { document_count: 3, candidate_series_count: 2 },
+        low_evidence_document_count: 0,
+        documents: [
+          { id: 201, title: 'Old card statement', created: '2026-01-01', tags: [] },
+          { id: 202, title: 'New card statement', created: '2026-02-01', tags: [] },
+          { id: 203, title: 'Annual summary', created: '2026-03-01', tags: [] },
+        ],
+        suggestions: [
+          { suggestion_key: 'same-legacy-key', kind: 'statement', series_discriminator: 'Old card', expectation_mode: 'unknown',
+            document_ids: [201], sample_document_ids: [201], evidence: { reason_codes: [], sample_size: 1 } },
+          { suggestion_key: 'same-legacy-key', kind: 'statement', series_discriminator: 'New card', expectation_mode: 'unknown',
+            document_ids: [202, 203], sample_document_ids: [202], evidence: { reason_codes: [], sample_size: 2 } },
+        ],
+      });
+      vi.mocked(endpoints.documentSources.createSeries).mockResolvedValue({
+        ...series[0], name: 'Card history', document_ids: [201, 202],
+      });
+      renderPage('/sources/41');
+      const groups = await screen.findAllByRole('checkbox', { name: 'Include in combined review' });
+      fireEvent.click(groups[0]);
+      fireEvent.click(groups[1]);
+      fireEvent.change(screen.getAllByLabelText('Series name')[0], { target: { value: 'Card history' } });
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Annual summary' }));
+      const combined = screen.getByText('Harbor Bank Statement Series').closest('article')!;
+      fireEvent.click(within(combined).getByRole('button', { name: 'Confirm 2 selected' }));
+      await waitFor(() => expect(endpoints.documentSources.createSeries).toHaveBeenCalledWith({
+        source_correspondent_id: 41, name: 'Card History', kind: 'statement',
+        discriminator: 'Card history', document_ids: [201, 202],
+      }));
+      expect(await screen.findByText('1 candidate series found')).toBeInTheDocument();
+    });
+
+  it('adds a detected group to an existing series without replacing its members', async () => {
+      mockLoadedData();
+      vi.mocked(endpoints.documentSources.getSeriesAnalysis).mockResolvedValue({
+        correspondent_id: 41, correspondent_name: 'Harbor Bank', analyzed_at: '2026-10-19',
+        observed_summary: { document_count: 2, candidate_series_count: 1 }, low_evidence_document_count: 0,
+        documents: [
+          { id: 201, title: 'April statement', created: '2026-04-01', tags: [] },
+          { id: 202, title: 'May statement', created: '2026-05-01', tags: [] },
+        ],
+        suggestions: [{
+          suggestion_key: 'new', kind: 'statement', series_discriminator: 'New label', expectation_mode: 'unknown',
+          document_ids: [201, 202], sample_document_ids: [201], evidence: { confidence: .25, reason_codes: [], sample_size: 2 },
+        }],
+      });
+      vi.mocked(endpoints.documentSources.addSeriesMembers).mockResolvedValue({
+        ...series[0], document_ids: [101, 102, 103, 201, 202],
+      });
+      renderPage('/sources/41');
+      fireEvent.change(await screen.findByLabelText('Destination series'), { target: { value: 'series-1' } });
+      expect(await screen.findAllByText('January checking statement')).not.toHaveLength(0);
+      expect(screen.getByText(/25% cadence confidence/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Add 2 selected' }));
+      await waitFor(() => expect(endpoints.documentSources.addSeriesMembers).toHaveBeenCalledWith('series-1', [201, 202]));
+      expect(endpoints.documentSources.createSeries).not.toHaveBeenCalled();
+      expect(await screen.findByText('0 candidate series found')).toBeInTheDocument();
+    });
 
   it('offers expectation setup and targeted history analysis for each linked Tyrion account', async () => {
     mockLoadedData({

@@ -47,6 +47,7 @@ def analyze_correspondent_policy(
     analyzed_at: datetime | None = None,
     account_identifier_extraction_requested: bool = False,
     candidate_overrides: dict[int, CandidateOverride] | None = None,
+    metadata_first: bool = False,
 ) -> CorrespondentAnalysisResult:
     """Build deterministic, explainable policy suggestions from Paperless metadata.
 
@@ -59,14 +60,6 @@ def analyze_correspondent_policy(
     all_profile_documents = [
         document for document in documents if document.correspondent_id == correspondent_id
     ]
-    profile_documents = [
-        document
-        for document in all_profile_documents
-        if not (
-            (override := candidate_overrides.get(document.id)) is not None and override.excluded
-        )
-    ]
-    excluded_document_count = len(all_profile_documents) - len(profile_documents)
     matching_series = [
         series
         for series in statement_series
@@ -82,6 +75,15 @@ def analyze_correspondent_policy(
         for series in matching_series
         for document_id in series.get("document_ids", [])
     }
+    profile_documents = [
+        document
+        for document in all_profile_documents
+        if str(document.id) in series_by_document
+        or not (
+            (override := candidate_overrides.get(document.id)) is not None and override.excluded
+        )
+    ]
+    excluded_document_count = len(all_profile_documents) - len(profile_documents)
     identifier_counts = Counter(
         identifier
         for document in profile_documents
@@ -109,7 +111,10 @@ def analyze_correspondent_policy(
         elif override and override.group_key:
             group_key = f"manual:{override.group_key}"
         elif account_key:
-            group_key = f"account:{account_key}"
+            purpose = _document_purpose(document) if metadata_first else ""
+            group_key = f"account:{account_key}" + (f":{kind}:{purpose}" if metadata_first else "")
+        elif metadata_first and (metadata_key := _source_metadata_group_key(document)):
+            group_key = metadata_key
         elif document.document_type_id is not None and style_key and style_counts[style_key] >= 2:
             group_key = f"title:{style_key}"
         elif family_key:
@@ -138,6 +143,10 @@ def analyze_correspondent_policy(
         (kind, normalized_title) for kind, _, normalized_title, _ in prepared_groups
     )
     duplicate_indexes: Counter[tuple[DocumentKind, str]] = Counter()
+    identity_counts = Counter(
+        _suggestion_identity_group_key(group_key, grouped_documents)
+        for _, group_key, _, grouped_documents in prepared_groups
+    )
     suggestions = []
     for kind, group_key, normalized_title, grouped_documents in prepared_groups:
         duplicate_key = (kind, normalized_title)
@@ -156,6 +165,13 @@ def analyze_correspondent_policy(
                 matching_series,
                 bound_series=group_series.get(group_key),
                 candidate_number=candidate_number,
+                allow_name_match=not metadata_first,
+                identity_key=(
+                    group_key
+                    if identity_counts[_suggestion_identity_group_key(group_key, grouped_documents)]
+                    > 1
+                    else None
+                ),
             )
         )
 
@@ -210,6 +226,8 @@ def _build_suggestion(
     *,
     bound_series: dict | None = None,
     candidate_number: int | None = None,
+    identity_key: str | None = None,
+    allow_name_match: bool = True,
 ) -> ExpectationPolicySuggestion:
     ordered = sorted(documents, key=lambda item: (item.created, item.id))
     mode, cadence, cadence_confidence, cadence_reason = _suggest_cadence(ordered)
@@ -223,11 +241,9 @@ def _build_suggestion(
         if candidate_number is not None and bound_series is None
         else base_discriminator
     )
-    bound_series_id = (
-        str(bound_series["id"])
-        if bound_series
-        else _match_statement_series(discriminator, normalized_title, statement_series)
-    )
+    bound_series_id = str(bound_series["id"]) if bound_series else None
+    if bound_series is None and allow_name_match:
+        bound_series_id = _match_statement_series(discriminator, normalized_title, statement_series)
     reason_codes = ["paperless_history", cadence_reason]
     signal_reason_code = _group_signal_reason_code(group_key)
     type_ids = {
@@ -246,7 +262,7 @@ def _build_suggestion(
         suggestion_key=_suggestion_key(
             correspondent_id,
             kind,
-            _suggestion_identity_group_key(group_key, ordered),
+            identity_key or _suggestion_identity_group_key(group_key, ordered),
         ),
         kind=kind,
         series_discriminator=discriminator,
@@ -309,6 +325,31 @@ def _group_signal_reason_code(group_key: str) -> str | None:
         return "tag_family_match"
     if group_key.startswith("title:"):
         return "title_pattern_match"
+    if group_key.startswith("metadata:"):
+        return "document_metadata_match"
+    return None
+
+
+def _document_purpose(document: DocumentRecord) -> str:
+    title = _classification_neutral_title(document)
+    for marker in ("annual summary", "annual", "dispute", "fraud", "notice", "credit limit"):
+        if marker in title:
+            return marker
+    return "regular"
+
+
+def _source_metadata_group_key(document: DocumentRecord) -> str | None:
+    """Treat generic filing titles as labels, not independent account evidence."""
+    metadata_key = _metadata_group_key(document)
+    if not metadata_key:
+        return None
+    title_words = set(_classification_neutral_title(document).split())
+    context_words = set(normalize_title(document.correspondent_name).split())
+    context_words.update(
+        word for tag in document.tags if ":" not in tag for word in normalize_title(tag).split()
+    )
+    if title_words <= context_words:
+        return f"metadata:{classify_document_kind(document)}:{metadata_key}"
     return None
 
 
@@ -344,7 +385,7 @@ def _dominant_title_pattern(documents: list[DocumentRecord]) -> str:
 
 
 def _classification_neutral_title(document: DocumentRecord) -> str:
-    normalized = _normalized_document_title(document)
+    normalized = re.sub(r"\bstmt\b", "statement", _normalized_document_title(document))
     classification_words = {
         keyword for _, keywords in _KIND_KEYWORDS for keyword in keywords if " " not in keyword
     }
